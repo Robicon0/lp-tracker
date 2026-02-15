@@ -10,3 +10,9 @@
 9 verbose logfile logs-max:10 dir:/Users/johnnyarya/lp-tracker-fresh/.npm-cache/_logs/2026-02-13T08_53_56_361Z-
 10 verbose logfile /Users/johnnyarya/lp-tracker-fresh/.npm-cache/_logs/2026-02-13T08_53_56_361Z-debug-0.log
 11 silly logfile done cleaning log files
+12 verbose cwd /Users/johnnyarya/lp-tracker-fresh
+13 verbose os Darwin 25.2.0
+14 verbose node v24.13.1
+15 verbose npm  v11.8.0
+16 verbose exit 0
+17 info ok
