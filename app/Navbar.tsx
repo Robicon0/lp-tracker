@@ -1,29 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useAccount, useConnect, useDisconnect } from "wagmi";
 import Link from "next/link";
 
 export default function Navbar() {
-  const [isConnected, setIsConnected] = useState(false);
+  const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { disconnect } = useDisconnect();
   const [showModal, setShowModal] = useState(false);
-  const [walletAddress, setWalletAddress] = useState("");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
-  const mockConnect = (wallet: string) => {
-    // Simulate wallet connection with a mock address
-    const mockAddresses: Record<string, string> = {
-      MetaMask: "0x1a2B3c4D5e6F7890AbCdEf1234567890aBcDeF12",
-      WalletConnect: "0xABcD1234EFgh5678IjKl9012MnOp3456QrSt7890",
-      "Coinbase Wallet": "0x9876FeDcBa0123456789AbCdEf0123456789AcBd",
-    };
-    setWalletAddress(mockAddresses[wallet] || "0x0000...0000");
-    setIsConnected(true);
+  const handleConnect = (connectorIndex: number) => {
+    connect({ connector: connectors[connectorIndex] });
     setShowModal(false);
-  };
-
-  const disconnect = () => {
-    setWalletAddress("");
-    setIsConnected(false);
   };
 
   const truncateAddress = (addr: string) => {
@@ -53,13 +43,13 @@ export default function Navbar() {
               </Link>
 
               {/* Wallet Button */}
-              {isConnected ? (
+              {isConnected && address ? (
                 <div className="flex items-center space-x-3">
                   <span className="bg-gray-900 border border-gray-700 text-green-400 px-3 py-1.5 rounded-lg text-sm font-mono">
-                    {truncateAddress(walletAddress)}
+                    {truncateAddress(address)}
                   </span>
                   <button
-                    onClick={disconnect}
+                    onClick={() => disconnect()}
                     className="text-gray-400 hover:text-red-400 text-sm transition-colors"
                   >
                     Disconnect
@@ -96,10 +86,10 @@ export default function Navbar() {
               <Link href="/" className="block text-gray-300 hover:text-white py-2">Home</Link>
               <Link href="/dashboard" className="block text-gray-300 hover:text-white py-2">Dashboard</Link>
               <Link href="/about" className="block text-gray-300 hover:text-white py-2">About</Link>
-              {isConnected ? (
+              {isConnected && address ? (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-green-400 text-sm font-mono">{truncateAddress(walletAddress)}</span>
-                  <button onClick={disconnect} className="text-red-400 text-sm">Disconnect</button>
+                  <span className="text-green-400 text-sm font-mono">{truncateAddress(address)}</span>
+                  <button onClick={() => disconnect()} className="text-red-400 text-sm">Disconnect</button>
                 </div>
               ) : (
                 <button
@@ -117,13 +107,10 @@ export default function Navbar() {
       {/* Wallet Connection Modal */}
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
-          {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={() => setShowModal(false)}
           />
-
-          {/* Modal */}
           <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">Connect Wallet</h2>
@@ -136,41 +123,25 @@ export default function Navbar() {
             </div>
 
             <div className="space-y-3">
-              {/* MetaMask */}
-              <button
-                onClick={() => mockConnect("MetaMask")}
-                className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
-              >
-                <span className="text-2xl">🦊</span>
-                <div className="text-left">
-                  <p className="text-white font-medium">MetaMask</p>
-                  <p className="text-gray-400 text-xs">Connect with browser extension</p>
-                </div>
-              </button>
-
-              {/* WalletConnect */}
-              <button
-                onClick={() => mockConnect("WalletConnect")}
-                className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
-              >
-                <span className="text-2xl">🔗</span>
-                <div className="text-left">
-                  <p className="text-white font-medium">WalletConnect</p>
-                  <p className="text-gray-400 text-xs">Scan with mobile wallet</p>
-                </div>
-              </button>
-
-              {/* Coinbase Wallet */}
-              <button
-                onClick={() => mockConnect("Coinbase Wallet")}
-                className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
-              >
-                <span className="text-2xl">🔵</span>
-                <div className="text-left">
-                  <p className="text-white font-medium">Coinbase Wallet</p>
-                  <p className="text-gray-400 text-xs">Connect with Coinbase</p>
-                </div>
-              </button>
+              {connectors.map((connector, index) => (
+                <button
+                  key={connector.id}
+                  onClick={() => handleConnect(index)}
+                  className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
+                >
+                  <span className="text-2xl">
+                    {connector.name === "MetaMask" ? "🦊" : "🔗"}
+                  </span>
+                  <div className="text-left">
+                    <p className="text-white font-medium">{connector.name}</p>
+                    <p className="text-gray-400 text-xs">
+                      {connector.name === "MetaMask"
+                        ? "Connect with browser extension"
+                        : "Connect wallet"}
+                    </p>
+                  </div>
+                </button>
+              ))}
             </div>
 
             <p className="text-gray-500 text-xs text-center mt-4">
