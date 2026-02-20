@@ -19,11 +19,18 @@ const sortOptions = [
 export default function Dashboard() {
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [sortIndex, setSortIndex] = useState(0);
+const [searchQuery, setSearchQuery] = useState("");
 
   const filtered = useMemo(() => {
     let result = positions;
-
+    if (searchQuery.trim() !== "") {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (p) =>
+          p.pair.toLowerCase().includes(q) ||
+          p.protocol.toLowerCase().includes(q) ||
+          p.chain.toLowerCase().includes(q)
+      );
     if (chainFilter !== "All") {
       result = result.filter((p) => p.chain === chainFilter);
     }
@@ -39,7 +46,7 @@ export default function Dashboard() {
     });
 
     return result;
-  }, [chainFilter, statusFilter, sortIndex]);
+  }, [chainFilter, statusFilter, sortIndex, searchQuery]);
 
   const totalValue = positions.reduce((sum, p) => sum + p.value, 0);
   const totalFees = positions.reduce((sum, p) => sum + p.fees, 0);
@@ -73,6 +80,16 @@ export default function Dashboard() {
 
         {/* Filters & Sort */}
         <div className="mt-8 flex flex-wrap gap-4 items-center">
+          {/* Search */}
+          <div>
+            <input
+              type="text"
+              placeholder="Search pairs, protocols, chains..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-64"
+            />
+          </div>
           {/* Chain Filter */}
           <div>
             <label className="text-gray-400 text-sm mr-2">Chain:</label>
