@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Navbar from "../Navbar";
 import { positions } from "../data/positions";
 import Link from "next/link";
+import Navbar from "../Navbar";
 
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
 const statuses = ["All", "In Range", "Out of Range"];
@@ -19,10 +19,12 @@ const sortOptions = [
 export default function Dashboard() {
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
-const [searchQuery, setSearchQuery] = useState("");
+  const [sortIndex, setSortIndex] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const filtered = useMemo(() => {
     let result = positions;
+
     if (searchQuery.trim() !== "") {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -31,6 +33,8 @@ const [searchQuery, setSearchQuery] = useState("");
           p.protocol.toLowerCase().includes(q) ||
           p.chain.toLowerCase().includes(q)
       );
+    }
+
     if (chainFilter !== "All") {
       result = result.filter((p) => p.chain === chainFilter);
     }
@@ -90,6 +94,7 @@ const [searchQuery, setSearchQuery] = useState("");
               className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-64"
             />
           </div>
+
           {/* Chain Filter */}
           <div>
             <label className="text-gray-400 text-sm mr-2">Chain:</label>

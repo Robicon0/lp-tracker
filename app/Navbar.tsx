@@ -38,6 +38,9 @@ export default function Navbar() {
               <Link href="/dashboard" className="text-gray-300 hover:text-white transition-colors">
                 Dashboard
               </Link>
+              <Link href="/analytics" className="text-gray-300 hover:text-white transition-colors">
+                Analytics
+              </Link>
               <Link href="/about" className="text-gray-300 hover:text-white transition-colors">
                 About
               </Link>
@@ -85,6 +88,7 @@ export default function Navbar() {
             <div className="md:hidden pb-4 space-y-2">
               <Link href="/" className="block text-gray-300 hover:text-white py-2">Home</Link>
               <Link href="/dashboard" className="block text-gray-300 hover:text-white py-2">Dashboard</Link>
+              <Link href="/analytics" className="block text-gray-300 hover:text-white py-2">Analytics</Link>
               <Link href="/about" className="block text-gray-300 hover:text-white py-2">About</Link>
               {isConnected && address ? (
                 <div className="flex items-center justify-between py-2">
