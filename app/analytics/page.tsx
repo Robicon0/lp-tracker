@@ -18,25 +18,20 @@ import {
   Area,
 } from "recharts";
 
-// Colors for charts
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316"];
 
-// Short pair names for bar chart labels
 const shortName = (pair: string) => pair.replace(" / ", "/");
 
-// Data: Value by position
 const valueData = positions.map((p) => ({
   name: shortName(p.pair),
   value: p.value,
 }));
 
-// Data: APY by position
 const apyData = positions.map((p) => ({
   name: shortName(p.pair),
   apy: p.apy,
 }));
 
-// Data: Value by chain (aggregated)
 const chainMap: Record<string, number> = {};
 positions.forEach((p) => {
   chainMap[p.chain] = (chainMap[p.chain] || 0) + p.value;
@@ -45,7 +40,6 @@ const chainData = Object.entries(chainMap)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value);
 
-// Data: Value by protocol (aggregated)
 const protocolMap: Record<string, number> = {};
 positions.forEach((p) => {
   protocolMap[p.protocol] = (protocolMap[p.protocol] || 0) + p.value;
@@ -54,7 +48,6 @@ const protocolData = Object.entries(protocolMap)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value);
 
-// Mock: Simulated 30-day portfolio performance
 const performanceData = Array.from({ length: 30 }, (_, i) => {
   const base = 120000;
   const variation = Math.sin(i / 3) * 5000 + Math.random() * 3000;
@@ -64,7 +57,6 @@ const performanceData = Array.from({ length: 30 }, (_, i) => {
   };
 });
 
-// Mock: Simulated daily fees over 30 days
 const dailyFeesData = Array.from({ length: 30 }, (_, i) => ({
   day: `Day ${i + 1}`,
   fees: Math.round(50 + Math.random() * 150),
@@ -78,7 +70,11 @@ const CustomTooltipStyle = {
   color: "#FFFFFF",
 };
 
-// Custom legend renderer for pie charts
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const fmtDollar = (value: any) => [`$${Number(value).toLocaleString()}`, "Value"];
+const fmtFees = (value: any) => [`$${Number(value)}`, "Fees"];
+const fmtPct = (value: any) => [`${Number(value)}%`, "APY"];
+
 const renderLegend = (props: any) => {
   const { payload } = props;
   const total = payload.reduce((sum: number, entry: any) => sum + entry.payload.value, 0);
@@ -97,6 +93,7 @@ const renderLegend = (props: any) => {
     </div>
   );
 };
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export default function Analytics() {
   const totalValue = positions.reduce((sum, p) => sum + p.value, 0);
@@ -110,7 +107,6 @@ export default function Analytics() {
         <h1 className="text-4xl font-bold">Portfolio Analytics</h1>
         <p className="text-gray-400 mt-2">Visual breakdown of your DeFi positions</p>
 
-        {/* Summary Stats */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <p className="text-gray-400 text-sm mb-2">Total Portfolio Value</p>
@@ -130,9 +126,7 @@ export default function Analytics() {
           </div>
         </div>
 
-        {/* Row 1: Portfolio Performance + Daily Fees */}
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 30-Day Portfolio Performance */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">30-Day Portfolio Value</h2>
             <ResponsiveContainer width="100%" height={300}>
@@ -146,13 +140,12 @@ export default function Analytics() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="day" tick={{ fill: "#9CA3AF", fontSize: 11 }} interval={4} />
                 <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(value: number) => [`$${value.toLocaleString()}`, "Value"]} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtDollar} />
                 <Area type="monotone" dataKey="value" stroke="#3B82F6" fill="url(#colorValue)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Daily Fees */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">Daily Fees Earned</h2>
             <ResponsiveContainer width="100%" height={300}>
@@ -160,16 +153,14 @@ export default function Analytics() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="day" tick={{ fill: "#9CA3AF", fontSize: 11 }} interval={4} />
                 <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(value: number) => [`$${value}`, "Fees"]} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtFees} />
                 <Bar dataKey="fees" fill="#10B981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Row 2: Value by Position + APY Comparison */}
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Value by Position */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">Value by Position</h2>
             <ResponsiveContainer width="100%" height={320}>
@@ -177,7 +168,7 @@ export default function Analytics() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis type="number" tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
                 <YAxis type="category" dataKey="name" tick={{ fill: "#9CA3AF", fontSize: 12 }} width={80} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(value: number) => [`$${value.toLocaleString()}`, "Value"]} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtDollar} />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                   {valueData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -187,7 +178,6 @@ export default function Analytics() {
             </ResponsiveContainer>
           </div>
 
-          {/* APY Comparison */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">APY Comparison</h2>
             <ResponsiveContainer width="100%" height={320}>
@@ -202,7 +192,7 @@ export default function Analytics() {
                   height={40}
                 />
                 <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(value: number) => [`${value}%`, "APY"]} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtPct} />
                 <Bar dataKey="apy" radius={[4, 4, 0, 0]}>
                   {apyData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -213,9 +203,7 @@ export default function Analytics() {
           </div>
         </div>
 
-        {/* Row 3: Chain Distribution + Protocol Distribution */}
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
-          {/* Chain Distribution */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">Value by Chain</h2>
             <ResponsiveContainer width="100%" height={350}>
@@ -233,13 +221,12 @@ export default function Analytics() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(value: number) => [`$${value.toLocaleString()}`, "Value"]} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtDollar} />
                 <Legend content={renderLegend} />
               </PieChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Protocol Distribution */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">Value by Protocol</h2>
             <ResponsiveContainer width="100%" height={350}>
@@ -257,7 +244,7 @@ export default function Analytics() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(value: number) => [`$${value.toLocaleString()}`, "Value"]} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtDollar} />
                 <Legend content={renderLegend} />
               </PieChart>
             </ResponsiveContainer>
