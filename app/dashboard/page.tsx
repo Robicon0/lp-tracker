@@ -144,7 +144,7 @@ export default function Dashboard() {
         </div>
 
         {/* Positions Grid */}
-        <h2 className="text-2xl font-bold mt-8 mb-4">Your Positions</h2>
+        <div className="flex justify-between items-center mt-8 mb-4"><h2 className="text-2xl font-bold">Your Positions</h2><button onClick={() => { const headers = "Pair,Protocol,Chain,Value,APY,Fees,Status\n"; const rows = filtered.map((p) => `${p.pair},${p.protocol},${p.chain},${p.value},${p.apy}%,${p.fees},${p.status}`).join("\n"); const blob = new Blob([headers + rows], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "lp-positions.csv"; a.click(); URL.revokeObjectURL(url); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Export CSV</button></div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {filtered.map((pos) => (
             <Link key={pos.id} href={`/dashboard/${pos.id}`}>
