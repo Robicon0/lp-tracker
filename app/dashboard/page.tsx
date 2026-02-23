@@ -5,7 +5,6 @@ import { positions } from "../data/positions";
 import Link from "next/link";
 import Navbar from "../Navbar";
 import PriceTicker from "../PriceTicker";
-import WalletBalances from "../WalletBalances";
 
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
 const statuses = ["All", "In Range", "Out of Range"];
@@ -63,7 +62,6 @@ export default function Dashboard() {
       <Navbar />
       <div className="max-w-7xl mx-auto">
         <PriceTicker />
-        <WalletBalances />
         <h1 className="text-4xl font-bold">Portfolio Overview</h1>
         <p className="text-gray-400 mt-2">Track your DeFi liquidity positions</p>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import Link from "next/link";
 
@@ -9,6 +9,8 @@ export default function Navbar() {
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const [showModal, setShowModal] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const handleConnect = (connectorIndex: number) => {
@@ -44,9 +46,12 @@ export default function Navbar() {
               <Link href="/about" className="text-gray-300 hover:text-white transition-colors">
                 About
               </Link>
+              <Link href="/wallet" className="text-gray-300 hover:text-white transition-colors">
+                Wallet
+              </Link>
 
               {/* Wallet Button */}
-              {isConnected && address ? (
+              {mounted && isConnected && address ? (
                 <div className="flex items-center space-x-3">
                   <span className="bg-gray-900 border border-gray-700 text-green-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     {truncateAddress(address)}
