@@ -1,17 +1,47 @@
-import { positions } from "../../data/positions";
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import Navbar from "../../Navbar";
-interface Props {
-  params: Promise<{ id: string }>;
-}
+"use client";
 
-export default async function PositionDetail({ params }: Props) {
-  const { id } = await params;
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import Navbar from "../../Navbar";
+import { usePositions } from "../../contexts/PositionsContext";
+
+export default function PositionDetail() {
+  const { id } = useParams<{ id: string }>();
+  const { positions, isLoading } = usePositions();
+
+  if (isLoading) {
+    return (
+      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+        <Navbar />
+        <div className="max-w-4xl mx-auto">
+          <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
+            &larr; Back to Dashboard
+          </Link>
+          <div className="flex items-center justify-center py-24">
+            <div className="text-gray-400 text-lg">Loading position...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const pos = positions.find((p) => p.id === id);
 
   if (!pos) {
-    notFound();
+    return (
+      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+        <Navbar />
+        <div className="max-w-4xl mx-auto">
+          <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
+            &larr; Back to Dashboard
+          </Link>
+          <div className="text-center py-24">
+            <h1 className="text-4xl font-bold mb-4">Position Not Found</h1>
+            <p className="text-gray-400">The position you&apos;re looking for doesn&apos;t exist or is no longer available.</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const feesPerDay = pos.fees / 30;
@@ -23,14 +53,14 @@ export default async function PositionDetail({ params }: Props) {
       <div className="max-w-4xl mx-auto">
         {/* Back Link */}
         <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
-          ← Back to Dashboard
+          &larr; Back to Dashboard
         </Link>
 
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-4xl font-bold">{pos.pair}</h1>
-            <p className="text-gray-400 mt-1">{pos.protocol} • {pos.chain}</p>
+            <p className="text-gray-400 mt-1">{pos.protocol} &bull; {pos.chain}</p>
           </div>
           <span
             className={`px-4 py-2 rounded-full text-sm font-medium ${
@@ -106,14 +136,14 @@ export default async function PositionDetail({ params }: Props) {
             <h2 className="text-xl font-bold mb-2">Performance Chart</h2>
             <p className="text-gray-500 text-sm">Coming soon — historical position performance</p>
             <div className="h-40 flex items-center justify-center border border-dashed border-gray-700 rounded-lg mt-4">
-              <span className="text-gray-600">📈 Chart Placeholder</span>
+              <span className="text-gray-600">Chart Placeholder</span>
             </div>
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-2">Impermanent Loss</h2>
             <p className="text-gray-500 text-sm">Coming soon — IL tracking & calculator</p>
             <div className="h-40 flex items-center justify-center border border-dashed border-gray-700 rounded-lg mt-4">
-              <span className="text-gray-600">📊 IL Calculator Placeholder</span>
+              <span className="text-gray-600">IL Calculator Placeholder</span>
             </div>
           </div>
         </div>

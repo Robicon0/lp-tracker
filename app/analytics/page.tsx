@@ -1,7 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
 import Navbar from "../Navbar";
-import { positions } from "../data/positions";
+import { usePositions } from "../contexts/PositionsContext";
 import {
   BarChart,
   Bar,
@@ -21,32 +22,6 @@ import {
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316"];
 
 const shortName = (pair: string) => pair.replace(" / ", "/");
-
-const valueData = positions.map((p) => ({
-  name: shortName(p.pair),
-  value: p.value,
-}));
-
-const apyData = positions.map((p) => ({
-  name: shortName(p.pair),
-  apy: p.apy,
-}));
-
-const chainMap: Record<string, number> = {};
-positions.forEach((p) => {
-  chainMap[p.chain] = (chainMap[p.chain] || 0) + p.value;
-});
-const chainData = Object.entries(chainMap)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value);
-
-const protocolMap: Record<string, number> = {};
-positions.forEach((p) => {
-  protocolMap[p.protocol] = (protocolMap[p.protocol] || 0) + p.value;
-});
-const protocolData = Object.entries(protocolMap)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value);
 
 const performanceData = Array.from({ length: 30 }, (_, i) => {
   const base = 120000;
@@ -96,9 +71,55 @@ const renderLegend = (props: any) => {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export default function Analytics() {
+  const { positions, isLoading } = usePositions();
+
+  const valueData = useMemo(() => positions.map((p) => ({
+    name: shortName(p.pair),
+    value: p.value,
+  })), [positions]);
+
+  const apyData = useMemo(() => positions.map((p) => ({
+    name: shortName(p.pair),
+    apy: p.apy,
+  })), [positions]);
+
+  const chainData = useMemo(() => {
+    const chainMap: Record<string, number> = {};
+    positions.forEach((p) => {
+      chainMap[p.chain] = (chainMap[p.chain] || 0) + p.value;
+    });
+    return Object.entries(chainMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [positions]);
+
+  const protocolData = useMemo(() => {
+    const protocolMap: Record<string, number> = {};
+    positions.forEach((p) => {
+      protocolMap[p.protocol] = (protocolMap[p.protocol] || 0) + p.value;
+    });
+    return Object.entries(protocolMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [positions]);
+
   const totalValue = positions.reduce((sum, p) => sum + p.value, 0);
   const totalFees = positions.reduce((sum, p) => sum + p.fees, 0);
-  const avgApy = positions.reduce((sum, p) => sum + p.apy, 0) / positions.length;
+  const avgApy = positions.length > 0
+    ? positions.reduce((sum, p) => sum + p.apy, 0) / positions.length
+    : 0;
+
+  if (isLoading) {
+    return (
+      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+        <Navbar />
+        <div className="max-w-7xl mx-auto">
+          <h1 className="text-4xl font-bold">Portfolio Analytics</h1>
+          <p className="text-gray-400 mt-2">Loading positions...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
