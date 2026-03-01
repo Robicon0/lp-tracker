@@ -37,8 +37,8 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     staleTime: 60_000,
   });
 
-  const isUsingDemoData = !isConnected || !walletPositions || walletPositions.length === 0;
-  const positions = isUsingDemoData ? demoPositions : walletPositions;
+  const isUsingDemoData = false;
+  const positions = walletPositions || [];
 
   return (
     <PositionsContext.Provider value={{ positions, isLoading, isUsingDemoData }}>
