@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { positions } from "../data/positions";
 import Link from "next/link";
 import Navbar from "../Navbar";
 import PriceTicker from "../PriceTicker";
-
+import { useAccount } from "wagmi";
+import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
+import { fetchUniswapV3Positions } from "../lib/uniswap";
+import { fetchVelodromePositions } from "../lib/velodrome";
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
 const statuses = ["All", "In Range", "Out of Range"];
 const sortOptions = [
@@ -18,13 +21,33 @@ const sortOptions = [
 ];
 
 export default function Dashboard() {
+  const { address, isConnected } = useAccount();
+const [realPositions, setRealPositions] = useState<AerodromePosition[]>([]);
+const [loadingPositions, setLoadingPositions] = useState(false);
+
+useEffect(() => {
+  if (!isConnected || !address) {
+    setRealPositions([]);
+    return;
+  }
+  setLoadingPositions(true);
+  Promise.all([
+      fetchAerodromePositions(address),
+      fetchUniswapV3Positions(address),
+      fetchVelodromePositions(address),
+    ]).then(([aeroPos, uniPos, veloPos]) => {
+      console.log('Aerodrome:', aeroPos.length, 'Uniswap V3:', uniPos.length, 'Velodrome:', veloPos.length);
+      setRealPositions([...aeroPos, ...uniPos, ...veloPos]);
+      setLoadingPositions(false);
+    });
+}, [address, isConnected]);
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
 
   const filtered = useMemo(() => {
-    let result = positions;
+    let result = realPositions.length > 0 ? realPositions : positions;
 
     if (searchQuery.trim() !== "") {
       const q = searchQuery.toLowerCase();
@@ -51,11 +74,12 @@ export default function Dashboard() {
     });
 
     return result;
-  }, [chainFilter, statusFilter, sortIndex, searchQuery]);
+  }, [realPositions, chainFilter, statusFilter, sortIndex, searchQuery]);
 
-  const totalValue = positions.reduce((sum, p) => sum + p.value, 0);
-  const totalFees = positions.reduce((sum, p) => sum + p.fees, 0);
-  const uniqueChains = new Set(positions.map((p) => p.chain)).size;
+  const displayPositions = realPositions.length > 0 ? realPositions : positions;
+  const totalValue = displayPositions.reduce((sum, p) => sum + p.value, 0);
+  const totalFees = displayPositions.reduce((sum, p) => sum + p.fees, 0);
+  const uniqueChains = new Set(displayPositions.map(p => p.chain)).size;
 
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
@@ -70,11 +94,10 @@ export default function Dashboard() {
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <p className="text-gray-400 text-sm mb-2">Total Portfolio Value</p>
             <p className="text-3xl font-bold">${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            <p className="text-green-500 text-sm mt-2">+$2,341.21 (24h)</p>
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <p className="text-gray-400 text-sm mb-2">Active Positions</p>
-            <p className="text-3xl font-bold">{positions.length}</p>
+            <p className="text-3xl font-bold">{displayPositions.length}</p>
             <p className="text-gray-400 text-sm mt-2">Across {uniqueChains} chains</p>
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
@@ -141,7 +164,7 @@ export default function Dashboard() {
 
           {/* Result count */}
           <span className="text-gray-500 text-sm ml-auto">
-            Showing {filtered.length} of {positions.length} positions
+            Showing {filtered.length} of {displayPositions.length} positions
           </span>
         </div>
 

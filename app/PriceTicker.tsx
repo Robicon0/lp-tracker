@@ -11,8 +11,7 @@ interface PriceData {
   image: string;
 }
 
-const COIN_IDS = "ethereum,bitcoin,usd-coin,tether,arbitrum,optimism,matic-network,avalanche-2,solana,wrapped-bitcoin";
-
+const COIN_IDS = "bitcoin,ethereum,solana,wrapped-bitcoin,sui,hyperliquid,coinbase-wrapped-btc,bittensor,zcash";
 export default function PriceTicker() {
   const [prices, setPrices] = useState<PriceData[]>([]);
   const [loading, setLoading] = useState(true);
