@@ -229,7 +229,12 @@ async function fetchTick(
   }
 }
 
-async function fetchBluefinAPYs(): Promise<Record<string, number>> {
+interface BluefinPoolStats {
+  apyBase: number; // annual fee APY % (e.g. 21.36)
+  tvlUsd: number;  // USD
+}
+
+async function fetchBluefinAPYs(): Promise<Record<string, BluefinPoolStats>> {
   try {
     const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
     const data = await res.json();
@@ -237,26 +242,28 @@ async function fetchBluefinAPYs(): Promise<Record<string, number>> {
       (p: { project: string; chain: string }) => p.project === 'bluefin-spot' && p.chain === 'Sui',
     ) || [];
 
-    const apysByPair: Record<string, number[]> = {};
+    const statsByPair: Record<string, { apys: number[]; tvls: number[] }> = {};
     for (const pool of pools) {
       if (pool.underlyingTokens?.length >= 2) {
-        // DefiLlama uses padded hex (0x000...0002::sui::SUI); normalize to short form to match our coin types
         const key = pool.underlyingTokens
           .map((t: string) => normalizeCoinType(t).toLowerCase())
           .sort()
           .join('-');
-        if (!apysByPair[key]) apysByPair[key] = [];
-        apysByPair[key].push(pool.apyBase || pool.apy || 0);
+        if (!statsByPair[key]) statsByPair[key] = { apys: [], tvls: [] };
+        statsByPair[key].apys.push(pool.apyBase || pool.apy || 0);
+        statsByPair[key].tvls.push(pool.tvlUsd || 0);
       }
     }
 
-    const result: Record<string, number> = {};
-    for (const [key, apys] of Object.entries(apysByPair)) {
+    const result: Record<string, BluefinPoolStats> = {};
+    for (const [key, { apys, tvls }] of Object.entries(statsByPair)) {
       const sorted = apys.sort((a, b) => a - b);
       const mid = Math.floor(sorted.length / 2);
-      result[key] = Math.round(
+      const medianApy = Math.round(
         (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100,
       ) / 100;
+      const totalTvl = tvls.reduce((s, v) => s + v, 0);
+      result[key] = { apyBase: medianApy, tvlUsd: totalTvl };
     }
     return result;
   } catch {
@@ -391,9 +398,17 @@ export async function GET(request: Request) {
 
       const inRange = tickCurrent >= tickLower && tickCurrent < tickUpper;
 
-      // APY lookup by normalized coin type pair key
+      // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
       const apyKey = [coinTypeA, coinTypeB].map((t) => t.toLowerCase()).sort().join('-');
-      const apy = apyData[apyKey] || 0;
+      const apyInfo = apyData[apyKey];
+      const poolLiquidity = pool ? BigInt((pool.liquidity as string) || '0') : 0n;
+      let apy = 0;
+      if (apyInfo && value > 0 && poolLiquidity > 0n && liquidity > 0n) {
+        const posLiqShare = Number(liquidity) / Number(poolLiquidity);
+        apy = Math.round(apyInfo.apyBase * (apyInfo.tvlUsd / value) * posLiqShare * 100) / 100;
+      } else if (apyInfo) {
+        apy = apyInfo.apyBase;
+      }
 
       return {
         id: `bluefin-${pos.objectId as string}`,

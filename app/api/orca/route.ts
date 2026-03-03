@@ -98,6 +98,7 @@ interface WhirlpoolData {
   tickSpacing: number;
   feeGrowthGlobalA: bigint;
   feeGrowthGlobalB: bigint;
+  liquidity: bigint;
 }
 
 // Derive Orca Whirlpool position PDA from NFT mint
@@ -201,6 +202,7 @@ async function fetchWhirlpoolData(poolAddress: string): Promise<WhirlpoolData | 
     tickSpacing: data.readUInt16LE(41),
     feeGrowthGlobalA: readU128LE(data, 165),
     feeGrowthGlobalB: readU128LE(data, 245),
+    liquidity: readU128LE(data, 49),
   };
 }
 
@@ -327,37 +329,23 @@ async function fetchPrices(): Promise<Record<string, number>> {
   }
 }
 
-async function fetchOrcaAPYs(): Promise<Record<string, number>> {
+interface OrcaPoolStats {
+  feeAprWeek: number; // annualized decimal (e.g. 0.458 = 45.8%)
+  tvl: number;        // USD
+}
+
+// Fetch per-pool APY + TVL from Orca's own API (keyed by pool address)
+async function fetchOrcaPoolStats(): Promise<Record<string, OrcaPoolStats>> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
+    const res = await fetch('https://api.mainnet.orca.so/v1/whirlpool/list', { next: { revalidate: 300 } });
     const data = await res.json();
-
-    // DefiLlama uses UUIDs for pool IDs, not on-chain addresses — pair-based lookup only
-    const pools = data.data?.filter(
-      (p: { project: string; chain: string }) =>
-        p.project === 'orca-dex' && p.chain === 'Solana'
-    ) || [];
-
-    const apysByPair: Record<string, number[]> = {};
-
-    for (const pool of pools) {
-      if (pool.underlyingTokens?.length >= 2) {
-        const key = pool.underlyingTokens.map((t: string) => t.toLowerCase()).sort().join('-');
-        if (!apysByPair[key]) apysByPair[key] = [];
-        apysByPair[key].push(pool.apyBase || pool.apy || 0);
+    const stats: Record<string, OrcaPoolStats> = {};
+    for (const pool of data.whirlpools || []) {
+      if (pool.address && pool.feeApr?.week != null && pool.tvl != null) {
+        stats[pool.address] = { feeAprWeek: pool.feeApr.week, tvl: pool.tvl };
       }
     }
-
-    const apyByPair: Record<string, number> = {};
-    for (const [key, apys] of Object.entries(apysByPair)) {
-      const sorted = apys.sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      apyByPair[key] = Math.round(
-        (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100
-      ) / 100;
-    }
-
-    return apyByPair;
+    return stats;
   } catch {
     return {};
   }
@@ -448,8 +436,8 @@ export async function GET(request: Request) {
       })
     );
 
-    // 7. Fetch prices and APY in parallel
-    const [prices, apyData] = await Promise.all([fetchPrices(), fetchOrcaAPYs()]);
+    // 7. Fetch prices and Orca pool stats in parallel
+    const [prices, orcaPoolStats] = await Promise.all([fetchPrices(), fetchOrcaPoolStats()]);
 
     // 8. Transform to shared position shape
     const positions = rawPositions.map((pos) => {
@@ -491,10 +479,13 @@ export async function GET(request: Request) {
       const tickCurrent = pool?.tickCurrentIndex ?? 0;
       const inRange = tickCurrent >= pos.tickLowerIndex && tickCurrent < pos.tickUpperIndex;
 
-      const apyKey = pool
-        ? [pool.tokenMintA, pool.tokenMintB].map((t) => t.toLowerCase()).sort().join('-')
-        : '';
-      const apy = apyData[apyKey] || 0;
+      // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
+      const poolStats = orcaPoolStats[pos.whirlpool];
+      let apy = 0;
+      if (poolStats && value > 0 && pool && pool.liquidity > 0n) {
+        const posLiqShare = Number(pos.liquidity) / Number(pool.liquidity);
+        apy = Math.round(poolStats.feeAprWeek * 100 * (poolStats.tvl / value) * posLiqShare * 100) / 100;
+      }
 
       return {
         id: `orca-${pos.positionPda}`,

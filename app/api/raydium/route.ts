@@ -92,6 +92,7 @@ interface RaydiumPoolData {
   mintDecimals0: number;
   mintDecimals1: number;
   tickCurrent: number;
+  liquidity: bigint;
 }
 
 // Fetch and decode Raydium CLMM personal position account for a given NFT mint
@@ -174,6 +175,7 @@ async function fetchRaydiumPool(poolId: string): Promise<RaydiumPoolData | null>
     mintDecimals0: data[232],
     mintDecimals1: data[233],
     tickCurrent: readI32LE(data, 268),
+    liquidity: readU128LE(data, 236),
   };
 }
 
@@ -232,36 +234,23 @@ async function fetchPrices(): Promise<Record<string, number>> {
   }
 }
 
-async function fetchRaydiumAPYs(): Promise<Record<string, number>> {
+interface RaydiumPoolStats {
+  feeAprWeek: number; // percentage (e.g. 12.34 = 12.34%)
+  tvl: number;        // USD
+}
+
+// Fetch per-pool APY + TVL from Raydium's own API (keyed by pool id)
+async function fetchRaydiumPoolStats(): Promise<Record<string, RaydiumPoolStats>> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
+    const res = await fetch('https://api.raydium.io/v2/ammV3/ammPools', { next: { revalidate: 300 } });
     const data = await res.json();
-
-    // DefiLlama uses UUIDs for pool IDs — pair-based lookup only
-    const pools = data.data?.filter(
-      (p: { project: string; chain: string }) => p.project === 'raydium-amm' && p.chain === 'Solana'
-    ) || [];
-
-    const apysByPair: Record<string, number[]> = {};
-
-    for (const pool of pools) {
-      if (pool.underlyingTokens?.length >= 2) {
-        const key = pool.underlyingTokens.map((t: string) => t.toLowerCase()).sort().join('-');
-        if (!apysByPair[key]) apysByPair[key] = [];
-        apysByPair[key].push(pool.apyBase || pool.apy || 0);
+    const stats: Record<string, RaydiumPoolStats> = {};
+    for (const pool of data.data || []) {
+      if (pool.id && pool.week?.feeApr != null && pool.tvl != null) {
+        stats[pool.id] = { feeAprWeek: pool.week.feeApr, tvl: pool.tvl };
       }
     }
-
-    const apyByPair: Record<string, number> = {};
-    for (const [key, apys] of Object.entries(apysByPair)) {
-      const sorted = apys.sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      apyByPair[key] = Math.round(
-        (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100
-      ) / 100;
-    }
-
-    return apyByPair;
+    return stats;
   } catch {
     return {};
   }
@@ -305,8 +294,8 @@ export async function GET(request: Request) {
       })
     );
 
-    // 4. Fetch prices and APY in parallel
-    const [prices, apyData] = await Promise.all([fetchPrices(), fetchRaydiumAPYs()]);
+    // 4. Fetch prices and Raydium pool stats in parallel
+    const [prices, raydiumPoolStats] = await Promise.all([fetchPrices(), fetchRaydiumPoolStats()]);
 
     // 5. Transform to shared position shape
     const positions = rawPositions.map((pos) => {
@@ -336,10 +325,14 @@ export async function GET(request: Request) {
       const inRange = tickCurrent >= pos.tickLower && tickCurrent < pos.tickUpper;
       const status = inRange ? 'In Range' : 'Out of Range';
 
-      const apyKey = pool
-        ? [pool.tokenMint0, pool.tokenMint1].map((t) => t.toLowerCase()).sort().join('-')
-        : '';
-      const apy = apyData[pos.poolId.toLowerCase()] || apyData[apyKey] || 0;
+      // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
+      // Raydium API returns feeAprWeek as percentage (e.g. 12.34 = 12.34%)
+      const poolStats = raydiumPoolStats[pos.poolId];
+      let apy = 0;
+      if (poolStats && value > 0 && pool && pool.liquidity > 0n) {
+        const posLiqShare = Number(pos.liquidity) / Number(pool.liquidity);
+        apy = Math.round(poolStats.feeAprWeek * (poolStats.tvl / value) * posLiqShare * 100) / 100;
+      }
 
       return {
         id: `ray-${pos.nftMint}`,
