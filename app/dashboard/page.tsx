@@ -179,9 +179,16 @@ export default function Dashboard() {
                     <span className="text-gray-400">Position Value</span>
                     <span className="font-semibold">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-start">
                     <span className="text-gray-400">APY</span>
-                    <span className="text-green-500">{pos.apy}%</span>
+                    <div className="text-right">
+                      <span className="text-green-500">{pos.apy}% <span className="text-green-500/60 text-xs">/yr</span></span>
+                      {pos.apy > 0 && (
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {(pos.apy / 12).toFixed(2)}% /mo · {(pos.apy / 365).toFixed(3)}% /day
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Fees Earned</span>
