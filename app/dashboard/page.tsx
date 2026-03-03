@@ -5,6 +5,9 @@ import Link from "next/link";
 import Navbar from "../Navbar";
 import PriceTicker from "../PriceTicker";
 import { usePositions } from "../contexts/PositionsContext";
+import { useAccount } from "wagmi";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
 const statuses = ["All", "In Range", "Out of Range"];
 const sortOptions = [
@@ -18,8 +21,13 @@ const sortOptions = [
 
 export default function Dashboard() {
   const { positions: allPositions, isLoading } = usePositions();
+  const { address } = useAccount();
+  const { publicKey } = useWallet();
+  const suiAccount = useCurrentAccount();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const hasWallet = mounted && !!(address || publicKey || suiAccount);
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
@@ -199,11 +207,39 @@ export default function Dashboard() {
             </Link>
           ))}
 
-          {!isLoading && filtered.length === 0 && (
-            <div className="col-span-2 text-center py-12 text-gray-500">
-              {allPositions.length === 0
-                ? "No positions found. Connect a wallet to see your LP positions."
-                : "No positions match your filters."}
+          {mounted && !isLoading && filtered.length === 0 && (
+            <div className="col-span-2">
+              {!hasWallet ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="text-5xl mb-6">💼</div>
+                  <h3 className="text-xl font-semibold text-white mb-2">No wallet connected</h3>
+                  <p className="text-gray-400 mb-8 max-w-sm">Connect your wallet to track your LP positions across EVM chains, Solana, and Sui.</p>
+                  <div className="flex flex-wrap justify-center gap-4 text-sm text-gray-500">
+                    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-2">
+                      <span className="text-blue-400 font-medium">EVM</span>
+                      <span>Ethereum · Base · Arbitrum · Optimism</span>
+                    </div>
+                    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-2">
+                      <span className="text-purple-400 font-medium">Solana</span>
+                      <span>Raydium · Orca</span>
+                    </div>
+                    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-2">
+                      <span className="text-cyan-400 font-medium">Sui</span>
+                      <span>Bluefin · Cetus</span>
+                    </div>
+                  </div>
+                </div>
+              ) : allPositions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="text-5xl mb-6">📭</div>
+                  <h3 className="text-xl font-semibold text-white mb-2">No positions found</h3>
+                  <p className="text-gray-400 max-w-sm">No LP positions were found for your connected wallet(s). Open a position on Aerodrome, Uniswap, Orca, Bluefin, or another supported protocol.</p>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  No positions match your filters.
+                </div>
+              )}
             </div>
           )}
         </div>

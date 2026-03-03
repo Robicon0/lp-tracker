@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
+import { useAccount } from "wagmi";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
 import {
   BarChart,
   Bar,
@@ -72,6 +75,12 @@ const renderLegend = (props: any) => {
 
 export default function Analytics() {
   const { positions, isLoading } = usePositions();
+  const { address } = useAccount();
+  const { publicKey } = useWallet();
+  const suiAccount = useCurrentAccount();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const hasWallet = mounted && !!(address || publicKey || suiAccount);
 
   const valueData = useMemo(() => positions.map((p) => ({
     name: shortName(p.pair),
@@ -116,6 +125,19 @@ export default function Analytics() {
         <div className="max-w-7xl mx-auto">
           <h1 className="text-4xl font-bold">Portfolio Analytics</h1>
           <p className="text-gray-400 mt-2">Loading positions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (mounted && !hasWallet) {
+    return (
+      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+        <Navbar />
+        <div className="max-w-7xl mx-auto flex flex-col items-center justify-center py-32 text-center">
+          <div className="text-5xl mb-6">📊</div>
+          <h1 className="text-4xl font-bold mb-4">Portfolio Analytics</h1>
+          <p className="text-gray-400 max-w-sm">Connect your wallet to see charts and analytics for your LP positions.</p>
         </div>
       </div>
     );

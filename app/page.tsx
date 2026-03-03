@@ -26,16 +26,16 @@ export default function Home() {
         </div>
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl">
           <div className="text-center">
-            <p className="text-3xl font-bold text-blue-500 mb-2">8</p>
-            <p className="text-gray-400">Active Positions</p>
+            <p className="text-3xl font-bold text-blue-500 mb-2">7</p>
+            <p className="text-gray-400">Protocols Supported</p>
           </div>
           <div className="text-center">
-            <p className="text-3xl font-bold text-green-500 mb-2">7</p>
-            <p className="text-gray-400">Chains Supported</p>
+            <p className="text-3xl font-bold text-green-500 mb-2">3</p>
+            <p className="text-gray-400">Chains (EVM · Solana · Sui)</p>
           </div>
           <div className="text-center">
             <p className="text-3xl font-bold text-yellow-500 mb-2">Live</p>
-            <p className="text-gray-400">Price Updates</p>
+            <p className="text-gray-400">Price & APY Updates</p>
           </div>
         </div>
       </div>
