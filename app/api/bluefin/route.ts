@@ -161,13 +161,8 @@ async function fetchPrices(coinTypes: string[]): Promise<Record<string, number>>
 
 // I32 package used for tick keys in the ticks Table
 const I32_TYPE = '0x714a63a0dba6da4f017b42d5d0fb78867f18bcde904868e51d951a5a6f5b7f57::i32::I32';
-const MAX_U128 = (1n << 128n);
+const U128_MASK = (1n << 128n) - 1n;
 
-function u128Wrap(n: bigint): bigint {
-  return ((n % MAX_U128) + MAX_U128) % MAX_U128;
-}
-
-// Standard CLMM fee-growth-inside calculation (same as Uniswap V3 / Orca)
 function calcFeeGrowthInside(
   tickCurrent: number,
   tickLower: number,
@@ -176,25 +171,25 @@ function calcFeeGrowthInside(
   tickLowerFeeGrowthOutside: bigint,
   tickUpperFeeGrowthOutside: bigint,
 ): bigint {
-  const feeGrowthBelow = tickCurrent >= tickLower
+  const below = tickCurrent >= tickLower
     ? tickLowerFeeGrowthOutside
-    : u128Wrap(feeGrowthGlobal - tickLowerFeeGrowthOutside);
-  // Uniswap V3 Tick.sol: feeGrowthAbove = outside when current < upper, else global - outside
-  const feeGrowthAbove = tickCurrent < tickUpper
+    : (feeGrowthGlobal - tickLowerFeeGrowthOutside) & U128_MASK;
+  // Uniswap V3 / Orca style: outside when current < upper, else global - outside
+  const above = tickCurrent < tickUpper
     ? tickUpperFeeGrowthOutside
-    : u128Wrap(feeGrowthGlobal - tickUpperFeeGrowthOutside);
-  return u128Wrap(feeGrowthGlobal - feeGrowthBelow - feeGrowthAbove);
+    : (feeGrowthGlobal - tickUpperFeeGrowthOutside) & U128_MASK;
+  return (feeGrowthGlobal - below - above) & U128_MASK;
 }
 
-// total owed = token_fee (snapshotted) + delta * liquidity / 2^128
+// Bluefin uses Q64 scaling (same as Orca): fees = tokenFee + (delta * liquidity) >> 64
 function calcPendingFees(
   tokenFee: bigint,
   feeGrowthInside: bigint,
   feeGrowthCheckpoint: bigint,
   liquidity: bigint,
 ): bigint {
-  const delta = u128Wrap(feeGrowthInside - feeGrowthCheckpoint);
-  return tokenFee + (delta * liquidity) / MAX_U128;
+  const delta = (feeGrowthInside - feeGrowthCheckpoint) & U128_MASK;
+  return tokenFee + ((delta * liquidity) >> 64n);
 }
 
 // Extract the ticks Table object ID from pool fields
