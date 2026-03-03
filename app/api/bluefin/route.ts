@@ -30,6 +30,25 @@ function bitsToI32(bits: number): number {
   return bits > 2147483647 ? bits - 4294967296 : bits;
 }
 
+// Bluefin returns coin types without 0x prefix (e.g. "2::sui::SUI")
+// Normalize to the standard 0x-prefixed short form used in KNOWN_COINS
+function normalizeCoinType(ct: string): string {
+  if (!ct) return ct;
+  const prefixed = ct.startsWith('0x') ? ct : `0x${ct}`;
+  // Convert padded hex address to short form: 0x000...002 -> 0x2
+  return prefixed.replace(/^0x0+([0-9a-f]+::)/, '0x$1');
+}
+
+// I32 struct from Bluefin/Sui comes as { type: "...::i32::I32", fields: { bits: N } }
+function extractI32Bits(val: unknown): number {
+  if (val == null) return 0;
+  const v = val as Record<string, unknown>;
+  if (typeof v.bits === 'number') return v.bits;             // flat { bits: N }
+  const fields = v.fields as Record<string, unknown> | undefined;
+  if (fields && typeof fields.bits === 'number') return fields.bits; // nested { fields: { bits: N } }
+  return 0;
+}
+
 function calculateAmounts(
   liquidity: bigint,
   tickLower: number,
@@ -149,10 +168,15 @@ export async function GET(request: Request) {
     const rawPositions = await fetchAllBluefinPositions(account);
     if (rawPositions.length === 0) return NextResponse.json({ positions: [], count: 0, account });
 
-    // Bluefin uses pool_id (not pool), lower_tick/upper_tick (not tick_lower/upper_index)
-    // coin_type_a and coin_type_b are plain strings
-    const poolIds = [...new Set(rawPositions.map((p) => p.pool_id as string).filter(Boolean))];
-    const coinTypes = [...new Set(rawPositions.flatMap((p) => [
+    // Bluefin coin types come without 0x prefix — normalize them first
+    const rawWithNormalized: Array<Record<string, unknown>> = rawPositions.map((p) => ({
+      ...p,
+      coin_type_a: normalizeCoinType(p.coin_type_a as string),
+      coin_type_b: normalizeCoinType(p.coin_type_b as string),
+    }));
+
+    const poolIds = [...new Set(rawWithNormalized.map((p) => p.pool_id as string).filter(Boolean))];
+    const coinTypes = [...new Set(rawWithNormalized.flatMap((p) => [
       p.coin_type_a as string,
       p.coin_type_b as string,
     ]).filter(Boolean))];
@@ -170,7 +194,7 @@ export async function GET(request: Request) {
       }),
     );
 
-    const positions = rawPositions.map((pos) => {
+    const positions = rawWithNormalized.map((pos) => {
       const poolId = pos.pool_id as string;
       const pool = poolMap[poolId];
       const coinTypeA = pos.coin_type_a as string;
@@ -184,11 +208,11 @@ export async function GET(request: Request) {
       const decimalsB = metaB?.decimals ?? 9;
 
       const liquidity = BigInt((pos.liquidity as string) || '0');
-      // Bluefin uses lower_tick / upper_tick (also bits-encoded I32)
-      const tickLower = bitsToI32((pos.lower_tick as { bits: number })?.bits ?? 0);
-      const tickUpper = bitsToI32((pos.upper_tick as { bits: number })?.bits ?? 0);
+      // Bluefin I32 struct: { type: "...::i32::I32", fields: { bits: N } }
+      const tickLower = bitsToI32(extractI32Bits(pos.lower_tick));
+      const tickUpper = bitsToI32(extractI32Bits(pos.upper_tick));
       const sqrtPriceX64 = BigInt((pool?.current_sqrt_price as string) || '0');
-      const tickCurrent = pool ? bitsToI32((pool.current_tick_index as { bits: number })?.bits ?? 0) : 0;
+      const tickCurrent = pool ? bitsToI32(extractI32Bits(pool.current_tick_index)) : 0;
 
       const { amount0, amount1 } = pool
         ? calculateAmounts(liquidity, tickLower, tickUpper, sqrtPriceX64, decimalsA, decimalsB)

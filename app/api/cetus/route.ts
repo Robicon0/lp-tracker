@@ -33,14 +33,32 @@ function bitsToI32(bits: number): number {
   return bits > 2147483647 ? bits - 4294967296 : bits;
 }
 
-// Extract coin type string from Cetus TypeName struct
-// Could be { fields: { name: "..." } } or { name: "..." }
-function extractCoinType(val: unknown): string {
-  if (typeof val === 'string') return val;
+// I32 struct comes as { type: "...::i32::I32", fields: { bits: N } } in object content
+function extractI32Bits(val: unknown): number {
+  if (val == null) return 0;
   const v = val as Record<string, unknown>;
-  if (v?.fields) return (v.fields as Record<string, string>).name || '';
-  if (v?.name) return v.name as string;
-  return '';
+  if (typeof v.bits === 'number') return v.bits;
+  const fields = v.fields as Record<string, unknown> | undefined;
+  if (fields && typeof fields.bits === 'number') return fields.bits;
+  return 0;
+}
+
+// Normalize Sui coin type: add 0x prefix and convert padded hex to short form
+function normalizeCoinType(ct: string): string {
+  if (!ct) return ct;
+  const prefixed = ct.startsWith('0x') ? ct : `0x${ct}`;
+  return prefixed.replace(/^0x0+([0-9a-f]+::)/, '0x$1');
+}
+
+// Extract coin type string from Cetus TypeName struct and normalize it
+// TypeName comes as { type: "0x1::type_name::TypeName", fields: { name: "addr::module::TYPE" } }
+function extractCoinType(val: unknown): string {
+  if (typeof val === 'string') return normalizeCoinType(val);
+  const v = val as Record<string, unknown>;
+  let raw = '';
+  if (v?.fields) raw = (v.fields as Record<string, string>).name || '';
+  else if (v?.name) raw = v.name as string;
+  return normalizeCoinType(raw);
 }
 
 // CLMM amount calculation (Uniswap V3 / Cetus math)
@@ -247,12 +265,11 @@ export async function GET(request: Request) {
       const decimalsB = metaB?.decimals ?? 9;
 
       const liquidity = BigInt((pos.liquidity as string) || '0');
-      const tickLower = bitsToI32((pos.tick_lower_index as { bits: number })?.bits ?? 0);
-      const tickUpper = bitsToI32((pos.tick_upper_index as { bits: number })?.bits ?? 0);
+      // I32 struct: { type: "...::i32::I32", fields: { bits: N } }
+      const tickLower = bitsToI32(extractI32Bits(pos.tick_lower_index));
+      const tickUpper = bitsToI32(extractI32Bits(pos.tick_upper_index));
       const sqrtPriceX64 = BigInt((pool?.current_sqrt_price as string) || '0');
-      const tickCurrent = pool
-        ? bitsToI32((pool.current_tick_index as { bits: number })?.bits ?? 0)
-        : 0;
+      const tickCurrent = pool ? bitsToI32(extractI32Bits(pool.current_tick_index)) : 0;
 
       const { amount0, amount1 } = pool
         ? calculateAmounts(liquidity, tickLower, tickUpper, sqrtPriceX64, decimalsA, decimalsB)
