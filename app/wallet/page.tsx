@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
 import Navbar from "../Navbar";
 
 interface TokenBalance {
@@ -81,15 +82,24 @@ interface SolanaBalances {
   tokens: { mint: string; symbol: string; name: string; balance: string }[];
 }
 
+interface SuiBalances {
+  suiBalance: string;
+  tokens: { coinType: string; symbol: string; name: string; balance: string }[];
+}
+
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
   const { publicKey } = useWallet();
+  const suiAccount = useCurrentAccount();
   const solanaAddress = publicKey?.toBase58();
+  const suiAddress = suiAccount?.address;
 
   const [chainBalances, setChainBalances] = useState<ChainBalances[]>([]);
   const [solanaBalances, setSolanaBalances] = useState<SolanaBalances | null>(null);
+  const [suiBalances, setSuiBalances] = useState<SuiBalances | null>(null);
   const [loading, setLoading] = useState(false);
   const [solanaLoading, setSolanaLoading] = useState(false);
+  const [suiLoading, setSuiLoading] = useState(false);
 
   useEffect(() => {
     if (!isConnected || !address) {
@@ -126,6 +136,19 @@ export default function WalletPage() {
       .finally(() => setSolanaLoading(false));
   }, [solanaAddress]);
 
+  useEffect(() => {
+    if (!suiAddress) {
+      setSuiBalances(null);
+      return;
+    }
+    setSuiLoading(true);
+    fetch(`/api/sui/balances?account=${suiAddress}`)
+      .then((r) => r.json())
+      .then((data) => setSuiBalances(data.error ? null : data))
+      .catch(() => setSuiBalances(null))
+      .finally(() => setSuiLoading(false));
+  }, [suiAddress]);
+
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
       <Navbar />
@@ -133,10 +156,10 @@ export default function WalletPage() {
         <h1 className="text-4xl font-bold">Wallet Balances</h1>
         <p className="text-gray-400 mt-2">Token balances across all supported chains</p>
 
-        {!isConnected && !solanaAddress ? (
+        {!isConnected && !solanaAddress && !suiAddress ? (
           <div className="mt-8 bg-gray-900 border border-gray-800 rounded-lg p-8 text-center">
             <p className="text-gray-400 text-lg">Connect a wallet to view balances</p>
-            <p className="text-gray-500 text-sm mt-2">Use &quot;Connect EVM&quot; or &quot;Connect Phantom&quot; in the navbar</p>
+            <p className="text-gray-500 text-sm mt-2">Use &quot;Connect EVM&quot;, &quot;Connect Phantom&quot;, or &quot;Connect Sui&quot; in the navbar</p>
           </div>
         ) : loading ? (
           <div className="mt-8 bg-gray-900 border border-gray-800 rounded-lg p-8">
@@ -215,6 +238,77 @@ export default function WalletPage() {
                       {solanaBalances.solBalance === "0.0000" && solanaBalances.tokens.length === 0 && (
                         <tr>
                           <td colSpan={2} className="px-4 py-4 text-center text-gray-500 text-sm">No tokens found on Solana</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null
+            )}
+
+            {/* Sui wallet address card */}
+            {suiAddress && (
+              <div className="bg-gray-900 border border-cyan-800/50 rounded-lg p-4">
+                <p className="text-cyan-400 text-xs mb-1">Sui Wallet</p>
+                <p className="text-white font-mono text-sm">{suiAddress}</p>
+              </div>
+            )}
+
+            {/* Sui balances */}
+            {suiAddress && (
+              suiLoading ? (
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-cyan-500 rounded-full animate-pulse" />
+                    <span className="text-gray-400">Fetching Sui balances...</span>
+                  </div>
+                </div>
+              ) : suiBalances ? (
+                <div className="bg-gray-900 border border-cyan-800/40 rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 border-b border-cyan-800/40 bg-cyan-900/10">
+                    <span className="text-cyan-300 font-semibold text-sm">Sui</span>
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Token</th>
+                        <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {suiBalances.suiBalance !== "0.0000" && (
+                        <tr className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center space-x-3">
+                              <span className="text-lg">🌊</span>
+                              <div>
+                                <p className="text-white font-medium text-sm">SUI</p>
+                                <p className="text-gray-500 text-xs">Sui native</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right text-white text-sm">{suiBalances.suiBalance}</td>
+                        </tr>
+                      )}
+                      {suiBalances.tokens.map((token, i) => (
+                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-6 h-6 bg-cyan-900/40 rounded-full flex items-center justify-center text-xs text-cyan-300">
+                                {token.symbol.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="text-white font-medium text-sm">{token.symbol}</p>
+                                <p className="text-gray-500 text-xs">{token.name}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right text-white text-sm">{token.balance}</td>
+                        </tr>
+                      ))}
+                      {suiBalances.suiBalance === "0.0000" && suiBalances.tokens.length === 0 && (
+                        <tr>
+                          <td colSpan={2} className="px-4 py-4 text-center text-gray-500 text-sm">No tokens found on Sui</td>
                         </tr>
                       )}
                     </tbody>

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { WalletName } from "@solana/wallet-adapter-base";
+import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import Link from "next/link";
 
 export default function Navbar() {
@@ -12,6 +13,14 @@ export default function Navbar() {
   const { disconnect } = useDisconnect();
   const { select, connect: connectSolana, disconnect: disconnectSolana, publicKey } = useWallet();
   const solanaAddress = publicKey?.toBase58();
+
+  // Sui wallet
+  const suiAccount = useCurrentAccount();
+  const suiAddress = suiAccount?.address;
+  const suiWallets = useWallets();
+  const { mutate: connectSui } = useConnectWallet();
+  const { mutate: disconnectSui } = useDisconnectWallet();
+  const [showSuiModal, setShowSuiModal] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -111,6 +120,30 @@ export default function Navbar() {
                   </button>
                 )
               )}
+
+              {/* Sui Wallet Button */}
+              {mounted && suiAddress ? (
+                <div className="flex items-center space-x-2">
+                  <span className="bg-gray-900 border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-sm font-mono">
+                    🌊 {truncateAddress(suiAddress)}
+                  </span>
+                  <button
+                    onClick={() => disconnectSui()}
+                    className="text-gray-400 hover:text-red-400 text-sm transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                mounted && (
+                  <button
+                    onClick={() => suiWallets.length > 0 ? setShowSuiModal(true) : undefined}
+                    className="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Connect Sui
+                  </button>
+                )
+              )}
             </div>
 
             {/* Mobile Menu Button */}
@@ -164,6 +197,21 @@ export default function Navbar() {
                   Connect Phantom
                 </button>
               )}
+
+              {/* Sui wallet — mobile */}
+              {suiAddress ? (
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-cyan-400 text-sm font-mono">🌊 {truncateAddress(suiAddress)}</span>
+                  <button onClick={() => disconnectSui()} className="text-red-400 text-sm">Disconnect Sui</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setShowSuiModal(true); setShowMobileMenu(false); }}
+                  className="w-full bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  Connect Sui
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -212,6 +260,45 @@ export default function Navbar() {
             <p className="text-gray-500 text-xs text-center mt-4">
               By connecting, you agree to the Terms of Service
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Sui Wallet Connection Modal */}
+      {showSuiModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowSuiModal(false)}
+          />
+          <div className="relative bg-gray-900 border border-cyan-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">Connect Sui Wallet</h2>
+              <button onClick={() => setShowSuiModal(false)} className="text-gray-400 hover:text-white">✕</button>
+            </div>
+            {suiWallets.length === 0 ? (
+              <p className="text-gray-400 text-sm text-center py-4">
+                No Sui wallet detected. Install a Sui-compatible wallet (e.g. Phantom, Suiet, Slush).
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {suiWallets.map((wallet) => (
+                  <button
+                    key={wallet.name}
+                    onClick={() => { connectSui({ wallet }); setShowSuiModal(false); }}
+                    className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-cyan-700 rounded-xl p-4 transition-colors"
+                  >
+                    {wallet.icon && (
+                      <img src={wallet.icon} alt={wallet.name} className="w-8 h-8 rounded-lg" />
+                    )}
+                    <div className="text-left">
+                      <p className="text-white font-medium">{wallet.name}</p>
+                      <p className="text-gray-400 text-xs">Connect with {wallet.name}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

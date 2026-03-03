@@ -4,11 +4,14 @@ import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
 import { fetchUniswapV3Positions } from "../lib/uniswap";
 import { fetchVelodromePositions } from "../lib/velodrome";
 import { fetchRaydiumPositions } from "../lib/raydium";
 import { fetchOrcaPositions } from "../lib/orca";
+import { fetchCetusPositions } from "../lib/cetus";
+import { fetchBluefinPositions } from "../lib/bluefin";
 
 interface PositionsContextValue {
   positions: AerodromePosition[];
@@ -25,10 +28,12 @@ const PositionsContext = createContext<PositionsContextValue>({
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const { address, isConnected } = useAccount();
   const { publicKey } = useWallet();
+  const suiAccount = useCurrentAccount();
   const solanaAddress = publicKey?.toBase58();
+  const suiAddress = suiAccount?.address;
 
   const { data: walletPositions, isLoading } = useQuery({
-    queryKey: ["positions", address, solanaAddress],
+    queryKey: ["positions", address, solanaAddress, suiAddress],
     queryFn: async () => {
       const promises: Promise<AerodromePosition[]>[] = [];
 
@@ -47,10 +52,17 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      if (suiAddress) {
+        promises.push(
+          fetchCetusPositions(suiAddress),
+          fetchBluefinPositions(suiAddress),
+        );
+      }
+
       const results = await Promise.all(promises);
       return results.flat();
     },
-    enabled: !!(address || solanaAddress),
+    enabled: !!(address || solanaAddress || suiAddress),
     staleTime: 60_000,
   });
 
