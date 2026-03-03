@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
+import { useWallet } from "@solana/wallet-adapter-react";
 import Navbar from "../Navbar";
 
 interface TokenBalance {
@@ -75,10 +76,20 @@ async function fetchChainBalances(address: string, chain: typeof CHAINS[0]): Pro
   return { chain: chain.name, nativeSymbol: chain.nativeSymbol, nativeBalance, tokens };
 }
 
+interface SolanaBalances {
+  solBalance: string;
+  tokens: { mint: string; symbol: string; name: string; balance: string }[];
+}
+
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
+  const { publicKey } = useWallet();
+  const solanaAddress = publicKey?.toBase58();
+
   const [chainBalances, setChainBalances] = useState<ChainBalances[]>([]);
+  const [solanaBalances, setSolanaBalances] = useState<SolanaBalances | null>(null);
   const [loading, setLoading] = useState(false);
+  const [solanaLoading, setSolanaLoading] = useState(false);
 
   useEffect(() => {
     if (!isConnected || !address) {
@@ -102,6 +113,19 @@ export default function WalletPage() {
     fetchAll();
   }, [address, isConnected]);
 
+  useEffect(() => {
+    if (!solanaAddress) {
+      setSolanaBalances(null);
+      return;
+    }
+    setSolanaLoading(true);
+    fetch(`/api/solana/balances?account=${solanaAddress}`)
+      .then((r) => r.json())
+      .then((data) => setSolanaBalances(data.error ? null : data))
+      .catch(() => setSolanaBalances(null))
+      .finally(() => setSolanaLoading(false));
+  }, [solanaAddress]);
+
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
       <Navbar />
@@ -109,10 +133,10 @@ export default function WalletPage() {
         <h1 className="text-4xl font-bold">Wallet Balances</h1>
         <p className="text-gray-400 mt-2">Token balances across all supported chains</p>
 
-        {!isConnected ? (
+        {!isConnected && !solanaAddress ? (
           <div className="mt-8 bg-gray-900 border border-gray-800 rounded-lg p-8 text-center">
-            <p className="text-gray-400 text-lg">Connect your wallet to view balances</p>
-            <p className="text-gray-500 text-sm mt-2">Click &quot;Connect EVM&quot; in the navbar</p>
+            <p className="text-gray-400 text-lg">Connect a wallet to view balances</p>
+            <p className="text-gray-500 text-sm mt-2">Use &quot;Connect EVM&quot; or &quot;Connect Phantom&quot; in the navbar</p>
           </div>
         ) : loading ? (
           <div className="mt-8 bg-gray-900 border border-gray-800 rounded-lg p-8">
@@ -123,11 +147,83 @@ export default function WalletPage() {
           </div>
         ) : (
           <div className="mt-8 space-y-6">
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-              <p className="text-gray-400 text-xs mb-1">Connected Wallet</p>
-              <p className="text-white font-mono text-sm">{address}</p>
-            </div>
+            {address && (
+              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+                <p className="text-gray-400 text-xs mb-1">EVM Wallet</p>
+                <p className="text-white font-mono text-sm">{address}</p>
+              </div>
+            )}
+            {solanaAddress && (
+              <div className="bg-gray-900 border border-purple-800/50 rounded-lg p-4">
+                <p className="text-purple-400 text-xs mb-1">Solana Wallet (Phantom)</p>
+                <p className="text-white font-mono text-sm">{solanaAddress}</p>
+              </div>
+            )}
 
+            {/* Solana balances */}
+            {solanaAddress && (
+              solanaLoading ? (
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
+                    <span className="text-gray-400">Fetching Solana balances...</span>
+                  </div>
+                </div>
+              ) : solanaBalances ? (
+                <div className="bg-gray-900 border border-purple-800/40 rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 border-b border-purple-800/40 bg-purple-900/10">
+                    <span className="text-purple-300 font-semibold text-sm">Solana</span>
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Token</th>
+                        <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {solanaBalances.solBalance !== "0.0000" && (
+                        <tr className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center space-x-3">
+                              <span className="text-lg">◎</span>
+                              <div>
+                                <p className="text-white font-medium text-sm">SOL</p>
+                                <p className="text-gray-500 text-xs">Solana native</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right text-white text-sm">{solanaBalances.solBalance}</td>
+                        </tr>
+                      )}
+                      {solanaBalances.tokens.map((token, i) => (
+                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-6 h-6 bg-purple-900/40 rounded-full flex items-center justify-center text-xs text-purple-300">
+                                {token.symbol.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="text-white font-medium text-sm">{token.symbol}</p>
+                                <p className="text-gray-500 text-xs">{token.name}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right text-white text-sm">{token.balance}</td>
+                        </tr>
+                      ))}
+                      {solanaBalances.solBalance === "0.0000" && solanaBalances.tokens.length === 0 && (
+                        <tr>
+                          <td colSpan={2} className="px-4 py-4 text-center text-gray-500 text-sm">No tokens found on Solana</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null
+            )}
+
+            {/* EVM chain balances */}
             {chainBalances.map((cb) => (
               <div key={cb.chain} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-800 bg-gray-800/40">
