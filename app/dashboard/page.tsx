@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import Navbar from "../Navbar";
 import PriceTicker from "../PriceTicker";
@@ -18,6 +18,8 @@ const sortOptions = [
 
 export default function Dashboard() {
   const { positions: allPositions, isLoading } = usePositions();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
@@ -146,8 +148,15 @@ export default function Dashboard() {
 
         {/* Positions Grid */}
         <div className="flex justify-between items-center mt-8 mb-4"><h2 className="text-2xl font-bold">Your Positions</h2><button onClick={() => { const headers = "Pair,Protocol,Chain,Value,APY,Fees,Status\n"; const rows = filtered.map((p) => `${p.pair},${p.protocol},${p.chain},${p.value},${p.apy}%,${p.fees},${p.status}`).join("\n"); const blob = new Blob([headers + rows], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "lp-positions.csv"; a.click(); URL.revokeObjectURL(url); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Export CSV</button></div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filtered.map((pos) => (
+          {mounted && isLoading && (
+            <div className="col-span-2 flex flex-col items-center justify-center py-16 text-gray-400">
+              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+              <p>Fetching your positions...</p>
+            </div>
+          )}
+          {(!mounted || !isLoading) && filtered.map((pos) => (
             <Link key={pos.id} href={`/dashboard/${pos.id}`}>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 hover:border-blue-500 transition-colors cursor-pointer">
                 <div className="flex justify-between items-start mb-4">
@@ -183,9 +192,11 @@ export default function Dashboard() {
             </Link>
           ))}
 
-          {filtered.length === 0 && (
+          {!isLoading && filtered.length === 0 && (
             <div className="col-span-2 text-center py-12 text-gray-500">
-              No positions match your filters.
+              {allPositions.length === 0
+                ? "No positions found. Connect a wallet to see your LP positions."
+                : "No positions match your filters."}
             </div>
           )}
         </div>

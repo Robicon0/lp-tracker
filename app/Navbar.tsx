@@ -2,12 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useWallet } from "@solana/wallet-adapter-react";
+import type { WalletName } from "@solana/wallet-adapter-base";
 import Link from "next/link";
 
 export default function Navbar() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
+  const { select, connect: connectSolana, disconnect: disconnectSolana, publicKey } = useWallet();
+  const solanaAddress = publicKey?.toBase58();
+
   const [showModal, setShowModal] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -16,6 +21,15 @@ export default function Navbar() {
   const handleConnect = (connectorIndex: number) => {
     connect({ connector: connectors[connectorIndex] });
     setShowModal(false);
+  };
+
+  const handlePhantomConnect = async () => {
+    try {
+      select("Phantom" as WalletName);
+      await connectSolana();
+    } catch (err) {
+      console.error("Phantom connect error:", err);
+    }
   };
 
   const truncateAddress = (addr: string) => {
@@ -50,9 +64,9 @@ export default function Navbar() {
                 Wallet
               </Link>
 
-              {/* Wallet Button */}
+              {/* EVM Wallet Button */}
               {mounted && isConnected && address ? (
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2">
                   <span className="bg-gray-900 border border-gray-700 text-green-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     {truncateAddress(address)}
                   </span>
@@ -60,16 +74,42 @@ export default function Navbar() {
                     onClick={() => disconnect()}
                     className="text-gray-400 hover:text-red-400 text-sm transition-colors"
                   >
-                    Disconnect
+                    ✕
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                >
-                  Connect Wallet
-                </button>
+                mounted && (
+                  <button
+                    onClick={() => setShowModal(true)}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Connect EVM
+                  </button>
+                )
+              )}
+
+              {/* Phantom / Solana Wallet Button */}
+              {mounted && solanaAddress ? (
+                <div className="flex items-center space-x-2">
+                  <span className="bg-gray-900 border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono">
+                    👻 {truncateAddress(solanaAddress)}
+                  </span>
+                  <button
+                    onClick={() => disconnectSolana()}
+                    className="text-gray-400 hover:text-red-400 text-sm transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                mounted && (
+                  <button
+                    onClick={handlePhantomConnect}
+                    className="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Connect Phantom
+                  </button>
+                )
               )}
             </div>
 
@@ -95,17 +135,33 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-gray-300 hover:text-white py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-gray-300 hover:text-white py-2">Analytics</Link>
               <Link href="/about" className="block text-gray-300 hover:text-white py-2">About</Link>
+              {/* EVM wallet — mobile */}
               {isConnected && address ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-green-400 text-sm font-mono">{truncateAddress(address)}</span>
-                  <button onClick={() => disconnect()} className="text-red-400 text-sm">Disconnect</button>
+                  <button onClick={() => disconnect()} className="text-red-400 text-sm">Disconnect EVM</button>
                 </div>
               ) : (
                 <button
                   onClick={() => { setShowModal(true); setShowMobileMenu(false); }}
                   className="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
                 >
-                  Connect Wallet
+                  Connect EVM
+                </button>
+              )}
+
+              {/* Phantom wallet — mobile */}
+              {solanaAddress ? (
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-purple-400 text-sm font-mono">👻 {truncateAddress(solanaAddress)}</span>
+                  <button onClick={() => disconnectSolana()} className="text-red-400 text-sm">Disconnect Phantom</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { handlePhantomConnect(); setShowMobileMenu(false); }}
+                  className="w-full bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  Connect Phantom
                 </button>
               )}
             </div>
@@ -113,7 +169,7 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Wallet Connection Modal */}
+      {/* EVM Wallet Connection Modal */}
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
           <div
@@ -122,7 +178,7 @@ export default function Navbar() {
           />
           <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">Connect Wallet</h2>
+              <h2 className="text-xl font-bold text-white">Connect EVM Wallet</h2>
               <button
                 onClick={() => setShowModal(false)}
                 className="text-gray-400 hover:text-white"

@@ -47,3 +47,46 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 ## Environment
 
 Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet balance fetching.
+
+---
+
+## Project: LP Tracker
+
+- DeFi liquidity position tracking dashboard
+- Deployed at lp-tracker-two.vercel.app
+- GitHub: Robicon0/lp-tracker
+- Tech: Next.js, TypeScript, Tailwind CSS, React Query
+
+## Current Integrations (Working)
+
+1. Aerodrome (Base) — Sugar V3 contract, real positions fetching ✅
+2. Uniswap V3 (Ethereum, Arbitrum, Polygon, Optimism) — NonfungiblePositionManager ✅
+3. Velodrome (Optimism) — Sugar contract with selector `0xedbd33bf` ✅
+4. CoinGecko for prices, DefiLlama for APY data ✅
+5. React Query context (`PositionsContext.tsx`) fetches all 3 in parallel ✅
+
+## Wallet
+
+- Primary wallet: `0xD99a5c1d3F93F1a7cfA77025A8F1532a0cEF4F20`
+- Currently has 3 Aerodrome positions on Base
+- MetaMask for EVM chains
+
+## Roadmap
+
+- Phase 2: Solana (Raydium/Orca) with Phantom wallet
+- Phase 3: Sui (Cetus/Bluefin/Momentum) with Sui wallet
+- Remove demo data, show empty state when no wallet connected
+
+## Dev Workflow
+
+- Two machines: Mac mini + MacBook, synced via VS Code Cloud Changes
+- Push to GitHub → auto-deploys on Vercel
+- Dev server: `cd ~/lp-tracker-fresh && npm run dev`
+- Alchemy API key in `.env.local` and Vercel env vars
+
+## Key Learnings
+
+- Velodrome uses `positions()` with 3 args (no factory param), NOT `positionsByFactory`
+- BigInt requires ES2020 target in `tsconfig.json`
+- Aerodrome positions are staked in gauges, not held as NFTs directly
+- DefiLlama `apyBase` (fee-only) with median prevents APY outliers
