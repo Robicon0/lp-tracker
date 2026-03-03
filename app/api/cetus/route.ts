@@ -191,13 +191,17 @@ async function fetchCetusAPYs(): Promise<Record<string, number>> {
     const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
     const data = await res.json();
     const pools = data.data?.filter(
-      (p: { project: string; chain: string }) => p.project === 'cetus-amm' && p.chain === 'Sui',
+      (p: { project: string; chain: string }) => p.project === 'cetus-clmm' && p.chain === 'Sui',
     ) || [];
 
     const apysByPair: Record<string, number[]> = {};
     for (const pool of pools) {
       if (pool.underlyingTokens?.length >= 2) {
-        const key = pool.underlyingTokens.map((t: string) => t.toLowerCase()).sort().join('-');
+        // DefiLlama uses padded hex (0x000...0002::sui::SUI); normalize to short form to match our coin types
+        const key = pool.underlyingTokens
+          .map((t: string) => normalizeCoinType(t).toLowerCase())
+          .sort()
+          .join('-');
         if (!apysByPair[key]) apysByPair[key] = [];
         apysByPair[key].push(pool.apyBase || pool.apy || 0);
       }

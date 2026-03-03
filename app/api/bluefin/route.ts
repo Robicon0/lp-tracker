@@ -159,6 +159,116 @@ async function fetchPrices(coinTypes: string[]): Promise<Record<string, number>>
   } catch { return {}; }
 }
 
+// I32 package used for tick keys in the ticks Table
+const I32_TYPE = '0x714a63a0dba6da4f017b42d5d0fb78867f18bcde904868e51d951a5a6f5b7f57::i32::I32';
+const MAX_U128 = (1n << 128n);
+
+function u128Wrap(n: bigint): bigint {
+  return ((n % MAX_U128) + MAX_U128) % MAX_U128;
+}
+
+// Standard CLMM fee-growth-inside calculation (same as Uniswap V3 / Orca)
+function calcFeeGrowthInside(
+  tickCurrent: number,
+  tickLower: number,
+  tickUpper: number,
+  feeGrowthGlobal: bigint,
+  tickLowerFeeGrowthOutside: bigint,
+  tickUpperFeeGrowthOutside: bigint,
+): bigint {
+  const feeGrowthBelow = tickCurrent >= tickLower
+    ? tickLowerFeeGrowthOutside
+    : u128Wrap(feeGrowthGlobal - tickLowerFeeGrowthOutside);
+  // Uniswap V3 Tick.sol: feeGrowthAbove = outside when current < upper, else global - outside
+  const feeGrowthAbove = tickCurrent < tickUpper
+    ? tickUpperFeeGrowthOutside
+    : u128Wrap(feeGrowthGlobal - tickUpperFeeGrowthOutside);
+  return u128Wrap(feeGrowthGlobal - feeGrowthBelow - feeGrowthAbove);
+}
+
+// total owed = token_fee (snapshotted) + delta * liquidity / 2^128
+function calcPendingFees(
+  tokenFee: bigint,
+  feeGrowthInside: bigint,
+  feeGrowthCheckpoint: bigint,
+  liquidity: bigint,
+): bigint {
+  const delta = u128Wrap(feeGrowthInside - feeGrowthCheckpoint);
+  return tokenFee + (delta * liquidity) / MAX_U128;
+}
+
+// Extract the ticks Table object ID from pool fields
+function getTicksTableId(poolFields: Record<string, unknown>): string | null {
+  const tm = poolFields.ticks_manager as Record<string, unknown> | undefined;
+  const tmFields = (tm?.fields as Record<string, unknown> | undefined) ?? tm;
+  const ticks = tmFields?.ticks as Record<string, unknown> | undefined;
+  const ticksFields = (ticks?.fields as Record<string, unknown> | undefined) ?? ticks;
+  const id = ticksFields?.id as Record<string, unknown> | undefined;
+  return (id?.id as string) || null;
+}
+
+// Fetch a single tick's fee_growth_outside values via dynamic field lookup
+async function fetchTick(
+  ticksTableId: string,
+  tickIndex: number,
+): Promise<{ feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint } | null> {
+  try {
+    const bits = tickIndex < 0 ? tickIndex + 4294967296 : tickIndex;
+    const result = await suiRpc('suix_getDynamicFieldObject', [
+      ticksTableId,
+      { type: I32_TYPE, value: { bits } },
+    ]) as { data: { content: { fields: Record<string, unknown> } } } | null;
+
+    const contentFields = result?.data?.content?.fields;
+    if (!contentFields) return null;
+    const valueItem = contentFields.value as Record<string, unknown> | undefined;
+    const tickFields = (valueItem?.fields as Record<string, unknown> | undefined) ?? valueItem;
+    if (!tickFields) return null;
+
+    return {
+      feeGrowthOutsideA: BigInt((tickFields.fee_growth_outside_a as string) || '0'),
+      feeGrowthOutsideB: BigInt((tickFields.fee_growth_outside_b as string) || '0'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBluefinAPYs(): Promise<Record<string, number>> {
+  try {
+    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
+    const data = await res.json();
+    const pools = data.data?.filter(
+      (p: { project: string; chain: string }) => p.project === 'bluefin-spot' && p.chain === 'Sui',
+    ) || [];
+
+    const apysByPair: Record<string, number[]> = {};
+    for (const pool of pools) {
+      if (pool.underlyingTokens?.length >= 2) {
+        // DefiLlama uses padded hex (0x000...0002::sui::SUI); normalize to short form to match our coin types
+        const key = pool.underlyingTokens
+          .map((t: string) => normalizeCoinType(t).toLowerCase())
+          .sort()
+          .join('-');
+        if (!apysByPair[key]) apysByPair[key] = [];
+        apysByPair[key].push(pool.apyBase || pool.apy || 0);
+      }
+    }
+
+    const result: Record<string, number> = {};
+    for (const [key, apys] of Object.entries(apysByPair)) {
+      const sorted = apys.sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      result[key] = Math.round(
+        (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100,
+      ) / 100;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
@@ -181,8 +291,9 @@ export async function GET(request: Request) {
       p.coin_type_b as string,
     ]).filter(Boolean))];
 
-    const [poolMap, priceData] = await Promise.all([
+    const [poolMap, apyData, priceData] = await Promise.all([
       fetchPools(poolIds),
+      fetchBluefinAPYs(),
       fetchPrices(coinTypes),
     ]);
 
@@ -191,6 +302,36 @@ export async function GET(request: Request) {
       coinTypes.map(async (ct) => {
         const meta = await fetchCoinMetadata(ct);
         if (meta) coinMetaMap[ct] = meta;
+      }),
+    );
+
+    // Build ticks table ID map per pool
+    const poolTicksTableIds: Record<string, string> = {};
+    for (const [poolId, poolFields] of Object.entries(poolMap)) {
+      const tableId = getTicksTableId(poolFields);
+      if (tableId) poolTicksTableIds[poolId] = tableId;
+    }
+
+    // Collect unique (tableId, tickIndex) pairs needed across all positions
+    const ticksToFetch = new Set<string>();
+    for (const pos of rawWithNormalized) {
+      const tableId = poolTicksTableIds[pos.pool_id as string];
+      if (!tableId) continue;
+      const tl = bitsToI32(extractI32Bits(pos.lower_tick));
+      const tu = bitsToI32(extractI32Bits(pos.upper_tick));
+      ticksToFetch.add(`${tableId}:${tl}`);
+      ticksToFetch.add(`${tableId}:${tu}`);
+    }
+
+    // Fetch all needed ticks in parallel
+    const tickDataMap: Record<string, { feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint }> = {};
+    await Promise.all(
+      [...ticksToFetch].map(async (key) => {
+        const colonIdx = key.indexOf(':');
+        const tableId = key.slice(0, colonIdx);
+        const tickIdx = parseInt(key.slice(colonIdx + 1));
+        const data = await fetchTick(tableId, tickIdx);
+        if (data) tickDataMap[key] = data;
       }),
     );
 
@@ -208,7 +349,6 @@ export async function GET(request: Request) {
       const decimalsB = metaB?.decimals ?? 9;
 
       const liquidity = BigInt((pos.liquidity as string) || '0');
-      // Bluefin I32 struct: { type: "...::i32::I32", fields: { bits: N } }
       const tickLower = bitsToI32(extractI32Bits(pos.lower_tick));
       const tickUpper = bitsToI32(extractI32Bits(pos.upper_tick));
       const sqrtPriceX64 = BigInt((pool?.current_sqrt_price as string) || '0');
@@ -222,12 +362,43 @@ export async function GET(request: Request) {
       const priceB = priceData[coinTypeB] || 0;
       const value = amount0 * priceA + amount1 * priceB;
 
-      // Bluefin stores accrued fees directly on position
-      const fees0 = Number((pos.token_a_fee as string) || '0') / 10 ** decimalsA;
-      const fees1 = Number((pos.token_b_fee as string) || '0') / 10 ** decimalsB;
+      // Calculate pending fees using fee growth inside (Uniswap V3 style)
+      const tableId = poolTicksTableIds[poolId];
+      const lowerTickData = tableId ? tickDataMap[`${tableId}:${tickLower}`] : undefined;
+      const upperTickData = tableId ? tickDataMap[`${tableId}:${tickUpper}`] : undefined;
+
+      let fees0 = 0, fees1 = 0;
+      if (pool && lowerTickData && upperTickData) {
+        const feeGrowthGlobalA = BigInt((pool.fee_growth_global_coin_a as string) || '0');
+        const feeGrowthGlobalB = BigInt((pool.fee_growth_global_coin_b as string) || '0');
+        const feeGrowthCheckpointA = BigInt((pos.fee_growth_coin_a as string) || '0');
+        const feeGrowthCheckpointB = BigInt((pos.fee_growth_coin_b as string) || '0');
+        const tokenAFee = BigInt((pos.token_a_fee as string) || '0');
+        const tokenBFee = BigInt((pos.token_b_fee as string) || '0');
+
+        const feeGrowthInsideA = calcFeeGrowthInside(
+          tickCurrent, tickLower, tickUpper,
+          feeGrowthGlobalA, lowerTickData.feeGrowthOutsideA, upperTickData.feeGrowthOutsideA,
+        );
+        const feeGrowthInsideB = calcFeeGrowthInside(
+          tickCurrent, tickLower, tickUpper,
+          feeGrowthGlobalB, lowerTickData.feeGrowthOutsideB, upperTickData.feeGrowthOutsideB,
+        );
+
+        fees0 = Number(calcPendingFees(tokenAFee, feeGrowthInsideA, feeGrowthCheckpointA, liquidity)) / 10 ** decimalsA;
+        fees1 = Number(calcPendingFees(tokenBFee, feeGrowthInsideB, feeGrowthCheckpointB, liquidity)) / 10 ** decimalsB;
+      } else {
+        // Fallback: use snapshotted fees only
+        fees0 = Number((pos.token_a_fee as string) || '0') / 10 ** decimalsA;
+        fees1 = Number((pos.token_b_fee as string) || '0') / 10 ** decimalsB;
+      }
       const feesUsd = fees0 * priceA + fees1 * priceB;
 
       const inRange = tickCurrent >= tickLower && tickCurrent < tickUpper;
+
+      // APY lookup by normalized coin type pair key
+      const apyKey = [coinTypeA, coinTypeB].map((t) => t.toLowerCase()).sort().join('-');
+      const apy = apyData[apyKey] || 0;
 
       return {
         id: `bluefin-${pos.objectId as string}`,
@@ -235,7 +406,7 @@ export async function GET(request: Request) {
         protocol: 'Bluefin',
         chain: 'Sui',
         value: Math.round(value * 100) / 100,
-        apy: 0,
+        apy,
         fees: Math.round(feesUsd * 100) / 100,
         status: (inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range',
         amount0: Math.round(amount0 * 1_000_000) / 1_000_000,
