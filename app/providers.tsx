@@ -6,6 +6,7 @@ import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react
 import { SuiClientProvider, WalletProvider as SuiWalletProvider, createNetworkConfig } from "@mysten/dapp-kit";
 import { config } from "./config/wagmi";
 import { PositionsProvider } from "./contexts/PositionsContext";
+import { WalletAuthProvider } from "./contexts/WalletAuthContext";
 
 const queryClient = new QueryClient();
 // Empty array: WalletProvider auto-detects any Solana Wallet Standard-compliant
@@ -21,17 +22,19 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ConnectionProvider endpoint={SOLANA_RPC}>
       <WalletProvider wallets={solanaWallets} autoConnect={false}>
-        <WagmiProvider config={config}>
-          <QueryClientProvider client={queryClient}>
-            <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
-              <SuiWalletProvider autoConnect={false}>
-                <PositionsProvider>
-                  {children}
-                </PositionsProvider>
-              </SuiWalletProvider>
-            </SuiClientProvider>
-          </QueryClientProvider>
-        </WagmiProvider>
+        <WalletAuthProvider>
+          <WagmiProvider config={config}>
+            <QueryClientProvider client={queryClient}>
+              <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
+                <SuiWalletProvider autoConnect={false}>
+                  <PositionsProvider>
+                    {children}
+                  </PositionsProvider>
+                </SuiWalletProvider>
+              </SuiClientProvider>
+            </QueryClientProvider>
+          </WagmiProvider>
+        </WalletAuthProvider>
       </WalletProvider>
     </ConnectionProvider>
   );

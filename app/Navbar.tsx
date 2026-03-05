@@ -5,6 +5,7 @@ import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { WalletName } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
+import { useWalletAuth } from "./contexts/WalletAuthContext";
 import Link from "next/link";
 
 export default function Navbar() {
@@ -30,6 +31,8 @@ export default function Navbar() {
   const { mutate: connectSui } = useConnectWallet();
   const { mutate: disconnectSui } = useDisconnectWallet();
 
+  const { setSolanaExplicit } = useWalletAuth();
+
   const [showEvmModal, setShowEvmModal] = useState(false);
   const [showSolanaModal, setShowSolanaModal] = useState(false);
   const [showSuiModal, setShowSuiModal] = useState(false);
@@ -46,10 +49,16 @@ export default function Navbar() {
     try {
       select(walletName as WalletName);
       await connectSolana();
+      setSolanaExplicit(true);
     } catch (err) {
       console.error("Solana connect error:", err);
     }
     setShowSolanaModal(false);
+  };
+
+  const handleSolanaDisconnect = () => {
+    setSolanaExplicit(false);
+    disconnectSolana();
   };
 
   const truncateAddress = (addr: string) => addr.slice(0, 6) + "..." + addr.slice(-4);
@@ -97,7 +106,7 @@ export default function Navbar() {
                   <span className="bg-gray-900 border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     ◎ {truncateAddress(solanaAddress)}
                   </span>
-                  <button onClick={() => disconnectSolana()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={() => handleSolanaDisconnect()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
@@ -169,7 +178,7 @@ export default function Navbar() {
               {solanaAddress ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-purple-400 text-sm font-mono">◎ {truncateAddress(solanaAddress)}</span>
-                  <button onClick={() => disconnectSolana()} className="text-red-400 text-sm">Disconnect Solana</button>
+                  <button onClick={() => handleSolanaDisconnect()} className="text-red-400 text-sm">Disconnect Solana</button>
                 </div>
               ) : (
                 <button

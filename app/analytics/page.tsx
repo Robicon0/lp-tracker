@@ -6,6 +6,7 @@ import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useWalletAuth } from "../contexts/WalletAuthContext";
 import {
   BarChart,
   Bar,
@@ -60,11 +61,13 @@ const renderLegend = (props: any) => {
 export default function Analytics() {
   const { positions, isLoading } = usePositions();
   const { address } = useAccount();
-  const { publicKey } = useWallet();
+  const { publicKey, connected: solanaConnected } = useWallet();
   const suiAccount = useCurrentAccount();
+  const { solanaExplicit } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const hasWallet = mounted && !!(address || publicKey || suiAccount);
+  const hasSolana = solanaExplicit && solanaConnected && !!publicKey;
+  const hasWallet = mounted && !!(address || hasSolana || suiAccount);
 
   const valueData = useMemo(() => positions.map((p) => ({
     name: shortName(p.pair),

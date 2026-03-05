@@ -6,6 +6,7 @@ import { useAccount } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
+import { useWalletAuth } from "./WalletAuthContext";
 import { fetchUniswapV3Positions } from "../lib/uniswap";
 import { fetchVelodromePositions } from "../lib/velodrome";
 import { fetchRaydiumPositions } from "../lib/raydium";
@@ -29,9 +30,10 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const { address, isConnected } = useAccount();
   const { publicKey, connected: solanaConnected } = useWallet();
   const suiAccount = useCurrentAccount();
-  // Only treat Solana as connected when the adapter reports connected=true
-  // (publicKey alone can be stale when a wallet is locked)
-  const solanaAddress = (solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
+  const { solanaExplicit } = useWalletAuth();
+  // Only treat Solana as connected when the user explicitly connected in this session.
+  // solanaConnected alone can be true even when the wallet is locked (Wallet Standard silent reconnect).
+  const solanaAddress = (solanaExplicit && solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
   const suiAddress = suiAccount?.address;
 
   const { data: walletPositions, isLoading } = useQuery({
