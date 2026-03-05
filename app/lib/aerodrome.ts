@@ -7,6 +7,15 @@ export interface AerodromePosition {
   apy: number;
   fees: number;
   status: 'In Range' | 'Out of Range';
+  // Optional enriched fields present on CLMM positions
+  amount0?: number;
+  amount1?: number;
+  token0Symbol?: string;
+  token1Symbol?: string;
+  fees0?: number;
+  fees1?: number;
+  tickLower?: number;
+  tickUpper?: number;
 }
 
 interface AerodromeResponse {
@@ -26,16 +35,7 @@ export async function fetchAerodromePositions(account: string): Promise<Aerodrom
       return [];
     }
 
-    return (data.positions || []).map((p) => ({
-      id: p.id,
-      pair: p.pair,
-      protocol: p.protocol,
-      chain: p.chain,
-      value: p.value,
-      apy: p.apy,
-      fees: p.fees,
-      status: p.status,
-    }));
+    return (data.positions || []).map((p: AerodromePosition) => ({ ...p }));
   } catch (error) {
     console.error('Failed to fetch Aerodrome positions:', error);
     return [];

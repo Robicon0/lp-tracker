@@ -18,27 +18,12 @@ import {
   Pie,
   Cell,
   Legend,
-  AreaChart,
-  Area,
 } from "recharts";
 
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316"];
 
 const shortName = (pair: string) => pair.replace(" / ", "/");
 
-const performanceData = Array.from({ length: 30 }, (_, i) => {
-  const base = 120000;
-  const variation = Math.sin(i / 3) * 5000 + Math.random() * 3000;
-  return {
-    day: `Day ${i + 1}`,
-    value: Math.round(base + variation + i * 200),
-  };
-});
-
-const dailyFeesData = Array.from({ length: 30 }, (_, i) => ({
-  day: `Day ${i + 1}`,
-  fees: Math.round(50 + Math.random() * 150),
-}));
 
 const CustomTooltipStyle = {
   backgroundColor: "#1F2937",
@@ -50,7 +35,6 @@ const CustomTooltipStyle = {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const fmtDollar = (value: any) => [`$${Number(value).toLocaleString()}`, "Value"];
-const fmtFees = (value: any) => [`$${Number(value)}`, "Fees"];
 const fmtPct = (value: any) => [`${Number(value)}%`, "APY"];
 
 const renderLegend = (props: any) => {
@@ -170,40 +154,6 @@ export default function Analytics() {
         </div>
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <h2 className="text-xl font-bold mb-4">30-Day Portfolio Value</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={performanceData}>
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="day" tick={{ fill: "#9CA3AF", fontSize: 11 }} interval={4} />
-                <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtDollar} />
-                <Area type="monotone" dataKey="value" stroke="#3B82F6" fill="url(#colorValue)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <h2 className="text-xl font-bold mb-4">Daily Fees Earned</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dailyFeesData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="day" tick={{ fill: "#9CA3AF", fontSize: 11 }} interval={4} />
-                <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtFees} />
-                <Bar dataKey="fees" fill="#10B981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-4">Value by Position</h2>
             <ResponsiveContainer width="100%" height={320}>
