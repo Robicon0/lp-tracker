@@ -27,9 +27,11 @@ const PositionsContext = createContext<PositionsContextValue>({
 
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const { address, isConnected } = useAccount();
-  const { publicKey } = useWallet();
+  const { publicKey, connected: solanaConnected } = useWallet();
   const suiAccount = useCurrentAccount();
-  const solanaAddress = publicKey?.toBase58();
+  // Only treat Solana as connected when the adapter reports connected=true
+  // (publicKey alone can be stale when a wallet is locked)
+  const solanaAddress = (solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
   const suiAddress = suiAccount?.address;
 
   const { data: walletPositions, isLoading } = useQuery({

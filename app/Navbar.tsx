@@ -11,8 +11,17 @@ export default function Navbar() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
-  const { select, connect: connectSolana, disconnect: disconnectSolana, publicKey } = useWallet();
-  const solanaAddress = publicKey?.toBase58();
+
+  const {
+    select,
+    connect: connectSolana,
+    disconnect: disconnectSolana,
+    publicKey,
+    connected: solanaConnected,
+    wallets: solanaWallets,
+  } = useWallet();
+  // Only show as connected when the adapter confirms connection (not just cached publicKey)
+  const solanaAddress = (solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
 
   // Sui wallet
   const suiAccount = useCurrentAccount();
@@ -20,30 +29,30 @@ export default function Navbar() {
   const suiWallets = useWallets();
   const { mutate: connectSui } = useConnectWallet();
   const { mutate: disconnectSui } = useDisconnectWallet();
+
+  const [showEvmModal, setShowEvmModal] = useState(false);
+  const [showSolanaModal, setShowSolanaModal] = useState(false);
   const [showSuiModal, setShowSuiModal] = useState(false);
-
-  const [showModal, setShowModal] = useState(false);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  useEffect(() => setMounted(true), []);
 
-  const handleConnect = (connectorIndex: number) => {
+  const handleEvmConnect = (connectorIndex: number) => {
     connect({ connector: connectors[connectorIndex] });
-    setShowModal(false);
+    setShowEvmModal(false);
   };
 
-  const handlePhantomConnect = async () => {
+  const handleSolanaConnect = async (walletName: string) => {
     try {
-      select("Phantom" as WalletName);
+      select(walletName as WalletName);
       await connectSolana();
     } catch (err) {
-      console.error("Phantom connect error:", err);
+      console.error("Solana connect error:", err);
     }
+    setShowSolanaModal(false);
   };
 
-  const truncateAddress = (addr: string) => {
-    return addr.slice(0, 6) + "..." + addr.slice(-4);
-  };
+  const truncateAddress = (addr: string) => addr.slice(0, 6) + "..." + addr.slice(-4);
 
   return (
     <>
@@ -57,39 +66,24 @@ export default function Navbar() {
 
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-8">
-              <Link href="/" className="text-gray-300 hover:text-white transition-colors">
-                Home
-              </Link>
-              <Link href="/dashboard" className="text-gray-300 hover:text-white transition-colors">
-                Dashboard
-              </Link>
-              <Link href="/analytics" className="text-gray-300 hover:text-white transition-colors">
-                Analytics
-              </Link>
-              <Link href="/about" className="text-gray-300 hover:text-white transition-colors">
-                About
-              </Link>
-              <Link href="/wallet" className="text-gray-300 hover:text-white transition-colors">
-                Wallet
-              </Link>
+              <Link href="/" className="text-gray-300 hover:text-white transition-colors">Home</Link>
+              <Link href="/dashboard" className="text-gray-300 hover:text-white transition-colors">Dashboard</Link>
+              <Link href="/analytics" className="text-gray-300 hover:text-white transition-colors">Analytics</Link>
+              <Link href="/about" className="text-gray-300 hover:text-white transition-colors">About</Link>
+              <Link href="/wallet" className="text-gray-300 hover:text-white transition-colors">Wallet</Link>
 
-              {/* EVM Wallet Button */}
+              {/* EVM Wallet */}
               {mounted && isConnected && address ? (
                 <div className="flex items-center space-x-2">
                   <span className="bg-gray-900 border border-gray-700 text-green-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     {truncateAddress(address)}
                   </span>
-                  <button
-                    onClick={() => disconnect()}
-                    className="text-gray-400 hover:text-red-400 text-sm transition-colors"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => disconnect()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
                   <button
-                    onClick={() => setShowModal(true)}
+                    onClick={() => setShowEvmModal(true)}
                     className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
                     Connect EVM
@@ -97,42 +91,32 @@ export default function Navbar() {
                 )
               )}
 
-              {/* Phantom / Solana Wallet Button */}
+              {/* Solana Wallet */}
               {mounted && solanaAddress ? (
                 <div className="flex items-center space-x-2">
                   <span className="bg-gray-900 border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono">
-                    👻 {truncateAddress(solanaAddress)}
+                    ◎ {truncateAddress(solanaAddress)}
                   </span>
-                  <button
-                    onClick={() => disconnectSolana()}
-                    className="text-gray-400 hover:text-red-400 text-sm transition-colors"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => disconnectSolana()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
                   <button
-                    onClick={handlePhantomConnect}
+                    onClick={() => setShowSolanaModal(true)}
                     className="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
-                    Connect Phantom
+                    Connect Solana
                   </button>
                 )
               )}
 
-              {/* Sui Wallet Button */}
+              {/* Sui Wallet */}
               {mounted && suiAddress ? (
                 <div className="flex items-center space-x-2">
                   <span className="bg-gray-900 border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     🌊 {truncateAddress(suiAddress)}
                   </span>
-                  <button
-                    onClick={() => disconnectSui()}
-                    className="text-gray-400 hover:text-red-400 text-sm transition-colors"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => disconnectSui()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
@@ -147,10 +131,7 @@ export default function Navbar() {
             </div>
 
             {/* Mobile Menu Button */}
-            <button
-              onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="md:hidden text-gray-300 hover:text-white"
-            >
+            <button onClick={() => setShowMobileMenu(!showMobileMenu)} className="md:hidden text-gray-300 hover:text-white">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {showMobileMenu ? (
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -168,7 +149,8 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-gray-300 hover:text-white py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-gray-300 hover:text-white py-2">Analytics</Link>
               <Link href="/about" className="block text-gray-300 hover:text-white py-2">About</Link>
-              {/* EVM wallet — mobile */}
+
+              {/* EVM — mobile */}
               {isConnected && address ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-green-400 text-sm font-mono">{truncateAddress(address)}</span>
@@ -176,29 +158,29 @@ export default function Navbar() {
                 </div>
               ) : (
                 <button
-                  onClick={() => { setShowModal(true); setShowMobileMenu(false); }}
+                  onClick={() => { setShowEvmModal(true); setShowMobileMenu(false); }}
                   className="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
                 >
                   Connect EVM
                 </button>
               )}
 
-              {/* Phantom wallet — mobile */}
+              {/* Solana — mobile */}
               {solanaAddress ? (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-purple-400 text-sm font-mono">👻 {truncateAddress(solanaAddress)}</span>
-                  <button onClick={() => disconnectSolana()} className="text-red-400 text-sm">Disconnect Phantom</button>
+                  <span className="text-purple-400 text-sm font-mono">◎ {truncateAddress(solanaAddress)}</span>
+                  <button onClick={() => disconnectSolana()} className="text-red-400 text-sm">Disconnect Solana</button>
                 </div>
               ) : (
                 <button
-                  onClick={() => { handlePhantomConnect(); setShowMobileMenu(false); }}
+                  onClick={() => { setShowSolanaModal(true); setShowMobileMenu(false); }}
                   className="w-full bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
                 >
-                  Connect Phantom
+                  Connect Solana
                 </button>
               )}
 
-              {/* Sui wallet — mobile */}
+              {/* Sui — mobile */}
               {suiAddress ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-cyan-400 text-sm font-mono">🌊 {truncateAddress(suiAddress)}</span>
@@ -217,60 +199,74 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* EVM Wallet Connection Modal */}
-      {showModal && (
+      {/* EVM Wallet Modal */}
+      {showEvmModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowModal(false)}
-          />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowEvmModal(false)} />
           <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">Connect EVM Wallet</h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowEvmModal(false)} className="text-gray-400 hover:text-white">✕</button>
             </div>
-
             <div className="space-y-3">
               {connectors.map((connector, index) => (
                 <button
                   key={connector.id}
-                  onClick={() => handleConnect(index)}
-                  className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
+                  onClick={() => handleEvmConnect(index)}
+                  className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
                 >
-                  <span className="text-2xl">
-                    {connector.name === "MetaMask" ? "🦊" : "🔗"}
-                  </span>
+                  <span className="text-2xl">{connector.name === "MetaMask" ? "🦊" : "🔗"}</span>
                   <div className="text-left">
                     <p className="text-white font-medium">{connector.name}</p>
-                    <p className="text-gray-400 text-xs">
-                      {connector.name === "MetaMask"
-                        ? "Connect with browser extension"
-                        : "Connect wallet"}
-                    </p>
+                    <p className="text-gray-400 text-xs">Connect with browser extension</p>
                   </div>
                 </button>
               ))}
             </div>
-
-            <p className="text-gray-500 text-xs text-center mt-4">
-              By connecting, you agree to the Terms of Service
-            </p>
           </div>
         </div>
       )}
 
-      {/* Sui Wallet Connection Modal */}
+      {/* Solana Wallet Modal */}
+      {showSolanaModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowSolanaModal(false)} />
+          <div className="relative bg-gray-900 border border-purple-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">Connect Solana Wallet</h2>
+              <button onClick={() => setShowSolanaModal(false)} className="text-gray-400 hover:text-white">✕</button>
+            </div>
+            {solanaWallets.length === 0 ? (
+              <p className="text-gray-400 text-sm text-center py-4">
+                No Solana wallet detected. Install a Solana-compatible wallet (e.g. Phantom, Backpack, Solflare).
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {solanaWallets.map((wallet) => (
+                  <button
+                    key={wallet.adapter.name}
+                    onClick={() => handleSolanaConnect(wallet.adapter.name)}
+                    className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-purple-700 rounded-xl p-4 transition-colors"
+                  >
+                    {wallet.adapter.icon && (
+                      <img src={wallet.adapter.icon} alt={wallet.adapter.name} className="w-8 h-8 rounded-lg" />
+                    )}
+                    <div className="text-left">
+                      <p className="text-white font-medium">{wallet.adapter.name}</p>
+                      <p className="text-gray-400 text-xs">Connect with {wallet.adapter.name}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Sui Wallet Modal */}
       {showSuiModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowSuiModal(false)}
-          />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowSuiModal(false)} />
           <div className="relative bg-gray-900 border border-cyan-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">Connect Sui Wallet</h2>
@@ -288,9 +284,7 @@ export default function Navbar() {
                     onClick={() => { connectSui({ wallet }); setShowSuiModal(false); }}
                     className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-cyan-700 rounded-xl p-4 transition-colors"
                   >
-                    {wallet.icon && (
-                      <img src={wallet.icon} alt={wallet.name} className="w-8 h-8 rounded-lg" />
-                    )}
+                    {wallet.icon && <img src={wallet.icon} alt={wallet.name} className="w-8 h-8 rounded-lg" />}
                     <div className="text-left">
                       <p className="text-white font-medium">{wallet.name}</p>
                       <p className="text-gray-400 text-xs">Connect with {wallet.name}</p>

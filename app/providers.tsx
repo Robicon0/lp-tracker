@@ -3,13 +3,14 @@
 import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SuiClientProvider, WalletProvider as SuiWalletProvider, createNetworkConfig } from "@mysten/dapp-kit";
 import { config } from "./config/wagmi";
 import { PositionsProvider } from "./contexts/PositionsContext";
 
 const queryClient = new QueryClient();
-const solanaWallets = [new PhantomWalletAdapter()];
+// Empty array: WalletProvider auto-detects any Solana Wallet Standard-compliant
+// wallet installed in the browser (Phantom, Backpack, Solflare, etc.)
+const solanaWallets: never[] = [];
 const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
 
 const { networkConfig: suiNetworkConfig } = createNetworkConfig({
