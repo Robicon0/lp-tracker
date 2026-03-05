@@ -21,9 +21,6 @@ export default function Navbar() {
     connected: solanaConnected,
     wallets: solanaWallets,
   } = useWallet();
-  // Only show as connected when the adapter confirms connection (not just cached publicKey)
-  const solanaAddress = (solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
-
   // Sui wallet
   const suiAccount = useCurrentAccount();
   const suiAddress = suiAccount?.address;
@@ -31,7 +28,11 @@ export default function Navbar() {
   const { mutate: connectSui } = useConnectWallet();
   const { mutate: disconnectSui } = useDisconnectWallet();
 
-  const { setSolanaExplicit } = useWalletAuth();
+  const { solanaExplicit, setSolanaExplicit } = useWalletAuth();
+
+  // Require explicit user consent — solanaConnected alone is true even for locked wallets
+  // (Wallet Standard silently reconnects trusted dApps on page load)
+  const solanaAddress = (solanaExplicit && solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
 
   const [showEvmModal, setShowEvmModal] = useState(false);
   const [showSolanaModal, setShowSolanaModal] = useState(false);
@@ -39,6 +40,14 @@ export default function Navbar() {
   const [mounted, setMounted] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // If the wallet adapter loses connection mid-session (e.g. user locks wallet and
+  // Phantom emits an accounts-change event), clear the explicit consent flag too.
+  useEffect(() => {
+    if (solanaExplicit && !solanaConnected) {
+      setSolanaExplicit(false);
+    }
+  }, [solanaConnected, solanaExplicit, setSolanaExplicit]);
 
   const handleEvmConnect = (connectorIndex: number) => {
     connect({ connector: connectors[connectorIndex] });
