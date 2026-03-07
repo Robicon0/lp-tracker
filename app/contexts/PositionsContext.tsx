@@ -3,7 +3,6 @@
 import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
-import { useCurrentAccount } from "@mysten/dapp-kit";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
 import { fetchUniswapV3Positions } from "../lib/uniswap";
@@ -27,11 +26,10 @@ const PositionsContext = createContext<PositionsContextValue>({
 
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const { address } = useAccount();
-  const suiAccount = useCurrentAccount();
-  // Use solanaAddress from WalletAuthContext — the only source of truth for
-  // whether the user has explicitly connected a Solana wallet in this session.
-  const { solanaAddress } = useWalletAuth();
-  const suiAddress = suiAccount?.address;
+  // Use addresses from WalletAuthContext — the only source of truth for explicit
+  // user connections. Adapter state (useWallet, useCurrentAccount) is not used
+  // here because those can reflect locked/silent-reconnect state.
+  const { solanaAddress, suiAddress } = useWalletAuth();
 
   const { data: walletPositions, isLoading } = useQuery({
     queryKey: ["positions", address, solanaAddress, suiAddress],

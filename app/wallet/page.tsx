@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
-import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import Navbar from "../Navbar";
 
@@ -89,9 +88,7 @@ interface SuiBalances {
 
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
-  const suiAccount = useCurrentAccount();
-  const { solanaAddress } = useWalletAuth();
-  const suiAddress = suiAccount?.address;
+  const { solanaAddress, suiAddress } = useWalletAuth();
 
   const [chainBalances, setChainBalances] = useState<ChainBalances[]>([]);
   const [solanaBalances, setSolanaBalances] = useState<SolanaBalances | null>(null);

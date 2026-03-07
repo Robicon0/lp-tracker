@@ -13,28 +13,28 @@ export default function Navbar() {
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
 
-  // Only use the adapter for: listing wallets, calling select/connect/disconnect.
-  // Never read connected or publicKey from the adapter for display — a locked
-  // Phantom wallet keeps connected=true and publicKey set via Wallet Standard
-  // silent reconnect, so those values are not trustworthy.
+  // Solana adapter — used ONLY for mechanics: wallet list, select, connect, disconnect.
+  // Never read connected or publicKey from the adapter for display: a locked Phantom
+  // wallet keeps those truthy via Wallet Standard silent reconnect.
   const {
     select,
     connect: connectSolana,
     disconnect: disconnectSolana,
-    connected: adapterConnected,
+    connected: adapterSolanaConnected,
     publicKey: adapterPublicKey,
     wallets: solanaWallets,
   } = useWallet();
 
-  // Sui wallet
-  const suiAccount = useCurrentAccount();
-  const suiAddress = suiAccount?.address;
+  // Sui adapter — used ONLY for mechanics: wallet list, connect, disconnect.
+  // @mysten/dapp-kit persists the last connected wallet; useCurrentAccount() can
+  // return an account on page load without user action, so we never use it for display.
+  const adapterSuiAccount = useCurrentAccount();
   const suiWallets = useWallets();
-  const { mutate: connectSui } = useConnectWallet();
+  const { mutateAsync: connectSuiAsync } = useConnectWallet();
   const { mutate: disconnectSui } = useDisconnectWallet();
 
-  // solanaAddress is our source of truth — only set after an explicit user connect.
-  const { solanaAddress, setSolanaAddress } = useWalletAuth();
+  // Our source of truth — only set after explicit user-initiated connect.
+  const { solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
 
   const [showEvmModal, setShowEvmModal] = useState(false);
   const [showSolanaModal, setShowSolanaModal] = useState(false);
@@ -43,28 +43,43 @@ export default function Navbar() {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Flag set during an in-progress explicit connect — used by the effect below
-  // to capture publicKey once React re-renders with the updated adapter state.
-  const awaitingConnect = useRef(false);
+  // --- Solana connection tracking ---
+  // Set to true during an in-progress explicit connect so the effect below
+  // knows to capture publicKey once the adapter state updates.
+  const awaitingSolanaConnect = useRef(false);
 
-  // Capture publicKey after a user-initiated connect resolves.
-  // We use an effect (not reading publicKey inline) because React hook values
-  // inside an async function reflect the stale closure at render time.
   useEffect(() => {
-    if (awaitingConnect.current && adapterConnected && adapterPublicKey) {
+    if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
       setSolanaAddress(adapterPublicKey.toBase58());
-      awaitingConnect.current = false;
+      awaitingSolanaConnect.current = false;
     }
-  }, [adapterConnected, adapterPublicKey, setSolanaAddress]);
+  }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
 
-  // If the adapter disconnects mid-session (e.g. wallet lock + Phantom emits
-  // an accounts-change event with empty accounts), clear our stored address too.
+  // Clear if adapter disconnects mid-session (e.g. wallet emits accounts-change).
   useEffect(() => {
-    if (!adapterConnected && solanaAddress) {
+    if (!adapterSolanaConnected && solanaAddress) {
       setSolanaAddress(null);
     }
-  }, [adapterConnected, solanaAddress, setSolanaAddress]);
+  }, [adapterSolanaConnected, solanaAddress, setSolanaAddress]);
 
+  // --- Sui connection tracking ---
+  const awaitingSuiConnect = useRef(false);
+
+  useEffect(() => {
+    if (awaitingSuiConnect.current && adapterSuiAccount) {
+      setSuiAddress(adapterSuiAccount.address);
+      awaitingSuiConnect.current = false;
+    }
+  }, [adapterSuiAccount, setSuiAddress]);
+
+  // Clear if adapter disconnects mid-session.
+  useEffect(() => {
+    if (!adapterSuiAccount && suiAddress) {
+      setSuiAddress(null);
+    }
+  }, [adapterSuiAccount, suiAddress, setSuiAddress]);
+
+  // --- Connect handlers ---
   const handleEvmConnect = (connectorIndex: number) => {
     connect({ connector: connectors[connectorIndex] });
     setShowEvmModal(false);
@@ -73,11 +88,11 @@ export default function Navbar() {
   const handleSolanaConnect = async (walletName: string) => {
     try {
       select(walletName as WalletName);
-      awaitingConnect.current = true;
+      awaitingSolanaConnect.current = true;
       await connectSolana();
-      // publicKey captured by the useEffect above once React re-renders
+      // Address captured by the useEffect above once React re-renders.
     } catch (err) {
-      awaitingConnect.current = false;
+      awaitingSolanaConnect.current = false;
       console.error("Solana connect error:", err);
     }
     setShowSolanaModal(false);
@@ -86,6 +101,23 @@ export default function Navbar() {
   const handleSolanaDisconnect = () => {
     setSolanaAddress(null);
     disconnectSolana();
+  };
+
+  const handleSuiConnect = async (wallet: (typeof suiWallets)[0]) => {
+    try {
+      awaitingSuiConnect.current = true;
+      await connectSuiAsync({ wallet });
+      // Address captured by the useEffect above once adapterSuiAccount updates.
+    } catch (err) {
+      awaitingSuiConnect.current = false;
+      console.error("Sui connect error:", err);
+    }
+    setShowSuiModal(false);
+  };
+
+  const handleSuiDisconnect = () => {
+    setSuiAddress(null);
+    disconnectSui();
   };
 
   const truncateAddress = (addr: string) => addr.slice(0, 6) + "..." + addr.slice(-4);
@@ -152,7 +184,7 @@ export default function Navbar() {
                   <span className="bg-gray-900 border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     🌊 {truncateAddress(suiAddress)}
                   </span>
-                  <button onClick={() => disconnectSui()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={handleSuiDisconnect} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
@@ -220,7 +252,7 @@ export default function Navbar() {
               {suiAddress ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-cyan-400 text-sm font-mono">🌊 {truncateAddress(suiAddress)}</span>
-                  <button onClick={() => disconnectSui()} className="text-red-400 text-sm">Disconnect Sui</button>
+                  <button onClick={handleSuiDisconnect} className="text-red-400 text-sm">Disconnect Sui</button>
                 </div>
               ) : (
                 <button
@@ -317,7 +349,7 @@ export default function Navbar() {
                 {suiWallets.map((wallet) => (
                   <button
                     key={wallet.name}
-                    onClick={() => { connectSui({ wallet }); setShowSuiModal(false); }}
+                    onClick={() => handleSuiConnect(wallet)}
                     className="w-full flex items-center space-x-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-cyan-700 rounded-xl p-4 transition-colors"
                   >
                     {wallet.icon && <img src={wallet.icon} alt={wallet.name} className="w-8 h-8 rounded-lg" />}

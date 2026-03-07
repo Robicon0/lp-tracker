@@ -4,7 +4,6 @@ import { useMemo, useEffect, useState } from "react";
 import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
-import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import {
   BarChart,
@@ -60,11 +59,10 @@ const renderLegend = (props: any) => {
 export default function Analytics() {
   const { positions, isLoading } = usePositions();
   const { address } = useAccount();
-  const suiAccount = useCurrentAccount();
-  const { solanaAddress } = useWalletAuth();
+  const { solanaAddress, suiAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const hasWallet = mounted && !!(address || solanaAddress || suiAccount);
+  const hasWallet = mounted && !!(address || solanaAddress || suiAddress);
 
   const valueData = useMemo(() => positions.map((p) => ({
     name: shortName(p.pair),
