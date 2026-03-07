@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { WalletName } from "@solana/wallet-adapter-base";
@@ -13,14 +13,19 @@ export default function Navbar() {
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
 
+  // Only use the adapter for: listing wallets, calling select/connect/disconnect.
+  // Never read connected or publicKey from the adapter for display — a locked
+  // Phantom wallet keeps connected=true and publicKey set via Wallet Standard
+  // silent reconnect, so those values are not trustworthy.
   const {
     select,
     connect: connectSolana,
     disconnect: disconnectSolana,
-    publicKey,
-    connected: solanaConnected,
+    connected: adapterConnected,
+    publicKey: adapterPublicKey,
     wallets: solanaWallets,
   } = useWallet();
+
   // Sui wallet
   const suiAccount = useCurrentAccount();
   const suiAddress = suiAccount?.address;
@@ -28,11 +33,8 @@ export default function Navbar() {
   const { mutate: connectSui } = useConnectWallet();
   const { mutate: disconnectSui } = useDisconnectWallet();
 
-  const { solanaExplicit, setSolanaExplicit } = useWalletAuth();
-
-  // Require explicit user consent — solanaConnected alone is true even for locked wallets
-  // (Wallet Standard silently reconnects trusted dApps on page load)
-  const solanaAddress = (solanaExplicit && solanaConnected && publicKey) ? publicKey.toBase58() : undefined;
+  // solanaAddress is our source of truth — only set after an explicit user connect.
+  const { solanaAddress, setSolanaAddress } = useWalletAuth();
 
   const [showEvmModal, setShowEvmModal] = useState(false);
   const [showSolanaModal, setShowSolanaModal] = useState(false);
@@ -41,13 +43,27 @@ export default function Navbar() {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // If the wallet adapter loses connection mid-session (e.g. user locks wallet and
-  // Phantom emits an accounts-change event), clear the explicit consent flag too.
+  // Flag set during an in-progress explicit connect — used by the effect below
+  // to capture publicKey once React re-renders with the updated adapter state.
+  const awaitingConnect = useRef(false);
+
+  // Capture publicKey after a user-initiated connect resolves.
+  // We use an effect (not reading publicKey inline) because React hook values
+  // inside an async function reflect the stale closure at render time.
   useEffect(() => {
-    if (solanaExplicit && !solanaConnected) {
-      setSolanaExplicit(false);
+    if (awaitingConnect.current && adapterConnected && adapterPublicKey) {
+      setSolanaAddress(adapterPublicKey.toBase58());
+      awaitingConnect.current = false;
     }
-  }, [solanaConnected, solanaExplicit, setSolanaExplicit]);
+  }, [adapterConnected, adapterPublicKey, setSolanaAddress]);
+
+  // If the adapter disconnects mid-session (e.g. wallet lock + Phantom emits
+  // an accounts-change event with empty accounts), clear our stored address too.
+  useEffect(() => {
+    if (!adapterConnected && solanaAddress) {
+      setSolanaAddress(null);
+    }
+  }, [adapterConnected, solanaAddress, setSolanaAddress]);
 
   const handleEvmConnect = (connectorIndex: number) => {
     connect({ connector: connectors[connectorIndex] });
@@ -57,16 +73,18 @@ export default function Navbar() {
   const handleSolanaConnect = async (walletName: string) => {
     try {
       select(walletName as WalletName);
+      awaitingConnect.current = true;
       await connectSolana();
-      setSolanaExplicit(true);
+      // publicKey captured by the useEffect above once React re-renders
     } catch (err) {
+      awaitingConnect.current = false;
       console.error("Solana connect error:", err);
     }
     setShowSolanaModal(false);
   };
 
   const handleSolanaDisconnect = () => {
-    setSolanaExplicit(false);
+    setSolanaAddress(null);
     disconnectSolana();
   };
 
@@ -115,7 +133,7 @@ export default function Navbar() {
                   <span className="bg-gray-900 border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     ◎ {truncateAddress(solanaAddress)}
                   </span>
-                  <button onClick={() => handleSolanaDisconnect()} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={handleSolanaDisconnect} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
@@ -187,7 +205,7 @@ export default function Navbar() {
               {solanaAddress ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-purple-400 text-sm font-mono">◎ {truncateAddress(solanaAddress)}</span>
-                  <button onClick={() => handleSolanaDisconnect()} className="text-red-400 text-sm">Disconnect Solana</button>
+                  <button onClick={handleSolanaDisconnect} className="text-red-400 text-sm">Disconnect Solana</button>
                 </div>
               ) : (
                 <button

@@ -3,19 +3,22 @@
 import { createContext, useContext, useState } from "react";
 
 interface WalletAuthContextValue {
-  solanaExplicit: boolean;
-  setSolanaExplicit: (v: boolean) => void;
+  // The Solana address the user explicitly connected in this session.
+  // null means no explicit connection — do NOT fall back to useWallet().publicKey,
+  // which can be set even for a locked wallet via Wallet Standard silent reconnect.
+  solanaAddress: string | null;
+  setSolanaAddress: (addr: string | null) => void;
 }
 
 const WalletAuthContext = createContext<WalletAuthContextValue>({
-  solanaExplicit: false,
-  setSolanaExplicit: () => {},
+  solanaAddress: null,
+  setSolanaAddress: () => {},
 });
 
 export function WalletAuthProvider({ children }: { children: React.ReactNode }) {
-  const [solanaExplicit, setSolanaExplicit] = useState(false);
+  const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
   return (
-    <WalletAuthContext.Provider value={{ solanaExplicit, setSolanaExplicit }}>
+    <WalletAuthContext.Provider value={{ solanaAddress, setSolanaAddress }}>
       {children}
     </WalletAuthContext.Provider>
   );

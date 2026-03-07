@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useWalletAuth } from "../contexts/WalletAuthContext";
 import Navbar from "../Navbar";
 
 interface TokenBalance {
@@ -89,9 +89,8 @@ interface SuiBalances {
 
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
-  const { publicKey } = useWallet();
   const suiAccount = useCurrentAccount();
-  const solanaAddress = publicKey?.toBase58();
+  const { solanaAddress } = useWalletAuth();
   const suiAddress = suiAccount?.address;
 
   const [chainBalances, setChainBalances] = useState<ChainBalances[]>([]);

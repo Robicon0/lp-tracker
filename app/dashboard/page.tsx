@@ -6,7 +6,6 @@ import Navbar from "../Navbar";
 import PriceTicker from "../PriceTicker";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
@@ -23,14 +22,12 @@ const sortOptions = [
 export default function Dashboard() {
   const { positions: allPositions, isLoading } = usePositions();
   const { address } = useAccount();
-  const { publicKey, connected: solanaConnected } = useWallet();
   const suiAccount = useCurrentAccount();
-  const { solanaExplicit } = useWalletAuth();
+  const { solanaAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const hasSolana = solanaExplicit && solanaConnected && !!publicKey;
-  const hasWallet = mounted && !!(address || hasSolana || suiAccount);
+  const hasWallet = mounted && !!(address || solanaAddress || suiAccount);
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);

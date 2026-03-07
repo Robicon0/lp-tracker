@@ -4,7 +4,6 @@ import { useMemo, useEffect, useState } from "react";
 import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import {
@@ -61,13 +60,11 @@ const renderLegend = (props: any) => {
 export default function Analytics() {
   const { positions, isLoading } = usePositions();
   const { address } = useAccount();
-  const { publicKey, connected: solanaConnected } = useWallet();
   const suiAccount = useCurrentAccount();
-  const { solanaExplicit } = useWalletAuth();
+  const { solanaAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const hasSolana = solanaExplicit && solanaConnected && !!publicKey;
-  const hasWallet = mounted && !!(address || hasSolana || suiAccount);
+  const hasWallet = mounted && !!(address || solanaAddress || suiAccount);
 
   const valueData = useMemo(() => positions.map((p) => ({
     name: shortName(p.pair),
