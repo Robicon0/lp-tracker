@@ -49,6 +49,7 @@ export default function PositionDetail() {
   const hasTokenBreakdown = pos.amount0 != null && pos.amount1 != null;
   const hasFeeBreakdown = pos.fees0 != null && pos.fees1 != null;
   const hasTickRange = pos.tickLower != null && pos.tickUpper != null;
+  const hasFeeTier = pos.feeTier != null;
 
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
@@ -154,6 +155,12 @@ export default function PositionDetail() {
                 {pos.status}
               </span>
             </div>
+            {hasFeeTier && (
+              <div className="flex justify-between py-3 border-b border-gray-800">
+                <span className="text-gray-400">Fee Tier</span>
+                <span className="font-semibold">{pos.feeTier}%</span>
+              </div>
+            )}
             {hasTickRange && (
               <div className="flex justify-between py-3 border-b border-gray-800">
                 <span className="text-gray-400">Tick Range</span>

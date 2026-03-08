@@ -21,15 +21,10 @@ export async function fetchUniswapV3Positions(account: string): Promise<UniswapP
       return [];
     }
 
-    return (data.positions || []).map((p) => ({
-      id: p.id,
-      pair: p.pair,
-      protocol: p.protocol,
-      chain: p.chain,
-      value: p.value,
-      apy: p.apy,
-      fees: p.fees,
-      status: p.status,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data.positions || []).map((p: any): UniswapPosition => ({
+      ...p,
+      feeTier: p.fee, // API returns fee tier as `fee` (e.g. 0.3 = 0.3%)
     }));
   } catch (error) {
     console.error('Failed to fetch Uniswap V3 positions:', error);

@@ -17,16 +17,7 @@ export async function fetchVelodromePositions(account: string): Promise<Velodrom
       return [];
     }
 
-    return (data.positions || []).map((p) => ({
-      id: p.id,
-      pair: p.pair,
-      protocol: p.protocol,
-      chain: p.chain,
-      value: p.value,
-      apy: p.apy,
-      fees: p.fees,
-      status: p.status,
-    }));
+    return (data.positions || []).map((p) => ({ ...p }));
   } catch (error) {
     console.error('Failed to fetch Velodrome positions:', error);
     return [];
