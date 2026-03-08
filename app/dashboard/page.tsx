@@ -8,6 +8,15 @@ import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+
+const TIME_RANGES = [
+  { key: "1D",  ms: 1   * 24 * 3_600_000, label: "in last 24h",     xFmt: (d: Date) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+  { key: "7D",  ms: 7   * 24 * 3_600_000, label: "in last 7 days",  xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "30D", ms: 30  * 24 * 3_600_000, label: "in last 30 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "90D", ms: 90  * 24 * 3_600_000, label: "in last 90 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "1Y",  ms: 365 * 24 * 3_600_000, label: "in last year",    xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }) },
+] as const;
+
 import {
   LineChart,
   Line,
@@ -97,24 +106,23 @@ export default function Dashboard() {
   const totalFees = allPositions.reduce((sum, p) => sum + p.fees, 0);
   const uniqueChains = new Set(allPositions.map(p => p.chain)).size;
 
+  const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
 
-  const firstSnapshot = portfolioHistory[0];
-  const pnlDollar = firstSnapshot ? totalValue - firstSnapshot.totalValue : 0;
-  const pnlPct = firstSnapshot && firstSnapshot.totalValue > 0
-    ? (pnlDollar / firstSnapshot.totalValue) * 100
+  const activeRange = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
+  const rangeCutoff = Date.now() - activeRange.ms;
+  const rangedHistory = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
+
+  const rangeFirst = rangedHistory[0];
+  const pnlDollar = rangeFirst ? totalValue - rangeFirst.totalValue : 0;
+  const pnlPct = rangeFirst && rangeFirst.totalValue > 0
+    ? (pnlDollar / rangeFirst.totalValue) * 100
     : 0;
 
-  const chartData = portfolioHistory.map((s) => {
-    const d = new Date(s.timestamp);
-    const spanDays = portfolioHistory.length > 1
-      ? (portfolioHistory[portfolioHistory.length - 1].timestamp - portfolioHistory[0].timestamp) / 86_400_000
-      : 0;
-    const label = spanDays > 2
-      ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-      : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    return { label, value: s.totalValue };
-  });
+  const chartData = rangedHistory.map((s) => ({
+    label: activeRange.xFmt(new Date(s.timestamp)),
+    value: s.totalValue,
+  }));
 
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
@@ -173,9 +181,26 @@ export default function Dashboard() {
         {/* Portfolio History */}
         {hasWallet && mounted && (
           <div className="mt-6 bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Portfolio History</h2>
-              {portfolioHistory.length >= 2 && (
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-xl font-bold">Portfolio History</h2>
+                <div className="flex gap-1">
+                  {TIME_RANGES.map((r) => (
+                    <button
+                      key={r.key}
+                      onClick={() => setRangeKey(r.key)}
+                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                        rangeKey === r.key
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+                      }`}
+                    >
+                      {r.key}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {rangedHistory.length >= 2 && (
                 <div className={`text-sm font-medium ${pnlDollar >= 0 ? "text-green-500" : "text-red-500"}`}>
                   {pnlDollar >= 0 ? "+" : ""}
                   ${Math.abs(pnlDollar).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -183,7 +208,7 @@ export default function Dashboard() {
                   <span className="opacity-75">
                     ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
                   </span>
-                  <span className="text-gray-500 font-normal ml-1">since tracking began</span>
+                  <span className="text-gray-500 font-normal ml-1">{activeRange.label}</span>
                 </div>
               )}
             </div>
@@ -195,6 +220,11 @@ export default function Dashboard() {
                 </svg>
                 <p className="text-sm">Tracking started — chart will populate over time.</p>
                 <p className="text-xs mt-1 opacity-60">Data points are saved every 30 minutes.</p>
+              </div>
+            ) : rangedHistory.length < 2 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-gray-500">
+                <p className="text-sm">No data for this time range yet.</p>
+                <p className="text-xs mt-1 opacity-60">Try a wider range or check back later.</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
