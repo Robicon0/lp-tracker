@@ -376,6 +376,10 @@ async function fetchPositionsForChain(
           amount1: Math.round(amount1 * 1000000) / 1000000,
           token0Symbol: t0Info.symbol,
           token1Symbol: t1Info.symbol,
+          tickLower: pos.tickLower,
+          tickUpper: pos.tickUpper,
+          token0Decimals: t0Info.decimals,
+          token1Decimals: t1Info.decimals,
         });
       } catch (err) {
         console.error(`Error processing token ${tokenId} on ${chainKey}:`, err);

@@ -40,7 +40,7 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 
 - `/` — Landing page (server component)
 - `/dashboard` — Portfolio overview with filters, search, sort, CSV export (client component)
-- `/dashboard/[id]` — Position detail (server component, only works with demo positions)
+- `/dashboard/[id]` — Position detail (client component). Tick range displayed as USD price range using `1.0001^tick * 10^(d0-d1)`. Est. Daily/Monthly Fees are pool-APY × value projections, not position-specific.
 - `/analytics` — Recharts visualizations of demo position data
 - `/wallet` — Shows ETH + ERC-20 balances via Alchemy RPC
 
@@ -84,9 +84,17 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 - Dev server: `cd ~/lp-tracker-fresh && npm run dev`
 - Alchemy API key in `.env.local` and Vercel env vars
 
+## Security Rules
+
+CRITICAL: Wallets must ONLY show as connected when the user has actively unlocked and connected them. A locked wallet must NEVER auto-connect to the site. This applies to ALL chains — EVM, Solana, Sui, and any future chains. Always use explicit user consent tracking (not just checking if a public key exists) to determine connection state.
+
+**Implementation**: `WalletAuthContext` (`app/contexts/WalletAuthContext.tsx`) stores `solanaAddress: string | null` — the actual address, set only after a user-initiated connect succeeds. Use the adapter (e.g. `useWallet()`) ONLY for mechanics: listing wallets, calling select/connect/disconnect. Never read `connected` or `publicKey` from the adapter for display — a locked Phantom wallet keeps those truthy via Wallet Standard silent reconnect. All components (Navbar, PositionsContext, Dashboard, Analytics, WalletPage) read `solanaAddress` from `WalletAuthContext`. Capture `publicKey` after connect via a `useRef` flag + `useEffect` to avoid stale closure issues in async handlers.
+
 ## Key Learnings
 
 - Velodrome uses `positions()` with 3 args (no factory param), NOT `positionsByFactory`
 - BigInt requires ES2020 target in `tsconfig.json`
 - Aerodrome positions are staked in gauges, not held as NFTs directly
 - DefiLlama `apyBase` (fee-only) with median prevents APY outliers
+- Tick-to-price: `price = 1.0001^tick * 10^(decimals0 - decimals1)` gives token0 price in token1. If token1 is stable → show directly as USD. If token0 is stable → show `1/price`. All API routes now pass `token0Decimals`/`token1Decimals` in positions.
+- Est. Daily Fees / Monthly Yield on detail page are APY-based projections (`value * apy / 100 / 365` and `/12`), not position-specific — labeled "(pool APY × value)"

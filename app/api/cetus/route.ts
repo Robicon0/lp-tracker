@@ -306,6 +306,8 @@ export async function GET(request: Request) {
         fees1: 0,
         tickLower,
         tickUpper,
+        token0Decimals: decimalsA,
+        token1Decimals: decimalsB,
       };
     });
 

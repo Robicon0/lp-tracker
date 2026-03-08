@@ -270,6 +270,8 @@ export async function GET(request: Request) {
         fees1: Math.round(fees1 * 1000000) / 1000000,
         tickLower: raw.tick_lower,
         tickUpper: raw.tick_upper,
+        token0Decimals: t0Decimals,
+        token1Decimals: t1Decimals,
       };
     });
 

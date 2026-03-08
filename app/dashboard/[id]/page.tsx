@@ -5,6 +5,42 @@ import Link from "next/link";
 import Navbar from "../../Navbar";
 import { usePositions } from "../../contexts/PositionsContext";
 
+const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
+
+function tickToPrice(tick: number, decimals0: number, decimals1: number): number {
+  return Math.pow(1.0001, tick) * Math.pow(10, decimals0 - decimals1);
+}
+
+function formatPrice(p: number): string {
+  if (p >= 1000) return `$${p.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  if (p >= 1) return `$${p.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return `$${p.toLocaleString("en-US", { maximumFractionDigits: 6 })}`;
+}
+
+function buildTickRangeLabel(
+  tickLower: number,
+  tickUpper: number,
+  decimals0: number,
+  decimals1: number,
+  sym0: string,
+  sym1: string,
+): string {
+  if (STABLES.has(sym1)) {
+    const lo = tickToPrice(tickLower, decimals0, decimals1);
+    const hi = tickToPrice(tickUpper, decimals0, decimals1);
+    return `${formatPrice(lo)} — ${formatPrice(hi)}`;
+  } else if (STABLES.has(sym0)) {
+    const lo = tickToPrice(tickLower, decimals0, decimals1);
+    const hi = tickToPrice(tickUpper, decimals0, decimals1);
+    return `${formatPrice(1 / hi)} — ${formatPrice(1 / lo)}`;
+  } else {
+    const lo = tickToPrice(tickLower, decimals0, decimals1);
+    const hi = tickToPrice(tickUpper, decimals0, decimals1);
+    const fmt = (p: number) => p.toLocaleString("en-US", { maximumFractionDigits: 6 });
+    return `${fmt(lo)} — ${fmt(hi)} ${sym1}/${sym0}`;
+  }
+}
+
 export default function PositionDetail() {
   const { id } = useParams<{ id: string }>();
   const { positions, isLoading } = usePositions();
@@ -50,6 +86,18 @@ export default function PositionDetail() {
   const hasFeeBreakdown = pos.fees0 != null && pos.fees1 != null;
   const hasTickRange = pos.tickLower != null && pos.tickUpper != null;
   const hasFeeTier = pos.feeTier != null;
+
+  const tickRangeLabel =
+    pos.tickLower != null && pos.tickUpper != null
+      ? buildTickRangeLabel(
+          pos.tickLower,
+          pos.tickUpper,
+          pos.token0Decimals ?? 18,
+          pos.token1Decimals ?? 18,
+          pos.token0Symbol ?? "",
+          pos.token1Symbol ?? "",
+        )
+      : null;
 
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
@@ -163,20 +211,32 @@ export default function PositionDetail() {
             )}
             {hasTickRange && (
               <div className="flex justify-between py-3 border-b border-gray-800">
-                <span className="text-gray-400">Tick Range</span>
-                <span className="font-semibold font-mono text-sm">{pos.tickLower} → {pos.tickUpper}</span>
+                <span className="text-gray-400">Price Range</span>
+                <span className="font-semibold">
+                  {tickRangeLabel ?? `${pos.tickLower} → ${pos.tickUpper}`}
+                </span>
               </div>
             )}
             <div className="flex justify-between py-3 border-b border-gray-800">
-              <span className="text-gray-400">Est. Daily Fees</span>
+              <span className="text-gray-400">
+                Est. Daily Fees
+                <span className="text-gray-600 text-xs ml-1">(pool APY × value)</span>
+              </span>
               <span className="font-semibold">
-                ${estimatedDailyFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {pos.apy > 0
+                  ? `$${estimatedDailyFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "—"}
               </span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-400">Est. Monthly Yield</span>
+              <span className="text-gray-400">
+                Est. Monthly Yield
+                <span className="text-gray-600 text-xs ml-1">(pool APY × value)</span>
+              </span>
               <span className="font-semibold text-green-500">
-                ${estimatedMonthlyYield.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {pos.apy > 0
+                  ? `$${estimatedMonthlyYield.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "—"}
               </span>
             </div>
           </div>

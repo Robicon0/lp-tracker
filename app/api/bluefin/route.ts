@@ -427,6 +427,8 @@ export async function GET(request: Request) {
         fees1: Math.round(fees1 * 1_000_000) / 1_000_000,
         tickLower,
         tickUpper,
+        token0Decimals: decimalsA,
+        token1Decimals: decimalsB,
       };
     });
 

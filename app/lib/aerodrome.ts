@@ -17,6 +17,8 @@ export interface AerodromePosition {
   tickLower?: number;
   tickUpper?: number;
   feeTier?: number; // fee percentage e.g. 0.3 means 0.3%
+  token0Decimals?: number;
+  token1Decimals?: number;
 }
 
 interface AerodromeResponse {
