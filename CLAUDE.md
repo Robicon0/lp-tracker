@@ -36,11 +36,12 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 - **Wallet**: Single injected connector (MetaMask). Config in `app/config/wagmi.ts` supports mainnet, Base, Arbitrum, Optimism, Polygon, Avalanche.
 - **Provider wrapping**: `app/providers.tsx` wraps app with WagmiProvider + React Query. All pages using hooks must be `"use client"`.
 - **Auto-refresh**: `PositionsContext` uses `refetchInterval: 60_000` + `placeholderData: keepPreviousData` for smooth background refresh with no layout shift. Exposes `isFetching`, `dataUpdatedAt`, `refetch`. Dashboard shows "Updated X ago" + manual refresh button (spinning icon while fetching).
+- **Portfolio history**: `app/hooks/usePortfolioHistory.ts` — saves `{timestamp, totalValue, positionCount}` snapshots to localStorage (`lp-portfolio-history`) every 30 min when wallet connected. Keeps 30 days. Dashboard renders a Recharts LineChart + P&L indicator ($ and % vs earliest snapshot). Shows "Tracking started" message until 2+ data points exist.
 
 ### Pages
 
 - `/` — Landing page (server component)
-- `/dashboard` — Portfolio overview with filters, search, sort, CSV export (client component)
+- `/dashboard` — Portfolio overview with filters, search, sort, CSV export, portfolio history chart + P&L (client component)
 - `/dashboard/[id]` — Position detail (client component). Tick range displayed as USD price range using `1.0001^tick * 10^(d0-d1)`. Est. Daily/Monthly Fees are pool-APY × value projections, not position-specific.
 - `/analytics` — Recharts visualizations of demo position data
 - `/wallet` — Shows ETH + ERC-20 balances via Alchemy RPC

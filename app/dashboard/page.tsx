@@ -7,6 +7,16 @@ import PriceTicker from "../PriceTicker";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
 const statuses = ["All", "In Range", "Out of Range"];
 const sortOptions = [
@@ -87,6 +97,25 @@ export default function Dashboard() {
   const totalFees = allPositions.reduce((sum, p) => sum + p.fees, 0);
   const uniqueChains = new Set(allPositions.map(p => p.chain)).size;
 
+  const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
+
+  const firstSnapshot = portfolioHistory[0];
+  const pnlDollar = firstSnapshot ? totalValue - firstSnapshot.totalValue : 0;
+  const pnlPct = firstSnapshot && firstSnapshot.totalValue > 0
+    ? (pnlDollar / firstSnapshot.totalValue) * 100
+    : 0;
+
+  const chartData = portfolioHistory.map((s) => {
+    const d = new Date(s.timestamp);
+    const spanDays = portfolioHistory.length > 1
+      ? (portfolioHistory[portfolioHistory.length - 1].timestamp - portfolioHistory[0].timestamp) / 86_400_000
+      : 0;
+    const label = spanDays > 2
+      ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    return { label, value: s.totalValue };
+  });
+
   return (
     <div className="p-8 pt-24 bg-black text-white min-h-screen">
       <Navbar />
@@ -140,6 +169,69 @@ export default function Dashboard() {
             <p className="text-gray-400 text-sm mt-2">All time</p>
           </div>
         </div>
+
+        {/* Portfolio History */}
+        {hasWallet && mounted && (
+          <div className="mt-6 bg-gray-900 border border-gray-800 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Portfolio History</h2>
+              {portfolioHistory.length >= 2 && (
+                <div className={`text-sm font-medium ${pnlDollar >= 0 ? "text-green-500" : "text-red-500"}`}>
+                  {pnlDollar >= 0 ? "+" : ""}
+                  ${Math.abs(pnlDollar).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {" "}
+                  <span className="opacity-75">
+                    ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
+                  </span>
+                  <span className="text-gray-500 font-normal ml-1">since tracking began</span>
+                </div>
+              )}
+            </div>
+            {portfolioHistory.length < 2 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-gray-500">
+                <svg className="w-8 h-8 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <p className="text-sm">Tracking started — chart will populate over time.</p>
+                <p className="text-xs mt-1 opacity-60">Data points are saved every 30 minutes.</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: "#6b7280", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fill: "#6b7280", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
+                    width={72}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: "8px", color: "#fff" }}
+                    formatter={(v: number | undefined) => [`$${(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Portfolio Value"]}
+                    labelStyle={{ color: "#9ca3af", marginBottom: 4 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={chartData.length <= 20}
+                    activeDot={{ r: 4, fill: "#3b82f6" }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        )}
 
         {/* Filters & Sort */}
         <div className="mt-8 flex flex-wrap gap-4 items-center">
