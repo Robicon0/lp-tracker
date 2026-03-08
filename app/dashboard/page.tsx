@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import Navbar from "../Navbar";
 import PriceTicker from "../PriceTicker";
@@ -19,7 +19,7 @@ const sortOptions = [
 ];
 
 export default function Dashboard() {
-  const { positions: allPositions, isLoading } = usePositions();
+  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch } = usePositions();
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
@@ -30,6 +30,28 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Tick the "last updated" counter every second
+  useEffect(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    setSecondsAgo(dataUpdatedAt > 0 ? Math.floor((Date.now() - dataUpdatedAt) / 1000) : 0);
+    if (dataUpdatedAt > 0) {
+      intervalRef.current = setInterval(() => {
+        setSecondsAgo(Math.floor((Date.now() - dataUpdatedAt) / 1000));
+      }, 1000);
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [dataUpdatedAt]);
+
+  function lastUpdatedLabel(): string {
+    if (dataUpdatedAt === 0) return "";
+    if (secondsAgo < 5) return "just now";
+    if (secondsAgo < 60) return `${secondsAgo}s ago`;
+    const m = Math.floor(secondsAgo / 60);
+    return `${m}m ago`;
+  }
 
   const filtered = useMemo(() => {
     let result = allPositions;
@@ -70,8 +92,36 @@ export default function Dashboard() {
       <Navbar />
       <div className="max-w-7xl mx-auto">
         <PriceTicker />
-        <h1 className="text-4xl font-bold">Portfolio Overview</h1>
-        <p className="text-gray-400 mt-2">Track your DeFi liquidity positions</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold">Portfolio Overview</h1>
+            <p className="text-gray-400 mt-2">Track your DeFi liquidity positions</p>
+          </div>
+          {hasWallet && mounted && (
+            <div className="flex items-center gap-3">
+              {dataUpdatedAt > 0 && (
+                <span className="text-gray-500 text-sm">
+                  Updated {lastUpdatedLabel()}
+                </span>
+              )}
+              <button
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 px-3 py-1.5 rounded-lg text-sm transition-colors"
+                title="Refresh positions"
+              >
+                <svg
+                  className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {isFetching ? "Refreshing…" : "Refresh"}
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* Stats Cards */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
@@ -15,13 +15,19 @@ import { fetchBluefinPositions } from "../lib/bluefin";
 interface PositionsContextValue {
   positions: AerodromePosition[];
   isLoading: boolean;
+  isFetching: boolean;
   isUsingDemoData: boolean;
+  dataUpdatedAt: number;
+  refetch: () => void;
 }
 
 const PositionsContext = createContext<PositionsContextValue>({
   positions: [],
   isLoading: false,
+  isFetching: false,
   isUsingDemoData: false,
+  dataUpdatedAt: 0,
+  refetch: () => {},
 });
 
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
@@ -31,7 +37,9 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // here because those can reflect locked/silent-reconnect state.
   const { solanaAddress, suiAddress } = useWalletAuth();
 
-  const { data: walletPositions, isLoading } = useQuery({
+  const hasWallet = !!(address || solanaAddress || suiAddress);
+
+  const { data: walletPositions, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ["positions", address, solanaAddress, suiAddress],
     queryFn: async () => {
       const promises: Promise<AerodromePosition[]>[] = [];
@@ -61,14 +69,16 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
       const results = await Promise.all(promises);
       return results.flat();
     },
-    enabled: !!(address || solanaAddress || suiAddress),
+    enabled: hasWallet,
     staleTime: 60_000,
+    refetchInterval: hasWallet ? 60_000 : false,
+    placeholderData: keepPreviousData,
   });
 
   const positions = walletPositions || [];
 
   return (
-    <PositionsContext.Provider value={{ positions, isLoading, isUsingDemoData: false }}>
+    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch }}>
       {children}
     </PositionsContext.Provider>
   );
