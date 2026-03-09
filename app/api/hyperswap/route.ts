@@ -7,9 +7,13 @@ const HYPERSWAP_NFT_MANAGER = '0x6eda206207c09e5428f281761ddc0d300851fbc8';
 // KittenSwap NonfungiblePositionManager on HyperEVM
 const KITTENSWAP_NFT_MANAGER = '0xb9201e89f94a01ff13ad4caecf43a2e232513754';
 
+// ProjectX (PRJX) NonfungiblePositionManager on HyperEVM
+const PRJX_NFT_MANAGER = '0xead19ae861c29bbb2101e834922b2feee69b9091';
+
 const POSITION_MANAGERS = [
   { address: HYPERSWAP_NFT_MANAGER, protocol: 'HyperSwap' },
   { address: KITTENSWAP_NFT_MANAGER, protocol: 'KittenSwap' },
+  { address: PRJX_NFT_MANAGER, protocol: 'ProjectX' },
 ];
 
 // Known tokens on HyperEVM
@@ -191,7 +195,7 @@ async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
     const data = await res.json();
     const pools = (data.data || []).filter(
       (p: { project: string; chain: string }) =>
-        (p.project === 'hyperswap-v3' || p.project === 'kittenswap') && p.chain === 'HyperEVM',
+        (p.project === 'hyperswap-v3' || p.project === 'kittenswap' || p.project === 'projectx') && p.chain === 'HyperEVM',
     );
 
     const apysByKey: Record<string, number[]> = {};
