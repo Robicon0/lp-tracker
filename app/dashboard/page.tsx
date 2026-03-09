@@ -98,12 +98,12 @@ export default function Dashboard() {
     }
 
     const { key, dir } = sortOptions[sortIndex];
+    const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1, "Closed": 2 };
     result = [...result].sort((a, b) => {
-      // Closed positions always sort last
-      const aClosed = effectiveStatus(a) === "Closed";
-      const bClosed = effectiveStatus(b) === "Closed";
-      if (aClosed && !bClosed) return 1;
-      if (!aClosed && bClosed) return -1;
+      // Primary: always group In Range → Out of Range → Closed
+      const statusDiff = (STATUS_ORDER[effectiveStatus(a)] ?? 1) - (STATUS_ORDER[effectiveStatus(b)] ?? 1);
+      if (statusDiff !== 0) return statusDiff;
+      // Secondary: user's chosen sort key within each group
       const aVal = a[key as keyof typeof a] as number;
       const bVal = b[key as keyof typeof b] as number;
       return dir === "desc" ? bVal - aVal : aVal - bVal;
@@ -126,15 +126,21 @@ export default function Dashboard() {
   // Fall back to all available data if the selected range doesn't have enough points
   const effectiveHistory = rangedHistory.length >= 2 ? rangedHistory : portfolioHistory;
   const effectiveFirst = effectiveHistory[0];
-  const usingFallback = rangedHistory.length < 2 && portfolioHistory.length >= 2;
 
   const pnlDollar = effectiveFirst ? totalValue - effectiveFirst.totalValue : 0;
   const pnlPct = effectiveFirst && effectiveFirst.totalValue > 0
     ? (pnlDollar / effectiveFirst.totalValue) * 100
     : 0;
-  const pnlLabel = usingFallback && effectiveFirst
-    ? `since ${new Date(effectiveFirst.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
-    : activeRange.label;
+
+  // Show "since [date]" when actual data doesn't cover at least 50% of the selected range
+  const pnlLabel = (() => {
+    if (!effectiveFirst) return activeRange.label;
+    const coverageMs = Date.now() - effectiveFirst.timestamp;
+    if (coverageMs < activeRange.ms * 0.5) {
+      return `since ${new Date(effectiveFirst.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    }
+    return activeRange.label;
+  })();
 
   const chartData = effectiveHistory.map((s) => ({
     label: activeRange.xFmt(new Date(s.timestamp)),

@@ -238,15 +238,41 @@ export async function GET(request: Request) {
       const value = (amount0 * price0) + (amount1 * price1);
       const feesUsd = (fees0 * price0) + (fees1 * price1);
 
-      // Determine if in range (tick_lower <= current_tick <= tick_upper)
-      // If liquidity > 0, the position exists. We check if amounts on both sides > 0
+      // Check if position is closed (all liquidity removed)
+      const totalLiquidity = BigInt(raw.liquidity) + BigInt(raw.staked);
+      if (totalLiquidity === 0n) {
+        if (feesUsd <= 0) return null; // Completely empty — filter out
+        // Has unclaimed fees — show as Closed
+        return {
+          id: `velo-${raw.id}`,
+          pair: `${t0Symbol} / ${t1Symbol}`,
+          protocol: 'Velodrome',
+          chain: 'Optimism',
+          value: 0,
+          apy: 0,
+          fees: Math.round(feesUsd * 100) / 100,
+          status: 'Closed' as const,
+          amount0: 0,
+          amount1: 0,
+          token0Symbol: t0Symbol,
+          token1Symbol: t1Symbol,
+          fees0: Math.round(fees0 * 1000000) / 1000000,
+          fees1: Math.round(fees1 * 1000000) / 1000000,
+          tickLower: raw.tick_lower,
+          tickUpper: raw.tick_upper,
+          token0Decimals: t0Decimals,
+          token1Decimals: t1Decimals,
+        };
+      }
+
+      // Determine if in range: both token amounts > 0 means current tick is within range
       const hasToken0 = amount0 > 0;
       const hasToken1 = amount1 > 0;
       const status = (hasToken0 && hasToken1) ? 'In Range' : 'Out of Range';
 
       // Look up APY from DefiLlama data — try pool address first, then token pair
       const poolAddr = raw.lp.toLowerCase();
-      const apyKey = tokens 
+      const apyKey = tokens
         ? [tokens.token0, tokens.token1].map(t => t.toLowerCase()).sort().join('-')
         : '';
       const apy = apyData[poolAddr] || apyData[apyKey] || 0;
@@ -273,11 +299,12 @@ export async function GET(request: Request) {
         token0Decimals: t0Decimals,
         token1Decimals: t1Decimals,
       };
-    });
+    }).filter(Boolean);
 
+    const validPositions = positions.filter((p): p is NonNullable<typeof p> => p !== null);
     return NextResponse.json({
-      positions,
-      count: positions.length,
+      positions: validPositions,
+      count: validPositions.length,
       account,
     });
   } catch (error) {
