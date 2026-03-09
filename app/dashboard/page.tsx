@@ -109,26 +109,24 @@ export default function Dashboard() {
   const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
 
-  // < 24h of data means we haven't built up enough history to show a meaningful chart
-  const historySpanMs = portfolioHistory.length >= 2
-    ? portfolioHistory[portfolioHistory.length - 1].timestamp - portfolioHistory[0].timestamp
-    : 0;
-  const hasEnoughHistory = historySpanMs >= 24 * 3_600_000;
-  const trackingStartLabel = portfolioHistory[0]
-    ? new Date(portfolioHistory[0].timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : null;
-
   const activeRange = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
   const rangeCutoff = Date.now() - activeRange.ms;
   const rangedHistory = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
 
-  const rangeFirst = rangedHistory[0];
-  const pnlDollar = rangeFirst ? totalValue - rangeFirst.totalValue : 0;
-  const pnlPct = rangeFirst && rangeFirst.totalValue > 0
-    ? (pnlDollar / rangeFirst.totalValue) * 100
-    : 0;
+  // Fall back to all available data if the selected range doesn't have enough points
+  const effectiveHistory = rangedHistory.length >= 2 ? rangedHistory : portfolioHistory;
+  const effectiveFirst = effectiveHistory[0];
+  const usingFallback = rangedHistory.length < 2 && portfolioHistory.length >= 2;
 
-  const chartData = rangedHistory.map((s) => ({
+  const pnlDollar = effectiveFirst ? totalValue - effectiveFirst.totalValue : 0;
+  const pnlPct = effectiveFirst && effectiveFirst.totalValue > 0
+    ? (pnlDollar / effectiveFirst.totalValue) * 100
+    : 0;
+  const pnlLabel = usingFallback && effectiveFirst
+    ? `since ${new Date(effectiveFirst.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+    : activeRange.label;
+
+  const chartData = effectiveHistory.map((s) => ({
     label: activeRange.xFmt(new Date(s.timestamp)),
     value: s.totalValue,
   }));
@@ -209,7 +207,7 @@ export default function Dashboard() {
                   ))}
                 </div>
               </div>
-              {rangedHistory.length >= 2 && (
+              {effectiveHistory.length >= 2 && (
                 <div className={`text-sm font-medium ${pnlDollar >= 0 ? "text-green-500" : "text-red-500"}`}>
                   {pnlDollar >= 0 ? "+" : ""}
                   ${Math.abs(pnlDollar).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -217,27 +215,18 @@ export default function Dashboard() {
                   <span className="opacity-75">
                     ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
                   </span>
-                  <span className="text-gray-500 font-normal ml-1">{activeRange.label}</span>
+                  <span className="text-gray-500 font-normal ml-1">{pnlLabel}</span>
                 </div>
               )}
             </div>
-            {!hasEnoughHistory ? (
+            {portfolioHistory.length < 2 ? (
               <div className="flex flex-col items-center justify-center py-10 text-gray-500">
                 <svg className="w-8 h-8 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
-                <p className="text-sm">
-                  {trackingStartLabel
-                    ? `Tracking started ${trackingStartLabel} — history builds over time.`
-                    : "Tracking started — history builds over time."}
-                </p>
-                <p className="text-xs mt-1 opacity-60">A new data point is saved each hour. Check back tomorrow for a full chart.</p>
-              </div>
-            ) : rangedHistory.length < 2 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-gray-500">
-                <p className="text-sm">No data for this time range yet.</p>
-                <p className="text-xs mt-1 opacity-60">Try a wider range or check back later.</p>
+                <p className="text-sm">Tracking started — chart will appear after the next refresh.</p>
+                <p className="text-xs mt-1 opacity-60">A new data point is saved on every positions refresh.</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>

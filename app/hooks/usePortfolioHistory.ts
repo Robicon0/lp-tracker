@@ -10,7 +10,7 @@ export interface PortfolioSnapshot {
 
 const STORAGE_KEY = "lp-portfolio-history";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const MIN_INTERVAL_MS = 60 * 60 * 1000;        // 1 hour between snapshots
+const MAX_POINTS = 1000;                        // cap total stored points
 
 export function usePortfolioHistory(
   totalValue: number,
@@ -39,24 +39,23 @@ export function usePortfolioHistory(
 
     setHistory((prev) => {
       const cutoff = Date.now() - MAX_AGE_MS;
-      const recent = prev.filter((p) => p.timestamp >= cutoff);
+      let recent = prev.filter((p) => p.timestamp >= cutoff);
 
-      // Throttle: skip if last snapshot is too recent
-      const last = recent[recent.length - 1];
-      if (last && dataUpdatedAt - last.timestamp < MIN_INTERVAL_MS) return prev;
+      // Skip if this exact timestamp was already saved
+      if (recent.length > 0 && recent[recent.length - 1].timestamp === dataUpdatedAt) return prev;
 
-      const next = [
-        ...recent,
-        { timestamp: dataUpdatedAt, totalValue, positionCount },
-      ];
+      recent = [...recent, { timestamp: dataUpdatedAt, totalValue, positionCount }];
+
+      // Trim to MAX_POINTS, keeping newest
+      if (recent.length > MAX_POINTS) recent = recent.slice(recent.length - MAX_POINTS);
 
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(recent));
       } catch {
         // Quota exceeded or private browsing — ignore
       }
 
-      return next;
+      return recent;
     });
   }, [dataUpdatedAt, totalValue, positionCount]);
 

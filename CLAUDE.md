@@ -36,7 +36,7 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 - **Wallet**: Single injected connector (MetaMask). Config in `app/config/wagmi.ts` supports mainnet, Base, Arbitrum, Optimism, Polygon, Avalanche.
 - **Provider wrapping**: `app/providers.tsx` wraps app with WagmiProvider + React Query. All pages using hooks must be `"use client"`.
 - **Auto-refresh**: `PositionsContext` uses `refetchInterval: 60_000` + `placeholderData: keepPreviousData` for smooth background refresh with no layout shift. Exposes `isFetching`, `dataUpdatedAt`, `refetch`. Dashboard shows "Updated X ago" + manual refresh button (spinning icon while fetching).
-- **Portfolio history**: `app/hooks/usePortfolioHistory.ts` — saves `{timestamp, totalValue, positionCount}` snapshots to localStorage (`lp-portfolio-history`) once per hour when wallet connected. Keeps 30 days. Dashboard renders a Recharts LineChart with 1D/7D/30D/90D/1Y range filter buttons (default 30D). X-axis format adapts per range (hours for 1D, dates for 7D–90D, month+year for 1Y). P&L indicator shows $ + % change for the selected range. Shows "Tracking started [date] — history builds over time" until 24h of data is accumulated; uses `historySpanMs >= 24h` check not snapshot count.
+- **Portfolio history**: `app/hooks/usePortfolioHistory.ts` — saves `{timestamp, totalValue, positionCount}` snapshots to localStorage (`lp-portfolio-history`) on every positions refresh (every 60s). Caps at 1000 points (oldest pruned); keeps 30 days by age. Chart shows after ≥2 points (appears within ~1 minute on first load). Range buttons (1D/7D/30D/90D/1Y) filter snapshots; if range has <2 points, falls back to all available data and labels P&L "since [date]". No 24h gate.
 
 ### Pages
 
