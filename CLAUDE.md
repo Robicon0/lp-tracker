@@ -69,8 +69,10 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 6. Cetus CLMM (Sui) — Sui public RPC, position type `::position::Position` ✅
 7. Bluefin (Sui) — Sui public RPC, Q64 fee math ✅
 8. Momentum (Sui) — Sui public RPC, package `0x70285592...`, Q64 fee math ✅
-9. CoinGecko for prices, DefiLlama for APY data ✅
-10. React Query context (`PositionsContext.tsx`) fetches all in parallel ✅
+9. HyperSwap V3 (HyperEVM) — public RPC `https://rpc.hyperliquid.xyz/evm`, NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8` ✅
+10. KittenSwap (HyperEVM) — same RPC, NFT manager `0xb9201e89f94a01ff13ad4caecf43a2e232513754` ✅
+11. CoinGecko for prices, DefiLlama for APY data ✅
+12. React Query context (`PositionsContext.tsx`) fetches all in parallel ✅
 
 ## Wallet
 
@@ -106,8 +108,10 @@ CRITICAL: Wallets must ONLY show as connected when the user has actively unlocke
 - DefiLlama `apyBase` (fee-only) with median prevents APY outliers
 - Tick-to-price: `price = 1.0001^tick * 10^(decimals0 - decimals1)` gives token0 price in token1. If token1 is stable → show directly as USD. If token0 is stable → show `1/price`. All API routes now pass `token0Decimals`/`token1Decimals` in positions.
 - Est. Daily Fees / Monthly Yield on detail page are APY-based projections (`value * apy / 100 / 365` and `/12`), not position-specific — labeled "(pool APY × value)"
-- Closed positions: ALL API routes return zero-liquidity positions as `status: 'Closed'` — never filter them out. Sugar (Aerodrome/Velodrome), Uni V3, Raydium, Orca, Cetus, Bluefin, Momentum all follow this rule.
+- Closed positions: ALL API routes return zero-liquidity positions as `status: 'Closed'` — never filter them out. Sugar (Aerodrome/Velodrome), Uni V3, Raydium, Orca, Cetus, Bluefin, Momentum, HyperSwap all follow this rule. IMPORTANT: Positions that were fully closed on-chain (NFT burned on Solana, position object deleted on Sui, NFT burned on EVM) CANNOT be recovered from current chain state — they simply don't exist anymore. Only positions with 0 liquidity whose NFT/object still exists in the wallet will show as 'Closed'.
+- Raydium: `getNftMints` queries both TOKEN_PROGRAM and TOKEN_PROGRAM_2022 (matching Orca) to ensure all NFT variants are captured.
 - Momentum (Sui): package `0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860`. Position fields: `pool_id`, `type_x`/`type_y` (TypeName structs → `.fields.name`), `tick_lower_index`/`tick_upper_index` (I32), `liquidity`, `fee_growth_inside_x_last`/`_y_last`, `owed_coin_x`/`owed_coin_y`. Pool fields: `sqrt_price` (Q64.64), `tick_index`, `fee_growth_global_x`/`_y`, `ticks` (Table). Tick fields: `fee_growth_outside_x`/`_y`. Uses Q64 scaling (>> 64n). Not on DefiLlama (APY=0).
 - Solana token resolution: Orca + Raydium routes use Helius DAS `getAssetBatch` as fallback for any tokens not in the static KNOWN_TOKENS map (symbol, decimals, price)
 - Dashboard position sort: always groups In Range → Out of Range → Closed (STATUS_ORDER primary), user sort key secondary
 - Portfolio history P&L label: shows "since [date]" when actual data coverage < 50% of selected range duration; range buttons dim when no data exists in that window
+- HyperEVM chain: ID 999, RPC `https://rpc.hyperliquid.xyz/evm`, native HYPE. HyperSwap V3 NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8`, KittenSwap `0xb9201e89f94a01ff13ad4caecf43a2e232513754`. WHYPE `0xadcb2f358eae6492f61a5f87eb8893d09391d160`, USDC `0xb88339cb7199b77e23db6e890353e22632ba630f`. No Alchemy key needed for HyperEVM (use public RPC). DefiLlama projects: `hyperswap-v3`, `kittenswap`.

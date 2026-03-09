@@ -12,6 +12,7 @@ import { fetchOrcaPositions } from "../lib/orca";
 import { fetchCetusPositions } from "../lib/cetus";
 import { fetchBluefinPositions } from "../lib/bluefin";
 import { fetchMomentumPositions } from "../lib/momentum";
+import { fetchHyperSwapPositions } from "../lib/hyperswap";
 
 interface PositionsContextValue {
   positions: AerodromePosition[];
@@ -50,6 +51,7 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
           fetchAerodromePositions(address),
           fetchUniswapV3Positions(address),
           fetchVelodromePositions(address),
+          fetchHyperSwapPositions(address),
         );
       }
 

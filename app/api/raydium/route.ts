@@ -29,17 +29,24 @@ async function solanaRpc(method: string, params: unknown[]): Promise<unknown> {
   return json.result;
 }
 
-// Get all NFT mints owned by account (amount=1, decimals=0 SPL tokens)
+const TOKEN_PROGRAM_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
+type TokenAccountsResult = {
+  value: Array<{
+    account: { data: { parsed: { info: { tokenAmount: { amount: string; decimals: number }; mint: string } } } };
+  }>;
+} | null;
+
+// Get all NFT mints owned by account (amount=1, decimals=0) — checks both TOKEN_PROGRAM and TOKEN_PROGRAM_2022
 async function getNftMints(account: string): Promise<string[]> {
-  const result = await solanaRpc('getTokenAccountsByOwner', [
-    account,
-    { programId: TOKEN_PROGRAM },
-    { encoding: 'jsonParsed' },
-  ]) as { value: Array<{ account: { data: { parsed: { info: { tokenAmount: { amount: string; decimals: number }; mint: string } } } } }> } | null;
+  const [result1, result2] = await Promise.all([
+    solanaRpc('getTokenAccountsByOwner', [account, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }]) as Promise<TokenAccountsResult>,
+    solanaRpc('getTokenAccountsByOwner', [account, { programId: TOKEN_PROGRAM_2022 }, { encoding: 'jsonParsed' }]) as Promise<TokenAccountsResult>,
+  ]);
 
-  if (!result?.value) return [];
+  const allAccounts = [...(result1?.value ?? []), ...(result2?.value ?? [])];
 
-  return result.value
+  return allAccounts
     .filter((ta) => {
       const info = ta.account.data.parsed.info;
       return info.tokenAmount.amount === '1' && info.tokenAmount.decimals === 0;
