@@ -11,6 +11,7 @@ import { fetchRaydiumPositions } from "../lib/raydium";
 import { fetchOrcaPositions } from "../lib/orca";
 import { fetchCetusPositions } from "../lib/cetus";
 import { fetchBluefinPositions } from "../lib/bluefin";
+import { fetchMomentumPositions } from "../lib/momentum";
 
 interface PositionsContextValue {
   positions: AerodromePosition[];
@@ -63,6 +64,7 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
         promises.push(
           fetchCetusPositions(suiAddress),
           fetchBluefinPositions(suiAddress),
+          fetchMomentumPositions(suiAddress),
         );
       }
 

@@ -144,7 +144,6 @@ function decodeOrcaPosition(data: Buffer, positionPda: string): OrcaPosition | n
   if (data.length < 144) return null;
 
   const liquidity = readU128LE(data, 72);
-  if (liquidity === 0n) return null;
 
   return {
     positionPda,
@@ -525,7 +524,7 @@ export async function GET(request: Request) {
       const feesUsd = feesA * priceA + feesB * priceB;
 
       const tickCurrent = pool?.tickCurrentIndex ?? 0;
-      const inRange = tickCurrent >= pos.tickLowerIndex && tickCurrent < pos.tickUpperIndex;
+      const inRange = pos.liquidity > 0n && tickCurrent >= pos.tickLowerIndex && tickCurrent < pos.tickUpperIndex;
 
       // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
       const poolStats = orcaPoolStats[pos.whirlpool];
@@ -543,7 +542,7 @@ export async function GET(request: Request) {
         value: Math.round(value * 100) / 100,
         apy,
         fees: Math.round(feesUsd * 100) / 100,
-        status: (inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range',
+        status: (pos.liquidity === 0n ? 'Closed' : inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range' | 'Closed',
         amount0: Math.round(amount0 * 1_000_000) / 1_000_000,
         amount1: Math.round(amount1 * 1_000_000) / 1_000_000,
         token0Symbol: tASymbol,

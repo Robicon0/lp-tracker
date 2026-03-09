@@ -320,7 +320,7 @@ async function fetchPositionsForChain(
     for (const tokenId of tokenIds) {
       try {
         const pos = await getPosition(chain.rpc, tokenId);
-        if (!pos || pos.liquidity === 0n) continue; // Skip closed positions
+        if (!pos) continue;
         
         // Get token info
         let t0Info = knownTokens[pos.token0];
@@ -356,10 +356,10 @@ async function fetchPositionsForChain(
         const apyKey = `${chain.defillamaChain}-${[pos.token0, pos.token1].sort().join('-')}`;
         const apy = apyData[apyKey] || 0;
         
-        // In range check
+        // Determine status
         const hasToken0 = amount0 > 0.0001;
         const hasToken1 = amount1 > 0.0001;
-        const status = (hasToken0 && hasToken1) ? 'In Range' : 'Out of Range';
+        const status = pos.liquidity === 0n ? 'Closed' : (hasToken0 && hasToken1) ? 'In Range' : 'Out of Range';
         
         positions.push({
           id: `uni3-${chainKey}-${tokenId.toString()}`,

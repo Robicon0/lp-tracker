@@ -283,14 +283,11 @@ export async function GET(request: Request) {
       const priceB = priceData[coinTypeB] || 0;
       const value = amount0 * priceA + amount1 * priceB;
 
-      const inRange = tickCurrent >= tickLower && tickCurrent < tickUpper;
+      const inRange = liquidity > 0n && tickCurrent >= tickLower && tickCurrent < tickUpper;
 
       // APY lookup by coin type pair
       const apyKey = [coinTypeA, coinTypeB].map((t) => t.toLowerCase()).sort().join('-');
       const apy = apyData[apyKey] || 0;
-
-      // Skip ghost positions: zero liquidity with no value and no fees
-      if (liquidity === 0n && value === 0 && apy === 0) return null;
 
       return {
         id: `cetus-${pos.objectId as string}`,
@@ -300,7 +297,7 @@ export async function GET(request: Request) {
         value: Math.round(value * 100) / 100,
         apy,
         fees: 0,
-        status: (inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range',
+        status: (liquidity === 0n ? 'Closed' : inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range' | 'Closed',
         amount0: Math.round(amount0 * 1_000_000) / 1_000_000,
         amount1: Math.round(amount1 * 1_000_000) / 1_000_000,
         token0Symbol: symbolA,
@@ -312,10 +309,9 @@ export async function GET(request: Request) {
         token0Decimals: decimalsA,
         token1Decimals: decimalsB,
       };
-    }).filter(Boolean);
+    });
 
-    const validPositions = positions.filter((p): p is NonNullable<typeof p> => p !== null);
-    return NextResponse.json({ positions: validPositions, count: validPositions.length, account });
+    return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to fetch Cetus positions', details: String(error) },

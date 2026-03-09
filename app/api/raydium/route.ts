@@ -128,7 +128,6 @@ async function fetchRaydiumPosition(nftMint: string): Promise<RawRaydiumPosition
   // [136..144] tokenFeesOwed1 (u64 LE)
 
   const liquidity = readU128LE(data, 80);
-  if (liquidity === 0n) return null;
 
   return {
     nftMint,
@@ -371,8 +370,8 @@ export async function GET(request: Request) {
       const feesUsd = fees0 * price0 + fees1 * price1;
 
       const tickCurrent = pool?.tickCurrent ?? 0;
-      const inRange = tickCurrent >= pos.tickLower && tickCurrent < pos.tickUpper;
-      const status = inRange ? 'In Range' : 'Out of Range';
+      const inRange = pos.liquidity > 0n && tickCurrent >= pos.tickLower && tickCurrent < pos.tickUpper;
+      const status = pos.liquidity === 0n ? 'Closed' : inRange ? 'In Range' : 'Out of Range';
 
       // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
       // Raydium API returns feeAprWeek as percentage (e.g. 12.34 = 12.34%)
@@ -391,7 +390,7 @@ export async function GET(request: Request) {
         value: Math.round(value * 100) / 100,
         apy,
         fees: Math.round(feesUsd * 100) / 100,
-        status: status as 'In Range' | 'Out of Range',
+        status: status as 'In Range' | 'Out of Range' | 'Closed',
         // Extra detail fields
         amount0: Math.round(amount0 * 1_000_000) / 1_000_000,
         amount1: Math.round(amount1 * 1_000_000) / 1_000_000,
