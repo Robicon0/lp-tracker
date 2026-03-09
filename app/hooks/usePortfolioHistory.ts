@@ -10,7 +10,7 @@ export interface PortfolioSnapshot {
 
 const STORAGE_KEY = "lp-portfolio-history";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const MIN_INTERVAL_MS = 30 * 60 * 1000;        // 30 minutes between snapshots
+const MIN_INTERVAL_MS = 60 * 60 * 1000;        // 1 hour between snapshots
 
 export function usePortfolioHistory(
   totalValue: number,

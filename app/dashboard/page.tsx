@@ -109,6 +109,15 @@ export default function Dashboard() {
   const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
 
+  // < 24h of data means we haven't built up enough history to show a meaningful chart
+  const historySpanMs = portfolioHistory.length >= 2
+    ? portfolioHistory[portfolioHistory.length - 1].timestamp - portfolioHistory[0].timestamp
+    : 0;
+  const hasEnoughHistory = historySpanMs >= 24 * 3_600_000;
+  const trackingStartLabel = portfolioHistory[0]
+    ? new Date(portfolioHistory[0].timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+
   const activeRange = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
   const rangeCutoff = Date.now() - activeRange.ms;
   const rangedHistory = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
@@ -212,14 +221,18 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-            {portfolioHistory.length < 2 ? (
+            {!hasEnoughHistory ? (
               <div className="flex flex-col items-center justify-center py-10 text-gray-500">
                 <svg className="w-8 h-8 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
-                <p className="text-sm">Tracking started — chart will populate over time.</p>
-                <p className="text-xs mt-1 opacity-60">Data points are saved every 30 minutes.</p>
+                <p className="text-sm">
+                  {trackingStartLabel
+                    ? `Tracking started ${trackingStartLabel} — history builds over time.`
+                    : "Tracking started — history builds over time."}
+                </p>
+                <p className="text-xs mt-1 opacity-60">A new data point is saved each hour. Check back tomorrow for a full chart.</p>
               </div>
             ) : rangedHistory.length < 2 ? (
               <div className="flex flex-col items-center justify-center py-10 text-gray-500">
