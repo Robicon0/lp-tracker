@@ -116,6 +116,8 @@ export default function PositionDetail() {
           <span className={`px-4 py-2 rounded-full text-sm font-medium ${
             pos.status === "In Range"
               ? "bg-green-500/10 text-green-500"
+              : pos.status === "Closed"
+              ? "bg-gray-500/10 text-gray-400"
               : "bg-red-500/10 text-red-500"
           }`}>
             {pos.status}
@@ -199,7 +201,7 @@ export default function PositionDetail() {
             </div>
             <div className="flex justify-between py-3 border-b border-gray-800">
               <span className="text-gray-400">Status</span>
-              <span className={pos.status === "In Range" ? "text-green-500 font-semibold" : "text-red-500 font-semibold"}>
+              <span className={pos.status === "In Range" ? "text-green-500 font-semibold" : pos.status === "Closed" ? "text-gray-400 font-semibold" : "text-red-500 font-semibold"}>
                 {pos.status}
               </span>
             </div>

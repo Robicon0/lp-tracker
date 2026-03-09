@@ -329,6 +329,35 @@ async function fetchPrices(): Promise<Record<string, number>> {
   }
 }
 
+interface DasTokenInfo {
+  symbol: string;
+  decimals: number;
+  price: number;
+}
+
+async function fetchDasTokenInfo(mints: string[]): Promise<Record<string, DasTokenInfo>> {
+  if (mints.length === 0) return {};
+  try {
+    const res = await fetch(SOLANA_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAssetBatch', params: { ids: mints } }),
+    });
+    const json = await res.json();
+    const result: Record<string, DasTokenInfo> = {};
+    for (const asset of json.result || []) {
+      if (!asset?.id) continue;
+      const symbol = asset.content?.metadata?.symbol || asset.id.slice(0, 6);
+      const decimals = asset.token_info?.decimals ?? 9;
+      const price = asset.token_info?.price_per_token ?? 0;
+      result[asset.id] = { symbol, decimals, price };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 interface OrcaPoolStats {
   feeAprWeek: number; // annualized decimal (e.g. 0.458 = 45.8%)
   tvl: number;        // USD
@@ -436,26 +465,45 @@ export async function GET(request: Request) {
       })
     );
 
-    // 7. Fetch prices and Orca pool stats in parallel
-    const [prices, orcaPoolStats] = await Promise.all([fetchPrices(), fetchOrcaPoolStats()]);
+    // 7. Collect unknown mints, then fetch prices + pool stats + DAS token info in parallel
+    const allMints = new Set<string>();
+    for (const pool of Object.values(poolDataMap)) {
+      allMints.add(pool.tokenMintA);
+      allMints.add(pool.tokenMintB);
+    }
+    const unknownMints = [...allMints].filter((m) => !KNOWN_TOKENS[m]);
+
+    const [prices, orcaPoolStats, dasTokens] = await Promise.all([
+      fetchPrices(),
+      fetchOrcaPoolStats(),
+      fetchDasTokenInfo(unknownMints),
+    ]);
+
+    // Merge DAS prices for tokens not in KNOWN_TOKENS
+    const allPrices: Record<string, number> = { ...prices };
+    for (const [mint, info] of Object.entries(dasTokens)) {
+      if (!allPrices[mint] && info.price > 0) allPrices[mint] = info.price;
+    }
 
     // 8. Transform to shared position shape
     const positions = rawPositions.map((pos) => {
       const pool = poolDataMap[pos.whirlpool];
-      const tAInfo = pool ? KNOWN_TOKENS[pool.tokenMintA] : null;
-      const tBInfo = pool ? KNOWN_TOKENS[pool.tokenMintB] : null;
+      const tAKnown = pool ? KNOWN_TOKENS[pool.tokenMintA] : null;
+      const tBKnown = pool ? KNOWN_TOKENS[pool.tokenMintB] : null;
+      const tADas = pool ? dasTokens[pool.tokenMintA] : null;
+      const tBDas = pool ? dasTokens[pool.tokenMintB] : null;
 
-      const tASymbol = tAInfo?.symbol || 'TOKEN_A';
-      const tBSymbol = tBInfo?.symbol || 'TOKEN_B';
-      const tADecimals = pool?.decimalsA ?? 9;
-      const tBDecimals = pool?.decimalsB ?? 9;
+      const tASymbol = tAKnown?.symbol || tADas?.symbol || 'TOKEN_A';
+      const tBSymbol = tBKnown?.symbol || tBDas?.symbol || 'TOKEN_B';
+      const tADecimals = tAKnown?.decimals ?? tADas?.decimals ?? pool?.decimalsA ?? 9;
+      const tBDecimals = tBKnown?.decimals ?? tBDas?.decimals ?? pool?.decimalsB ?? 9;
 
       const { amount0, amount1 } = pool
         ? calculateAmounts(pos.liquidity, pos.tickLowerIndex, pos.tickUpperIndex, pool.tickCurrentIndex, tADecimals, tBDecimals)
         : { amount0: 0, amount1: 0 };
 
-      const priceA = pool ? (prices[pool.tokenMintA] || 0) : 0;
-      const priceB = pool ? (prices[pool.tokenMintB] || 0) : 0;
+      const priceA = pool ? (allPrices[pool.tokenMintA] || 0) : 0;
+      const priceB = pool ? (allPrices[pool.tokenMintB] || 0) : 0;
       const value = amount0 * priceA + amount1 * priceB;
 
       // Settled fees (ready to claim) + pending fees (accrued since last checkpoint)

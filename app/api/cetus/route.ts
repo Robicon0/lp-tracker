@@ -254,7 +254,7 @@ export async function GET(request: Request) {
       }),
     );
 
-    // 4. Build positions
+    // 4. Build positions (filter ghost zero-liquidity objects)
     const positions = rawPositions.map((pos) => {
       const poolId = pos.pool as string;
       const pool = poolMap[poolId];
@@ -289,6 +289,9 @@ export async function GET(request: Request) {
       const apyKey = [coinTypeA, coinTypeB].map((t) => t.toLowerCase()).sort().join('-');
       const apy = apyData[apyKey] || 0;
 
+      // Skip ghost positions: zero liquidity with no value and no fees
+      if (liquidity === 0n && value === 0 && apy === 0) return null;
+
       return {
         id: `cetus-${pos.objectId as string}`,
         pair: `${symbolA} / ${symbolB}`,
@@ -296,7 +299,7 @@ export async function GET(request: Request) {
         chain: 'Sui',
         value: Math.round(value * 100) / 100,
         apy,
-        fees: 0, // Pending fees require tick manager fetch (complex); show 0 for MVP
+        fees: 0,
         status: (inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range',
         amount0: Math.round(amount0 * 1_000_000) / 1_000_000,
         amount1: Math.round(amount1 * 1_000_000) / 1_000_000,
@@ -309,9 +312,10 @@ export async function GET(request: Request) {
         token0Decimals: decimalsA,
         token1Decimals: decimalsB,
       };
-    });
+    }).filter(Boolean);
 
-    return NextResponse.json({ positions, count: positions.length, account });
+    const validPositions = positions.filter((p): p is NonNullable<typeof p> => p !== null);
+    return NextResponse.json({ positions: validPositions, count: validPositions.length, account });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to fetch Cetus positions', details: String(error) },

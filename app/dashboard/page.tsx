@@ -27,7 +27,12 @@ import {
   ResponsiveContainer,
 } from "recharts";
 const chains = ["All", "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon", "Avalanche", "Solana"];
-const statuses = ["All", "In Range", "Out of Range"];
+const statuses = ["All", "In Range", "Out of Range", "Closed"];
+
+function effectiveStatus(p: { value: number; fees: number; status: string }): "In Range" | "Out of Range" | "Closed" {
+  if (p.value === 0 && p.fees === 0) return "Closed";
+  return p.status as "In Range" | "Out of Range";
+}
 const sortOptions = [
   { label: "Value (High → Low)", key: "value", dir: "desc" },
   { label: "Value (Low → High)", key: "value", dir: "asc" },
@@ -89,11 +94,16 @@ export default function Dashboard() {
       result = result.filter((p) => p.chain === chainFilter);
     }
     if (statusFilter !== "All") {
-      result = result.filter((p) => p.status === statusFilter);
+      result = result.filter((p) => effectiveStatus(p) === statusFilter);
     }
 
     const { key, dir } = sortOptions[sortIndex];
     result = [...result].sort((a, b) => {
+      // Closed positions always sort last
+      const aClosed = effectiveStatus(a) === "Closed";
+      const bClosed = effectiveStatus(b) === "Closed";
+      if (aClosed && !bClosed) return 1;
+      if (!aClosed && bClosed) return -1;
       const aVal = a[key as keyof typeof a] as number;
       const bVal = b[key as keyof typeof b] as number;
       return dir === "desc" ? bVal - aVal : aVal - bVal;
@@ -192,19 +202,26 @@ export default function Dashboard() {
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-xl font-bold">Portfolio History</h2>
                 <div className="flex gap-1">
-                  {TIME_RANGES.map((r) => (
-                    <button
-                      key={r.key}
-                      onClick={() => setRangeKey(r.key)}
-                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-                        rangeKey === r.key
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
-                      }`}
-                    >
-                      {r.key}
-                    </button>
-                  ))}
+                  {TIME_RANGES.map((r) => {
+                    const cutoff = Date.now() - r.ms;
+                    const hasData = portfolioHistory.filter((s) => s.timestamp >= cutoff).length >= 2;
+                    return (
+                      <button
+                        key={r.key}
+                        onClick={() => setRangeKey(r.key)}
+                        title={!hasData ? "Not enough history yet" : undefined}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                          rangeKey === r.key
+                            ? "bg-blue-600 text-white"
+                            : hasData
+                            ? "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+                            : "bg-gray-800 text-gray-600"
+                        }`}
+                      >
+                        {r.key}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               {effectiveHistory.length >= 2 && (
@@ -336,9 +353,12 @@ export default function Dashboard() {
               <p>Fetching your positions...</p>
             </div>
           )}
-          {(!mounted || !isLoading) && filtered.map((pos) => (
+          {(!mounted || !isLoading) && filtered.map((pos) => {
+            const posStatus = effectiveStatus(pos);
+            const isClosed = posStatus === "Closed";
+            return (
             <Link key={pos.id} href={`/dashboard/${pos.id}`}>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 hover:border-blue-500 transition-colors cursor-pointer">
+              <div className={`bg-gray-900 border border-gray-800 rounded-lg p-6 hover:border-blue-500 transition-colors cursor-pointer${isClosed ? " opacity-50" : ""}`}>
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="text-xl font-bold">{pos.pair}</h3>
@@ -346,12 +366,14 @@ export default function Dashboard() {
                   </div>
                   <span
                     className={`px-3 py-1 rounded-full text-sm ${
-                      pos.status === "In Range"
+                      posStatus === "In Range"
                         ? "bg-green-500/10 text-green-500"
+                        : posStatus === "Closed"
+                        ? "bg-gray-500/10 text-gray-400"
                         : "bg-red-500/10 text-red-500"
                     }`}
                   >
-                    {pos.status}
+                    {posStatus}
                   </span>
                 </div>
                 <div className="space-y-2">
@@ -377,7 +399,8 @@ export default function Dashboard() {
                 </div>
               </div>
             </Link>
-          ))}
+            );
+          })}
 
           {mounted && !isLoading && filtered.length === 0 && (
             <div className="col-span-2">

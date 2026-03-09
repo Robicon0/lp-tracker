@@ -6,7 +6,7 @@ export interface AerodromePosition {
   value: number;
   apy: number;
   fees: number;
-  status: 'In Range' | 'Out of Range';
+  status: 'In Range' | 'Out of Range' | 'Closed';
   // Optional enriched fields present on CLMM positions
   amount0?: number;
   amount1?: number;

@@ -234,6 +234,35 @@ async function fetchPrices(): Promise<Record<string, number>> {
   }
 }
 
+interface DasTokenInfo {
+  symbol: string;
+  decimals: number;
+  price: number;
+}
+
+async function fetchDasTokenInfo(mints: string[]): Promise<Record<string, DasTokenInfo>> {
+  if (mints.length === 0) return {};
+  try {
+    const res = await fetch(SOLANA_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAssetBatch', params: { ids: mints } }),
+    });
+    const json = await res.json();
+    const result: Record<string, DasTokenInfo> = {};
+    for (const asset of json.result || []) {
+      if (!asset?.id) continue;
+      const symbol = asset.content?.metadata?.symbol || asset.id.slice(0, 6);
+      const decimals = asset.token_info?.decimals ?? 9;
+      const price = asset.token_info?.price_per_token ?? 0;
+      result[asset.id] = { symbol, decimals, price };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 interface RaydiumPoolStats {
   feeAprWeek: number; // percentage (e.g. 12.34 = 12.34%)
   tvl: number;        // USD
@@ -294,26 +323,46 @@ export async function GET(request: Request) {
       })
     );
 
-    // 4. Fetch prices and Raydium pool stats in parallel
-    const [prices, raydiumPoolStats] = await Promise.all([fetchPrices(), fetchRaydiumPoolStats()]);
+    // Collect unknown mints for DAS lookup
+    const allMints = new Set<string>();
+    for (const pool of Object.values(poolDataMap)) {
+      allMints.add(pool.tokenMint0);
+      allMints.add(pool.tokenMint1);
+    }
+    const unknownMints = [...allMints].filter((m) => !TOKENS[m]);
+
+    // 4. Fetch prices + Raydium pool stats + DAS token info in parallel
+    const [prices, raydiumPoolStats, dasTokens] = await Promise.all([
+      fetchPrices(),
+      fetchRaydiumPoolStats(),
+      fetchDasTokenInfo(unknownMints),
+    ]);
+
+    // Merge DAS prices for tokens not in TOKENS
+    const allPrices: Record<string, number> = { ...prices };
+    for (const [mint, info] of Object.entries(dasTokens)) {
+      if (!allPrices[mint] && info.price > 0) allPrices[mint] = info.price;
+    }
 
     // 5. Transform to shared position shape
     const positions = rawPositions.map((pos) => {
       const pool = poolDataMap[pos.poolId];
-      const t0Info = pool ? TOKENS[pool.tokenMint0] : null;
-      const t1Info = pool ? TOKENS[pool.tokenMint1] : null;
+      const t0Known = pool ? TOKENS[pool.tokenMint0] : null;
+      const t1Known = pool ? TOKENS[pool.tokenMint1] : null;
+      const t0Das = pool ? dasTokens[pool.tokenMint0] : null;
+      const t1Das = pool ? dasTokens[pool.tokenMint1] : null;
 
-      const t0Symbol = t0Info?.symbol || 'TOKEN0';
-      const t1Symbol = t1Info?.symbol || 'TOKEN1';
-      const t0Decimals = pool?.mintDecimals0 ?? (t0Info?.decimals || 9);
-      const t1Decimals = pool?.mintDecimals1 ?? (t1Info?.decimals || 9);
+      const t0Symbol = t0Known?.symbol || t0Das?.symbol || 'TOKEN0';
+      const t1Symbol = t1Known?.symbol || t1Das?.symbol || 'TOKEN1';
+      const t0Decimals = pool?.mintDecimals0 ?? t0Known?.decimals ?? t0Das?.decimals ?? 9;
+      const t1Decimals = pool?.mintDecimals1 ?? t1Known?.decimals ?? t1Das?.decimals ?? 9;
 
       const { amount0, amount1 } = pool
         ? calculateAmounts(pos.liquidity, pos.tickLower, pos.tickUpper, pool.tickCurrent, t0Decimals, t1Decimals)
         : { amount0: 0, amount1: 0 };
 
-      const price0 = pool ? (prices[pool.tokenMint0] || 0) : 0;
-      const price1 = pool ? (prices[pool.tokenMint1] || 0) : 0;
+      const price0 = pool ? (allPrices[pool.tokenMint0] || 0) : 0;
+      const price1 = pool ? (allPrices[pool.tokenMint1] || 0) : 0;
 
       const value = amount0 * price0 + amount1 * price1;
 
