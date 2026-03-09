@@ -64,13 +64,18 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 1. Aerodrome (Base) — Sugar V3 contract, real positions fetching ✅
 2. Uniswap V3 (Ethereum, Arbitrum, Polygon, Optimism) — NonfungiblePositionManager ✅
 3. Velodrome (Optimism) — Sugar contract with selector `0xedbd33bf` ✅
-4. CoinGecko for prices, DefiLlama for APY data ✅
-5. React Query context (`PositionsContext.tsx`) fetches all 3 in parallel ✅
+4. Raydium CLMM (Solana) — Helius RPC, program `CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK` ✅
+5. Orca Whirlpools (Solana) — Helius RPC, Token2022 NFTs ✅
+6. Cetus CLMM (Sui) — Sui public RPC, position type `::position::Position` ✅
+7. Bluefin (Sui) — Sui public RPC, Q64 fee math ✅
+8. Momentum (Sui) — Sui public RPC, package `0x70285592...`, Q64 fee math ✅
+9. CoinGecko for prices, DefiLlama for APY data ✅
+10. React Query context (`PositionsContext.tsx`) fetches all in parallel ✅
 
 ## Wallet
 
 - Primary wallet: `0xD99a5c1d3F93F1a7cfA77025A8F1532a0cEF4F20`
-- All 3 prior Aerodrome positions (WETH/USDC, WETH/USDC, USDC/cbBTC) are now closed (zero liquidity, zero value) and are filtered out by the API
+- All 3 prior Aerodrome positions (WETH/USDC, WETH/USDC, USDC/cbBTC) are now closed (zero liquidity, zero value) and shown as 'Closed'
 - Solana: GndRtybRYe3ShqES4RXpw9hq2MysJRLkjEf99M6PpogC — active SOL/USDC Orca position
 - MetaMask for EVM chains
 
@@ -101,7 +106,8 @@ CRITICAL: Wallets must ONLY show as connected when the user has actively unlocke
 - DefiLlama `apyBase` (fee-only) with median prevents APY outliers
 - Tick-to-price: `price = 1.0001^tick * 10^(decimals0 - decimals1)` gives token0 price in token1. If token1 is stable → show directly as USD. If token0 is stable → show `1/price`. All API routes now pass `token0Decimals`/`token1Decimals` in positions.
 - Est. Daily Fees / Monthly Yield on detail page are APY-based projections (`value * apy / 100 / 365` and `/12`), not position-specific — labeled "(pool APY × value)"
-- Aerodrome/Velodrome Sugar contract returns ALL historical positions including closed ones. Filter: `liquidity + staked = 0n && feesUsd <= 0` → omit completely; `liquidity + staked = 0n && feesUsd > 0` → show as status 'Closed'
+- Closed positions: ALL API routes return zero-liquidity positions as `status: 'Closed'` — never filter them out. Sugar (Aerodrome/Velodrome), Uni V3, Raydium, Orca, Cetus, Bluefin, Momentum all follow this rule.
+- Momentum (Sui): package `0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860`. Position fields: `pool_id`, `type_x`/`type_y` (TypeName structs → `.fields.name`), `tick_lower_index`/`tick_upper_index` (I32), `liquidity`, `fee_growth_inside_x_last`/`_y_last`, `owed_coin_x`/`owed_coin_y`. Pool fields: `sqrt_price` (Q64.64), `tick_index`, `fee_growth_global_x`/`_y`, `ticks` (Table). Tick fields: `fee_growth_outside_x`/`_y`. Uses Q64 scaling (>> 64n). Not on DefiLlama (APY=0).
 - Solana token resolution: Orca + Raydium routes use Helius DAS `getAssetBatch` as fallback for any tokens not in the static KNOWN_TOKENS map (symbol, decimals, price)
 - Dashboard position sort: always groups In Range → Out of Range → Closed (STATUS_ORDER primary), user sort key secondary
 - Portfolio history P&L label: shows "since [date]" when actual data coverage < 50% of selected range duration; range buttons dim when no data exists in that window
