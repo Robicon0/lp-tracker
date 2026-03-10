@@ -347,7 +347,7 @@ async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
     const data = await res.json();
     const pools = (data.data || []).filter(
       (p: { project: string; chain: string }) =>
-        (p.project === 'hyperswap-v3' || p.project === 'kittenswap' || p.project === 'projectx') && p.chain === 'HyperEVM',
+        (p.project === 'hyperswap-v3' || p.project === 'kittenswap' || p.project === 'project-x') && p.chain === 'Hyperliquid L1',
     );
 
     const apysByKey: Record<string, number[]> = {};
