@@ -71,8 +71,9 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 8. Momentum (Sui) — Sui public RPC, package `0x70285592...`, Q64 fee math ✅
 9. HyperSwap V3 (HyperEVM) — public RPC `https://rpc.hyperliquid.xyz/evm`, NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8` ✅
 10. KittenSwap (HyperEVM) — same RPC, NFT manager `0xb9201e89f94a01ff13ad4caecf43a2e232513754` ✅
-11. CoinGecko for prices, DefiLlama for APY data ✅
-12. React Query context (`PositionsContext.tsx`) fetches all in parallel ✅
+11. ProjectX / PRJX (HyperEVM) — same RPC, NFT manager `0xead19ae861c29bbb2101e834922b2feee69b9091` ✅
+12. CoinGecko for prices, DefiLlama for APY data ✅
+13. React Query context (`PositionsContext.tsx`) fetches all in parallel ✅
 
 ## Wallet
 
@@ -114,4 +115,4 @@ CRITICAL: Wallets must ONLY show as connected when the user has actively unlocke
 - Solana token resolution: Orca + Raydium routes use Helius DAS `getAssetBatch` as fallback for any tokens not in the static KNOWN_TOKENS map (symbol, decimals, price)
 - Dashboard position sort: always groups In Range → Out of Range → Closed (STATUS_ORDER primary), user sort key secondary
 - Portfolio history P&L label: shows "since [date]" when actual data coverage < 50% of selected range duration; range buttons dim when no data exists in that window
-- HyperEVM chain: ID 999, RPC `https://rpc.hyperliquid.xyz/evm`, native HYPE. HyperSwap V3 NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8`, KittenSwap `0xb9201e89f94a01ff13ad4caecf43a2e232513754`. WHYPE `0xadcb2f358eae6492f61a5f87eb8893d09391d160`, USDC `0xb88339cb7199b77e23db6e890353e22632ba630f`. No Alchemy key needed for HyperEVM (use public RPC). DefiLlama projects: `hyperswap-v3`, `kittenswap`.
+- HyperEVM chain: ID 999, RPC `https://rpc.hyperliquid.xyz/evm`, native HYPE. HyperSwap V3 NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8`, KittenSwap `0xb9201e89f94a01ff13ad4caecf43a2e232513754`, ProjectX/PRJX `0xead19ae861c29bbb2101e834922b2feee69b9091`. WHYPE `0xadcb2f358eae6492f61a5f87eb8893d09391d160`, USDC `0xb88339cb7199b77e23db6e890353e22632ba630f`. No Alchemy key needed for HyperEVM (use public RPC). DefiLlama projects: `hyperswap-v3`, `kittenswap`, `projectx`. All 3 queried in same `/api/hyperswap` route.
