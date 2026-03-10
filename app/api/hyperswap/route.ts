@@ -17,7 +17,9 @@ const POSITION_MANAGERS = [
 ];
 
 // Known tokens on HyperEVM
+// Note: 0x5555...5555 is how native HYPE is represented in V3 pool token slots
 const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingeckoId: string }> = {
+  '0x5555555555555555555555555555555555555555': { symbol: 'HYPE', decimals: 18, coingeckoId: 'hyperliquid' },
   '0xadcb2f358eae6492f61a5f87eb8893d09391d160': { symbol: 'WHYPE', decimals: 18, coingeckoId: 'hyperliquid' },
   '0xb88339cb7199b77e23db6e890353e22632ba630f': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
   '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
@@ -27,7 +29,7 @@ const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingecko
 const SELECTORS = {
   balanceOf: '0x70a08231',          // balanceOf(address)
   tokenOfOwnerByIndex: '0x2f745c59', // tokenOfOwnerByIndex(address,uint256)
-  positions: '0x99fd0e82',           // positions(uint256)
+  positions: '0x99fbab88',           // positions(uint256) — HyperEVM V3 fork selector
   symbol: '0x95d89b41',
   decimals: '0x313ce567',
 };
@@ -89,11 +91,10 @@ async function getPosition(nftManager: string, tokenId: bigint): Promise<Positio
   const hex = result.startsWith('0x') ? result.slice(2) : result;
   const readWord = (i: number) => hex.slice(i * 64, (i + 1) * 64);
   const toAddress = (word: string) => '0x' + word.slice(24).toLowerCase();
+  // int24 is sign-extended to 32 bytes in ABI encoding; decode from last 3 bytes
   const toInt24 = (word: string) => {
-    const val = BigInt('0x' + word);
-    const MAX = BigInt('0x7fffff');
-    if (val > MAX) return Number(val - BigInt('0x1000000'));
-    return Number(val);
+    const val = parseInt(word.slice(-6), 16);
+    return val >= 0x800000 ? val - 0x1000000 : val;
   };
 
   // word 0: nonce, 1: operator, 2: token0, 3: token1, 4: fee,
