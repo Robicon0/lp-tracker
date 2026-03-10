@@ -10,10 +10,11 @@ const KITTENSWAP_NFT_MANAGER = '0xb9201e89f94a01ff13ad4caecf43a2e232513754';
 // ProjectX (PRJX) NonfungiblePositionManager on HyperEVM
 const PRJX_NFT_MANAGER = '0xead19ae861c29bbb2101e834922b2feee69b9091';
 
+// Known factory addresses — hardcoded to skip the factory() RPC call where possible
 const POSITION_MANAGERS = [
-  { address: HYPERSWAP_NFT_MANAGER, protocol: 'HyperSwap' },
-  { address: KITTENSWAP_NFT_MANAGER, protocol: 'KittenSwap' },
-  { address: PRJX_NFT_MANAGER, protocol: 'ProjectX' },
+  { address: HYPERSWAP_NFT_MANAGER, protocol: 'HyperSwap', factory: '' },
+  { address: KITTENSWAP_NFT_MANAGER, protocol: 'KittenSwap', factory: '' },
+  { address: PRJX_NFT_MANAGER, protocol: 'ProjectX', factory: '0xff7b3e8c00e57ea31477c32a5b52a58eea47b072' },
 ];
 
 // Known tokens on HyperEVM
@@ -32,6 +33,12 @@ const SELECTORS = {
   positions: '0x99fbab88',           // positions(uint256) — HyperEVM V3 fork selector
   symbol: '0x95d89b41',
   decimals: '0x313ce567',
+  factory: '0xc45a0155',             // factory()
+  getPool: '0x1698ee82',             // getPool(address,address,uint24)
+  slot0: '0x3850c7bd',               // slot0()
+  feeGrowthGlobal0: '0xf3058399',    // feeGrowthGlobal0X128()
+  feeGrowthGlobal1: '0x46141319',    // feeGrowthGlobal1X128()
+  ticks: '0xf30dba93',               // ticks(int24)
 };
 
 function padAddress(addr: string): string {
@@ -40,6 +47,13 @@ function padAddress(addr: string): string {
 
 function padUint256(value: bigint): string {
   return value.toString(16).padStart(64, '0');
+}
+
+function padInt256(value: number): string {
+  if (value >= 0) return value.toString(16).padStart(64, '0');
+  // Two's complement 256-bit
+  const u = (BigInt(value) + (1n << 256n)) & ((1n << 256n) - 1n);
+  return u.toString(16).padStart(64, '0');
 }
 
 async function rpcCall(to: string, data: string): Promise<string> {
@@ -80,6 +94,8 @@ interface PositionData {
   liquidity: bigint;
   tokensOwed0: bigint;
   tokensOwed1: bigint;
+  feeGrowthInside0LastX128: bigint;
+  feeGrowthInside1LastX128: bigint;
 }
 
 async function getPosition(nftManager: string, tokenId: bigint): Promise<PositionData | null> {
@@ -98,17 +114,20 @@ async function getPosition(nftManager: string, tokenId: bigint): Promise<Positio
   };
 
   // word 0: nonce, 1: operator, 2: token0, 3: token1, 4: fee,
-  // 5: tickLower, 6: tickUpper, 7: liquidity, 8-9: feeGrowth, 10-11: tokensOwed
+  // 5: tickLower, 6: tickUpper, 7: liquidity, 8: feeGrowthInside0LastX128,
+  // 9: feeGrowthInside1LastX128, 10: tokensOwed0, 11: tokensOwed1
   const token0 = toAddress(readWord(2));
   const token1 = toAddress(readWord(3));
   const fee = parseInt(readWord(4), 16);
   const tickLower = toInt24(readWord(5));
   const tickUpper = toInt24(readWord(6));
   const liquidity = BigInt('0x' + readWord(7));
+  const feeGrowthInside0LastX128 = BigInt('0x' + readWord(8));
+  const feeGrowthInside1LastX128 = BigInt('0x' + readWord(9));
   const tokensOwed0 = BigInt('0x' + readWord(10));
   const tokensOwed1 = BigInt('0x' + readWord(11));
 
-  return { token0, token1, fee, tickLower, tickUpper, liquidity, tokensOwed0, tokensOwed1 };
+  return { token0, token1, fee, tickLower, tickUpper, liquidity, tokensOwed0, tokensOwed1, feeGrowthInside0LastX128, feeGrowthInside1LastX128 };
 }
 
 async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
@@ -151,8 +170,125 @@ async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; d
   }
 }
 
+// Compute pending fees + amounts using actual pool sqrtPrice from slot0
+const U256_MASK = (1n << 256n) - 1n;
+
+interface PoolExtras {
+  pending0: bigint;
+  pending1: bigint;
+  sqrtPriceX96: bigint;
+  currentTick: number;
+}
+
+async function fetchPoolExtras(
+  nftManager: string,
+  knownFactory: string,
+  pos: PositionData,
+  factoryCache: Record<string, string>,
+): Promise<PoolExtras> {
+  const zero: PoolExtras = { pending0: 0n, pending1: 0n, sqrtPriceX96: 0n, currentTick: 0 };
+  if (pos.liquidity === 0n) return zero;
+
+  try {
+    // Use hardcoded factory if available, otherwise fetch via factory() RPC call
+    if (knownFactory) {
+      factoryCache[nftManager] = knownFactory;
+    } else if (!factoryCache[nftManager]) {
+      const result = await rpcCall(nftManager, SELECTORS.factory);
+      if (!result || result === '0x') {
+        console.error(`[HyperSwap] factory() failed for manager ${nftManager}: ${result}`);
+        return zero;
+      }
+      factoryCache[nftManager] = '0x' + result.slice(-40);
+    }
+    const factory = factoryCache[nftManager];
+
+    // Get pool address from factory
+    const getPoolData = SELECTORS.getPool + padAddress(pos.token0) + padAddress(pos.token1) + padUint256(BigInt(pos.fee));
+    const poolResult = await rpcCall(factory, getPoolData);
+    if (!poolResult || poolResult === '0x') {
+      console.error(`[HyperSwap] getPool() failed for factory ${factory}, pair ${pos.token0}/${pos.token1} fee ${pos.fee}: ${poolResult}`);
+      return zero;
+    }
+    const poolAddress = '0x' + poolResult.slice(-40);
+    if (poolAddress === '0x0000000000000000000000000000000000000000') {
+      console.error(`[HyperSwap] pool not found for pair ${pos.token0}/${pos.token1} fee ${pos.fee} in factory ${factory}`);
+      return zero;
+    }
+
+    // Fetch pool state and tick data in parallel
+    const [slot0Result, fg0Result, fg1Result, lowerResult, upperResult] = await Promise.all([
+      rpcCall(poolAddress, SELECTORS.slot0),
+      rpcCall(poolAddress, SELECTORS.feeGrowthGlobal0),
+      rpcCall(poolAddress, SELECTORS.feeGrowthGlobal1),
+      rpcCall(poolAddress, SELECTORS.ticks + padInt256(pos.tickLower)),
+      rpcCall(poolAddress, SELECTORS.ticks + padInt256(pos.tickUpper)),
+    ]);
+
+    // Parse slot0: W0 = sqrtPriceX96 (uint160), W1 = tick (int24)
+    if (!slot0Result || slot0Result.length < 130) {
+      console.error(`[HyperSwap] slot0() bad response from pool ${poolAddress}: len=${slot0Result?.length} val=${slot0Result}`);
+      return zero;
+    }
+    const s0hex = slot0Result.startsWith('0x') ? slot0Result.slice(2) : slot0Result;
+    const sqrtPriceX96 = BigInt('0x' + s0hex.slice(0, 64));
+    const tickWord = s0hex.slice(64, 128);
+    const tickVal = parseInt(tickWord.slice(-6), 16);
+    const currentTick = tickVal >= 0x800000 ? tickVal - 0x1000000 : tickVal;
+
+    // Parse feeGrowthGlobal (full uint256 values)
+    const fgGlobal0 = fg0Result && fg0Result !== '0x' ? BigInt(fg0Result) : 0n;
+    const fgGlobal1 = fg1Result && fg1Result !== '0x' ? BigInt(fg1Result) : 0n;
+
+    // Parse tick data: word[2]=feeGrowthOutside0X128, word[3]=feeGrowthOutside1X128
+    const parseTick = (result: string, label: string) => {
+      if (!result || result === '0x' || result.length < 258) {
+        console.error(`[HyperSwap] ticks(${label}) bad response from pool ${poolAddress}: len=${result?.length} val=${result?.slice(0, 20)}`);
+        return null;
+      }
+      const hex = result.startsWith('0x') ? result.slice(2) : result;
+      return {
+        feeGrowthOutside0: BigInt('0x' + hex.slice(128, 192)),
+        feeGrowthOutside1: BigInt('0x' + hex.slice(192, 256)),
+      };
+    };
+
+    const lowerData = parseTick(lowerResult, `lower=${pos.tickLower}`);
+    const upperData = parseTick(upperResult, `upper=${pos.tickUpper}`);
+    if (!lowerData || !upperData) return { ...zero, sqrtPriceX96, currentTick };
+
+    // Uniswap V3 feeGrowthInside calculation
+    const fgBelow0 = currentTick >= pos.tickLower
+      ? lowerData.feeGrowthOutside0
+      : (fgGlobal0 - lowerData.feeGrowthOutside0) & U256_MASK;
+    const fgBelow1 = currentTick >= pos.tickLower
+      ? lowerData.feeGrowthOutside1
+      : (fgGlobal1 - lowerData.feeGrowthOutside1) & U256_MASK;
+
+    const fgAbove0 = currentTick < pos.tickUpper
+      ? upperData.feeGrowthOutside0
+      : (fgGlobal0 - upperData.feeGrowthOutside0) & U256_MASK;
+    const fgAbove1 = currentTick < pos.tickUpper
+      ? upperData.feeGrowthOutside1
+      : (fgGlobal1 - upperData.feeGrowthOutside1) & U256_MASK;
+
+    const fgInside0 = (fgGlobal0 - fgBelow0 - fgAbove0) & U256_MASK;
+    const fgInside1 = (fgGlobal1 - fgBelow1 - fgAbove1) & U256_MASK;
+
+    // pending fees = liquidity * (feeGrowthInside - checkpoint) >> 128
+    const pending0 = (pos.liquidity * ((fgInside0 - pos.feeGrowthInside0LastX128) & U256_MASK)) >> 128n;
+    const pending1 = (pos.liquidity * ((fgInside1 - pos.feeGrowthInside1LastX128) & U256_MASK)) >> 128n;
+
+    return { pending0, pending1, sqrtPriceX96, currentTick };
+  } catch (err) {
+    console.error(`[HyperSwap] fetchPoolExtras threw for manager ${nftManager}:`, err);
+    return zero;
+  }
+}
+
 function calculateAmounts(
   liquidity: bigint,
+  sqrtPriceX96: bigint,
   tickLower: number,
   tickUpper: number,
   decimals0: number,
@@ -160,15 +296,30 @@ function calculateAmounts(
 ): { amount0: number; amount1: number } {
   if (liquidity === 0n) return { amount0: 0, amount1: 0 };
 
+  const sqrtPrice = Number(sqrtPriceX96) / 2 ** 96;
   const sqrtLower = Math.sqrt(1.0001 ** tickLower);
   const sqrtUpper = Math.sqrt(1.0001 ** tickUpper);
-  const sqrtCurrent = (sqrtLower + sqrtUpper) / 2; // midpoint estimate
-
   const liq = Number(liquidity);
-  const amount0 = Math.max(0, liq * (1 / sqrtCurrent - 1 / sqrtUpper)) / 10 ** decimals0;
-  const amount1 = Math.max(0, liq * (sqrtCurrent - sqrtLower)) / 10 ** decimals1;
 
-  return { amount0, amount1 };
+  let amount0 = 0;
+  let amount1 = 0;
+
+  if (sqrtPrice <= sqrtLower) {
+    // Price below range — all token0
+    amount0 = liq * (1 / sqrtLower - 1 / sqrtUpper);
+  } else if (sqrtPrice >= sqrtUpper) {
+    // Price above range — all token1
+    amount1 = liq * (sqrtUpper - sqrtLower);
+  } else {
+    // Price in range
+    amount0 = liq * (1 / sqrtPrice - 1 / sqrtUpper);
+    amount1 = liq * (sqrtPrice - sqrtLower);
+  }
+
+  return {
+    amount0: Math.max(0, amount0) / 10 ** decimals0,
+    amount1: Math.max(0, amount1) / 10 ** decimals1,
+  };
 }
 
 async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, number>> {
@@ -223,14 +374,18 @@ async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
 async function fetchPositionsForManager(
   nftManager: string,
   protocol: string,
+  knownFactory: string,
   account: string,
 ): Promise<Array<{
   tokenId: bigint;
   pos: PositionData;
   protocol: string;
+  nftManager: string;
+  knownFactory: string;
 }>> {
   try {
     const balance = await getBalance(nftManager, account);
+    console.log(`[HyperSwap] ${protocol} balance for ${account}: ${balance}`);
     if (balance === 0) return [];
 
     const count = Math.min(balance, 50);
@@ -239,16 +394,18 @@ async function fetchPositionsForManager(
       const id = await getTokenId(nftManager, account, i);
       if (id > 0n) tokenIds.push(id);
     }
+    console.log(`[HyperSwap] ${protocol} tokenIds:`, tokenIds.map(String));
 
-    const results: Array<{ tokenId: bigint; pos: PositionData; protocol: string }> = [];
+    const results: Array<{ tokenId: bigint; pos: PositionData; protocol: string; nftManager: string; knownFactory: string }> = [];
     await Promise.all(
       tokenIds.map(async (tokenId) => {
         const pos = await getPosition(nftManager, tokenId);
-        if (pos) results.push({ tokenId, pos, protocol });
+        if (pos) results.push({ tokenId, pos, protocol, nftManager, knownFactory });
       }),
     );
     return results;
-  } catch {
+  } catch (err) {
+    console.error(`[HyperSwap] fetchPositionsForManager threw for ${protocol}:`, err);
     return [];
   }
 }
@@ -264,7 +421,7 @@ export async function GET(request: Request) {
   try {
     // Fetch from all position managers in parallel
     const allRaw = (await Promise.all(
-      POSITION_MANAGERS.map(({ address, protocol }) => fetchPositionsForManager(address, protocol, account)),
+      POSITION_MANAGERS.map(({ address, protocol, factory }) => fetchPositionsForManager(address, protocol, factory, account)),
     )).flat();
 
     if (allRaw.length === 0) {
@@ -287,34 +444,48 @@ export async function GET(request: Request) {
     );
 
     const coingeckoIds = Object.values(tokenInfoMap).map((t) => t.coingeckoId).filter(Boolean);
-    const [prices, apyData] = await Promise.all([
+
+    // Fetch pool state (sqrtPriceX96, currentTick) + pending fees for all positions
+    // Shared factory cache avoids duplicate factory() RPC calls
+    const factoryCache: Record<string, string> = {};
+    const [prices, apyData, poolExtrasList] = await Promise.all([
       fetchPrices(coingeckoIds),
       fetchHyperSwapAPYs(),
+      Promise.all(allRaw.map(({ pos, nftManager, knownFactory }) => fetchPoolExtras(nftManager, knownFactory, pos, factoryCache))),
     ]);
 
-    const positions = allRaw.map(({ tokenId, pos, protocol }) => {
+    const positions = allRaw.map(({ tokenId, pos, protocol }, i) => {
       const t0Info = tokenInfoMap[pos.token0] || { symbol: pos.token0.slice(2, 8), decimals: 18, coingeckoId: '' };
       const t1Info = tokenInfoMap[pos.token1] || { symbol: pos.token1.slice(2, 8), decimals: 18, coingeckoId: '' };
 
-      const { amount0, amount1 } = calculateAmounts(pos.liquidity, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals);
+      const { pending0, pending1, sqrtPriceX96, currentTick } = poolExtrasList[i];
+
+      // Use actual sqrtPriceX96 from slot0 for precise amount calculation
+      const { amount0, amount1 } = calculateAmounts(
+        pos.liquidity, sqrtPriceX96, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals,
+      );
 
       const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
       const price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
       const value = amount0 * price0 + amount1 * price1;
 
-      const fees0 = Number(pos.tokensOwed0) / 10 ** t0Info.decimals;
-      const fees1 = Number(pos.tokensOwed1) / 10 ** t1Info.decimals;
+      // Total fees = settled (tokensOwed) + pending (feeGrowthInside math)
+      const fees0 = (Number(pos.tokensOwed0 + pending0)) / 10 ** t0Info.decimals;
+      const fees1 = (Number(pos.tokensOwed1 + pending1)) / 10 ** t1Info.decimals;
       const feesUsd = fees0 * price0 + fees1 * price1;
 
-      const apyKey = [pos.token0, pos.token1].map((t) => t.toLowerCase()).sort().join('-');
-      const apy = apyData[apyKey] || 0;
+      // APY lookup: try both position token addresses and WHYPE alias for native HYPE
+      const HYPE_NATIVE = '0x5555555555555555555555555555555555555555';
+      const WHYPE = '0xadcb2f358eae6492f61a5f87eb8893d09391d160';
+      const normalizeForApy = (addr: string) => addr.toLowerCase() === HYPE_NATIVE ? WHYPE : addr.toLowerCase();
+      const apyKey = [pos.token0, pos.token1].map(normalizeForApy).sort().join('-');
+      const apyKeyRaw = [pos.token0, pos.token1].map((t) => t.toLowerCase()).sort().join('-');
+      const apy = apyData[apyKey] || apyData[apyKeyRaw] || 0;
 
-      // Determine range status: in range when both tokens are present; fallback on liquidity
-      const hasToken0 = amount0 > 1e-9;
-      const hasToken1 = amount1 > 1e-9;
+      // Range status from actual currentTick
       const status = pos.liquidity === 0n
         ? 'Closed'
-        : (hasToken0 && hasToken1 ? 'In Range' : 'Out of Range');
+        : (currentTick >= pos.tickLower && currentTick < pos.tickUpper ? 'In Range' : 'Out of Range');
 
       return {
         id: `hyperswap-${protocol.toLowerCase()}-${tokenId.toString()}`,
@@ -342,6 +513,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
+    console.error('[HyperSwap] route error:', error);
     return NextResponse.json(
       { error: 'Failed to fetch HyperSwap positions', details: String(error) },
       { status: 500 },
