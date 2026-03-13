@@ -444,6 +444,16 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        {/* Closed position limitation note — shown when Solana or Sui wallet is connected */}
+        {mounted && (solanaAddress || suiAddress) && (
+          <div className="mt-6 text-sm text-gray-500 border border-gray-800 rounded-lg px-4 py-3 flex items-start gap-2">
+            <span className="mt-0.5 shrink-0">ℹ️</span>
+            <span>
+              Some closed positions may not appear: on Solana, NFTs are burned when a position is fully closed; on Sui, position objects are destroyed. These no longer exist on-chain and cannot be recovered. Only positions whose on-chain record still exists (zero liquidity but unburned) show as &quot;Closed&quot;.
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
