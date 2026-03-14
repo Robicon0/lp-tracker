@@ -1,0 +1,193 @@
+LP Tracker — Progress
+Last updated: 2026-03-15
+====================================================
+
+====================================================
+COMPLETED WORK
+====================================================
+
+--- INFRASTRUCTURE ---
+[DONE] Next.js 16 App Router project setup
+[DONE] Tailwind CSS, TypeScript, ESLint (flat config)
+[DONE] React Query (TanStack) with PositionsContext
+       - 60s auto-refresh (refetchInterval)
+       - keepPreviousData to avoid layout shift
+       - Exposes isFetching, dataUpdatedAt, refetch
+[DONE] Wagmi v3 config — EVM chains: mainnet, Base, Arbitrum, Optimism, Polygon, Avalanche
+[DONE] Shared position type: AerodromePosition (app/lib/aerodrome.ts)
+[DONE] tsconfig.json: ES2020 target (required for BigInt)
+
+--- EVM INTEGRATIONS ---
+[DONE] Aerodrome (Base)
+       - app/api/aerodrome/route.ts
+       - Sugar V3 contract, 0x0d0154a9 selector + CL_FACTORY param
+       - All 3 prior positions are closed (liquidity=0), shown as 'Closed'
+[DONE] Uniswap V3 (Ethereum, Arbitrum, Polygon, Optimism)
+       - app/api/uniswap/v3/route.ts
+       - NonfungiblePositionManager 0xC36442...
+       - Tick math for sqrtPrice-based amount calculation
+[DONE] Velodrome (Optimism)
+       - app/api/velodrome/route.ts
+       - Sugar, selector 0xedbd33bf (3 args, NO factory param)
+[DONE] HyperSwap V3 + KittenSwap + ProjectX (HyperEVM)
+       - app/api/hyperswap/route.ts (all 3 in one route)
+       - Public RPC https://rpc.hyperliquid.xyz/evm (no API key)
+       - positions() selector 0x99fbab88 (NOT 0x99fd0e82)
+       - Actual sqrtPriceX96 from slot0() for correct amounts
+       - Pending fees via feeGrowthInside math
+       - PRJX factory hardcoded: 0xff7b3e8c00e57ea31477c32a5b52a58eea47b072
+       - DefiLlama: project-x, chain "Hyperliquid L1"
+
+--- SOLANA INTEGRATIONS ---
+[DONE] Raydium CLMM
+       - app/api/raydium/route.ts
+       - Helius RPC (HELIUS_API_KEY env var, server-only)
+       - Program: CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
+       - getNftMints queries TOKEN_PROGRAM + TOKEN_PROGRAM_2022
+[DONE] Orca Whirlpools
+       - app/api/orca/route.ts
+       - Program: whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc
+       - Token2022 NFTs supported
+       - Pending fees via calcFeeGrowthInside + tick arrays
+
+--- SUI INTEGRATIONS ---
+[DONE] Cetus CLMM
+       - app/api/cetus/route.ts
+       - Sui public RPC https://fullnode.mainnet.sui.io:443
+       - Cursor-based pagination (50/page, loops until hasNextPage=false)
+[DONE] Bluefin
+       - app/api/bluefin/route.ts
+       - Sui public RPC
+       - Pending fees via Q64 fee growth math (>> 64n, NOT >> 128n)
+       - Cursor-based pagination
+[DONE] Momentum
+       - app/api/momentum/route.ts
+       - Package: 0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860
+       - Q64 scaling, ticks Table (direct, not nested in ticks_manager)
+       - Cursor-based pagination
+       - Not on DefiLlama (APY = 0%)
+
+--- PRICE / APY DATA ---
+[DONE] CoinGecko simple/price endpoint (60s revalidation)
+[DONE] DefiLlama yields API (300s revalidation)
+       - Median apyBase per token-pair key
+       - HyperEVM chain name = "Hyperliquid L1" (NOT "HyperEVM")
+       - ProjectX project name = "project-x" (with hyphen)
+
+--- WALLET CONNECTION ---
+[DONE] EVM: MetaMask via wagmi injected connector
+[DONE] Solana: @solana/wallet-adapter-react + Phantom
+[DONE] Sui: @mysten/dapp-kit (useWallets, useConnectWallet, useCurrentAccount)
+[DONE] WalletAuthContext (app/contexts/WalletAuthContext.tsx)
+       - Explicit consent tracking — locked wallets NEVER auto-connect
+       - Stores solanaAddress, suiAddress (null until user connects)
+       - awaitingConnect ref pattern to avoid stale closures
+       - All components read from WalletAuthContext, never from adapter state
+
+--- DASHBOARD & UI ---
+[DONE] Dashboard page (app/dashboard/page.tsx)
+       - Stats row: Total Value, Total Fees, Positions count
+       - Filter by status (All / In Range / Out of Range / Closed)
+       - Search by pair/protocol/chain
+       - Sort: Value, APY, Fees, Status
+       - Sort always groups In Range → Out of Range → Closed (STATUS_ORDER primary)
+       - CSV export
+[DONE] Position cards
+       - Value, APY (/yr + /mo + /day breakdown), Fees, Status badge
+       - Closed positions: opacity-50, grey status badge
+[DONE] Position detail page (app/dashboard/[id])
+       - Tick range → USD price range (1.0001^tick × 10^(d0-d1))
+       - Est. Daily Fees and Monthly Yield (pool APY × value projection)
+       - Fee tier display
+[DONE] Portfolio history chart
+       - localStorage snapshots every 60s (lp-portfolio-history key)
+       - Caps at 1000 points, prunes >30 days
+       - Range buttons: 1D / 7D / 30D / 90D / 1Y
+       - P&L labeled "since [date]" when data coverage < 50% of range
+[DONE] Wallet page (app/wallet/page.tsx)
+       - EVM: ETH + ERC-20 balances via Alchemy
+       - Solana: SOL + SPL balances via Helius
+       - Sui: all coin balances via suix_getAllBalances
+[DONE] Analytics page (app/analytics)
+       - Recharts visualizations (demo data)
+
+--- BUG FIXES ---
+[DONE] Wallet auto-connect when locked
+       - Root cause: Wallet Standard silently reconnects trusted dApps
+       - Fix: WalletAuthContext explicit consent; never read adapter.connected/publicKey for display
+[DONE] Closed positions explanation note
+       - Dashboard shows info banner when Solana/Sui wallet connected
+       - Explains: burned NFTs (Solana) and destroyed objects (Sui) are unrecoverable
+       - Cetus/Bluefin/Momentum pagination verified correct (cursor-based, no limit)
+
+====================================================
+TODO — NEXT UP
+====================================================
+
+--- FEATURE 1: IMPERMANENT LOSS CALCULATOR ---
+
+Step 1: API changes (all 9 routes)
+[ ] app/api/aerodrome/route.ts    — add liquidity (string), price0, price1 to response
+[ ] app/api/uniswap/v3/route.ts   — add liquidity (string), price0, price1 to response
+[ ] app/api/velodrome/route.ts    — add liquidity (string), price0, price1 to response
+[ ] app/api/hyperswap/route.ts    — add liquidity (string), price0, price1 to response
+[ ] app/api/raydium/route.ts      — add liquidity (string), price0, price1 to response
+[ ] app/api/orca/route.ts         — add liquidity (string), price0, price1 to response
+[ ] app/api/cetus/route.ts        — add liquidity (string), price0, price1 to response
+[ ] app/api/bluefin/route.ts      — add liquidity (string), price0, price1 to response
+[ ] app/api/momentum/route.ts     — add liquidity (string), price0, price1 to response
+[ ] app/lib/aerodrome.ts (type)   — add liquidity?: string, price0?: number, price1?: number
+
+Step 2: Detail page IL section
+[ ] Implement IL calculation function (entryTick midpoint → entryAmounts → hodlValue → ilUSD/ilPct)
+[ ] Add "Impermanent Loss" section to app/dashboard/[id]/page.tsx
+    - Entry price (est.), HODL value, Current value, IL $ + IL %
+    - Hidden for closed positions or missing price data
+    - Footnote: "Estimated from range midpoint — not your actual entry"
+
+Step 3: Dashboard Total IL stat tile
+[ ] Aggregate IL across all calculable positions in dashboard
+[ ] Add 4th stat tile to dashboard stats row: Total IL ($ + %)
+[ ] Tile hidden/grey if no calculable positions
+
+Step 4: Verify & ship
+[ ] npm run build — no TypeScript errors
+[ ] Test with all 3 wallets connected; confirm at least one non-zero IL shows
+[ ] Push to GitHub
+
+--- FEATURE 2: WALLET ADDRESS BADGES ---
+
+[ ] Add walletAddress: string to all 9 API route responses (pass account param through)
+[ ] Add walletAddress?: string to AerodromePosition type
+[ ] Update all lib wrappers if needed (check if spread already passes it)
+[ ] Dashboard card: show ...{last4} badge after chain name
+[ ] Hide badge when ≤1 wallet is connected (check hasWallet logic)
+[ ] npm run build + test + push
+
+--- FEATURE 3: FUTURE PROTOCOL INTEGRATIONS ---
+
+Phase A — EVM DEXes (one session each)
+[ ] Camelot V3 (Arbitrum) — research spNFT staking, add route
+[ ] Trader Joe V2 (Avalanche/Arbitrum) — research Liquidity Book bin math
+[ ] SushiSwap V3 (multi-chain) — standard Uni V3 fork pattern
+
+Phase B — Solana
+[ ] Jupiter — research if user-owned liquidity positions exist on-chain
+[ ] Drift Protocol — research vault/liquidity position structure
+
+Phase C — Sui
+[ ] Turbos Finance — research position object type, CLMM math
+[ ] FlowX — research position structure
+[ ] DeepBook — research (order book, not CLMM — may be out of scope)
+
+====================================================
+KNOWN LIMITATIONS (by design)
+====================================================
+
+- Solana: Burned NFTs (fully closed Orca/Raydium positions) cannot be recovered
+- Sui: Destroyed position objects (Cetus/Bluefin/Momentum) cannot be recovered
+- HyperEVM APY from DefiLlama is pool-wide (~50%); prjx.com shows position-specific concentrated APR (~129%) — difference is expected for CLMM positions
+- ProjectX (PRJX) not indexed on DefiLlama as "projectx" — correct name is "project-x"
+- Momentum (Sui) not on DefiLlama — APY always 0%
+- Aerodrome: positions are staked in gauges, not held as NFTs — complex to track individually
+- Est. Daily/Monthly Fees on detail page are pool-APY projections, not position-specific earnings
