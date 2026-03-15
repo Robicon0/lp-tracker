@@ -1,5 +1,5 @@
 LP Tracker — Progress
-Last updated: 2026-03-15
+Last updated: 2026-03-16
 ====================================================
 
 ====================================================
@@ -138,14 +138,12 @@ TODO — NEXT UP
        - Red if negative, green if positive, grey "—" if no calculable positions
        - Stats row changed to grid-cols-2 md:grid-cols-4 (2×2 on mobile)
 
---- FEATURE 2: WALLET ADDRESS BADGES ---
+--- FEATURE 2: WALLET ADDRESS BADGES --- DONE ✅
 
-[ ] Add walletAddress: string to all 9 API route responses (pass account param through)
-[ ] Add walletAddress?: string to AerodromePosition type
-[ ] Update all lib wrappers if needed (check if spread already passes it)
-[ ] Dashboard card: show ...{last4} badge after chain name
-[ ] Hide badge when ≤1 wallet is connected (check hasWallet logic)
-[ ] npm run build + test + push
+[DONE] Add walletAddress: account to all 9 API route responses
+[DONE] Add walletAddress?: string to AerodromePosition type
+[DONE] Dashboard card: show ...{last4} badge after chain name (text-gray-600 text-xs font-mono)
+[DONE] Badge hidden when ≤1 wallet connected (connectedWalletCount >= 2 check)
 
 --- FEATURE 3: FUTURE PROTOCOL INTEGRATIONS ---
 
