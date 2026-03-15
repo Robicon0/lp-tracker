@@ -311,6 +311,7 @@ export async function GET(request: Request) {
         liquidity: liquidity.toString(),
         price0: priceA,
         price1: priceB,
+        walletAddress: account,
       };
     });
 

@@ -50,6 +50,7 @@ export default function Dashboard() {
   useEffect(() => setMounted(true), []);
 
   const hasWallet = mounted && !!(address || solanaAddress || suiAddress);
+  const connectedWalletCount = mounted ? [address, solanaAddress, suiAddress].filter(Boolean).length : 0;
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
@@ -408,7 +409,12 @@ export default function Dashboard() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="text-xl font-bold">{pos.pair}</h3>
-                    <p className="text-gray-400 text-sm">{pos.protocol} • {pos.chain}</p>
+                    <p className="text-gray-400 text-sm">
+                      {pos.protocol} • {pos.chain}
+                      {connectedWalletCount >= 2 && pos.walletAddress && (
+                        <span className="ml-2 text-gray-600 text-xs font-mono">...{pos.walletAddress.slice(-4)}</span>
+                      )}
+                    </p>
                   </div>
                   <span
                     className={`px-3 py-1 rounded-full text-sm ${

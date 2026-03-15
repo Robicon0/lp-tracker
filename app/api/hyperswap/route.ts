@@ -511,6 +511,7 @@ export async function GET(request: Request) {
         liquidity: pos.liquidity.toString(),
         price0,
         price1,
+        walletAddress: account,
       };
     });
 

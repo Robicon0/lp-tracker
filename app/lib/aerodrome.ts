@@ -22,6 +22,7 @@ export interface AerodromePosition {
   liquidity?: string;
   price0?: number;
   price1?: number;
+  walletAddress?: string;
 }
 
 interface AerodromeResponse {

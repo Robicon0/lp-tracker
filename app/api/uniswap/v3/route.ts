@@ -383,6 +383,7 @@ async function fetchPositionsForChain(
           liquidity: pos.liquidity.toString(),
           price0,
           price1,
+          walletAddress: account,
         });
       } catch (err) {
         console.error(`Error processing token ${tokenId} on ${chainKey}:`, err);
