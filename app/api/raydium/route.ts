@@ -409,6 +409,9 @@ export async function GET(request: Request) {
         tickUpper: pos.tickUpper,
         token0Decimals: t0Decimals,
         token1Decimals: t1Decimals,
+        liquidity: pos.liquidity.toString(),
+        price0,
+        price1,
       };
     });
 

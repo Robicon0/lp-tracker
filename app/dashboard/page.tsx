@@ -116,6 +116,31 @@ export default function Dashboard() {
   const totalFees = allPositions.reduce((sum, p) => sum + p.fees, 0);
   const uniqueChains = new Set(allPositions.map(p => p.chain)).size;
 
+  const STABLES_SET = useMemo(() => new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]), []);
+  const { totalILUSD, totalILHodlValue } = useMemo(() => {
+    let sumIL = 0, sumHodl = 0;
+    for (const pos of allPositions) {
+      if (pos.status === "Closed") continue;
+      if (!pos.liquidity || !pos.price0 || !pos.price1 || pos.tickLower == null || pos.tickUpper == null) continue;
+      const L = Number(pos.liquidity);
+      if (L === 0) continue;
+      const d0 = pos.token0Decimals ?? 18;
+      const d1 = pos.token1Decimals ?? 18;
+      const entryTick = Math.floor((pos.tickLower + pos.tickUpper) / 2);
+      const sqrtPe = Math.sqrt(Math.pow(1.0001, entryTick));
+      const sqrtLower = Math.sqrt(Math.pow(1.0001, pos.tickLower));
+      const sqrtUpper = Math.sqrt(Math.pow(1.0001, pos.tickUpper));
+      if (!isFinite(sqrtPe) || sqrtPe === 0 || !isFinite(sqrtLower) || !isFinite(sqrtUpper)) continue;
+      const a0 = Math.max(0, L * (1 / sqrtPe - 1 / sqrtUpper)) / Math.pow(10, d0);
+      const a1 = Math.max(0, L * (sqrtPe - sqrtLower)) / Math.pow(10, d1);
+      const hodlVal = a0 * pos.price0 + a1 * pos.price1;
+      if (hodlVal <= 0) continue;
+      sumIL += pos.value - hodlVal;
+      sumHodl += hodlVal;
+    }
+    return { totalILUSD: sumIL, totalILHodlValue: sumHodl };
+  }, [allPositions, STABLES_SET]);
+
   const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
 
@@ -184,7 +209,7 @@ export default function Dashboard() {
         </div>
 
         {/* Stats Cards */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-6">
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <p className="text-gray-400 text-sm mb-2">Total Portfolio Value</p>
             <p className="text-3xl font-bold">${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
@@ -198,6 +223,21 @@ export default function Dashboard() {
             <p className="text-gray-400 text-sm mb-2">Total Fees Earned</p>
             <p className="text-3xl font-bold">${totalFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             <p className="text-gray-400 text-sm mt-2">All time</p>
+          </div>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+            <p className="text-gray-400 text-sm mb-2">Total IL</p>
+            {totalILHodlValue > 0 ? (
+              <>
+                <p className={`text-3xl font-bold ${totalILUSD < 0 ? "text-red-400" : "text-green-400"}`}>
+                  {totalILUSD < 0 ? "−" : "+"}${Math.abs(totalILUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className={`text-sm mt-2 ${totalILUSD < 0 ? "text-red-400/70" : "text-green-400/70"}`}>
+                  {totalILUSD >= 0 ? "+" : ""}{((totalILUSD / totalILHodlValue) * 100).toFixed(2)}% vs HODL
+                </p>
+              </>
+            ) : (
+              <p className="text-3xl font-bold text-gray-600">—</p>
+            )}
           </div>
         </div>
 

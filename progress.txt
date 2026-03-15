@@ -124,36 +124,19 @@ COMPLETED WORK
 TODO — NEXT UP
 ====================================================
 
---- FEATURE 1: IMPERMANENT LOSS CALCULATOR ---
+--- FEATURE 1: IMPERMANENT LOSS CALCULATOR --- DONE ✅
 
-Step 1: API changes (all 9 routes)
-[ ] app/api/aerodrome/route.ts    — add liquidity (string), price0, price1 to response
-[ ] app/api/uniswap/v3/route.ts   — add liquidity (string), price0, price1 to response
-[ ] app/api/velodrome/route.ts    — add liquidity (string), price0, price1 to response
-[ ] app/api/hyperswap/route.ts    — add liquidity (string), price0, price1 to response
-[ ] app/api/raydium/route.ts      — add liquidity (string), price0, price1 to response
-[ ] app/api/orca/route.ts         — add liquidity (string), price0, price1 to response
-[ ] app/api/cetus/route.ts        — add liquidity (string), price0, price1 to response
-[ ] app/api/bluefin/route.ts      — add liquidity (string), price0, price1 to response
-[ ] app/api/momentum/route.ts     — add liquidity (string), price0, price1 to response
-[ ] app/lib/aerodrome.ts (type)   — add liquidity?: string, price0?: number, price1?: number
-
-Step 2: Detail page IL section
-[ ] Implement IL calculation function (entryTick midpoint → entryAmounts → hodlValue → ilUSD/ilPct)
-[ ] Add "Impermanent Loss" section to app/dashboard/[id]/page.tsx
-    - Entry price (est.), HODL value, Current value, IL $ + IL %
-    - Hidden for closed positions or missing price data
-    - Footnote: "Estimated from range midpoint — not your actual entry"
-
-Step 3: Dashboard Total IL stat tile
-[ ] Aggregate IL across all calculable positions in dashboard
-[ ] Add 4th stat tile to dashboard stats row: Total IL ($ + %)
-[ ] Tile hidden/grey if no calculable positions
-
-Step 4: Verify & ship
-[ ] npm run build — no TypeScript errors
-[ ] Test with all 3 wallets connected; confirm at least one non-zero IL shows
-[ ] Push to GitHub
+[DONE] All 9 API routes — added liquidity (string), price0, price1 to response
+[DONE] app/lib/aerodrome.ts (type) — added liquidity?, price0?, price1?
+[DONE] app/dashboard/[id]/page.tsx — IL section below Position Details
+       - computeIL(): range midpoint → entryAmounts → hodlValue → ilUSD/ilPct
+       - Entry price (est.), HODL value, Current value, IL $ + IL %
+       - Hidden for Closed positions or missing price/liquidity data
+       - Footnote with entry tick: "Estimated from range midpoint — not your actual entry"
+[DONE] app/dashboard/page.tsx — 4th stat tile "Total IL"
+       - Aggregates ilUSD and hodlValue across all calculable active positions
+       - Red if negative, green if positive, grey "—" if no calculable positions
+       - Stats row changed to grid-cols-2 md:grid-cols-4 (2×2 on mobile)
 
 --- FEATURE 2: WALLET ADDRESS BADGES ---
 

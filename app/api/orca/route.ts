@@ -553,6 +553,9 @@ export async function GET(request: Request) {
         tickUpper: pos.tickUpperIndex,
         token0Decimals: tADecimals,
         token1Decimals: tBDecimals,
+        liquidity: pos.liquidity.toString(),
+        price0: priceA,
+        price1: priceB,
       };
     });
 

@@ -273,6 +273,9 @@ export async function GET(request: Request) {
         tickUpper: raw.tick_upper,
         token0Decimals: t0Decimals,
         token1Decimals: t1Decimals,
+        liquidity: totalLiquidity.toString(),
+        price0,
+        price1,
       };
     });
 

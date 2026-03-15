@@ -41,6 +41,68 @@ function buildTickRangeLabel(
   }
 }
 
+interface ILData {
+  entryPriceUSD: number;
+  entryPriceLabel: string;
+  entryTick: number;
+  hodlValue: number;
+  ilUSD: number;
+  ilPct: number;
+}
+
+function computeIL(
+  liquidity: string,
+  price0: number,
+  price1: number,
+  tickLower: number,
+  tickUpper: number,
+  decimals0: number,
+  decimals1: number,
+  sym0: string,
+  sym1: string,
+  currentValue: number,
+): ILData | null {
+  if (!liquidity || price0 === 0 || price1 === 0) return null;
+  const L = Number(liquidity);
+  if (L === 0) return null;
+
+  const entryTick = Math.floor((tickLower + tickUpper) / 2);
+  const sqrtPe = Math.sqrt(Math.pow(1.0001, entryTick));
+  const sqrtLower = Math.sqrt(Math.pow(1.0001, tickLower));
+  const sqrtUpper = Math.sqrt(Math.pow(1.0001, tickUpper));
+
+  if (!isFinite(sqrtPe) || sqrtPe === 0 || !isFinite(sqrtLower) || !isFinite(sqrtUpper)) return null;
+
+  const entryAmount0 = Math.max(0, L * (1 / sqrtPe - 1 / sqrtUpper)) / Math.pow(10, decimals0);
+  const entryAmount1 = Math.max(0, L * (sqrtPe - sqrtLower)) / Math.pow(10, decimals1);
+
+  const hodlValue = entryAmount0 * price0 + entryAmount1 * price1;
+  if (hodlValue <= 0) return null;
+
+  const ilUSD = currentValue - hodlValue;
+  const ilPct = (ilUSD / hodlValue) * 100;
+
+  // Token0 price in USD at entry tick
+  const entryPriceToken0USD = Math.pow(1.0001, entryTick) * Math.pow(10, decimals0 - decimals1) * price1;
+
+  let entryPriceUSD: number;
+  let entryPriceLabel: string;
+  if (STABLES.has(sym1)) {
+    entryPriceUSD = entryPriceToken0USD;
+    entryPriceLabel = sym0;
+  } else if (STABLES.has(sym0)) {
+    entryPriceUSD = entryPriceToken0USD > 0 ? 1 / entryPriceToken0USD : 0;
+    entryPriceLabel = sym1;
+  } else {
+    entryPriceUSD = entryPriceToken0USD;
+    entryPriceLabel = sym0;
+  }
+
+  if (!isFinite(entryPriceUSD) || entryPriceUSD <= 0) return null;
+
+  return { entryPriceUSD, entryPriceLabel, entryTick, hodlValue, ilUSD, ilPct };
+}
+
 export default function PositionDetail() {
   const { id } = useParams<{ id: string }>();
   const { positions, isLoading } = usePositions();
@@ -82,6 +144,28 @@ export default function PositionDetail() {
 
   const estimatedDailyFees = (pos.value * pos.apy) / 100 / 365;
   const estimatedMonthlyYield = (pos.value * pos.apy) / 100 / 12;
+
+  const ilData: ILData | null =
+    pos.status !== "Closed" &&
+    pos.liquidity != null &&
+    pos.price0 != null &&
+    pos.price1 != null &&
+    pos.tickLower != null &&
+    pos.tickUpper != null
+      ? computeIL(
+          pos.liquidity,
+          pos.price0,
+          pos.price1,
+          pos.tickLower,
+          pos.tickUpper,
+          pos.token0Decimals ?? 18,
+          pos.token1Decimals ?? 18,
+          pos.token0Symbol ?? "",
+          pos.token1Symbol ?? "",
+          pos.value,
+        )
+      : null;
+
   const hasTokenBreakdown = pos.amount0 != null && pos.amount1 != null;
   const hasFeeBreakdown = pos.fees0 != null && pos.fees1 != null;
   const hasTickRange = pos.tickLower != null && pos.tickUpper != null;
@@ -243,6 +327,44 @@ export default function PositionDetail() {
             </div>
           </div>
         </div>
+
+        {/* Impermanent Loss */}
+        {ilData && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-bold mb-4">Impermanent Loss</h2>
+            <div className="space-y-0">
+              <div className="flex justify-between py-3 border-b border-gray-800">
+                <span className="text-gray-400">Entry price (est.)</span>
+                <span className="font-semibold">
+                  {formatPrice(ilData.entryPriceUSD)} / {ilData.entryPriceLabel}
+                </span>
+              </div>
+              <div className="flex justify-between py-3 border-b border-gray-800">
+                <span className="text-gray-400">HODL value</span>
+                <span className="font-semibold">
+                  ${ilData.hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between py-3 border-b border-gray-800">
+                <span className="text-gray-400">Current value</span>
+                <span className="font-semibold">
+                  ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-400">IL</span>
+                <span className={`font-semibold ${ilData.ilUSD < 0 ? "text-red-400" : "text-green-400"}`}>
+                  {ilData.ilUSD < 0 ? "−" : "+"}$
+                  {Math.abs(ilData.ilUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {" "}({ilData.ilUSD >= 0 ? "+" : ""}{ilData.ilPct.toFixed(2)}%)
+                </span>
+              </div>
+            </div>
+            <p className="text-gray-600 text-xs mt-3">
+              Estimated from range midpoint · tick {ilData.entryTick} — not your actual entry
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

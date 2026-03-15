@@ -380,6 +380,9 @@ async function fetchPositionsForChain(
           tickUpper: pos.tickUpper,
           token0Decimals: t0Info.decimals,
           token1Decimals: t1Info.decimals,
+          liquidity: pos.liquidity.toString(),
+          price0,
+          price1,
         });
       } catch (err) {
         console.error(`Error processing token ${tokenId} on ${chainKey}:`, err);

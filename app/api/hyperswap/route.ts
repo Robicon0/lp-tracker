@@ -508,6 +508,9 @@ export async function GET(request: Request) {
         tickUpper: pos.tickUpper,
         token0Decimals: t0Info.decimals,
         token1Decimals: t1Info.decimals,
+        liquidity: pos.liquidity.toString(),
+        price0,
+        price1,
       };
     });
 

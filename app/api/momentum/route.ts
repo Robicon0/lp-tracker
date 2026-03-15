@@ -375,6 +375,9 @@ export async function GET(request: Request) {
         tickUpper,
         token0Decimals: decimalsX,
         token1Decimals: decimalsY,
+        liquidity: liquidity.toString(),
+        price0: priceX,
+        price1: priceY,
       };
     });
 
