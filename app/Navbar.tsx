@@ -163,7 +163,7 @@ export default function Navbar() {
               {/* Solana Wallet */}
               {mounted && solanaAddress ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-gray-900 border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono">
+                  <span className="bg-gray-900 border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono whitespace-nowrap">
                     ◎ {truncateAddress(solanaAddress)}
                   </span>
                   <button onClick={handleSolanaDisconnect} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
@@ -182,8 +182,8 @@ export default function Navbar() {
               {/* Sui Wallet */}
               {mounted && suiAddress ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-gray-900 border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-sm font-mono">
-                    🌊 {truncateAddress(suiAddress)}
+                  <span className="bg-gray-900 border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-sm font-mono whitespace-nowrap">
+                    ◈ {truncateAddress(suiAddress)}
                   </span>
                   <button onClick={handleSuiDisconnect} className="text-gray-400 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
