@@ -147,24 +147,58 @@ TODO — NEXT UP
 
 --- FEATURE 3: FUTURE PROTOCOL INTEGRATIONS --- DEFERRED ⏸
 
-User has no positions on any of these protocols.
-Will revisit when user opens a position on one of them.
+User has no positions on these. Revisit when user opens a position.
+(Camelot V3, SushiSwap V3, Jupiter, Drift, Turbos, FlowX, DeepBook)
+Trader Joe V2 removed from scope entirely.
 
-Phase A — EVM DEXes
-[ ] Camelot V3 (Arbitrum) — research spNFT staking, add route
-[ ] Trader Joe V2 (Avalanche/Arbitrum) — research Liquidity Book bin math
-[ ] SushiSwap V3 (multi-chain) — standard Uni V3 fork pattern
+====================================================
+PHASE 2 — MULTI-CHAIN EXPANSION + WATCH WALLET
+====================================================
+Started: 2026-03-16
 
-Phase B — Solana
-[ ] Jupiter — research if user-owned liquidity positions exist on-chain
-[ ] Drift Protocol — research vault/liquidity position structure
+--- FEATURE 4: PANCAKESWAP V3 (BNB CHAIN) ---
 
-Phase C — Sui
-[ ] Turbos Finance — research position object type, CLMM math
-[ ] FlowX — research position structure
-[ ] DeepBook — research (order book, not CLMM — may be out of scope)
+[ ] Add ALCHEMY_BSC_KEY to .env.local + Vercel env vars
+[ ] Create app/api/pancakeswap/route.ts
+    - NFT Manager: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+    - Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    - Chain ID: 56, chain name: "BNB Chain"
+    - Verify positions() selector (standard 0x99fd0e82 or custom?)
+    - KNOWN_TOKENS: WBNB, USDT, USDC, BUSD, CAKE, ETH on BSC
+    - Returns: liquidity, price0, price1, walletAddress
+[ ] Create app/lib/pancakeswap.ts (thin fetch wrapper)
+[ ] Wire into PositionsContext (fires when EVM wallet connected)
+[ ] Verify on dashboard with test address
 
---- POST-PRD ROADMAP ---
+--- FEATURE 5: WATCH WALLET ---
+
+[ ] Create app/contexts/WatchedWalletsContext.tsx
+    - localStorage key: "lp-watched-wallets"
+    - WatchedWallet type: { address, chain, label?, addedAt }
+    - Expose: watchedWallets[], addWallet(), removeWallet()
+[ ] Quick-add bar on dashboard (below stats row)
+    - Text input + chain selector (EVM/Solana/Sui/Aptos) + Watch button
+    - Validate address format per chain
+    - Inline error display
+[ ] Integrate watched wallets into PositionsContext
+    - For each watched wallet: call matching API routes
+    - EVM → Aerodrome, Uni V3, Velodrome, HyperSwap, PancakeSwap
+    - Solana → Raydium + Orca
+    - Sui → Cetus + Bluefin + Momentum
+[ ] Create app/watched/page.tsx (management page)
+    - List all watched wallets with Remove button
+    - Optional label editing
+    - Link from Navbar
+[ ] Verify: positions from watched wallets appear on dashboard with badge
+
+--- FEATURE 6: APTOS (SPECULATIVE — DEFERRED) ---
+
+[ ] Skip until user has active Aptos LP positions
+    Wallet adapter: @aptos-labs/wallet-adapter-react
+    Protocols: Liquidswap, Thala
+    RPC: https://fullnode.mainnet.aptoslabs.com/v1 (no key)
+
+--- POST-PRD BACKLOG ---
 
 [ ] Remove demo data — show empty state with connect-wallet prompt when no wallet connected
 

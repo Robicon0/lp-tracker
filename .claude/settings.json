@@ -50,7 +50,8 @@
       "Bash(curl -s -m 5 \"https://api.prjx.com/v2/pools\")",
       "Bash(curl -s -m 5 \"https://api.prjx.com/stats\")",
       "Bash(curl -s \"https://yields.llama.fi/chart/86eb8c44-6acd-4049-a434-6a6f82e81477\")",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "WebSearch"
     ]
   }
 }

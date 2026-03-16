@@ -222,23 +222,206 @@ For each: new route at `app/api/{protocol}/route.ts`, lib wrapper, add to Positi
 - Mobile UI polish — deferred until higher priority items are complete
 - Manual entry price override for IL — auto midpoint is sufficient
 - Multiple simultaneous EVM wallets — current one-EVM-at-a-time is sufficient
-- Read-only watch addresses — not needed given current wallet setup
 - Historical IL tracking — no on-chain transaction history queries
 
 ---
 
-## Implementation Priority
+## Implementation Priority (Phase 1)
 
 ```
-1. Feature 1: IL Calculator
-   a. Add liquidity/price0/price1 to all 9 API routes
-   b. IL section on detail page
-   c. Total IL tile on dashboard
+1. Feature 1: IL Calculator ✅
+2. Feature 2: Wallet badges ✅
+3. Feature 3: Protocol integrations — DEFERRED (no active positions)
+```
 
-2. Feature 2: Wallet badges
-   a. Add walletAddress to all API routes
-   b. Badge on position card
-   c. Hide logic when ≤1 wallet
+---
 
-3. Feature 3: Protocol integrations (as separate sessions per protocol)
+---
+
+# Phase 2: Multi-Chain Expansion + Watch Wallet
+
+_Last updated: 2026-03-16_
+
+## Priority Order
+
+```
+4. Feature 4: PancakeSwap V3 (BNB Chain)
+5. Feature 5: Watch Wallet
+6. Feature 6: Aptos + Liquidswap/Thala (speculative — no positions yet)
+```
+
+Trader Joe V2 removed from scope (user has no positions and Liquidity Book math is complex).
+
+---
+
+## Feature 4: PancakeSwap V3 (BNB Chain)
+
+### Overview
+
+Add BNB Chain support via PancakeSwap V3 — a direct Uni V3 fork. Reuse the existing pattern from `app/api/uniswap/v3/route.ts` with BSC-specific contract addresses and an Alchemy BSC RPC key.
+
+### Technical Details
+
+- **NFT Manager**: `0x46A15B0b27311cedF172AB29E4f4766fbE7F4364` (verified on BscScan)
+- **Factory**: `0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865`
+- **RPC**: Alchemy BSC endpoint — new env var `ALCHEMY_BSC_KEY`
+- **Chain ID**: 56
+- **Chain name**: `BNB Chain`
+- **Native token**: BNB
+- **DefiLlama project**: `pancakeswap-v3`, chain `BSC`
+- **positions() selector**: Standard Uni V3 `0x99fd0e82` (PancakeSwap V3 is a true fork — verify before shipping)
+- **Token resolution**: Hardcode common BSC tokens (WBNB, USDT, USDC, BUSD, CAKE, ETH); fallback to `eth_call` `symbol()/decimals()` for unknowns
+- **Env var**: `ALCHEMY_BSC_KEY` (server-only, NOT NEXT_PUBLIC) — must be added to Vercel too
+
+### Implementation Steps
+
+1. Add `ALCHEMY_BSC_KEY` to `.env.local`
+2. Create `app/api/pancakeswap/route.ts` — copy Uni V3 pattern, swap in BSC addresses + RPC
+3. Create `app/lib/pancakeswap.ts` — thin fetch wrapper
+4. Add to `PositionsContext.tsx` — fires when EVM wallet connected (BSC positions share EVM wallet)
+5. Update `KNOWN_TOKENS` map with BSC token addresses
+6. Verify `positions()` selector matches standard Uni V3 (or patch if different)
+7. Add to `progress.txt` + commit
+
+### Acceptance Criteria
+
+- [ ] `app/api/pancakeswap/route.ts` returns positions for BSC wallet
+- [ ] Positions appear on dashboard with protocol "PancakeSwap V3" and chain "BNB Chain"
+- [ ] APY from DefiLlama (0% if not indexed is acceptable)
+- [ ] IL calculator works (liquidity, price0, price1 included in response)
+- [ ] walletAddress included in response
+- [ ] Build passes with no TypeScript errors
+
+---
+
+## Feature 5: Watch Wallet
+
+### Overview
+
+Let the user paste any wallet address + select a chain to watch LP positions from any wallet — without connecting it. Watched wallets' positions are mixed into the main dashboard alongside connected wallets. Watched wallets are saved to localStorage and persist across sessions.
+
+### Scope
+
+- **No limit** on number of watched wallets
+- **Supported chains for watching**: EVM (all current chains incl. BNB), Solana, Sui, Aptos (placeholder — no integration yet)
+- Watched positions appear in the **main dashboard** (not a separate tab)
+- Wallet address badges (`...{last4}`) already implemented — watched wallets will show their badge naturally
+- Watched wallets are **read-only** — no connect/disconnect, just data fetching
+
+### 5.1 Data Model
+
+```ts
+// localStorage key: "lp-watched-wallets"
+type WatchedWallet = {
+  address: string        // full address string
+  chain: 'evm' | 'solana' | 'sui' | 'aptos'
+  label?: string         // optional user-set nickname
+  addedAt: number        // timestamp
+}
+```
+
+### 5.2 Quick-Add UI (Dashboard)
+
+Input bar below the stats row, always visible:
+
+```
+[ Total Value ] [ Total Fees ] [ Positions ] [ Total IL ]
+────────────────────────────────────────────────────────
+👁  0x1234abcd...  [Chain ▾]  [Watch]
+────────────────────────────────────────────────────────
+  Position cards...
+```
+
+- Text input: placeholder "Paste wallet address"
+- Chain dropdown: EVM / Solana / Sui / Aptos
+- "Watch" button: validates address format, saves to localStorage, triggers refetch
+- Shows inline error if address format doesn't match selected chain
+- Collapses/hides if no watched wallets and user hasn't focused it (optional UX improvement)
+
+### 5.3 Watched Wallets Management Page (`/watched`)
+
+Dedicated page listing all watched wallets:
+
+```
+Watched Wallets
+
+  EVM   0xAbCd...1234   (optional label)   [Remove]
+  SOL   GndR...ogC      My Solana wallet   [Remove]
+  SUI   0xef...3f4a                        [Remove]
+
+  [ + Add wallet ]
+```
+
+- Remove button deletes from localStorage + triggers refetch
+- Optional inline label editing
+- Linked from Navbar ("Watched" link or icon)
+
+### 5.4 Data Fetching Integration
+
+- `WatchedWalletsContext` (new context) — reads from localStorage, exposes `watchedWallets[]` and `addWallet/removeWallet`
+- `PositionsContext` imports `WatchedWalletsContext` — for each watched wallet, calls the matching API route(s) and pushes to the positions array
+- EVM watched wallets: call Aerodrome, Uni V3, Velodrome, HyperSwap, PancakeSwap routes with the watched address
+- Solana watched wallets: call Raydium + Orca routes
+- Sui watched wallets: call Cetus + Bluefin + Momentum routes
+- Positions from watched wallets get `walletAddress` set to the watched address — badge shows naturally
+
+### Acceptance Criteria
+
+- [ ] Quick-add bar on dashboard accepts address + chain, saves to localStorage
+- [ ] Watched wallet positions appear mixed into main dashboard
+- [ ] Wallet address badges distinguish watched vs connected wallets visually (same badge, different source)
+- [ ] `/watched` page lists all watched wallets with remove button
+- [ ] Removing a wallet instantly removes its positions from the dashboard
+- [ ] Watched wallets persist across page refresh
+- [ ] No limit enforced — many watched wallets work
+- [ ] Build passes with no TypeScript errors
+
+---
+
+## Feature 6: Aptos + Liquidswap / Thala (Speculative)
+
+### Overview
+
+Add Aptos chain support. No active positions yet — build it ready for future use. Lower priority; skip if no positions by the time Features 4 and 5 are done.
+
+### Technical Details (to be researched before building)
+
+- **Wallet adapter**: `@aptos-labs/wallet-adapter-react` (official Aptos wallet standard)
+- **Liquidswap**: Pontem Network CLMM on Aptos — position module TBD (research required)
+- **Thala**: Thala Labs AMM on Aptos — position module TBD (research required)
+- **RPC**: Aptos public fullnode `https://fullnode.mainnet.aptoslabs.com/v1` (no key needed)
+- **Position fetching**: Aptos REST API (`/accounts/{address}/resources`, `/accounts/{address}/events`) — no binary decoding, JSON REST
+- **DefiLlama**: chain `Aptos`, project names TBD
+
+### Status
+
+Speculative — no positions to test against. Research phase required before planning. **Do not build until user has active Aptos positions.**
+
+---
+
+## Phase 2 Non-Goals
+
+- Mobile UI polish — still deferred
+- Trader Joe V2 (Liquidity Book) — removed (no positions, complex math)
+- Multiple simultaneous EVM wallets — still one-EVM-at-a-time
+- Watch wallet notifications / alerts — out of scope
+
+---
+
+## Phase 2 Implementation Priority
+
+```
+4. Feature 4: PancakeSwap V3 (BNB Chain)
+   a. ALCHEMY_BSC_KEY env var
+   b. app/api/pancakeswap/route.ts
+   c. app/lib/pancakeswap.ts
+   d. Wire into PositionsContext
+
+5. Feature 5: Watch Wallet
+   a. WatchedWalletsContext + localStorage
+   b. Quick-add bar on dashboard
+   c. /watched management page
+   d. PositionsContext integration (fetch for each watched wallet)
+
+6. Feature 6: Aptos (only if user opens positions)
 ```
