@@ -139,6 +139,7 @@ export default function Navbar() {
               <Link href="/analytics" className="text-gray-300 hover:text-white transition-colors">Analytics</Link>
               <Link href="/about" className="text-gray-300 hover:text-white transition-colors">About</Link>
               <Link href="/wallet" className="text-gray-300 hover:text-white transition-colors">Wallet</Link>
+              <Link href="/watched" className="text-gray-300 hover:text-white transition-colors">Watched</Link>
 
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (
@@ -217,6 +218,7 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-gray-300 hover:text-white py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-gray-300 hover:text-white py-2">Analytics</Link>
               <Link href="/about" className="block text-gray-300 hover:text-white py-2">About</Link>
+              <Link href="/watched" className="block text-gray-300 hover:text-white py-2">Watched</Link>
 
               {/* EVM — mobile */}
               {isConnected && address ? (

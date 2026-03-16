@@ -5,6 +5,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
+import { useWatchedWallets } from "./WatchedWalletsContext";
 import { fetchUniswapV3Positions } from "../lib/uniswap";
 import { fetchVelodromePositions } from "../lib/velodrome";
 import { fetchRaydiumPositions } from "../lib/raydium";
@@ -39,14 +40,19 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // user connections. Adapter state (useWallet, useCurrentAccount) is not used
   // here because those can reflect locked/silent-reconnect state.
   const { solanaAddress, suiAddress } = useWalletAuth();
+  const { watchedWallets } = useWatchedWallets();
 
-  const hasWallet = !!(address || solanaAddress || suiAddress);
+  const hasWallet = !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0;
+
+  // Stable queryKey: stringify watched wallets so React Query refetches when they change
+  const watchedKey = watchedWallets.map((w) => `${w.chain}:${w.address}`).join(",");
 
   const { data: walletPositions, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
-    queryKey: ["positions", address, solanaAddress, suiAddress],
+    queryKey: ["positions", address, solanaAddress, suiAddress, watchedKey],
     queryFn: async () => {
       const promises: Promise<AerodromePosition[]>[] = [];
 
+      // Connected wallets
       if (address) {
         promises.push(
           fetchAerodromePositions(address),
@@ -70,6 +76,31 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
           fetchBluefinPositions(suiAddress),
           fetchMomentumPositions(suiAddress),
         );
+      }
+
+      // Watched wallets
+      for (const w of watchedWallets) {
+        if (w.chain === "evm") {
+          promises.push(
+            fetchAerodromePositions(w.address),
+            fetchUniswapV3Positions(w.address),
+            fetchVelodromePositions(w.address),
+            fetchHyperSwapPositions(w.address),
+            fetchPancakeSwapPositions(w.address),
+          );
+        } else if (w.chain === "solana") {
+          promises.push(
+            fetchRaydiumPositions(w.address),
+            fetchOrcaPositions(w.address),
+          );
+        } else if (w.chain === "sui") {
+          promises.push(
+            fetchCetusPositions(w.address),
+            fetchBluefinPositions(w.address),
+            fetchMomentumPositions(w.address),
+          );
+        }
+        // aptos: not yet implemented — skip silently
       }
 
       const results = await Promise.all(promises);

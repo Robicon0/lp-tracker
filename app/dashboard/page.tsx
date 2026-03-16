@@ -7,6 +7,7 @@ import PriceTicker from "../PriceTicker";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 
 const TIME_RANGES = [
@@ -49,8 +50,35 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const hasWallet = mounted && !!(address || solanaAddress || suiAddress);
-  const connectedWalletCount = mounted ? [address, solanaAddress, suiAddress].filter(Boolean).length : 0;
+  const { watchedWallets, addWallet, removeWallet } = useWatchedWallets();
+  const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
+  // Show wallet badges when multiple sources exist (connected + watched, or multiple connected)
+  const connectedWalletCount = mounted
+    ? [address, solanaAddress, suiAddress].filter(Boolean).length + watchedWallets.length
+    : 0;
+
+  // Watch wallet quick-add state
+  const [watchInput, setWatchInput] = useState("");
+  const [watchChain, setWatchChain] = useState<WatchedWalletChain>("evm");
+  const [watchError, setWatchError] = useState("");
+
+  function validateAddress(addr: string, chain: WatchedWalletChain): string {
+    if (!addr.trim()) return "Address is required";
+    if (chain === "evm" && !/^0x[0-9a-fA-F]{40}$/.test(addr)) return "Invalid EVM address (0x + 40 hex chars)";
+    if (chain === "solana" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return "Invalid Solana address";
+    if (chain === "sui" && !/^0x[0-9a-fA-F]{63,64}$/.test(addr)) return "Invalid Sui address (0x + 64 hex chars)";
+    if (chain === "aptos" && !/^0x[0-9a-fA-F]{64}$/.test(addr)) return "Invalid Aptos address (0x + 64 hex chars)";
+    return "";
+  }
+
+  function handleWatch() {
+    const err = validateAddress(watchInput.trim(), watchChain);
+    if (err) { setWatchError(err); return; }
+    addWallet(watchInput.trim(), watchChain);
+    setWatchInput("");
+    setWatchError("");
+  }
+
   const [chainFilter, setChainFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
@@ -241,6 +269,45 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {/* Watch Wallet Quick-Add */}
+        {mounted && (
+          <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+            <span className="text-gray-500 text-sm shrink-0">👁 Watch:</span>
+            <input
+              type="text"
+              value={watchInput}
+              onChange={(e) => { setWatchInput(e.target.value); setWatchError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && handleWatch()}
+              placeholder="Paste wallet address"
+              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500"
+            />
+            <select
+              value={watchChain}
+              onChange={(e) => { setWatchChain(e.target.value as WatchedWalletChain); setWatchError(""); }}
+              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 shrink-0"
+            >
+              <option value="evm">EVM</option>
+              <option value="solana">Solana</option>
+              <option value="sui">Sui</option>
+              <option value="aptos">Aptos</option>
+            </select>
+            <button
+              onClick={handleWatch}
+              className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-sm transition-colors shrink-0"
+            >
+              Watch
+            </button>
+            {watchedWallets.length > 0 && (
+              <Link href="/watched" className="text-blue-400 hover:text-blue-300 text-sm shrink-0 transition-colors">
+                Manage ({watchedWallets.length})
+              </Link>
+            )}
+          </div>
+        )}
+        {watchError && mounted && (
+          <p className="text-red-400 text-xs mt-1">{watchError}</p>
+        )}
 
         {/* Portfolio History */}
         {hasWallet && mounted && (

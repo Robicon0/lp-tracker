@@ -171,26 +171,25 @@ Started: 2026-03-16
 [DONE] Build passes (npm run build ✓)
 [ ] Confirm visually on dashboard (need BSC position to test)
 
---- FEATURE 5: WATCH WALLET ---
+--- FEATURE 5: WATCH WALLET --- DONE ✅
 
-[ ] Create app/contexts/WatchedWalletsContext.tsx
-    - localStorage key: "lp-watched-wallets"
-    - WatchedWallet type: { address, chain, label?, addedAt }
-    - Expose: watchedWallets[], addWallet(), removeWallet()
-[ ] Quick-add bar on dashboard (below stats row)
-    - Text input + chain selector (EVM/Solana/Sui/Aptos) + Watch button
-    - Validate address format per chain
-    - Inline error display
-[ ] Integrate watched wallets into PositionsContext
-    - For each watched wallet: call matching API routes
-    - EVM → Aerodrome, Uni V3, Velodrome, HyperSwap, PancakeSwap
-    - Solana → Raydium + Orca
-    - Sui → Cetus + Bluefin + Momentum
-[ ] Create app/watched/page.tsx (management page)
-    - List all watched wallets with Remove button
-    - Optional label editing
-    - Link from Navbar
-[ ] Verify: positions from watched wallets appear on dashboard with badge
+[DONE] app/contexts/WatchedWalletsContext.tsx
+       - localStorage key: "lp-watched-wallets"
+       - WatchedWallet: { address, chain, label?, addedAt }
+       - addWallet (dedup check), removeWallet, updateLabel
+[DONE] app/providers.tsx: WatchedWalletsProvider wraps PositionsProvider
+[DONE] PositionsContext: fetches watched wallets alongside connected wallets
+       - EVM → Aerodrome, Uni V3, Velodrome, HyperSwap, PancakeSwap
+       - Solana → Raydium + Orca; Sui → Cetus + Bluefin + Momentum
+       - hasWallet = connected OR watchedWallets.length > 0
+       - watchedKey in queryKey triggers refetch when wallets change
+[DONE] Dashboard quick-add bar (below stats row)
+       - Per-chain address validation, inline error, "Manage (N)" link
+       - connectedWalletCount includes watched wallets for badge visibility
+[DONE] app/watched/page.tsx — list, remove, inline label edit, add form
+[DONE] Navbar: "Watched" link (desktop + mobile)
+[DONE] Build passes (npm run build ✓)
+[ ] Confirm visually on dashboard
 
 --- FEATURE 6: APTOS (SPECULATIVE — DEFERRED) ---
 

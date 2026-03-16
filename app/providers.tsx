@@ -7,6 +7,7 @@ import { SuiClientProvider, WalletProvider as SuiWalletProvider, createNetworkCo
 import { config } from "./config/wagmi";
 import { PositionsProvider } from "./contexts/PositionsContext";
 import { WalletAuthProvider } from "./contexts/WalletAuthContext";
+import { WatchedWalletsProvider } from "./contexts/WatchedWalletsContext";
 
 const queryClient = new QueryClient();
 // Empty array: WalletProvider auto-detects any Solana Wallet Standard-compliant
@@ -27,9 +28,11 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             <QueryClientProvider client={queryClient}>
               <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
                 <SuiWalletProvider autoConnect={false}>
-                  <PositionsProvider>
-                    {children}
-                  </PositionsProvider>
+                  <WatchedWalletsProvider>
+                    <PositionsProvider>
+                      {children}
+                    </PositionsProvider>
+                  </WatchedWalletsProvider>
                 </SuiWalletProvider>
               </SuiClientProvider>
             </QueryClientProvider>
