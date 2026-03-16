@@ -145,9 +145,12 @@ TODO — NEXT UP
 [DONE] Dashboard card: show ...{last4} badge after chain name (text-gray-600 text-xs font-mono)
 [DONE] Badge hidden when ≤1 wallet connected (connectedWalletCount >= 2 check)
 
---- FEATURE 3: FUTURE PROTOCOL INTEGRATIONS ---
+--- FEATURE 3: FUTURE PROTOCOL INTEGRATIONS --- DEFERRED ⏸
 
-Phase A — EVM DEXes (one session each)
+User has no positions on any of these protocols.
+Will revisit when user opens a position on one of them.
+
+Phase A — EVM DEXes
 [ ] Camelot V3 (Arbitrum) — research spNFT staking, add route
 [ ] Trader Joe V2 (Avalanche/Arbitrum) — research Liquidity Book bin math
 [ ] SushiSwap V3 (multi-chain) — standard Uni V3 fork pattern
@@ -160,6 +163,10 @@ Phase C — Sui
 [ ] Turbos Finance — research position object type, CLMM math
 [ ] FlowX — research position structure
 [ ] DeepBook — research (order book, not CLMM — may be out of scope)
+
+--- POST-PRD ROADMAP ---
+
+[ ] Remove demo data — show empty state with connect-wallet prompt when no wallet connected
 
 ====================================================
 KNOWN LIMITATIONS (by design)

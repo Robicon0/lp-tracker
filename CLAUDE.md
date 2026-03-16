@@ -84,8 +84,11 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 
 ## Roadmap
 
-- Phase 2: Solana (Raydium/Orca) with Phantom wallet
-- Phase 3: Sui (Cetus/Bluefin/Momentum) with Sui wallet
+- ~~Phase 2: Solana (Raydium/Orca) with Phantom wallet~~ ✅ Done
+- ~~Phase 3: Sui (Cetus/Bluefin/Momentum) with Sui wallet~~ ✅ Done
+- ~~Feature 1: Impermanent Loss Calculator~~ ✅ Done
+- ~~Feature 2: Wallet Address Badges~~ ✅ Done
+- Feature 3: New protocol integrations (Camelot, Trader Joe, SushiSwap, etc.) — **deferred** (no active positions)
 - Remove demo data, show empty state when no wallet connected
 
 ## Dev Workflow
