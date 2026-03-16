@@ -156,19 +156,20 @@ PHASE 2 — MULTI-CHAIN EXPANSION + WATCH WALLET
 ====================================================
 Started: 2026-03-16
 
---- FEATURE 4: PANCAKESWAP V3 (BNB CHAIN) ---
+--- FEATURE 4: PANCAKESWAP V3 (BNB CHAIN) --- DONE ✅
 
-[ ] Add ALCHEMY_BSC_KEY to .env.local + Vercel env vars
-[ ] Create app/api/pancakeswap/route.ts
-    - NFT Manager: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
-    - Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
-    - Chain ID: 56, chain name: "BNB Chain"
-    - Verify positions() selector (standard 0x99fd0e82 or custom?)
-    - KNOWN_TOKENS: WBNB, USDT, USDC, BUSD, CAKE, ETH on BSC
-    - Returns: liquidity, price0, price1, walletAddress
-[ ] Create app/lib/pancakeswap.ts (thin fetch wrapper)
-[ ] Wire into PositionsContext (fires when EVM wallet connected)
-[ ] Verify on dashboard with test address
+[DONE] app/api/pancakeswap/route.ts
+       - NFT Manager: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+       - RPC: https://bnb-mainnet.g.alchemy.com/v2/${NEXT_PUBLIC_ALCHEMY_KEY} (no new env var)
+       - positions() selector: 0x99fd0e82 (standard Uni V3 fork)
+       - Correct int24 decode: last 3 bytes, sign-extend if >= 0x800000
+       - KNOWN_TOKENS: WBNB, USDT, USDC, BUSD, CAKE, ETH, BTCB, DAI
+       - DefiLlama: project=pancakeswap-v3, chain=BSC
+       - Returns: liquidity, price0, price1, walletAddress
+[DONE] app/lib/pancakeswap.ts (thin fetch wrapper)
+[DONE] PositionsContext: fetchPancakeSwapPositions fires with EVM wallet
+[DONE] Build passes (npm run build ✓)
+[ ] Confirm visually on dashboard (need BSC position to test)
 
 --- FEATURE 5: WATCH WALLET ---
 

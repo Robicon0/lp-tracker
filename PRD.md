@@ -264,19 +264,18 @@ Add BNB Chain support via PancakeSwap V3 — a direct Uni V3 fork. Reuse the exi
 
 - **NFT Manager**: `0x46A15B0b27311cedF172AB29E4f4766fbE7F4364` (verified on BscScan)
 - **Factory**: `0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865`
-- **RPC**: Alchemy BSC endpoint — new env var `ALCHEMY_BSC_KEY`
+- **RPC**: `https://bnb-mainnet.g.alchemy.com/v2/${NEXT_PUBLIC_ALCHEMY_KEY}` — same existing key, no new env var needed
 - **Chain ID**: 56
 - **Chain name**: `BNB Chain`
 - **Native token**: BNB
 - **DefiLlama project**: `pancakeswap-v3`, chain `BSC`
-- **positions() selector**: Standard Uni V3 `0x99fd0e82` (PancakeSwap V3 is a true fork — verify before shipping)
-- **Token resolution**: Hardcode common BSC tokens (WBNB, USDT, USDC, BUSD, CAKE, ETH); fallback to `eth_call` `symbol()/decimals()` for unknowns
-- **Env var**: `ALCHEMY_BSC_KEY` (server-only, NOT NEXT_PUBLIC) — must be added to Vercel too
+- **positions() selector**: Standard Uni V3 `0x99fd0e82` (PancakeSwap V3 is a true fork)
+- **Token resolution**: Hardcode common BSC tokens (WBNB, USDT, USDC, BUSD, CAKE, ETH, BTCB); fallback to `eth_call` `symbol()/decimals()` for unknowns
+- **No new env var needed** — Alchemy supports BNB Chain with the existing `NEXT_PUBLIC_ALCHEMY_KEY`
 
 ### Implementation Steps
 
-1. Add `ALCHEMY_BSC_KEY` to `.env.local`
-2. Create `app/api/pancakeswap/route.ts` — copy Uni V3 pattern, swap in BSC addresses + RPC
+1. Create `app/api/pancakeswap/route.ts` — copy Uni V3 pattern, swap in BSC addresses + RPC
 3. Create `app/lib/pancakeswap.ts` — thin fetch wrapper
 4. Add to `PositionsContext.tsx` — fires when EVM wallet connected (BSC positions share EVM wallet)
 5. Update `KNOWN_TOKENS` map with BSC token addresses
