@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import Navbar from "../../Navbar";
 import { usePositions } from "../../contexts/PositionsContext";
+import { usePositionActivity } from "../../hooks/usePositionActivity";
 
 const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
@@ -141,6 +142,14 @@ export default function PositionDetail() {
       </div>
     );
   }
+
+  // Aerodrome-only: on-chain activity (Current vs Invested)
+  const aeroTokenId = pos.protocol === 'Aerodrome' ? pos.id.replace('aero-', '') : null;
+  const { data: activity, isLoading: activityLoading } = usePositionActivity(
+    aeroTokenId,
+    pos.token0Decimals ?? 18,
+    pos.token1Decimals ?? 18,
+  );
 
   const estimatedDailyFees = (pos.value * pos.apy) / 100 / 365;
   const estimatedMonthlyYield = (pos.value * pos.apy) / 100 / 12;
@@ -363,6 +372,89 @@ export default function PositionDetail() {
             <p className="text-gray-600 text-xs mt-3">
               Estimated from range midpoint · tick {ilData.entryTick} — not your actual entry
             </p>
+          </div>
+        )}
+
+        {/* Assets: Current vs Invested (Aerodrome only) */}
+        {pos.protocol === 'Aerodrome' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-bold mb-4">Assets</h2>
+
+            {activityLoading && (
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="w-4 h-4 border border-gray-500 border-t-transparent rounded-full animate-spin" />
+                Scanning on-chain history…
+              </div>
+            )}
+
+            {!activityLoading && activity && (() => {
+              const p0 = pos.price0 ?? 0;
+              const p1 = pos.price1 ?? 0;
+              const sym0 = pos.token0Symbol ?? 'Token0';
+              const sym1 = pos.token1Symbol ?? 'Token1';
+              const cur0 = pos.amount0 ?? 0;
+              const cur1 = pos.amount1 ?? 0;
+              const inv0 = activity.netInvested0;
+              const inv1 = activity.netInvested1;
+              const investedUSD = inv0 * p0 + inv1 * p1;
+              const currentUSD = pos.value;
+              const gainLossUSD = currentUSD - investedUSD;
+              const gainLoss0 = cur0 - inv0;
+              const gainLoss1 = cur1 - inv1;
+
+              const fmtAmt = (n: number, decimals = 6) =>
+                n.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: 0 });
+              const fmtUSD = (n: number) =>
+                `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              const sign = (n: number) => (n >= 0 ? '+' : '−');
+
+              return (
+                <div>
+                  <div className="grid grid-cols-4 gap-2 text-xs text-gray-500 mb-2 px-1">
+                    <span></span>
+                    <span className="text-right">{sym0}</span>
+                    <span className="text-right">{sym1}</span>
+                    <span className="text-right">USD</span>
+                  </div>
+                  {/* Invested row */}
+                  <div className="grid grid-cols-4 gap-2 py-3 border-b border-gray-800 px-1 items-center">
+                    <span className="text-gray-400 text-sm">Invested</span>
+                    <span className="text-right font-mono text-sm">{fmtAmt(inv0)}</span>
+                    <span className="text-right font-mono text-sm">{fmtAmt(inv1)}</span>
+                    <span className="text-right text-sm font-semibold">{fmtUSD(investedUSD)}</span>
+                  </div>
+                  {/* Current row */}
+                  <div className="grid grid-cols-4 gap-2 py-3 border-b border-gray-800 px-1 items-center">
+                    <span className="text-gray-400 text-sm">Current</span>
+                    <span className="text-right font-mono text-sm">{fmtAmt(cur0)}</span>
+                    <span className="text-right font-mono text-sm">{fmtAmt(cur1)}</span>
+                    <span className="text-right text-sm font-semibold">{fmtUSD(currentUSD)}</span>
+                  </div>
+                  {/* Gain/Loss row */}
+                  <div className="grid grid-cols-4 gap-2 py-3 px-1 items-center">
+                    <span className="text-gray-400 text-sm">Gain / Loss</span>
+                    <span className={`text-right font-mono text-sm ${gainLoss0 >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {sign(gainLoss0)}{fmtAmt(Math.abs(gainLoss0))}
+                    </span>
+                    <span className={`text-right font-mono text-sm ${gainLoss1 >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {sign(gainLoss1)}{fmtAmt(Math.abs(gainLoss1))}
+                    </span>
+                    <span className={`text-right text-sm font-semibold ${gainLossUSD >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {sign(gainLossUSD)}{fmtUSD(gainLossUSD)}
+                    </span>
+                  </div>
+                  {activity.events.length === 0 && (
+                    <p className="text-gray-600 text-xs mt-2">
+                      No on-chain events found · NFT manager address may need updating
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
+            {!activityLoading && !activity && (
+              <p className="text-gray-500 text-sm">Could not load activity data.</p>
+            )}
           </div>
         )}
       </div>
