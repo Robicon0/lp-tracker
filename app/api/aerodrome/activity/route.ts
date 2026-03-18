@@ -1,20 +1,23 @@
 import { NextResponse } from 'next/server';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
-const BASE_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
+// Alchemy used only for eth_getBlockByNumber (timestamp lookups) — free tier supports this
+const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
+// Blast public RPC used for eth_getLogs — supports full-history scans filtered by tokenId
+// (Alchemy free tier caps eth_getLogs at 10 blocks; Blast allows any range when result count < 10K)
+const BLAST_RPC = 'https://base-mainnet.public.blastapi.io';
 
 // Aerodrome Slipstream (CL) NonfungiblePositionManager on Base
-// Source: https://github.com/aerodrome-finance/slipstream — verify on BaseScan if events return empty
+// Verified: factory() returns 0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A (matches CL_FACTORY)
 const NFT_MANAGER = '0x827922686190790b37229fd06084350E74485b72';
 
-// Event topic0 values — standard Uniswap V3 NonfungiblePositionManager event signatures
-// (Aerodrome Slipstream is a Uni V3 fork; event signatures are identical)
+// Event topic0 values — computed via keccak256 with viem, verified against live Base chain events
 // IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
-const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35';
+const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
 // DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
 // Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collected, uint256 amount1Collected)
-const TOPIC_COLLECT = '0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0';
+const TOPIC_COLLECT = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
 
@@ -35,8 +38,8 @@ interface ActivityResponse {
   totalFees1: number;
 }
 
-async function rpc(body: object): Promise<unknown> {
-  const res = await fetch(BASE_RPC, {
+async function rpcPost(url: string, body: object): Promise<unknown> {
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -44,10 +47,10 @@ async function rpc(body: object): Promise<unknown> {
   return res.json();
 }
 
-// eth_getLogs for all three event types, filtered by tokenId
+// eth_getLogs via Blast — supports full-history scans when result count < 10K
+// A specific tokenId has at most ~20-50 events, so this works across the full chain history
 async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
-  // Try full range first; Alchemy handles large ranges fine for specific topic filters
-  const result = await rpc({
+  const result = await rpcPost(BLAST_RPC, {
     jsonrpc: '2.0',
     method: 'eth_getLogs',
     params: [{
@@ -56,7 +59,7 @@ async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
         [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT],
         tokenIdHex,                   // topics[1] = indexed tokenId
       ],
-      fromBlock: '0x0',
+      fromBlock: '0x1000000',         // Base block ~17M (pre-dates all Aerodrome positions)
       toBlock: 'latest',
     }],
     id: 1,
@@ -69,12 +72,12 @@ async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
   return result.result ?? [];
 }
 
-// Batch-fetch block timestamps for a list of unique block numbers
+// Batch-fetch block timestamps using Alchemy (eth_getBlockByNumber works fine on free tier)
 async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, number>> {
   const unique = [...new Set(blockNumbers)];
   const results = await Promise.all(
     unique.map(async (bn) => {
-      const res = await rpc({
+      const res = await rpcPost(ALCHEMY_RPC, {
         jsonrpc: '2.0',
         method: 'eth_getBlockByNumber',
         params: [`0x${bn.toString(16)}`, false],
