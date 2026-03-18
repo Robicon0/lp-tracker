@@ -1,5 +1,5 @@
 LP Tracker — Progress
-Last updated: 2026-03-16
+Last updated: 2026-03-17
 ====================================================
 
 ====================================================
@@ -197,6 +197,50 @@ Started: 2026-03-16
     Wallet adapter: @aptos-labs/wallet-adapter-react
     Protocols: Liquidswap, Thala
     RPC: https://fullnode.mainnet.aptoslabs.com/v1 (no key)
+
+====================================================
+PHASE 3 — POSITION ACTIVITY & ANALYTICS
+====================================================
+Started: 2026-03-17
+Scope: Aerodrome (Base) only to start. Expand after confirmed working.
+No new env vars — uses existing NEXT_PUBLIC_ALCHEMY_KEY.
+
+--- FEATURE 7: CURRENT VS INVESTED ASSETS (SECTION 1) --- PLANNED
+
+[ ] Pass gauge address through /api/aerodrome response
+    (Sugar V3 already has gauge in raw decode — just expose it)
+[ ] Build /api/aerodrome/activity route
+    - eth_getLogs via Alchemy for IncreaseLiquidity / DecreaseLiquidity / Collect
+      on NonfungiblePositionManager (filtered by tokenId)
+    - eth_getLogs on gauge for Deposit / Withdraw (filtered by tokenId)
+    - Block timestamps via eth_getBlockByNumber
+    - No new env var — existing NEXT_PUBLIC_ALCHEMY_KEY on Base chain
+    - Chunked scanning if needed (500k blocks/chunk)
+[ ] app/hooks/usePositionActivity.ts — localStorage cache (5-min TTL)
+[ ] Assets table UI on /dashboard/[id]
+    - Invested: sum IncreaseLiquidity minus DecreaseLiquidity
+    - Current: existing amount0/amount1
+    - Gain/Loss: current minus invested (per token + USD at current prices)
+
+--- FEATURE 8: ACTIVITY HISTORY TABLE (SECTION 2) --- PLANNED
+
+[ ] CoinGecko historical price fetching in /api/aerodrome/activity
+    - /coins/{id}/history?date=DD-MM-YYYY per unique tx date
+    - Cap at 30 unique dates; use current price for older dates
+    - Retry with backoff on rate limit
+[ ] Activity table UI on /dashboard/[id]
+    - Columns: Date, Action, Token0, Token1, USD at time, Cumulative fees
+    - Newest first
+    - Tx hash links to basescan.org/tx/{hash}
+
+--- FEATURE 9: ACTUAL APR (SECTION 3) --- PLANNED
+
+[ ] APR calculation: totalFeesUSD / currentValue / (daysActive / 365) * 100
+[ ] Actual Performance panel UI
+    - Total fees earned, days active, realized APR
+    - Daily / Monthly / Yearly fee projections
+    - Sits alongside existing "Est. Daily Fees" (clearly labeled Actual vs Estimated)
+    - Shown for all positions including Closed
 
 --- POST-PRD BACKLOG ---
 

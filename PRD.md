@@ -424,3 +424,244 @@ Speculative — no positions to test against. Research phase required before pla
 
 6. Feature 6: Aptos (only if user opens positions)
 ```
+
+---
+
+---
+
+# Phase 3: Position Activity & Analytics
+
+_Last updated: 2026-03-17_
+
+## Overview
+
+Add on-chain transaction history and real performance metrics to position detail pages. Start with **Aerodrome on Base only** — expand to other protocols after this is confirmed working.
+
+Three new sections appear at the bottom of `/dashboard/[id]` for Aerodrome positions, below the existing IL and Fee Estimate sections.
+
+---
+
+## Feature 7: Current vs Invested Assets (Section 1)
+
+### What it shows
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Assets                                                 │
+│  ─────────────────────────────────────────────────────  │
+│                    Token0         Token1       Total    │
+│  Invested     1.24 WETH      420 USDC        $4,312     │
+│  Current      1.31 WETH      398 USDC        $4,501     │
+│  Gain/Loss   +0.07 WETH      −22 USDC        +$189      │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Invested**: sum of all `IncreaseLiquidity` events (amount0 + amount1) minus sum of all `DecreaseLiquidity` events. Represents net tokens deposited to date.
+- **Current**: existing `amount0` / `amount1` computed by the API route (already shown in position detail).
+- **Gain/Loss**: Current − Invested, per token and in USD at current prices.
+- USD values for invested amounts use **current prices** (not historical) — simpler, still useful for relative comparison.
+- Show for all positions including Closed.
+
+---
+
+## Feature 8: Activity History Table (Section 2)
+
+### What it shows
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│  Activity History                                                          │
+│  ──────────────────────────────────────────────────────────────────────── │
+│  Date          Action          Token0        Token1        USD      Cumul. │
+│  2026-01-04    Deposit         1.24 WETH     420 USDC      $4,312   —      │
+│  2026-01-15    Fee Claim       0.003 WETH    12 USDC       $24      $24    │
+│  2026-02-01    Fee Claim       0.005 WETH    18 USDC       $38      $62    │
+│  2026-03-10    Fee Claim       0.004 WETH    14 USDC       $29      $91    │
+└────────────────────────────────────────────────────────────────────────────┘
+  Tx hash links open BaseScan in new tab
+```
+
+- **Rows**: Deposit (IncreaseLiquidity), Fee Claim (Collect), Withdrawal (DecreaseLiquidity), Close (all liquidity removed)
+- **Sorted**: newest first
+- **USD value at time of tx**: fetched from CoinGecko `/coins/{id}/history?date=DD-MM-YYYY` for each unique date in the tx history
+- **Cumulative fees**: running total of all fee claims in USD (resets at zero, not decremented by withdrawals)
+- Tx hash displayed as `0x1234...abcd` linking to `https://basescan.org/tx/{hash}`
+
+### Events to scan
+
+Aerodrome CL positions involve two contracts. Both are scanned:
+
+| Contract | Event | Description |
+|----------|-------|-------------|
+| NonfungiblePositionManager | `IncreaseLiquidity(tokenId, liquidity, amount0, amount1)` | Deposit / top-up |
+| NonfungiblePositionManager | `DecreaseLiquidity(tokenId, liquidity, amount0, amount1)` | Partial or full withdrawal |
+| NonfungiblePositionManager | `Collect(tokenId, recipient, amount0, amount1)` | Fee claim |
+| CL Gauge | `Deposit(address from, uint256 tokenId)` | NFT staked in gauge (no amounts, correlate to IncreaseLiquidity by block) |
+| CL Gauge | `Withdraw(address from, uint256 tokenId)` | NFT unstaked |
+
+> Note: `Collect` on the NonfungiblePositionManager captures the actual token amounts for fee claims. Gauge events (`Deposit`/`Withdraw`) provide staking timestamps for context only.
+
+### Data source
+
+- **RPC**: `eth_getLogs` via existing Alchemy key (`NEXT_PUBLIC_ALCHEMY_KEY`), Base chain (`https://base-mainnet.g.alchemy.com/v2/${key}`)
+- **Block range**: from block 0 (Base genesis) to `latest` — full history, no cap
+- **Filter**: by contract address + event topic0 (keccak256 of event signature) + tokenId as topic
+- The Sugar V3 contract already returns a `gauge` field per position — pass it through in `/api/aerodrome` response as `gauge?: string` on the position object
+- The NonfungiblePositionManager address is already known: standard Aerodrome CL NFT manager on Base
+
+### New API route
+
+`GET /api/aerodrome/activity?positionId={nftId}&gauge={0x...}&token0={0x...}&token1={0x...}&account={0x...}`
+
+Returns:
+```ts
+{
+  events: ActivityEvent[]
+  totalFeesClaimed: { amount0: string, amount1: string, usd: number }
+  daysActive: number
+}
+
+type ActivityEvent = {
+  type: 'deposit' | 'fee_claim' | 'withdrawal' | 'close'
+  txHash: string
+  blockNumber: number
+  timestamp: number          // unix seconds
+  amount0: string            // decimal string
+  amount1: string
+  usdAtTime: number | null   // null if CoinGecko lookup fails
+  cumulativeFeeUSD: number   // running total (fee_claim rows only)
+}
+```
+
+### Caching
+
+- Cache key: `aero-activity-${positionId}` in localStorage
+- TTL: 5 minutes
+- On cache hit: return cached data immediately, show "Updated X ago" caption
+- On cache miss or expiry: fetch fresh, show loading spinner
+
+---
+
+## Feature 9: Actual APR (Section 3)
+
+### What it shows
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Actual Performance                                     │
+│  ─────────────────────────────────────────────────────  │
+│  Total fees earned       $91                            │
+│  Position active         68 days                        │
+│  Realized APR            ~194% / yr                     │
+│                                                         │
+│  Daily   $1.34   Monthly  $40.5   Yearly  $489          │
+│                                                         │
+│  Based on actual claimed fees · not pool APY estimate   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Formula
+
+```
+totalFeesUSD = sum of all fee_claim rows (usdAtTime, fallback to current price)
+daysActive   = (now − firstDepositTimestamp) / 86400
+realizedAPR  = (totalFeesUSD / currentPositionValue) / (daysActive / 365) * 100
+
+dailyFees    = totalFeesUSD / daysActive
+monthlyFees  = dailyFees * 30
+yearlyFees   = dailyFees * 365
+```
+
+- Show for **all positions including Closed** (realized APR is the most meaningful metric for closed positions)
+- If `daysActive < 1`: show "< 1 day active" and omit APR (too early to annualize)
+- If `totalFeesUSD = 0`: show "No fees claimed yet" instead of 0% APR
+- Sits **alongside** the existing "Est. Daily Fees / Monthly Yield" section — labeled clearly as "Actual" vs "Estimated (pool APY)"
+
+---
+
+## Technical Implementation Plan
+
+### Step 1 — Pass gauge address through Aerodrome route
+- Sugar V3 decode already has `gauge` in the raw response; add `gauge?: string` to `AerodromePosition` type and return it from `/api/aerodrome`
+
+### Step 2 — Build `/api/aerodrome/activity` route
+- Accept: `positionId`, `gauge`, `token0`, `token1`, `account` query params
+- Scan eth_getLogs on NonfungiblePositionManager for IncreaseLiquidity/DecreaseLiquidity/Collect filtered by tokenId
+- Scan eth_getLogs on gauge for Deposit/Withdraw filtered by tokenId
+- Decode event data (no ethers/viem — manual ABI decode)
+- Fetch block timestamps via `eth_getBlockByNumber` (batch if possible)
+- Fetch historical CoinGecko prices per unique date in the event list
+- Compute cumulative fees + daysActive + totalFeesClaimed
+- Return structured `ActivityEvent[]`
+
+### Step 3 — Client-side caching layer (`app/hooks/usePositionActivity.ts`)
+- localStorage cache with 5-min TTL
+- Loading / error states
+- Fetches from `/api/aerodrome/activity` using position fields already on the detail page
+
+### Step 4 — UI on `/dashboard/[id]`
+- Section 1: Assets table (invested vs current vs gain/loss)
+- Section 2: Activity history table with BaseScan links
+- Section 3: Actual APR panel
+- All three sections gated: only render for Aerodrome positions (`pos.protocol === 'Aerodrome'`)
+
+---
+
+## Edge Cases
+
+| Case | Handling |
+|------|----------|
+| Position opened before Base genesis indexing | Scan from block 0; Alchemy handles gracefully |
+| CoinGecko rate limit on historical prices | Retry with exponential backoff; fallback to current price if all retries fail |
+| Very old position with 100+ fee claims | Cap CoinGecko calls to 30 unique dates; use current price for older dates |
+| Position never staked in gauge (no gauge events) | Only scan NonfungiblePositionManager; still shows IncreaseLiquidity/Collect |
+| Partial withdrawals (multiple DecreaseLiquidity events) | Each shown as its own row in history table |
+| tokenId not in a top-up (one deposit only) | "Invested" = single IncreaseLiquidity row |
+| Alchemy getLogs timeout on full block range | Split into chunks of 500k blocks; aggregate results |
+
+---
+
+## Scope Boundaries (Phase 3)
+
+- **In scope**: Aerodrome (Base) only
+- **Out of scope for now**: Uniswap V3, Velodrome, Raydium, Orca, Cetus, Bluefin, Momentum, HyperSwap, PancakeSwap — expand after Aerodrome is confirmed working
+- **No new env vars** — uses existing `NEXT_PUBLIC_ALCHEMY_KEY`
+- **No database** — localStorage cache only
+
+---
+
+## Acceptance Criteria
+
+- [ ] `/api/aerodrome` response includes `gauge?: string` field
+- [ ] `/api/aerodrome/activity` returns correct events for a known Aerodrome position
+- [ ] Section 1 (Assets) shows invested vs current with correct gain/loss
+- [ ] Section 2 (Activity History) shows all deposit/fee claim/withdrawal rows in newest-first order
+- [ ] Each row in Section 2 has a working BaseScan link
+- [ ] Section 3 (Actual APR) shows realized APR based on actual claimed fees
+- [ ] All three sections visible for both active and closed Aerodrome positions
+- [ ] Activity data cached in localStorage with 5-min TTL
+- [ ] Sections absent for non-Aerodrome positions (no errors, no empty boxes)
+- [ ] Build passes with no TypeScript errors
+
+---
+
+## Phase 3 Implementation Priority
+
+```
+7. Feature 7: Current vs Invested Assets (Section 1)
+   a. Pass gauge through /api/aerodrome response
+   b. Build /api/aerodrome/activity route (event log scanning)
+   c. usePositionActivity hook (localStorage cache)
+   d. Assets table UI on detail page
+
+8. Feature 8: Activity History Table (Section 2)
+   a. Add CoinGecko historical price fetching to /api/aerodrome/activity
+   b. Activity table UI with BaseScan links
+
+9. Feature 9: Actual APR (Section 3)
+   a. APR calculation from activity data
+   b. Actual Performance panel UI
+   c. Sits alongside existing Est. Daily Fees section
+```
+
+**Do not start building until confirmed by user.**
