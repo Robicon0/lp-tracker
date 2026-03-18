@@ -51,7 +51,9 @@
       "Bash(curl -s -m 5 \"https://api.prjx.com/stats\")",
       "Bash(curl -s \"https://yields.llama.fi/chart/86eb8c44-6acd-4049-a434-6a6f82e81477\")",
       "Bash(echo \"Exit: $?\")",
-      "WebSearch"
+      "WebSearch",
+      "Bash(head -20 grep -rn \"protocol.*Aerodrome\\\\|Aerodrome.*protocol\\\\|aero-[0-9]\" ~/lp-tracker-fresh/app/ --include=\"*.ts\" --include=\"*.tsx\")",
+      "Bash(head -5 grep -rn \"DEMO\\\\|demoPositions\\\\|hardcoded\" ~/lp-tracker-fresh/app/ --include=\"*.ts\" --include=\"*.tsx\")"
     ]
   }
 }

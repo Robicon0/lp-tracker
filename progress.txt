@@ -1,5 +1,5 @@
 LP Tracker — Progress
-Last updated: 2026-03-17
+Last updated: 2026-03-18
 ====================================================
 
 ====================================================
@@ -205,24 +205,35 @@ Started: 2026-03-17
 Scope: Aerodrome (Base) only to start. Expand after confirmed working.
 No new env vars — uses existing NEXT_PUBLIC_ALCHEMY_KEY.
 
---- FEATURE 7: CURRENT VS INVESTED ASSETS (SECTION 1) --- DONE ✅
+--- FEATURE 7: CURRENT VS INVESTED ASSETS (SECTION 1) --- DONE ✅ CONFIRMED
 
 [DONE] app/api/aerodrome/activity/route.ts
        - eth_getLogs on Aerodrome Slipstream NonfungiblePositionManager
-         0x827922686190790b37229fd06084350E74485b72
+         0x827922686190790b37229fd06084350E74485b72 (verified: factory() = CL_FACTORY)
        - Events: IncreaseLiquidity, DecreaseLiquidity, Collect (tokenId indexed filter)
-       - Batch-fetches block timestamps via eth_getBlockByNumber
+       - eth_getLogs via Blast public RPC (base-mainnet.public.blastapi.io) — supports
+         full-history scans when result count < 10K; Alchemy free tier caps at 10 blocks
+       - Block timestamps via eth_getBlockByNumber on Alchemy (works fine on free tier)
        - Returns events[], netInvested0/1, totalFees0/1 (decimal-adjusted floats)
-       - No new env var — uses NEXT_PUBLIC_ALCHEMY_KEY on Base RPC
+       - No new env var needed
 [DONE] app/hooks/usePositionActivity.ts
        - localStorage cache (5-min TTL), key: aero-activity-{positionId}
        - Cancels in-flight fetch on unmount
 [DONE] Assets section on /dashboard/[id] (Aerodrome positions only)
        - Invested / Current / Gain-Loss table (per-token + USD)
        - Invested = sum(IncreaseLiquidity) - sum(DecreaseLiquidity) at current prices
-       - Loading spinner while scanning; fallback message if events empty
-       - "No on-chain events found" note if NFT manager address needs updating
-[ ] Visual confirmation — need to open an Aerodrome position detail page and verify events load
+       - Loading spinner while scanning
+[DONE] Confirmed working — Assets section shows correct invested vs current data
+
+KEY LEARNINGS:
+- Aerodrome Slipstream NFT manager: 0x827922686190790b37229fd06084350E74485b72
+- Correct topic hashes (computed with viem keccak256):
+    IncreaseLiquidity: 0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f
+    DecreaseLiquidity: 0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4
+    Collect:           0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01
+- Always compute topic hashes with viem/ethers — never hardcode from memory
+- Alchemy free tier: eth_getLogs limited to 10 blocks; use Blast or another public RPC
+- Blast public RPC (base-mainnet.public.blastapi.io): unlimited block range when result < 10K
 
 --- FEATURE 8: ACTIVITY HISTORY TABLE (SECTION 2) --- PLANNED
 
