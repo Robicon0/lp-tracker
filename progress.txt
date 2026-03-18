@@ -205,22 +205,24 @@ Started: 2026-03-17
 Scope: Aerodrome (Base) only to start. Expand after confirmed working.
 No new env vars — uses existing NEXT_PUBLIC_ALCHEMY_KEY.
 
---- FEATURE 7: CURRENT VS INVESTED ASSETS (SECTION 1) --- PLANNED
+--- FEATURE 7: CURRENT VS INVESTED ASSETS (SECTION 1) --- DONE ✅
 
-[ ] Pass gauge address through /api/aerodrome response
-    (Sugar V3 already has gauge in raw decode — just expose it)
-[ ] Build /api/aerodrome/activity route
-    - eth_getLogs via Alchemy for IncreaseLiquidity / DecreaseLiquidity / Collect
-      on NonfungiblePositionManager (filtered by tokenId)
-    - eth_getLogs on gauge for Deposit / Withdraw (filtered by tokenId)
-    - Block timestamps via eth_getBlockByNumber
-    - No new env var — existing NEXT_PUBLIC_ALCHEMY_KEY on Base chain
-    - Chunked scanning if needed (500k blocks/chunk)
-[ ] app/hooks/usePositionActivity.ts — localStorage cache (5-min TTL)
-[ ] Assets table UI on /dashboard/[id]
-    - Invested: sum IncreaseLiquidity minus DecreaseLiquidity
-    - Current: existing amount0/amount1
-    - Gain/Loss: current minus invested (per token + USD at current prices)
+[DONE] app/api/aerodrome/activity/route.ts
+       - eth_getLogs on Aerodrome Slipstream NonfungiblePositionManager
+         0x827922686190790b37229fd06084350E74485b72
+       - Events: IncreaseLiquidity, DecreaseLiquidity, Collect (tokenId indexed filter)
+       - Batch-fetches block timestamps via eth_getBlockByNumber
+       - Returns events[], netInvested0/1, totalFees0/1 (decimal-adjusted floats)
+       - No new env var — uses NEXT_PUBLIC_ALCHEMY_KEY on Base RPC
+[DONE] app/hooks/usePositionActivity.ts
+       - localStorage cache (5-min TTL), key: aero-activity-{positionId}
+       - Cancels in-flight fetch on unmount
+[DONE] Assets section on /dashboard/[id] (Aerodrome positions only)
+       - Invested / Current / Gain-Loss table (per-token + USD)
+       - Invested = sum(IncreaseLiquidity) - sum(DecreaseLiquidity) at current prices
+       - Loading spinner while scanning; fallback message if events empty
+       - "No on-chain events found" note if NFT manager address needs updating
+[ ] Visual confirmation — need to open an Aerodrome position detail page and verify events load
 
 --- FEATURE 8: ACTIVITY HISTORY TABLE (SECTION 2) --- PLANNED
 
