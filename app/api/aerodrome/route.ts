@@ -272,6 +272,8 @@ export async function GET(request: Request) {
         liquidity: totalLiquidity.toString(),
         price0,
         price1,
+        token0Address: tokens?.token0,
+        token1Address: tokens?.token1,
         walletAddress: account,
       };
     });

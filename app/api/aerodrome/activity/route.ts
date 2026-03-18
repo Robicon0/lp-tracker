@@ -19,15 +19,25 @@ const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8d
 // Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collected, uint256 amount1Collected)
 const TOPIC_COLLECT = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
 
+// CoinGecko IDs for known Base tokens — used to fetch historical prices
+const CG_IDS: Record<string, string> = {
+  '0x4200000000000000000000000000000000000006': 'ethereum',       // WETH
+  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'usd-coin',      // USDC
+  '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 'bitcoin',        // cbBTC
+  '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'dai',            // DAI
+};
+
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
 
 export interface ActivityEvent {
   type: ActivityEventType;
   txHash: string;
   blockNumber: number;
-  timestamp: number;    // unix seconds
-  amount0: number;      // human-readable (decimal-adjusted)
+  timestamp: number;      // unix seconds
+  amount0: number;        // human-readable (decimal-adjusted)
   amount1: number;
+  usdAtTime: number | null;   // null if historical price fetch failed
+  cumulativeFeeUSD: number;   // running total of fee_claim USD; 0 for non-fee events
 }
 
 interface ActivityResponse {
@@ -90,6 +100,73 @@ async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, n
   return Object.fromEntries(results);
 }
 
+function tsToDateStr(ts: number): string {
+  const d = new Date(ts * 1000);
+  const day = d.getUTCDate().toString().padStart(2, '0');
+  const month = (d.getUTCMonth() + 1).toString().padStart(2, '0');
+  const year = d.getUTCFullYear();
+  return `${day}-${month}-${year}`;
+}
+
+// Fetch historical USD price for a CoinGecko coin ID on a specific date (DD-MM-YYYY)
+// Returns null on failure — caller should fall back to current price
+async function fetchCGHistoricalPrice(cgId: string, dateStr: string): Promise<number | null> {
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/${cgId}/history?date=${dateStr}&localization=false`;
+    const res = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!res.ok) {
+      console.error(`[aerodrome/activity] CoinGecko history ${cgId} ${dateStr} HTTP ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    return json?.market_data?.current_price?.usd ?? null;
+  } catch (err) {
+    console.error(`[aerodrome/activity] CoinGecko history ${cgId} ${dateStr} error:`, err);
+    return null;
+  }
+}
+
+// Fetch historical prices for two tokens across a set of unique dates (capped at 30 most recent).
+// For dates beyond the cap or where fetch fails, returns current price as fallback.
+async function fetchHistoricalPrices(
+  token0: string,
+  token1: string,
+  dates: string[],         // unique DD-MM-YYYY strings, sorted chronologically
+  fallback0: number,
+  fallback1: number,
+): Promise<Record<string, { p0: number; p1: number }>> {
+  const cgId0 = CG_IDS[token0.toLowerCase()] ?? null;
+  const cgId1 = CG_IDS[token1.toLowerCase()] ?? null;
+
+  // Cap at 30 most recent unique dates — use current price for older ones
+  const MAX_DATES = 30;
+  const recentDates = dates.slice(-MAX_DATES);
+  const olderDates = dates.slice(0, dates.length - MAX_DATES);
+
+  const result: Record<string, { p0: number; p1: number }> = {};
+
+  // Fill older dates with fallback prices immediately
+  for (const d of olderDates) {
+    result[d] = { p0: fallback0, p1: fallback1 };
+  }
+
+  // Fetch historical prices for recent dates in parallel (batched per date)
+  await Promise.all(
+    recentDates.map(async (dateStr) => {
+      const [p0, p1] = await Promise.all([
+        cgId0 ? fetchCGHistoricalPrice(cgId0, dateStr) : Promise.resolve(null),
+        cgId1 ? fetchCGHistoricalPrice(cgId1, dateStr) : Promise.resolve(null),
+      ]);
+      result[dateStr] = {
+        p0: p0 ?? fallback0,
+        p1: p1 ?? fallback1,
+      };
+    })
+  );
+
+  return result;
+}
+
 function decodeWord(data: string, wordIndex: number): bigint {
   const start = wordIndex * 64;
   const word = data.slice(start, start + 64);
@@ -102,6 +179,10 @@ export async function GET(request: Request) {
   const positionId = searchParams.get('positionId');   // numeric NFT tokenId string
   const t0d = parseInt(searchParams.get('t0d') ?? '18', 10);
   const t1d = parseInt(searchParams.get('t1d') ?? '18', 10);
+  const token0 = (searchParams.get('token0') ?? '').toLowerCase();
+  const token1 = (searchParams.get('token1') ?? '').toLowerCase();
+  const fallback0 = parseFloat(searchParams.get('p0') ?? '0');
+  const fallback1 = parseFloat(searchParams.get('p1') ?? '0');
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -135,54 +216,102 @@ export async function GET(request: Request) {
     const scale0 = BigInt(10) ** BigInt(t0d);
     const scale1 = BigInt(10) ** BigInt(t1d);
 
+    // Collect unique dates (for historical price lookups) across all events
+    const uniqueDatesSet = new Set<string>();
+    for (const log of logs) {
+      const bn = parseInt(log.blockNumber, 16);
+      const ts = timestamps[bn] ?? 0;
+      if (ts > 0) uniqueDatesSet.add(tsToDateStr(ts));
+    }
+    const uniqueDates = [...uniqueDatesSet].sort();  // chronological
+
+    // Fetch historical prices (or fall back to current prices)
+    const pricesByDate = token0 && token1
+      ? await fetchHistoricalPrices(token0, token1, uniqueDates, fallback0, fallback1)
+      : {};
+
     let deposited0 = 0n, deposited1 = 0n;
     let withdrawn0 = 0n, withdrawn1 = 0n;
     let fees0 = 0n, fees1 = 0n;
 
-    const events: ActivityEvent[] = logs.map((log) => {
+    // Build events in log order (chronological) first to compute cumulative fees correctly
+    interface RawEvent {
+      type: ActivityEventType;
+      txHash: string;
+      blockNumber: number;
+      timestamp: number;
+      amount0Raw: bigint;
+      amount1Raw: bigint;
+    }
+
+    const rawEvents: RawEvent[] = logs.map((log) => {
       const topic0 = log.topics[0].toLowerCase();
       const blockNum = parseInt(log.blockNumber, 16);
       const timestamp = timestamps[blockNum] ?? 0;
       const data = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
 
       let type: ActivityEventType;
-      let amount0 = 0n, amount1 = 0n;
+      let amount0Raw = 0n, amount1Raw = 0n;
 
       if (topic0 === TOPIC_INCREASE) {
         type = 'deposit';
-        // data: word0=liquidity(uint128), word1=amount0, word2=amount1
-        amount0 = decodeWord(data, 1);
-        amount1 = decodeWord(data, 2);
-        deposited0 += amount0;
-        deposited1 += amount1;
+        amount0Raw = decodeWord(data, 1);
+        amount1Raw = decodeWord(data, 2);
+        deposited0 += amount0Raw;
+        deposited1 += amount1Raw;
       } else if (topic0 === TOPIC_DECREASE) {
         type = 'withdrawal';
-        // data: word0=liquidity(uint128), word1=amount0, word2=amount1
-        amount0 = decodeWord(data, 1);
-        amount1 = decodeWord(data, 2);
-        withdrawn0 += amount0;
-        withdrawn1 += amount1;
+        amount0Raw = decodeWord(data, 1);
+        amount1Raw = decodeWord(data, 2);
+        withdrawn0 += amount0Raw;
+        withdrawn1 += amount1Raw;
       } else {
         type = 'fee_claim';
-        // data: word0=recipient(address), word1=amount0Collected, word2=amount1Collected
-        amount0 = decodeWord(data, 1);
-        amount1 = decodeWord(data, 2);
-        fees0 += amount0;
-        fees1 += amount1;
+        amount0Raw = decodeWord(data, 1);
+        amount1Raw = decodeWord(data, 2);
+        fees0 += amount0Raw;
+        fees1 += amount1Raw;
+      }
+
+      return { type, txHash: log.transactionHash, blockNumber: blockNum, timestamp, amount0Raw, amount1Raw };
+    });
+
+    // Sort chronologically to compute cumulative fees (oldest first)
+    rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
+
+    let runningFeeUSD = 0;
+    const events: ActivityEvent[] = rawEvents.map((ev) => {
+      const amount0 = Number(ev.amount0Raw) / Number(scale0);
+      const amount1 = Number(ev.amount1Raw) / Number(scale1);
+      const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
+      const prices = dateStr ? (pricesByDate[dateStr] ?? { p0: fallback0, p1: fallback1 }) : null;
+      const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
+
+      let cumulativeFeeUSD = 0;
+      if (ev.type === 'fee_claim' && usdAtTime != null) {
+        runningFeeUSD += usdAtTime;
+        cumulativeFeeUSD = runningFeeUSD;
+      } else if (ev.type === 'fee_claim') {
+        // Fee claim but no USD value — still increment with fallback
+        const fallbackUSD = amount0 * fallback0 + amount1 * fallback1;
+        runningFeeUSD += fallbackUSD;
+        cumulativeFeeUSD = runningFeeUSD;
       }
 
       return {
-        type,
-        txHash: log.transactionHash,
-        blockNumber: blockNum,
-        timestamp,
-        amount0: Number(amount0) / Number(scale0),
-        amount1: Number(amount1) / Number(scale1),
+        type: ev.type,
+        txHash: ev.txHash,
+        blockNumber: ev.blockNumber,
+        timestamp: ev.timestamp,
+        amount0,
+        amount1,
+        usdAtTime,
+        cumulativeFeeUSD,
       };
     });
 
-    // Sort newest first
-    events.sort((a, b) => b.blockNumber - a.blockNumber);
+    // Reverse to newest-first for display
+    events.reverse();
 
     const response: ActivityResponse = {
       events,

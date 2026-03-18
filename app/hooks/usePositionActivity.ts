@@ -49,6 +49,10 @@ export function usePositionActivity(
   positionId: string | null,   // null = skip
   token0Decimals: number,
   token1Decimals: number,
+  token0Address?: string,
+  token1Address?: string,
+  price0?: number,
+  price1?: number,
 ) {
   const [data, setData] = useState<PositionActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -68,7 +72,17 @@ export function usePositionActivity(
     setIsLoading(true);
     setError(null);
 
-    fetch(`/api/aerodrome/activity?positionId=${positionId}&t0d=${token0Decimals}&t1d=${token1Decimals}`)
+    const params = new URLSearchParams({
+      positionId,
+      t0d: String(token0Decimals),
+      t1d: String(token1Decimals),
+    });
+    if (token0Address) params.set('token0', token0Address);
+    if (token1Address) params.set('token1', token1Address);
+    if (price0 != null) params.set('p0', String(price0));
+    if (price1 != null) params.set('p1', String(price1));
+
+    fetch(`/api/aerodrome/activity?${params.toString()}`)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
@@ -89,7 +103,7 @@ export function usePositionActivity(
       });
 
     return () => { cancelled = true; };
-  }, [positionId, token0Decimals, token1Decimals]);
+  }, [positionId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1]);
 
   return { data, isLoading, error };
 }

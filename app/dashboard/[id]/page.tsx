@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import Navbar from "../../Navbar";
 import { usePositions } from "../../contexts/PositionsContext";
 import { usePositionActivity } from "../../hooks/usePositionActivity";
@@ -107,8 +108,25 @@ function computeIL(
 export default function PositionDetail() {
   const { id } = useParams<{ id: string }>();
   const { positions, isLoading } = usePositions();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
-  if (isLoading) {
+  // Find position — may be undefined until data loads; derive params for hook below
+  const pos = positions.find((p) => p.id === id);
+
+  // ALL hooks must be called unconditionally before any early returns
+  const aeroTokenId = pos?.protocol === 'Aerodrome' ? pos.id.replace('aero-', '') : null;
+  const { data: activity, isLoading: activityLoading } = usePositionActivity(
+    aeroTokenId,
+    pos?.token0Decimals ?? 18,
+    pos?.token1Decimals ?? 18,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+  );
+
+  if (!mounted || isLoading) {
     return (
       <div className="p-8 pt-24 bg-black text-white min-h-screen">
         <Navbar />
@@ -124,8 +142,6 @@ export default function PositionDetail() {
     );
   }
 
-  const pos = positions.find((p) => p.id === id);
-
   if (!pos) {
     return (
       <div className="p-8 pt-24 bg-black text-white min-h-screen">
@@ -134,22 +150,16 @@ export default function PositionDetail() {
           <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
-          <div className="text-center py-24">
-            <h1 className="text-4xl font-bold mb-4">Position Not Found</h1>
-            <p className="text-gray-400">This position doesn&apos;t exist or your wallet isn&apos;t connected.</p>
+          <div className="flex items-center justify-center py-24">
+            <div className="text-center">
+              <h1 className="text-4xl font-bold mb-4">Position Not Found</h1>
+              <p className="text-gray-400">This position doesn&apos;t exist or your wallet isn&apos;t connected.</p>
+            </div>
           </div>
         </div>
       </div>
     );
   }
-
-  // Aerodrome-only: on-chain activity (Current vs Invested)
-  const aeroTokenId = pos.protocol === 'Aerodrome' ? pos.id.replace('aero-', '') : null;
-  const { data: activity, isLoading: activityLoading } = usePositionActivity(
-    aeroTokenId,
-    pos.token0Decimals ?? 18,
-    pos.token1Decimals ?? 18,
-  );
 
   const estimatedDailyFees = (pos.value * pos.apy) / 100 / 365;
   const estimatedMonthlyYield = (pos.value * pos.apy) / 100 / 12;
@@ -448,6 +458,99 @@ export default function PositionDetail() {
                       No on-chain events found · NFT manager address may need updating
                     </p>
                   )}
+                </div>
+              );
+            })()}
+
+            {!activityLoading && !activity && (
+              <p className="text-gray-500 text-sm">Could not load activity data.</p>
+            )}
+          </div>
+        )}
+
+        {/* Activity History Table (Aerodrome only) */}
+        {pos.protocol === 'Aerodrome' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-bold mb-4">Activity History</h2>
+
+            {activityLoading && (
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="w-4 h-4 border border-gray-500 border-t-transparent rounded-full animate-spin" />
+                Loading activity…
+              </div>
+            )}
+
+            {!activityLoading && activity && activity.events.length === 0 && (
+              <p className="text-gray-500 text-sm">No on-chain events found for this position.</p>
+            )}
+
+            {!activityLoading && activity && activity.events.length > 0 && (() => {
+              const sym0 = pos.token0Symbol ?? 'Token0';
+              const sym1 = pos.token1Symbol ?? 'Token1';
+
+              const ACTION_LABELS: Record<string, string> = {
+                deposit: 'Deposit',
+                withdrawal: 'Withdrawal',
+                fee_claim: 'Fee Claim',
+              };
+              const ACTION_COLORS: Record<string, string> = {
+                deposit: 'text-blue-400',
+                withdrawal: 'text-orange-400',
+                fee_claim: 'text-green-400',
+              };
+
+              const fmtDate = (ts: number) => {
+                if (!ts) return '—';
+                const d = new Date(ts * 1000);
+                return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+              };
+              const fmtAmt = (n: number) =>
+                n === 0 ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 6, minimumFractionDigits: 0 });
+              const fmtUSD = (n: number | null) =>
+                n == null ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              const shortHash = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-gray-500 text-xs border-b border-gray-800">
+                        <th className="text-left py-2 pr-4 font-normal">Date</th>
+                        <th className="text-left py-2 pr-4 font-normal">Action</th>
+                        <th className="text-right py-2 pr-4 font-normal">{sym0}</th>
+                        <th className="text-right py-2 pr-4 font-normal">{sym1}</th>
+                        <th className="text-right py-2 pr-4 font-normal">USD</th>
+                        <th className="text-right py-2 pr-4 font-normal">Cumul. Fees</th>
+                        <th className="text-right py-2 font-normal">Tx</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activity.events.map((ev, i) => (
+                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="py-3 pr-4 text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
+                          <td className={`py-3 pr-4 font-medium ${ACTION_COLORS[ev.type] ?? 'text-gray-300'}`}>
+                            {ACTION_LABELS[ev.type] ?? ev.type}
+                          </td>
+                          <td className="py-3 pr-4 text-right font-mono text-gray-300">{fmtAmt(ev.amount0)}</td>
+                          <td className="py-3 pr-4 text-right font-mono text-gray-300">{fmtAmt(ev.amount1)}</td>
+                          <td className="py-3 pr-4 text-right text-gray-300">{fmtUSD(ev.usdAtTime)}</td>
+                          <td className="py-3 pr-4 text-right text-gray-500">
+                            {ev.type === 'fee_claim' ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
+                          </td>
+                          <td className="py-3 text-right">
+                            <a
+                              href={`https://basescan.org/tx/${ev.txHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 font-mono text-xs"
+                            >
+                              {shortHash(ev.txHash)}
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               );
             })()}
