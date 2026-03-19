@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import Navbar from "../../Navbar";
 import { usePositions } from "../../contexts/PositionsContext";
 import { usePositionActivity } from "../../hooks/usePositionActivity";
+import { useBluefinActivity } from "../../hooks/useBluefinActivity";
 
 const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
@@ -116,7 +117,7 @@ export default function PositionDetail() {
 
   // ALL hooks must be called unconditionally before any early returns
   const aeroTokenId = pos?.protocol === 'Aerodrome' ? pos.id.replace('aero-', '') : null;
-  const { data: activity, isLoading: activityLoading } = usePositionActivity(
+  const { data: aeroActivity, isLoading: aeroActivityLoading } = usePositionActivity(
     aeroTokenId,
     pos?.token0Decimals ?? 18,
     pos?.token1Decimals ?? 18,
@@ -125,6 +126,27 @@ export default function PositionDetail() {
     pos?.price0,
     pos?.price1,
   );
+
+  const bluefinObjId = pos?.protocol === 'Bluefin' ? pos.id.replace('bluefin-', '') : null;
+  const { data: bluefinActivity, isLoading: bluefinActivityLoading } = useBluefinActivity(
+    bluefinObjId,
+    pos?.token0Decimals ?? 9,
+    pos?.token1Decimals ?? 6,
+    pos?.coinTypeA,
+    pos?.coinTypeB,
+    pos?.price0,
+    pos?.price1,
+    pos?.walletAddress,
+  );
+
+  // Unified activity data — pick source based on protocol
+  const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
+    : pos?.protocol === 'Bluefin' ? bluefinActivity
+    : null;
+  const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
+    : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
+    : false;
+  const isActivityProtocol = pos?.protocol === 'Aerodrome' || pos?.protocol === 'Bluefin';
 
   if (!mounted || isLoading) {
     return (
@@ -385,8 +407,8 @@ export default function PositionDetail() {
           </div>
         )}
 
-        {/* Assets: Current vs Invested (Aerodrome only) */}
-        {pos.protocol === 'Aerodrome' && (
+        {/* Assets: Current vs Invested (Aerodrome + Bluefin) */}
+        {isActivityProtocol && (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
             <h2 className="text-xl font-bold mb-4">Assets</h2>
 
@@ -468,8 +490,8 @@ export default function PositionDetail() {
           </div>
         )}
 
-        {/* Activity History Table (Aerodrome only) */}
-        {pos.protocol === 'Aerodrome' && (
+        {/* Activity History Table (Aerodrome + Bluefin) */}
+        {isActivityProtocol && (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
             <h2 className="text-xl font-bold mb-4">Activity History</h2>
 
@@ -492,12 +514,19 @@ export default function PositionDetail() {
                 deposit: 'Deposit',
                 withdrawal: 'Withdrawal',
                 fee_claim: 'Fee Claim',
+                reward_claim: 'Reward',
               };
               const ACTION_COLORS: Record<string, string> = {
                 deposit: 'text-blue-400',
                 withdrawal: 'text-orange-400',
                 fee_claim: 'text-green-400',
+                reward_claim: 'text-purple-400',
               };
+
+              const txUrl = (hash: string) =>
+                pos.protocol === 'Bluefin'
+                  ? `https://suivision.xyz/txblock/${hash}`
+                  : `https://basescan.org/tx/${hash}`;
 
               const fmtDate = (ts: number) => {
                 if (!ts) return '—';
@@ -531,15 +560,21 @@ export default function PositionDetail() {
                           <td className={`py-3 pr-4 font-medium ${ACTION_COLORS[ev.type] ?? 'text-gray-300'}`}>
                             {ACTION_LABELS[ev.type] ?? ev.type}
                           </td>
-                          <td className="py-3 pr-4 text-right font-mono text-gray-300">{fmtAmt(ev.amount0)}</td>
-                          <td className="py-3 pr-4 text-right font-mono text-gray-300">{fmtAmt(ev.amount1)}</td>
+                          <td className="py-3 pr-4 text-right font-mono text-gray-300">
+                            {ev.type === 'reward_claim'
+                              ? <span>{fmtAmt(ev.amount0)}<span className="text-gray-500 text-xs ml-1">{ev.rewardSymbol}</span></span>
+                              : fmtAmt(ev.amount0)}
+                          </td>
+                          <td className="py-3 pr-4 text-right font-mono text-gray-300">
+                            {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
+                          </td>
                           <td className="py-3 pr-4 text-right text-gray-300">{fmtUSD(ev.usdAtTime)}</td>
                           <td className="py-3 pr-4 text-right text-gray-500">
                             {ev.type === 'fee_claim' ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
                           </td>
                           <td className="py-3 text-right">
                             <a
-                              href={`https://basescan.org/tx/${ev.txHash}`}
+                              href={txUrl(ev.txHash)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-400 hover:text-blue-300 font-mono text-xs"
@@ -561,8 +596,8 @@ export default function PositionDetail() {
           </div>
         )}
 
-        {/* Actual Performance — Feature 9 (Aerodrome only) */}
-        {pos.protocol === 'Aerodrome' && (
+        {/* Actual Performance — Feature 9 (Aerodrome + Bluefin) */}
+        {isActivityProtocol && (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
             <h2 className="text-xl font-bold mb-1">Actual Performance</h2>
             <p className="text-gray-600 text-xs mb-4">Based on actual claimed fees · not pool APY estimate</p>
@@ -575,7 +610,7 @@ export default function PositionDetail() {
             )}
 
             {!activityLoading && activity && (() => {
-              const feeClaims = activity.events.filter(e => e.type === 'fee_claim');
+              const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
               const deposits = activity.events.filter(e => e.type === 'deposit');
 
               // Total fees in USD — prefer usdAtTime, fall back to current prices
