@@ -665,3 +665,170 @@ yearlyFees   = dailyFees * 365
 ```
 
 **Do not start building until confirmed by user.**
+
+---
+
+---
+
+# Phase 4: Bluefin Activity Expansion
+
+_Last updated: 2026-03-20_
+
+## Overview
+
+Replicate Features 7, 8, and 9 for **Bluefin on Sui**. Same three sections on the position detail page — Assets (Invested vs Current), Activity History table, and Actual Performance (realized APR) — using Sui's transaction query API instead of EVM `eth_getLogs`.
+
+---
+
+## Technical Approach
+
+### Transaction querying
+
+Use `suix_queryTransactionBlocks` with `filter: { ChangedObject: positionObjectId }` to find all transactions that mutated the position object. This catches deposits, withdrawals, and fee claims without needing to know Bluefin's event type names upfront.
+
+```
+suix_queryTransactionBlocks({
+  filter: { ChangedObject: positionObjectId },
+  options: {
+    showEvents: true,
+    showBalanceChanges: true
+  },
+  limit: 50
+})
+```
+
+Paginate until `hasNextPage = false`. Each result includes:
+- `digest` — transaction hash equivalent (base58)
+- `timestampMs` — millisecond timestamp (no separate block lookup needed)
+- `events[]` — Move events with `type` (full module path) and `parsedJson`
+- `balanceChanges[]` — `{ owner, coinType, amount }` for all participants
+
+### Classifying transaction types
+
+Inspect the events array for events from the Bluefin package (`0x3492c874...`). The event `type` field reveals the struct name (e.g. `0x3492...::pool::AddLiquidityEvent`). Exact event names will be discovered empirically from the first live RPC call during Step 1 of building.
+
+Fallback: use `balanceChanges` filtered to the wallet address — if both coins are negative → deposit; both positive → withdrawal or fee claim; distinguish fee claim vs withdrawal by checking whether liquidity field changed (visible in `objectChanges`).
+
+### Amount extraction
+
+Use `balanceChanges` filtered to `owner.AddressOwner === account` — cleaner than parsing event fields and works regardless of event struct layout.
+
+### Timestamps
+
+`timestampMs` is returned directly on each transaction block — no separate `eth_getBlockByNumber` lookup required (simpler than Aerodrome).
+
+### Historical USD prices
+
+Same CoinGecko approach as Aerodrome: `/coins/{id}/history?date=DD-MM-YYYY`, capped at 30 most recent unique dates, fallback to current price. Known Sui coin → CoinGecko ID map: `0x2::sui::SUI` → `sui`, USDC → `usd-coin`, USDT → `tether`, WETH → `ethereum`.
+
+### Transaction links
+
+Each tx links to `https://suivision.xyz/txblock/{digest}` (clean Sui explorer, no network param needed for mainnet).
+
+---
+
+## New API Route
+
+`GET /api/bluefin/activity?positionId={objectId}&account={suiAddr}&coinTypeA={type}&coinTypeB={type}&t0d={n}&t1d={n}&p0={f}&p1={f}`
+
+Returns same `ActivityResponse` shape as `/api/aerodrome/activity` for consistency:
+
+```ts
+{
+  events: ActivityEvent[]       // same type — usdAtTime, cumulativeFeeUSD
+  netInvested0: number
+  netInvested1: number
+  totalFees0: number
+  totalFees1: number
+}
+```
+
+### Caching
+
+Same localStorage pattern as `usePositionActivity` — 5-min TTL, key: `bluefin-activity-{positionId}`.
+
+---
+
+## Data Flow Changes
+
+### `AerodromePosition` type
+
+Add `coinTypeA?: string` and `coinTypeB?: string` — Sui coin type strings (e.g. `0x2::sui::SUI`). These are the Sui equivalent of EVM token addresses for historical price lookups.
+
+### Bluefin API route (`/api/bluefin/route.ts`)
+
+Add `coinTypeA` and `coinTypeB` to the returned position object (already have them internally as `coinTypeA`/`coinTypeB`).
+
+Also add `account` as `walletAddress` (already done) — but the Sui wallet address also needs to be forwarded to the activity hook so it can filter `balanceChanges`.
+
+### New hook: `app/hooks/useBluefinActivity.ts`
+
+Mirror of `usePositionActivity` — same cache/fetch pattern, different endpoint and params.
+
+---
+
+## UI on `/dashboard/[id]`
+
+Add three sections **below** the existing IL section, **gated by `pos.protocol === 'Bluefin'`**:
+
+1. **Assets** — Invested / Current / Gain-Loss table (same layout as Aerodrome)
+2. **Activity History** — table with Date, Action, CoinA, CoinB, USD at time, Cumul. Fees, Tx (links to Suivision)
+3. **Actual Performance** — realized APR panel (same as Aerodrome)
+
+---
+
+## Edge Cases
+
+| Case | Handling |
+|------|----------|
+| Position creation tx not returned by ChangedObject filter | Check objectChanges for "created" type; treat as deposit |
+| balanceChanges has unexpected coin types | Skip unknown coins |
+| CoinGecko rate limit | Retry once; fallback to current price |
+| Multiple deposits / partial withdrawals | Each shown as its own row |
+| Sui address not available client-side | Hook accepts null account → skips fetch |
+
+---
+
+## Acceptance Criteria
+
+- [ ] `/api/bluefin` response includes `coinTypeA`, `coinTypeB` fields
+- [ ] `/api/bluefin/activity` returns correct events for a known position (all 4 operation types)
+- [ ] Assets section shows Invested / Current / Gain-Loss for Bluefin positions
+- [ ] Activity History table shows all rows with Suivision tx links
+- [ ] Actual Performance panel shows realized APR, daily/monthly/yearly
+- [ ] All three sections hidden for non-Bluefin positions
+- [ ] localStorage cache with 5-min TTL
+- [ ] `suiAddress` forwarded from `WalletAuthContext` to the hook via detail page
+- [ ] Build passes with no TypeScript errors
+
+---
+
+## Phase 4 Implementation Order
+
+```
+Step 1: Research — make live RPC call to discover Bluefin event type names
+   a. Add coinTypeA/coinTypeB to AerodromePosition type + Bluefin API route
+   b. Make a test suix_queryTransactionBlocks call on a known position objectId
+   c. Record exact event type strings for classify logic
+
+Step 2: Build /api/bluefin/activity/route.ts
+   a. suix_queryTransactionBlocks with ChangedObject filter + pagination
+   b. Classify events by type string discovered in Step 1
+   c. Extract amounts from balanceChanges
+   d. CoinGecko historical prices (same cap-30 approach)
+   e. Compute cumulativeFeeUSD, netInvested, totalFees
+
+Step 3: Hook + UI
+   a. app/hooks/useBluefinActivity.ts (localStorage cache, 5-min TTL)
+   b. Detail page: pass coinTypeA/B + suiAddress to hook
+   c. Assets section (gated: pos.protocol === 'Bluefin')
+   d. Activity History table with Suivision links
+   e. Actual Performance panel
+
+Step 4: Test and confirm
+   a. Verify all 4 operation types appear correctly
+   b. Verify USD values and cumul. fees make sense
+   c. npm run build — no TypeScript errors
+```
+
+**Do not start building until confirmed by user.**

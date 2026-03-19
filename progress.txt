@@ -262,6 +262,41 @@ KEY LEARNINGS:
        - Edge cases: daysActive < 1 → shows fees but omits APR; no fee claims → "No fees claimed yet"
        - Subtitle: "Based on actual claimed fees · not pool APY estimate"
 
+====================================================
+PHASE 4 — BLUEFIN ACTIVITY EXPANSION
+====================================================
+Started: 2026-03-20
+Scope: Replicate Features 7/8/9 (Assets, Activity History, Actual APR) for Bluefin on Sui.
+No new env vars — uses existing Sui public RPC.
+
+Key design decisions:
+- suix_queryTransactionBlocks with filter: { ChangedObject: positionObjectId }
+- Amounts from balanceChanges (filtered to wallet address) — no need to parse event data fields
+- Timestamps from timestampMs (no separate block lookup needed, unlike EVM)
+- Tx links: https://suivision.xyz/txblock/{digest}
+- CoinGecko historical prices: same cap-30 approach as Aerodrome
+- New type fields: coinTypeA, coinTypeB on AerodromePosition (Sui coin type strings)
+- New hook: useBluefinActivity.ts (5-min localStorage cache)
+
+[ ] Step 1: Discover Bluefin event type names via live RPC test
+    [ ] Add coinTypeA/coinTypeB to AerodromePosition type + Bluefin API route
+    [ ] Test suix_queryTransactionBlocks on known position objectId
+    [ ] Record exact event type strings for classify logic
+
+[ ] Step 2: Build /api/bluefin/activity/route.ts
+    [ ] ChangedObject filter + pagination
+    [ ] Event classification + balanceChanges amount extraction
+    [ ] CoinGecko historical prices
+    [ ] Return ActivityResponse shape (same as Aerodrome)
+
+[ ] Step 3: Hook + UI
+    [ ] app/hooks/useBluefinActivity.ts
+    [ ] Detail page: Assets section (Bluefin)
+    [ ] Detail page: Activity History table (Suivision links)
+    [ ] Detail page: Actual Performance panel
+
+[ ] Step 4: Test + confirm all 4 operation types visible
+
 --- POST-PRD BACKLOG ---
 
 [ ] Remove demo data — show empty state with connect-wallet prompt when no wallet connected
