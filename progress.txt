@@ -1,5 +1,5 @@
 LP Tracker — Progress
-Last updated: 2026-03-18
+Last updated: 2026-03-20
 ====================================================
 
 ====================================================
@@ -235,25 +235,32 @@ KEY LEARNINGS:
 - Alchemy free tier: eth_getLogs limited to 10 blocks; use Blast or another public RPC
 - Blast public RPC (base-mainnet.public.blastapi.io): unlimited block range when result < 10K
 
---- FEATURE 8: ACTIVITY HISTORY TABLE (SECTION 2) --- PLANNED
+--- FEATURE 8: ACTIVITY HISTORY TABLE (SECTION 2) --- DONE ✅ CONFIRMED
 
-[ ] CoinGecko historical price fetching in /api/aerodrome/activity
-    - /coins/{id}/history?date=DD-MM-YYYY per unique tx date
-    - Cap at 30 unique dates; use current price for older dates
-    - Retry with backoff on rate limit
-[ ] Activity table UI on /dashboard/[id]
-    - Columns: Date, Action, Token0, Token1, USD at time, Cumulative fees
-    - Newest first
-    - Tx hash links to basescan.org/tx/{hash}
+[DONE] CoinGecko historical price fetching in /api/aerodrome/activity
+       - /coins/{id}/history?date=DD-MM-YYYY per unique tx date (capped at 30 most recent)
+       - Older dates and failed fetches fall back to current price (p0/p1 query params)
+       - Known Base token → CoinGecko ID map: WETH→ethereum, USDC→usd-coin, cbBTC→bitcoin, DAI→dai
+       - token0/token1/p0/p1 query params added; usdAtTime + cumulativeFeeUSD added to ActivityEvent
+       - Events sorted chronologically for cumulative fee calc, then reversed to newest-first for display
+[DONE] token0Address / token1Address added to AerodromePosition type + Aerodrome API route response
+[DONE] usePositionActivity hook: accepts token0Address, token1Address, price0, price1; forwards to API
+[DONE] Activity table UI on /dashboard/[id]
+       - Columns: Date, Action, Token0, Token1, USD at time, Cumul. Fees, Tx
+       - Actions color-coded: blue=Deposit, orange=Withdrawal, green=Fee Claim
+       - Cumul. Fees column shows — for non-fee rows
+       - Tx hash links to basescan.org/tx/{hash} (0x1234…abcd format)
+[DONE] Hydration fix: all hooks (including usePositionActivity) now called before any early returns
 
---- FEATURE 9: ACTUAL APR (SECTION 3) --- PLANNED
+--- FEATURE 9: ACTUAL APR (SECTION 3) --- DONE ✅ CONFIRMED
 
-[ ] APR calculation: totalFeesUSD / currentValue / (daysActive / 365) * 100
-[ ] Actual Performance panel UI
-    - Total fees earned, days active, realized APR
-    - Daily / Monthly / Yearly fee projections
-    - Sits alongside existing "Est. Daily Fees" (clearly labeled Actual vs Estimated)
-    - Shown for all positions including Closed
+[DONE] Actual Performance panel on /dashboard/[id] (Aerodrome only)
+       - totalFeesUSD: sums fee_claim events using usdAtTime (historical), falls back to current prices
+       - daysActive: (now - firstDepositTimestamp) / 86400 from on-chain events
+       - realizedAPR: (totalFeesUSD / positionValue) / (daysActive / 365) * 100
+       - Daily / Monthly / Yearly fee projection tiles
+       - Edge cases: daysActive < 1 → shows fees but omits APR; no fee claims → "No fees claimed yet"
+       - Subtitle: "Based on actual claimed fees · not pool APY estimate"
 
 --- POST-PRD BACKLOG ---
 

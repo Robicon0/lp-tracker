@@ -89,6 +89,12 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 - ~~Feature 1: Impermanent Loss Calculator~~ ✅ Done
 - ~~Feature 2: Wallet Address Badges~~ ✅ Done
 - Feature 3: New protocol integrations (Camelot, Trader Joe, SushiSwap, etc.) — **deferred** (no active positions)
+- ~~Feature 4: PancakeSwap V3 (BNB Chain)~~ ✅ Done
+- ~~Feature 5: Watch Wallet~~ ✅ Done
+- Feature 6: Aptos — **deferred** (no active positions)
+- ~~Feature 7: Current vs Invested Assets (Aerodrome)~~ ✅ Done
+- ~~Feature 8: Activity History Table (Aerodrome)~~ ✅ Done
+- ~~Feature 9: Actual APR from claimed fees (Aerodrome)~~ ✅ Done
 - Remove demo data, show empty state when no wallet connected
 
 ## Dev Workflow
@@ -131,3 +137,6 @@ CRITICAL: Wallets must ONLY show as connected when the user has actively unlocke
 - HyperEVM amount calculation: MUST use actual `sqrtPriceX96` from `slot0()` (word 0 of slot0 response, uint160), NOT a midpoint estimate between ticks. Midpoint gives wildly wrong values (e.g. 5x too high). `sqrtPrice = Number(sqrtPriceX96) / 2^96`. Use `fetchPoolExtras` pattern that fetches slot0 + feeGrowth + ticks in one function to reuse both for amount calc and fee calc (no duplicate RPC calls). Range status = `currentTick >= tickLower && currentTick < tickUpper`.
 - Aerodrome Slipstream (CL) on Base — on-chain activity scanning: NonfungiblePositionManager `0x827922686190790b37229fd06084350E74485b72` (verified via `factory()` = CL_FACTORY). Correct event topic0 hashes (computed with viem keccak256 — NEVER hardcode from memory): `IncreaseLiquidity=0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f`, `DecreaseLiquidity=0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4`, `Collect=0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01`. tokenId is indexed (topic1). Data layout for Increase/Decrease: word0=liquidity(uint128), word1=amount0, word2=amount1. Data layout for Collect: word0=recipient(address), word1=amount0Collected, word2=amount1Collected.
 - eth_getLogs RPC limits: Alchemy free tier caps at 10 blocks per request — useless for history scans. Public Base RPC (mainnet.base.org) and DRPC cap at 10,000 blocks. Blast public RPC (`https://base-mainnet.public.blastapi.io`) supports ANY block range as long as result count < 10K — ideal for tokenId-filtered scans (a single position has ≤50 events). Use Blast for `eth_getLogs` in activity routes; use Alchemy for all other calls (eth_call, eth_getBlockByNumber, etc.).
+- Phase 3 activity hook pattern: `usePositionActivity` accepts token0Address, token1Address, price0, price1 — forwards to `/api/aerodrome/activity` as query params (token0, token1, p0, p1). Hook must be called BEFORE any conditional early returns in the component (React hooks rules). Sort events chronologically to compute cumulativeFeeUSD, then reverse to newest-first for display.
+- CoinGecko historical prices: `/coins/{id}/history?date=DD-MM-YYYY` returns `market_data.current_price.usd`. Cap at 30 most recent unique dates; older dates and fetch failures fall back to current price. Known Base token → CoinGecko ID map in activity route (WETH→ethereum, USDC→usd-coin, cbBTC→bitcoin, DAI→dai). Fetch both tokens in parallel per date.
+- Actual APR formula: `(totalFeesUSD / positionValue) / (daysActive / 365) * 100`. `totalFeesUSD` = sum of `fee_claim` events using `usdAtTime` with current-price fallback. `daysActive` = `(nowTs - firstDepositTs) / 86400`. Guard: if daysActive < 1, show fees but omit APR. If no fee claims, show "No fees claimed yet" instead of 0%.
