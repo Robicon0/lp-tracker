@@ -560,6 +560,115 @@ export default function PositionDetail() {
             )}
           </div>
         )}
+
+        {/* Actual Performance — Feature 9 (Aerodrome only) */}
+        {pos.protocol === 'Aerodrome' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-bold mb-1">Actual Performance</h2>
+            <p className="text-gray-600 text-xs mb-4">Based on actual claimed fees · not pool APY estimate</p>
+
+            {activityLoading && (
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="w-4 h-4 border border-gray-500 border-t-transparent rounded-full animate-spin" />
+                Calculating…
+              </div>
+            )}
+
+            {!activityLoading && activity && (() => {
+              const feeClaims = activity.events.filter(e => e.type === 'fee_claim');
+              const deposits = activity.events.filter(e => e.type === 'deposit');
+
+              // Total fees in USD — prefer usdAtTime, fall back to current prices
+              const totalFeesUSD = feeClaims.reduce((sum, e) => {
+                if (e.usdAtTime != null) return sum + e.usdAtTime;
+                const p0 = pos.price0 ?? 0;
+                const p1 = pos.price1 ?? 0;
+                return sum + e.amount0 * p0 + e.amount1 * p1;
+              }, 0);
+
+              // First deposit timestamp (events are newest-first, so take last deposit)
+              const firstDeposit = deposits.length > 0
+                ? deposits[deposits.length - 1]
+                : null;
+              const firstTs = firstDeposit?.timestamp ?? 0;
+              const nowTs = Math.floor(Date.now() / 1000);
+              const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+
+              const fmtUSD = (n: number) =>
+                `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+              if (feeClaims.length === 0) {
+                return (
+                  <p className="text-gray-500 text-sm">No fees claimed yet.</p>
+                );
+              }
+
+              if (daysActive < 1) {
+                return (
+                  <div className="space-y-0">
+                    <div className="flex justify-between py-3 border-b border-gray-800">
+                      <span className="text-gray-400">Total fees earned</span>
+                      <span className="font-semibold text-green-400">{fmtUSD(totalFeesUSD)}</span>
+                    </div>
+                    <div className="flex justify-between py-3">
+                      <span className="text-gray-400">Position active</span>
+                      <span className="font-semibold">&lt; 1 day</span>
+                    </div>
+                    <p className="text-gray-600 text-xs mt-2">APR not shown — position active less than 1 day</p>
+                  </div>
+                );
+              }
+
+              const dailyFees = totalFeesUSD / daysActive;
+              const monthlyFees = dailyFees * 30;
+              const yearlyFees = dailyFees * 365;
+              const realizedAPR = pos.value > 0
+                ? (totalFeesUSD / pos.value) / (daysActive / 365) * 100
+                : 0;
+
+              const daysLabel = daysActive >= 1
+                ? `${Math.floor(daysActive)} day${Math.floor(daysActive) !== 1 ? 's' : ''}`
+                : '< 1 day';
+
+              return (
+                <div>
+                  <div className="space-y-0">
+                    <div className="flex justify-between py-3 border-b border-gray-800">
+                      <span className="text-gray-400">Total fees earned</span>
+                      <span className="font-semibold text-green-400">{fmtUSD(totalFeesUSD)}</span>
+                    </div>
+                    <div className="flex justify-between py-3 border-b border-gray-800">
+                      <span className="text-gray-400">Position active</span>
+                      <span className="font-semibold">{daysLabel}</span>
+                    </div>
+                    <div className="flex justify-between py-3 border-b border-gray-800">
+                      <span className="text-gray-400">Realized APR</span>
+                      <span className="font-semibold text-green-400">~{realizedAPR.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                      <p className="text-gray-500 text-xs mb-1">Daily</p>
+                      <p className="font-semibold text-sm">{fmtUSD(dailyFees)}</p>
+                    </div>
+                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                      <p className="text-gray-500 text-xs mb-1">Monthly</p>
+                      <p className="font-semibold text-sm">{fmtUSD(monthlyFees)}</p>
+                    </div>
+                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                      <p className="text-gray-500 text-xs mb-1">Yearly</p>
+                      <p className="font-semibold text-sm">{fmtUSD(yearlyFees)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!activityLoading && !activity && (
+              <p className="text-gray-500 text-sm">Could not load activity data.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
