@@ -570,7 +570,7 @@ export default function PositionDetail() {
                           </td>
                           <td className="py-3 pr-4 text-right text-gray-300">{fmtUSD(ev.usdAtTime)}</td>
                           <td className="py-3 pr-4 text-right text-gray-500">
-                            {ev.type === 'fee_claim' ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
+                            {(ev.type === 'fee_claim' || ev.type === 'reward_claim') ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
                           </td>
                           <td className="py-3 text-right">
                             <a
