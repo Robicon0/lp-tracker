@@ -683,10 +683,10 @@ export default function PositionDetail() {
                       <span className="text-gray-400">Realized APR</span>
                       <div className="text-right">
                         <span className="font-semibold text-green-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
-                        <span className="text-gray-500 text-xs mx-2">·</span>
-                        <span className="text-green-400/70 text-sm">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / mo</span>
-                        <span className="text-gray-500 text-xs mx-2">·</span>
-                        <span className="text-green-400/50 text-sm">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / wk</span>
+                        <span className="text-gray-500 mx-2">·</span>
+                        <span className="font-semibold text-blue-400">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / mo</span>
+                        <span className="text-gray-500 mx-2">·</span>
+                        <span className="font-semibold text-purple-400">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / wk</span>
                       </div>
                     </div>
                   </div>
