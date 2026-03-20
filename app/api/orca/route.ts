@@ -556,6 +556,8 @@ export async function GET(request: Request) {
         liquidity: pos.liquidity.toString(),
         price0: priceA,
         price1: priceB,
+        token0Address: pool?.tokenMintA,
+        token1Address: pool?.tokenMintB,
         walletAddress: account,
       };
     });

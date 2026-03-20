@@ -85,6 +85,7 @@ function readPubkey(buf: Buffer, offset: number): string {
 
 interface RawRaydiumPosition {
   nftMint: string;
+  positionPubkey: string;  // position state account address
   poolId: string;
   tickLower: number;
   tickUpper: number;
@@ -119,6 +120,7 @@ async function fetchRaydiumPosition(nftMint: string): Promise<RawRaydiumPosition
 
   if (!result || result.length === 0) return null;
 
+  const positionPubkey = result[0].pubkey;
   const data = Buffer.from(result[0].account.data[0], 'base64');
   if (data.length < 144) return null;
 
@@ -138,6 +140,7 @@ async function fetchRaydiumPosition(nftMint: string): Promise<RawRaydiumPosition
 
   return {
     nftMint,
+    positionPubkey,
     poolId: readPubkey(data, 40),
     tickLower: readI32LE(data, 72),
     tickUpper: readI32LE(data, 76),
@@ -390,7 +393,7 @@ export async function GET(request: Request) {
       }
 
       return {
-        id: `ray-${pos.nftMint}`,
+        id: `ray-${pos.positionPubkey}`,
         pair: `${t0Symbol} / ${t1Symbol}`,
         protocol: 'Raydium',
         chain: 'Solana',
@@ -412,6 +415,8 @@ export async function GET(request: Request) {
         liquidity: pos.liquidity.toString(),
         price0,
         price1,
+        token0Address: pool?.tokenMint0,
+        token1Address: pool?.tokenMint1,
         walletAddress: account,
       };
     });

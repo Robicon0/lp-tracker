@@ -832,3 +832,57 @@ Step 4: Test and confirm
 ```
 
 **Do not start building until confirmed by user.**
+
+---
+
+---
+
+# Phase 5: Orca + Raydium Activity Expansion
+
+_Last updated: 2026-03-20_
+
+## Overview
+
+Replicate Features 7, 8, and 9 for **Orca and Raydium on Solana**. Same three sections — Assets (Invested vs Current), Activity History table, and Actual Performance (realized APR) — on the position detail page. Uses Solana-specific transaction history APIs via Helius RPC.
+
+---
+
+## Technical Approach
+
+### Transaction discovery
+
+`getSignaturesForAddress(positionPDA)` for Orca and `getSignaturesForAddress(positionAccountPubkey)` for Raydium. Both query the on-chain account that is mutated by every relevant operation — equivalent to Sui's ChangedObject filter.
+
+- Raydium route updated: `id` changed from `ray-{nftMint}` to `ray-{positionAccountPubkey}` so the activity route can use `pos.id.replace('ray-', '')` directly.
+
+### Amount extraction
+
+`meta.preTokenBalances` / `meta.postTokenBalances` from each transaction. Delta for `owner === walletAddress` and `mint === tokenMintA/B`. Raw `amount` string (not `uiAmount`) used to avoid null issues.
+
+### Event classification
+
+Anchor 8-byte discriminators computed via Node's `createHash('sha256').update('global:{name}').digest().slice(0,8)`. Inline base58 decoder (no SDK deps).
+
+| Instruction | Orca | Raydium | Event type |
+|-------------|------|---------|------------|
+| open_position / open_position_with_metadata | ✓ | ✓ | deposit |
+| increase_liquidity / v2 | ✓ | ✓ | deposit |
+| decrease_liquidity / v2 | ✓ → withdrawal | liquidity=0 → fee_claim, else withdrawal | withdrawal or fee_claim |
+| collect_fees / v2 | ✓ | — | fee_claim |
+| close_position | ✓ | ✓ | withdrawal |
+
+**Raydium fee-claim detection**: `decrease_liquidity` instruction data bytes 8..24 = u128 LE liquidity param. If zero → fee_claim.
+
+### TX links
+
+`https://solscan.io/tx/{signature}` for both Orca and Raydium.
+
+---
+
+## Acceptance Criteria
+
+- [x] Build passes with no TypeScript errors
+- [ ] Orca: Assets / Activity History / Actual Performance visible on position detail
+- [ ] Raydium: same three sections visible (when position exists)
+- [ ] TX links open Solscan in new tab
+- [ ] localStorage cache with 5-min TTL working

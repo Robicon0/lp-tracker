@@ -7,6 +7,8 @@ import Navbar from "../../Navbar";
 import { usePositions } from "../../contexts/PositionsContext";
 import { usePositionActivity } from "../../hooks/usePositionActivity";
 import { useBluefinActivity } from "../../hooks/useBluefinActivity";
+import { useOrcaActivity } from "../../hooks/useOrcaActivity";
+import { useRaydiumActivity } from "../../hooks/useRaydiumActivity";
 
 const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
@@ -139,14 +141,43 @@ export default function PositionDetail() {
     pos?.walletAddress,
   );
 
+  const orcaPosId = pos?.protocol === 'Orca' ? pos.id.replace('orca-', '') : null;
+  const { data: orcaActivity, isLoading: orcaActivityLoading } = useOrcaActivity(
+    orcaPosId,
+    pos?.token0Decimals ?? 9,
+    pos?.token1Decimals ?? 6,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+    pos?.walletAddress,
+  );
+
+  const raydiumPosId = pos?.protocol === 'Raydium' ? pos.id.replace('ray-', '') : null;
+  const { data: raydiumActivity, isLoading: raydiumActivityLoading } = useRaydiumActivity(
+    raydiumPosId,
+    pos?.token0Decimals ?? 9,
+    pos?.token1Decimals ?? 6,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+    pos?.walletAddress,
+  );
+
   // Unified activity data — pick source based on protocol
   const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
     : pos?.protocol === 'Bluefin' ? bluefinActivity
+    : pos?.protocol === 'Orca' ? orcaActivity
+    : pos?.protocol === 'Raydium' ? raydiumActivity
     : null;
   const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
     : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
+    : pos?.protocol === 'Orca' ? orcaActivityLoading
+    : pos?.protocol === 'Raydium' ? raydiumActivityLoading
     : false;
-  const isActivityProtocol = pos?.protocol === 'Aerodrome' || pos?.protocol === 'Bluefin';
+  const isActivityProtocol = pos?.protocol === 'Aerodrome' || pos?.protocol === 'Bluefin'
+    || pos?.protocol === 'Orca' || pos?.protocol === 'Raydium';
 
   if (!mounted || isLoading) {
     return (
@@ -526,6 +557,8 @@ export default function PositionDetail() {
               const txUrl = (hash: string) =>
                 pos.protocol === 'Bluefin'
                   ? `https://suivision.xyz/txblock/${hash}`
+                  : (pos.protocol === 'Orca' || pos.protocol === 'Raydium')
+                  ? `https://solscan.io/tx/${hash}`
                   : `https://basescan.org/tx/${hash}`;
 
               const fmtDate = (ts: number) => {

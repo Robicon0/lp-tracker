@@ -297,6 +297,49 @@ Key design decisions:
 
 [ ] Step 4: Test + confirm all 4 operation types visible
 
+====================================================
+PHASE 5 — ORCA + RAYDIUM ACTIVITY EXPANSION
+====================================================
+Started: 2026-03-20
+Scope: Replicate Features 7/8/9 (Assets, Activity History, Actual APR) for Orca and Raydium on Solana.
+No new env vars — uses existing HELIUS_API_KEY.
+
+Key design decisions:
+- Transaction discovery: getSignaturesForAddress(positionPDA/positionAccountPubkey)
+- Amounts from meta.preTokenBalances / meta.postTokenBalances delta (owner+mint filter)
+- Event classification via Anchor 8-byte discriminators (sha256("global:...")[0..8]) using Node crypto
+- Inline base58 decoder — no @solana/web3.js needed in activity routes
+- Raydium: decrease_liquidity with liquidity param = 0 → fee_claim; > 0 → withdrawal
+- Raydium: id changed from 'ray-{nftMint}' to 'ray-{positionAccountPubkey}' for activity queries
+- TX links: https://solscan.io/tx/{signature} (both Orca and Raydium)
+- CoinGecko historical prices: same cap-30 approach as Aerodrome/Bluefin
+- localStorage cache: 5-min TTL, keys orca-activity-{id} / raydium-activity-{id}
+
+[DONE] app/api/orca/route.ts — added token0Address (tokenMintA), token1Address (tokenMintB)
+[DONE] app/api/raydium/route.ts — added positionPubkey to RawRaydiumPosition, changed id to 'ray-{positionPubkey}', added token0Address/token1Address
+[DONE] app/api/orca/activity/route.ts
+       - getSignaturesForAddress(positionPDA) with before-cursor pagination (cap 1000)
+       - getTransaction (20 per batch) with encoding: jsonParsed, maxSupportedTransactionVersion: 0
+       - Anchor discriminators: open_position, open_position_with_metadata, increase_liquidity/v2 → deposit
+         decrease_liquidity/v2, close_position → withdrawal; collect_fees/v2 → fee_claim
+       - Amounts from pre/post token balances (raw amount strings summed per owner+mint)
+       - CoinGecko historical prices (cap 30 dates, fallback to current)
+       - Returns ActivityResponse shape (events, netInvested0/1, totalFees0/1)
+[DONE] app/api/raydium/activity/route.ts
+       - Same pattern as Orca but for Raydium CLMM program
+       - decrease_liquidity with 0-liquidity param → fee_claim (reads u128 LE bytes 8..24)
+[DONE] app/hooks/useOrcaActivity.ts — localStorage cache, 5-min TTL, orca-activity-{positionId}
+[DONE] app/hooks/useRaydiumActivity.ts — same, raydium-activity-{positionId}
+[DONE] app/dashboard/[id]/page.tsx
+       - Imports useOrcaActivity + useRaydiumActivity (called unconditionally before early returns)
+       - activity/activityLoading/isActivityProtocol now covers Orca + Raydium
+       - txUrl: Orca/Raydium → solscan.io/tx/{hash}
+       - All 3 sections (Assets, Activity History, Actual Performance) shown for Orca + Raydium
+[DONE] Build passes (npm run build ✓)
+
+[ ] Confirm Orca activity data in dashboard (connect Solana wallet, open Orca position detail)
+[ ] Confirm Raydium activity data when Raydium position exists
+
 --- POST-PRD BACKLOG ---
 
 [ ] Remove demo data — show empty state with connect-wallet prompt when no wallet connected
