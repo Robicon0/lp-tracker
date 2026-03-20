@@ -9,6 +9,9 @@ import { usePositionActivity } from "../../hooks/usePositionActivity";
 import { useBluefinActivity } from "../../hooks/useBluefinActivity";
 import { useOrcaActivity } from "../../hooks/useOrcaActivity";
 import { useRaydiumActivity } from "../../hooks/useRaydiumActivity";
+import { useHyperSwapActivity } from "../../hooks/useHyperSwapActivity";
+import { useUniswapActivity } from "../../hooks/useUniswapActivity";
+import { useVelodromeActivity } from "../../hooks/useVelodromeActivity";
 
 const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
@@ -165,19 +168,66 @@ export default function PositionDetail() {
     pos?.walletAddress,
   );
 
+  const HYPEREVM_PROTOCOLS = new Set(['HyperSwap', 'KittenSwap', 'ProjectX']);
+  const hyperswapTokenId = pos && HYPEREVM_PROTOCOLS.has(pos.protocol)
+    ? pos.id.replace(/^hyperswap-[^-]+-/, '')
+    : null;
+  const { data: hyperswapActivity, isLoading: hyperswapActivityLoading } = useHyperSwapActivity(
+    hyperswapTokenId,
+    pos && HYPEREVM_PROTOCOLS.has(pos.protocol) ? pos.protocol : null,
+    pos?.token0Decimals ?? 18,
+    pos?.token1Decimals ?? 6,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+  );
+
+  // Uniswap V3 — id format: uni3-{chainKey}-{tokenId}
+  const uniswapPosId = pos?.protocol === 'Uniswap V3' ? pos.id : null;
+  const { data: uniswapActivity, isLoading: uniswapActivityLoading } = useUniswapActivity(
+    uniswapPosId,
+    pos?.token0Decimals ?? 18,
+    pos?.token1Decimals ?? 18,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+  );
+
+  // Velodrome — id format: velo-{tokenId}
+  const velodromePosId = pos?.protocol === 'Velodrome' ? pos.id.replace('velo-', '') : null;
+  const { data: velodromeActivity, isLoading: velodromeActivityLoading } = useVelodromeActivity(
+    velodromePosId,
+    pos?.token0Decimals ?? 18,
+    pos?.token1Decimals ?? 18,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+  );
+
   // Unified activity data — pick source based on protocol
+  const isHyperEVM = pos ? HYPEREVM_PROTOCOLS.has(pos.protocol) : false;
   const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
     : pos?.protocol === 'Bluefin' ? bluefinActivity
     : pos?.protocol === 'Orca' ? orcaActivity
     : pos?.protocol === 'Raydium' ? raydiumActivity
+    : isHyperEVM ? hyperswapActivity
+    : pos?.protocol === 'Uniswap V3' ? uniswapActivity
+    : pos?.protocol === 'Velodrome' ? velodromeActivity
     : null;
   const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
     : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
     : pos?.protocol === 'Orca' ? orcaActivityLoading
     : pos?.protocol === 'Raydium' ? raydiumActivityLoading
+    : isHyperEVM ? hyperswapActivityLoading
+    : pos?.protocol === 'Uniswap V3' ? uniswapActivityLoading
+    : pos?.protocol === 'Velodrome' ? velodromeActivityLoading
     : false;
   const isActivityProtocol = pos?.protocol === 'Aerodrome' || pos?.protocol === 'Bluefin'
-    || pos?.protocol === 'Orca' || pos?.protocol === 'Raydium';
+    || pos?.protocol === 'Orca' || pos?.protocol === 'Raydium' || isHyperEVM
+    || pos?.protocol === 'Uniswap V3' || pos?.protocol === 'Velodrome';
 
   if (!mounted || isLoading) {
     return (
@@ -554,12 +604,17 @@ export default function PositionDetail() {
                 reward_claim: 'text-purple-400',
               };
 
-              const txUrl = (hash: string) =>
-                pos.protocol === 'Bluefin'
-                  ? `https://suivision.xyz/txblock/${hash}`
-                  : (pos.protocol === 'Orca' || pos.protocol === 'Raydium')
-                  ? `https://solscan.io/tx/${hash}`
-                  : `https://basescan.org/tx/${hash}`;
+              const txUrl = (hash: string) => {
+                if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
+                if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
+                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
+                // EVM chains — route by chain name
+                if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
+                if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
+                if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
+                if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
+                return `https://basescan.org/tx/${hash}`; // Base (Aerodrome)
+              };
 
               const fmtDate = (ts: number) => {
                 if (!ts) return '—';

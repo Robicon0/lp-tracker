@@ -383,6 +383,8 @@ async function fetchPositionsForChain(
           liquidity: pos.liquidity.toString(),
           price0,
           price1,
+          token0Address: pos.token0,
+          token1Address: pos.token1,
           walletAddress: account,
         });
       } catch (err) {
