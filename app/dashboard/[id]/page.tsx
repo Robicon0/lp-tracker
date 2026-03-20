@@ -655,11 +655,14 @@ export default function PositionDetail() {
               }
 
               const dailyFees = totalFeesUSD / daysActive;
+              const weeklyFees = dailyFees * 7;
               const monthlyFees = dailyFees * 30;
               const yearlyFees = dailyFees * 365;
-              const realizedAPR = pos.value > 0
+              const aprYearly = pos.value > 0
                 ? (totalFeesUSD / pos.value) / (daysActive / 365) * 100
                 : 0;
+              const aprMonthly = aprYearly / 12;
+              const aprWeekly = aprYearly / 52;
 
               const daysLabel = daysActive >= 1
                 ? `${Math.floor(daysActive)} day${Math.floor(daysActive) !== 1 ? 's' : ''}`
@@ -678,13 +681,23 @@ export default function PositionDetail() {
                     </div>
                     <div className="flex justify-between py-3 border-b border-gray-800">
                       <span className="text-gray-400">Realized APR</span>
-                      <span className="font-semibold text-green-400">~{realizedAPR.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
+                      <div className="text-right">
+                        <span className="font-semibold text-green-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
+                        <span className="text-gray-500 text-xs mx-2">·</span>
+                        <span className="text-green-400/70 text-sm">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / mo</span>
+                        <span className="text-gray-500 text-xs mx-2">·</span>
+                        <span className="text-green-400/50 text-sm">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / wk</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="mt-4 grid grid-cols-3 gap-3">
+                  <div className="mt-4 grid grid-cols-4 gap-3">
                     <div className="bg-gray-800/50 rounded-lg p-3 text-center">
                       <p className="text-gray-500 text-xs mb-1">Daily</p>
                       <p className="font-semibold text-sm">{fmtUSD(dailyFees)}</p>
+                    </div>
+                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                      <p className="text-gray-500 text-xs mb-1">Weekly</p>
+                      <p className="font-semibold text-sm">{fmtUSD(weeklyFees)}</p>
                     </div>
                     <div className="bg-gray-800/50 rounded-lg p-3 text-center">
                       <p className="text-gray-500 text-xs mb-1">Monthly</p>
