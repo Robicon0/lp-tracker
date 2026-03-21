@@ -234,7 +234,7 @@ export default function PositionDetail() {
     return (
       <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
-        <div className="w-full max-w-7xl mx-auto px-4">
+        <div className="w-full max-w-7xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
@@ -250,7 +250,7 @@ export default function PositionDetail() {
     return (
       <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
-        <div className="w-full max-w-7xl mx-auto px-4">
+        <div className="w-full max-w-7xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
@@ -327,7 +327,7 @@ export default function PositionDetail() {
   return (
     <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
-      <div className="w-full max-w-7xl mx-auto px-4">
+      <div className="w-full max-w-7xl mx-auto">
         <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
           &larr; Back to Dashboard
         </Link>
@@ -422,7 +422,7 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid gap-1 mb-1.5 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-2 mb-1.5 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
             <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
@@ -563,7 +563,7 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid gap-1 mb-1.5 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-2 mb-1.5 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
               <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
