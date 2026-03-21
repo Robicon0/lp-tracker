@@ -115,6 +115,7 @@ export default function PositionDetail() {
   const { id } = useParams<{ id: string }>();
   const { positions, isLoading } = usePositions();
   const [mounted, setMounted] = useState(false);
+  const [aprExpanded, setAprExpanded] = useState(false);
   useEffect(() => setMounted(true), []);
 
   // Find position — may be undefined until data loads; derive params for hook below
@@ -231,14 +232,14 @@ export default function PositionDetail() {
 
   if (!mounted || isLoading) {
     return (
-      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+      <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
-        <div className="max-w-4xl mx-auto">
-          <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
+        <div className="max-w-5xl mx-auto">
+          <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
           <div className="flex items-center justify-center py-24">
-            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
           </div>
         </div>
       </div>
@@ -247,16 +248,16 @@ export default function PositionDetail() {
 
   if (!pos) {
     return (
-      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+      <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
-        <div className="max-w-4xl mx-auto">
-          <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
+        <div className="max-w-5xl mx-auto">
+          <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
           <div className="flex items-center justify-center py-24">
             <div className="text-center">
               <h1 className="text-4xl font-bold mb-4">Position Not Found</h1>
-              <p className="text-gray-400">This position doesn&apos;t exist or your wallet isn&apos;t connected.</p>
+              <p className="text-emerald-300/70">This position doesn&apos;t exist or your wallet isn&apos;t connected.</p>
             </div>
           </div>
         </div>
@@ -288,7 +289,6 @@ export default function PositionDetail() {
         )
       : null;
 
-  const hasTokenBreakdown = pos.amount0 != null && pos.amount1 != null;
   const hasFeeBreakdown = pos.fees0 != null && pos.fees1 != null;
   const hasTickRange = pos.tickLower != null && pos.tickUpper != null;
   const hasFeeTier = pos.feeTier != null;
@@ -305,202 +305,137 @@ export default function PositionDetail() {
         )
       : null;
 
+  // Pre-compute APR metrics for the stat card
+  const aprMetrics = (() => {
+    if (!isActivityProtocol || !activity) return null;
+    const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
+    if (feeClaims.length === 0) return null;
+    const totalFeesUSD = feeClaims.reduce((sum, e) => {
+      if (e.usdAtTime != null) return sum + e.usdAtTime;
+      return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+    }, 0);
+    const deposits = activity.events.filter(e => e.type === 'deposit');
+    const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
+    const firstTs = firstDeposit?.timestamp ?? 0;
+    const nowTs = Math.floor(Date.now() / 1000);
+    const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+    if (daysActive < 1) return null;
+    const aprYearly = pos.value > 0 ? (totalFeesUSD / pos.value) / (daysActive / 365) * 100 : 0;
+    return { aprYearly, aprMonthly: aprYearly / 12, aprWeekly: aprYearly / 52, aprDaily: aprYearly / 365 };
+  })();
+
   return (
-    <div className="p-8 pt-24 bg-black text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
-      <div className="max-w-4xl mx-auto">
-        <Link href="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm mb-6 inline-block">
+      <div className="max-w-5xl mx-auto">
+        <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
           &larr; Back to Dashboard
         </Link>
 
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-4xl font-bold">{pos.pair}</h1>
-            <p className="text-gray-400 mt-1">{pos.protocol} &bull; {pos.chain}</p>
+            <h1 className="text-2xl font-bold text-white">{pos.pair}</h1>
+            <p className="text-gray-400 text-sm mt-1">{pos.protocol} &bull; {pos.chain}</p>
           </div>
-          <span className={`px-4 py-2 rounded-full text-sm font-medium ${
+          <span className={`px-4 py-2 rounded-full text-sm font-semibold ${
             pos.status === "In Range"
-              ? "bg-green-500/10 text-green-500"
+              ? "bg-emerald-950 text-emerald-400 border border-emerald-400/30"
               : pos.status === "Closed"
-              ? "bg-gray-500/10 text-gray-400"
-              : "bg-red-500/10 text-red-500"
+              ? "bg-gray-800/50 text-gray-400 border border-gray-600/30"
+              : "bg-red-950/50 text-red-400 border border-red-400/30"
           }`}>
             {pos.status}
           </span>
         </div>
 
-        {/* Top Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Position Value</p>
-            <p className="text-3xl font-bold">
+        {/* Row 1: Top Stats — 4 cards */}
+        <div className="grid grid-cols-4 gap-3 mb-6">
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+            <p className="text-xs font-medium text-emerald-300 mb-1">Position Value</p>
+            <p className="text-2xl font-bold text-white">
               ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Current APY</p>
-            <p className="text-3xl font-bold text-green-500">{pos.apy}%</p>
-            {pos.apy > 0 && (
-              <p className="text-gray-500 text-xs mt-1">
-                {(pos.apy / 12).toFixed(2)}% /mo &middot; {(pos.apy / 365).toFixed(3)}% /day
-              </p>
+
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+            <p className="text-xs font-medium text-emerald-300 mb-1">Realized APR</p>
+            {activityLoading ? (
+              <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
+            ) : aprMetrics ? (
+              <button onClick={() => setAprExpanded(v => !v)} className="text-left w-full">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-2xl font-bold text-white">~{aprMetrics.aprYearly.toFixed(1)}%</span>
+                  <span className="text-gray-400 text-xs">/yr</span>
+                  <svg className={`w-3 h-3 text-gray-400 ml-auto transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {aprExpanded && (
+                  <div className="mt-2 grid grid-cols-2 gap-1">
+                    <div className="bg-emerald-900/30 rounded p-1.5 text-center">
+                      <p className="text-xs text-gray-400">Yearly</p>
+                      <p className="text-xs font-semibold text-emerald-300">~{aprMetrics.aprYearly.toFixed(1)}%</p>
+                    </div>
+                    <div className="bg-blue-900/30 rounded p-1.5 text-center">
+                      <p className="text-xs text-gray-400">Monthly</p>
+                      <p className="text-xs font-semibold text-blue-300">~{aprMetrics.aprMonthly.toFixed(2)}%</p>
+                    </div>
+                    <div className="bg-purple-900/30 rounded p-1.5 text-center">
+                      <p className="text-xs text-gray-400">Weekly</p>
+                      <p className="text-xs font-semibold text-purple-300">~{aprMetrics.aprWeekly.toFixed(2)}%</p>
+                    </div>
+                    <div className="bg-emerald-900/20 rounded p-1.5 text-center">
+                      <p className="text-xs text-gray-400">Daily</p>
+                      <p className="text-xs font-semibold text-white/60">~{aprMetrics.aprDaily.toFixed(3)}%</p>
+                    </div>
+                  </div>
+                )}
+              </button>
+            ) : (
+              <p className="text-2xl font-bold text-white/30">—</p>
             )}
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Fees Earned</p>
-            <p className="text-3xl font-bold">
+
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+            <p className="text-xs font-medium text-emerald-300 mb-1">Total Fees Earned</p>
+            <p className="text-2xl font-bold text-white">
               ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
-        </div>
 
-        {/* Token Breakdown */}
-        {hasTokenBreakdown && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4">Token Amounts</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-800/50 rounded-lg p-4">
-                <p className="text-gray-400 text-sm mb-1">{pos.token0Symbol}</p>
-                <p className="text-xl font-semibold">{pos.amount0!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</p>
-              </div>
-              <div className="bg-gray-800/50 rounded-lg p-4">
-                <p className="text-gray-400 text-sm mb-1">{pos.token1Symbol}</p>
-                <p className="text-xl font-semibold">{pos.amount1!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Fee Breakdown */}
-        {hasFeeBreakdown && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4">Fee Breakdown</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-800/50 rounded-lg p-4">
-                <p className="text-gray-400 text-sm mb-1">{pos.token0Symbol} Fees</p>
-                <p className="text-xl font-semibold">{pos.fees0!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</p>
-              </div>
-              <div className="bg-gray-800/50 rounded-lg p-4">
-                <p className="text-gray-400 text-sm mb-1">{pos.token1Symbol} Fees</p>
-                <p className="text-xl font-semibold">{pos.fees1!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Position Details */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-          <h2 className="text-xl font-bold mb-4">Position Details</h2>
-          <div className="space-y-0">
-            <div className="flex justify-between py-3 border-b border-gray-800">
-              <span className="text-gray-400">Trading Pair</span>
-              <span className="font-semibold">{pos.pair}</span>
-            </div>
-            <div className="flex justify-between py-3 border-b border-gray-800">
-              <span className="text-gray-400">Protocol</span>
-              <span className="font-semibold">{pos.protocol}</span>
-            </div>
-            <div className="flex justify-between py-3 border-b border-gray-800">
-              <span className="text-gray-400">Blockchain</span>
-              <span className="font-semibold">{pos.chain}</span>
-            </div>
-            <div className="flex justify-between py-3 border-b border-gray-800">
-              <span className="text-gray-400">Status</span>
-              <span className={pos.status === "In Range" ? "text-green-500 font-semibold" : pos.status === "Closed" ? "text-gray-400 font-semibold" : "text-red-500 font-semibold"}>
-                {pos.status}
-              </span>
-            </div>
-            {hasFeeTier && (
-              <div className="flex justify-between py-3 border-b border-gray-800">
-                <span className="text-gray-400">Fee Tier</span>
-                <span className="font-semibold">{pos.feeTier}%</span>
-              </div>
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+            <p className="text-xs font-medium text-emerald-300 mb-1">IL</p>
+            {ilData ? (
+              <>
+                <p className={`text-2xl font-bold ${ilData.ilUSD < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {ilData.ilUSD < 0 ? '−' : '+'}${Math.abs(ilData.ilUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs mt-1 text-red-300">
+                  {ilData.ilUSD >= 0 ? '+' : ''}{ilData.ilPct.toFixed(2)}% vs HODL
+                </p>
+              </>
+            ) : (
+              <p className="text-2xl font-bold text-white/30">—</p>
             )}
-            {hasTickRange && (
-              <div className="flex justify-between py-3 border-b border-gray-800">
-                <span className="text-gray-400">Price Range</span>
-                <span className="font-semibold">
-                  {tickRangeLabel ?? `${pos.tickLower} → ${pos.tickUpper}`}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between py-3 border-b border-gray-800">
-              <span className="text-gray-400">
-                Est. Daily Fees
-                <span className="text-gray-600 text-xs ml-1">(pool APY × value)</span>
-              </span>
-              <span className="font-semibold">
-                {pos.apy > 0
-                  ? `$${estimatedDailyFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : "—"}
-              </span>
-            </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-400">
-                Est. Monthly Yield
-                <span className="text-gray-600 text-xs ml-1">(pool APY × value)</span>
-              </span>
-              <span className="font-semibold text-green-500">
-                {pos.apy > 0
-                  ? `$${estimatedMonthlyYield.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : "—"}
-              </span>
-            </div>
           </div>
         </div>
 
-        {/* Impermanent Loss */}
-        {ilData && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4">Impermanent Loss</h2>
-            <div className="space-y-0">
-              <div className="flex justify-between py-3 border-b border-gray-800">
-                <span className="text-gray-400">Entry price (est.)</span>
-                <span className="font-semibold">
-                  {formatPrice(ilData.entryPriceUSD)} / {ilData.entryPriceLabel}
-                </span>
-              </div>
-              <div className="flex justify-between py-3 border-b border-gray-800">
-                <span className="text-gray-400">HODL value</span>
-                <span className="font-semibold">
-                  ${ilData.hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between py-3 border-b border-gray-800">
-                <span className="text-gray-400">Current value</span>
-                <span className="font-semibold">
-                  ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between py-3">
-                <span className="text-gray-400">IL</span>
-                <span className={`font-semibold ${ilData.ilUSD < 0 ? "text-red-400" : "text-green-400"}`}>
-                  {ilData.ilUSD < 0 ? "−" : "+"}$
-                  {Math.abs(ilData.ilUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  {" "}({ilData.ilUSD >= 0 ? "+" : ""}{ilData.ilPct.toFixed(2)}%)
-                </span>
-              </div>
-            </div>
-            <p className="text-gray-600 text-xs mt-3">
-              Estimated from range midpoint · tick {ilData.entryTick} — not your actual entry
-            </p>
-          </div>
-        )}
+        {/* Row 2: Assets + Position Details */}
+        <div className={`grid gap-3 mb-3 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {/* Assets: Current vs Invested */}
+          {isActivityProtocol && (
+            <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+              <h2 className="text-sm font-bold text-emerald-300 mb-3">Assets</h2>
 
-        {/* Assets: Current vs Invested (Aerodrome + Bluefin) */}
-        {isActivityProtocol && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4">Assets</h2>
+              {activityLoading && (
+                <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                  <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
+                  Scanning on-chain history…
+                </div>
+              )}
 
-            {activityLoading && (
-              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
-                <div className="w-4 h-4 border border-gray-500 border-t-transparent rounded-full animate-spin" />
-                Scanning on-chain history…
-              </div>
-            )}
-
-            {!activityLoading && activity && (() => {
+              {!activityLoading && activity && (() => {
               const p0 = pos.price0 ?? 0;
               const p1 = pos.price1 ?? 0;
               const sym0 = pos.token0Symbol ?? 'Token0';
@@ -523,41 +458,38 @@ export default function PositionDetail() {
 
               return (
                 <div>
-                  <div className="grid grid-cols-4 gap-2 text-xs text-gray-500 mb-2 px-1">
+                  <div className="grid grid-cols-4 gap-2 text-xs text-gray-400 mb-2 px-1">
                     <span></span>
                     <span className="text-right">{sym0}</span>
                     <span className="text-right">{sym1}</span>
                     <span className="text-right">USD</span>
                   </div>
-                  {/* Invested row */}
-                  <div className="grid grid-cols-4 gap-2 py-3 border-b border-gray-800 px-1 items-center">
-                    <span className="text-gray-400 text-sm">Invested</span>
-                    <span className="text-right font-mono text-sm">{fmtAmt(inv0)}</span>
-                    <span className="text-right font-mono text-sm">{fmtAmt(inv1)}</span>
-                    <span className="text-right text-sm font-semibold">{fmtUSD(investedUSD)}</span>
+                  <div className="grid grid-cols-4 gap-2 py-2 border-b border-emerald-500/10 px-1 items-center">
+                    <span className="text-sm text-gray-400">Invested</span>
+                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(inv0)}</span>
+                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(inv1)}</span>
+                    <span className="text-right text-sm font-semibold text-white">{fmtUSD(investedUSD)}</span>
                   </div>
-                  {/* Current row */}
-                  <div className="grid grid-cols-4 gap-2 py-3 border-b border-gray-800 px-1 items-center">
-                    <span className="text-gray-400 text-sm">Current</span>
-                    <span className="text-right font-mono text-sm">{fmtAmt(cur0)}</span>
-                    <span className="text-right font-mono text-sm">{fmtAmt(cur1)}</span>
-                    <span className="text-right text-sm font-semibold">{fmtUSD(currentUSD)}</span>
+                  <div className="grid grid-cols-4 gap-2 py-2 border-b border-emerald-500/10 px-1 items-center">
+                    <span className="text-sm text-gray-400">Current</span>
+                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(cur0)}</span>
+                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(cur1)}</span>
+                    <span className="text-right text-sm font-semibold text-white">{fmtUSD(currentUSD)}</span>
                   </div>
-                  {/* Gain/Loss row */}
-                  <div className="grid grid-cols-4 gap-2 py-3 px-1 items-center">
-                    <span className="text-gray-400 text-sm">Gain / Loss</span>
-                    <span className={`text-right font-mono text-sm ${gainLoss0 >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  <div className="grid grid-cols-4 gap-2 py-2 px-1 items-center">
+                    <span className="text-sm text-gray-400">Gain / Loss</span>
+                    <span className={`text-right font-mono text-sm font-semibold ${gainLoss0 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLoss0)}{fmtAmt(Math.abs(gainLoss0))}
                     </span>
-                    <span className={`text-right font-mono text-sm ${gainLoss1 >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <span className={`text-right font-mono text-sm font-semibold ${gainLoss1 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLoss1)}{fmtAmt(Math.abs(gainLoss1))}
                     </span>
-                    <span className={`text-right text-sm font-semibold ${gainLossUSD >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <span className={`text-right text-sm font-semibold ${gainLossUSD >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLossUSD)}{fmtUSD(gainLossUSD)}
                     </span>
                   </div>
                   {activity.events.length === 0 && (
-                    <p className="text-gray-600 text-xs mt-2">
+                    <p className="text-gray-400/50 text-xs mt-2">
                       No on-chain events found · NFT manager address may need updating
                     </p>
                   )}
@@ -565,32 +497,281 @@ export default function PositionDetail() {
               );
             })()}
 
-            {!activityLoading && !activity && (
-              <p className="text-gray-500 text-sm">Could not load activity data.</p>
+              {!activityLoading && !activity && (
+                <p className="text-sm text-gray-400">Could not load activity data.</p>
+              )}
+            </div>
+          )}
+
+          {/* Position Details */}
+          <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+            <h2 className="text-sm font-bold text-emerald-300 mb-3">Position Details</h2>
+            <div className="space-y-0">
+              <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                <span className="text-sm text-gray-400">Trading Pair</span>
+                <span className="text-sm font-semibold text-white">{pos.pair}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                <span className="text-sm text-gray-400">Protocol</span>
+                <span className="text-sm font-semibold text-white">{pos.protocol}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                <span className="text-sm text-gray-400">Blockchain</span>
+                <span className="text-sm font-semibold text-white">{pos.chain}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                <span className="text-sm text-gray-400">Status</span>
+                <span className={`text-sm font-semibold ${pos.status === "In Range" ? "text-emerald-400" : pos.status === "Closed" ? "text-gray-400" : "text-red-400"}`}>
+                  {pos.status}
+                </span>
+              </div>
+              {hasFeeTier && (
+                <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                  <span className="text-sm text-gray-400">Fee Tier</span>
+                  <span className="text-sm font-semibold text-white">{pos.feeTier}%</span>
+                </div>
+              )}
+              {hasTickRange && (
+                <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                  <span className="text-sm text-gray-400">Price Range</span>
+                  <span className="text-sm font-semibold text-white">
+                    {tickRangeLabel ?? `${pos.tickLower} → ${pos.tickUpper}`}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                <span className="text-sm text-gray-400">
+                  Est. Daily Fees
+                  <span className="text-gray-400/50 text-xs ml-1">(pool APY × value)</span>
+                </span>
+                <span className="text-sm font-semibold text-white">
+                  {pos.apy > 0 ? `$${estimatedDailyFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between py-2">
+                <span className="text-sm text-gray-400">
+                  Est. Monthly Yield
+                  <span className="text-gray-400/50 text-xs ml-1">(pool APY × value)</span>
+                </span>
+                <span className="text-sm font-semibold text-emerald-400">
+                  {pos.apy > 0 ? `$${estimatedMonthlyYield.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: IL Breakdown + Unclaimed Fees */}
+        {(ilData || hasFeeBreakdown) && (
+          <div className={`grid gap-3 mb-3 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {ilData && (
+              <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+                <h2 className="text-sm font-bold text-emerald-300 mb-3">IL Breakdown</h2>
+                <div className="space-y-0">
+                  <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                    <span className="text-sm text-gray-400">Entry price (est.)</span>
+                    <span className="text-sm font-semibold text-white">
+                      {formatPrice(ilData.entryPriceUSD)} / {ilData.entryPriceLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                    <span className="text-sm text-gray-400">HODL value</span>
+                    <span className="text-sm font-semibold text-white">
+                      ${ilData.hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                    <span className="text-sm text-gray-400">Current value</span>
+                    <span className="text-sm font-semibold text-white">
+                      ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                    <span className="text-sm text-gray-400">IL ($)</span>
+                    <span className={`text-sm font-semibold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      {ilData.ilUSD < 0 ? "−" : "+"}${Math.abs(ilData.ilUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2">
+                    <span className="text-sm text-gray-400">IL (%)</span>
+                    <span className={`text-sm font-semibold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      {ilData.ilUSD >= 0 ? "+" : ""}{ilData.ilPct.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+                <p className="text-gray-400/40 text-xs mt-3">
+                  Estimated from range midpoint · tick {ilData.entryTick} — not your actual entry
+                </p>
+              </div>
+            )}
+
+            {hasFeeBreakdown && (
+              <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+                <h2 className="text-sm font-bold text-emerald-300 mb-3">Unclaimed Fees</h2>
+                <div className="space-y-0">
+                  <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
+                    <span className="text-sm text-gray-400">{pos.token0Symbol}</span>
+                    <span className="text-sm font-semibold text-white">{pos.fees0!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
+                    <span className="text-sm text-gray-400">{pos.token1Symbol}</span>
+                    <span className="text-sm font-semibold text-white">{pos.fees1!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-sm text-gray-400">Total (USD)</span>
+                    <span className="text-sm font-semibold text-emerald-400">
+                      ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
 
-        {/* Activity History Table (Aerodrome + Bluefin) */}
+        {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4">Activity History</h2>
+          <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15 mb-3">
+            <h2 className="text-sm font-bold text-emerald-300 mb-3">Actual Performance</h2>
+            <p className="text-xs text-gray-400/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
             {activityLoading && (
               <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
-                <div className="w-4 h-4 border border-gray-500 border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
+                Calculating…
+              </div>
+            )}
+
+            {!activityLoading && activity && (() => {
+              const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
+              const deposits = activity.events.filter(e => e.type === 'deposit');
+              const totalFeesUSD = feeClaims.reduce((sum, e) => {
+                if (e.usdAtTime != null) return sum + e.usdAtTime;
+                return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+              }, 0);
+              const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
+              const firstTs = firstDeposit?.timestamp ?? 0;
+              const nowTs = Math.floor(Date.now() / 1000);
+              const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+              const fmtUSD = (n: number) =>
+                `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+              if (feeClaims.length === 0) {
+                return <p className="text-sm text-gray-400">No fees claimed yet.</p>;
+              }
+              if (daysActive < 1) {
+                return (
+                  <div className="space-y-0">
+                    <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                      <span className="text-sm text-gray-400">Total fees earned</span>
+                      <span className="text-sm font-semibold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
+                    </div>
+                    <div className="flex justify-between py-2">
+                      <span className="text-sm text-gray-400">Position active</span>
+                      <span className="text-sm font-semibold text-white">&lt; 1 day</span>
+                    </div>
+                    <p className="text-gray-400/40 text-xs mt-2">APR not shown — position active less than 1 day</p>
+                  </div>
+                );
+              }
+
+              const dailyFees = totalFeesUSD / daysActive;
+              const weeklyFees = dailyFees * 7;
+              const monthlyFees = dailyFees * 30;
+              const yearlyFees = dailyFees * 365;
+              const aprYearly = pos.value > 0 ? (totalFeesUSD / pos.value) / (daysActive / 365) * 100 : 0;
+              const aprMonthly = aprYearly / 12;
+              const aprWeekly = aprYearly / 52;
+              const daysLabel = `${Math.floor(daysActive)} day${Math.floor(daysActive) !== 1 ? 's' : ''}`;
+
+              return (
+                <div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 mb-4">
+                    <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                      <span className="text-sm text-gray-400">Total fees earned</span>
+                      <span className="text-sm font-semibold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-emerald-500/10">
+                      <span className="text-sm text-gray-400">Position active</span>
+                      <span className="text-sm font-semibold text-white">{daysLabel}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
+                      <span className="text-sm text-gray-400">Realized APR</span>
+                      <button onClick={() => setAprExpanded(v => !v)} className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-emerald-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
+                        <svg className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  {aprExpanded && (
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      <div className="bg-emerald-900/20 rounded p-2 text-center">
+                        <p className="text-xs text-gray-400">Yearly</p>
+                        <p className="text-sm font-semibold text-emerald-300">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</p>
+                      </div>
+                      <div className="bg-blue-900/20 rounded p-2 text-center">
+                        <p className="text-xs text-gray-400">Monthly</p>
+                        <p className="text-sm font-semibold text-blue-300">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
+                      </div>
+                      <div className="bg-purple-900/20 rounded p-2 text-center">
+                        <p className="text-xs text-gray-400">Weekly</p>
+                        <p className="text-sm font-semibold text-purple-300">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
+                      </div>
+                      <div className="bg-emerald-900/20 rounded p-2 text-center">
+                        <p className="text-xs text-gray-400">Daily</p>
+                        <p className="text-sm font-semibold text-white/60">~{(aprYearly / 365).toLocaleString('en-US', { maximumFractionDigits: 3 })}%</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-emerald-300">Daily</p>
+                      <p className="text-base font-bold text-white">{fmtUSD(dailyFees)}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-emerald-300">Weekly</p>
+                      <p className="text-base font-bold text-white">{fmtUSD(weeklyFees)}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-emerald-300">Monthly</p>
+                      <p className="text-base font-bold text-white">{fmtUSD(monthlyFees)}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-emerald-300">Yearly</p>
+                      <p className="text-base font-bold text-white">{fmtUSD(yearlyFees)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!activityLoading && !activity && (
+              <p className="text-sm text-gray-400">Could not load activity data.</p>
+            )}
+          </div>
+        )}
+
+        {/* Row 5: Activity History — full width */}
+        {isActivityProtocol && (
+          <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15 mb-6">
+            <h2 className="text-sm font-bold text-emerald-300 mb-3">Activity History</h2>
+
+            {activityLoading && (
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Loading activity…
               </div>
             )}
 
             {!activityLoading && activity && activity.events.length === 0 && (
-              <p className="text-gray-500 text-sm">No on-chain events found for this position.</p>
+              <p className="text-sm text-gray-400">No on-chain events found for this position.</p>
             )}
 
             {!activityLoading && activity && activity.events.length > 0 && (() => {
               const sym0 = pos.token0Symbol ?? 'Token0';
               const sym1 = pos.token1Symbol ?? 'Token1';
-
               const ACTION_LABELS: Record<string, string> = {
                 deposit: 'Deposit',
                 withdrawal: 'Withdrawal',
@@ -599,23 +780,20 @@ export default function PositionDetail() {
               };
               const ACTION_COLORS: Record<string, string> = {
                 deposit: 'text-blue-400',
-                withdrawal: 'text-orange-400',
-                fee_claim: 'text-green-400',
+                withdrawal: 'text-red-400',
+                fee_claim: 'text-emerald-400',
                 reward_claim: 'text-purple-400',
               };
-
               const txUrl = (hash: string) => {
                 if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
                 if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
                 if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
-                // EVM chains — route by chain name
                 if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
                 if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
                 if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
                 if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
-                return `https://basescan.org/tx/${hash}`; // Base (Aerodrome)
+                return `https://basescan.org/tx/${hash}`;
               };
-
               const fmtDate = (ts: number) => {
                 if (!ts) return '—';
                 const d = new Date(ts * 1000);
@@ -631,7 +809,7 @@ export default function PositionDetail() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-gray-500 text-xs border-b border-gray-800">
+                      <tr className="text-xs text-gray-400 border-b border-emerald-500/10">
                         <th className="text-left py-2 pr-4 font-normal">Date</th>
                         <th className="text-left py-2 pr-4 font-normal">Action</th>
                         <th className="text-right py-2 pr-4 font-normal">{sym0}</th>
@@ -643,30 +821,26 @@ export default function PositionDetail() {
                     </thead>
                     <tbody>
                       {activity.events.map((ev, i) => (
-                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                          <td className="py-3 pr-4 text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
-                          <td className={`py-3 pr-4 font-medium ${ACTION_COLORS[ev.type] ?? 'text-gray-300'}`}>
+                        <tr key={i} className="border-b border-emerald-500/10 hover:bg-[rgba(6,78,59,0.2)]">
+                          <td className="py-2 pr-4 text-sm text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
+                          <td className={`py-2 pr-4 text-sm font-semibold ${ACTION_COLORS[ev.type] ?? 'text-gray-400'}`}>
                             {ACTION_LABELS[ev.type] ?? ev.type}
                           </td>
-                          <td className="py-3 pr-4 text-right font-mono text-gray-300">
+                          <td className="py-2 pr-4 text-right font-mono text-sm font-semibold text-white">
                             {ev.type === 'reward_claim'
-                              ? <span>{fmtAmt(ev.amount0)}<span className="text-gray-500 text-xs ml-1">{ev.rewardSymbol}</span></span>
+                              ? <span>{fmtAmt(ev.amount0)}<span className="text-gray-400 font-normal text-xs ml-1">{ev.rewardSymbol}</span></span>
                               : fmtAmt(ev.amount0)}
                           </td>
-                          <td className="py-3 pr-4 text-right font-mono text-gray-300">
+                          <td className="py-2 pr-4 text-right font-mono text-sm font-semibold text-white">
                             {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
                           </td>
-                          <td className="py-3 pr-4 text-right text-gray-300">{fmtUSD(ev.usdAtTime)}</td>
-                          <td className="py-3 pr-4 text-right text-gray-500">
+                          <td className="py-2 pr-4 text-right text-sm font-semibold text-white">{fmtUSD(ev.usdAtTime)}</td>
+                          <td className="py-2 pr-4 text-right text-sm text-gray-400">
                             {(ev.type === 'fee_claim' || ev.type === 'reward_claim') ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
                           </td>
-                          <td className="py-3 text-right">
-                            <a
-                              href={txUrl(ev.txHash)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-400 hover:text-blue-300 font-mono text-xs"
-                            >
+                          <td className="py-2 text-right">
+                            <a href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
+                              className="text-emerald-400 hover:text-emerald-300 font-mono text-xs">
                               {shortHash(ev.txHash)}
                             </a>
                           </td>
@@ -679,129 +853,7 @@ export default function PositionDetail() {
             })()}
 
             {!activityLoading && !activity && (
-              <p className="text-gray-500 text-sm">Could not load activity data.</p>
-            )}
-          </div>
-        )}
-
-        {/* Actual Performance — Feature 9 (Aerodrome + Bluefin) */}
-        {isActivityProtocol && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold mb-1">Actual Performance</h2>
-            <p className="text-gray-600 text-xs mb-4">Based on actual claimed fees · not pool APY estimate</p>
-
-            {activityLoading && (
-              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
-                <div className="w-4 h-4 border border-gray-500 border-t-transparent rounded-full animate-spin" />
-                Calculating…
-              </div>
-            )}
-
-            {!activityLoading && activity && (() => {
-              const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
-              const deposits = activity.events.filter(e => e.type === 'deposit');
-
-              // Total fees in USD — prefer usdAtTime, fall back to current prices
-              const totalFeesUSD = feeClaims.reduce((sum, e) => {
-                if (e.usdAtTime != null) return sum + e.usdAtTime;
-                const p0 = pos.price0 ?? 0;
-                const p1 = pos.price1 ?? 0;
-                return sum + e.amount0 * p0 + e.amount1 * p1;
-              }, 0);
-
-              // First deposit timestamp (events are newest-first, so take last deposit)
-              const firstDeposit = deposits.length > 0
-                ? deposits[deposits.length - 1]
-                : null;
-              const firstTs = firstDeposit?.timestamp ?? 0;
-              const nowTs = Math.floor(Date.now() / 1000);
-              const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
-
-              const fmtUSD = (n: number) =>
-                `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-              if (feeClaims.length === 0) {
-                return (
-                  <p className="text-gray-500 text-sm">No fees claimed yet.</p>
-                );
-              }
-
-              if (daysActive < 1) {
-                return (
-                  <div className="space-y-0">
-                    <div className="flex justify-between py-3 border-b border-gray-800">
-                      <span className="text-gray-400">Total fees earned</span>
-                      <span className="font-semibold text-green-400">{fmtUSD(totalFeesUSD)}</span>
-                    </div>
-                    <div className="flex justify-between py-3">
-                      <span className="text-gray-400">Position active</span>
-                      <span className="font-semibold">&lt; 1 day</span>
-                    </div>
-                    <p className="text-gray-600 text-xs mt-2">APR not shown — position active less than 1 day</p>
-                  </div>
-                );
-              }
-
-              const dailyFees = totalFeesUSD / daysActive;
-              const weeklyFees = dailyFees * 7;
-              const monthlyFees = dailyFees * 30;
-              const yearlyFees = dailyFees * 365;
-              const aprYearly = pos.value > 0
-                ? (totalFeesUSD / pos.value) / (daysActive / 365) * 100
-                : 0;
-              const aprMonthly = aprYearly / 12;
-              const aprWeekly = aprYearly / 52;
-
-              const daysLabel = daysActive >= 1
-                ? `${Math.floor(daysActive)} day${Math.floor(daysActive) !== 1 ? 's' : ''}`
-                : '< 1 day';
-
-              return (
-                <div>
-                  <div className="space-y-0">
-                    <div className="flex justify-between py-3 border-b border-gray-800">
-                      <span className="text-gray-400">Total fees earned</span>
-                      <span className="font-semibold text-green-400">{fmtUSD(totalFeesUSD)}</span>
-                    </div>
-                    <div className="flex justify-between py-3 border-b border-gray-800">
-                      <span className="text-gray-400">Position active</span>
-                      <span className="font-semibold">{daysLabel}</span>
-                    </div>
-                    <div className="flex justify-between py-3 border-b border-gray-800">
-                      <span className="text-gray-400">Realized APR</span>
-                      <div className="text-right">
-                        <span className="font-semibold text-green-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
-                        <span className="text-gray-500 mx-2">·</span>
-                        <span className="font-semibold text-blue-400">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / mo</span>
-                        <span className="text-gray-500 mx-2">·</span>
-                        <span className="font-semibold text-purple-400">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}% / wk</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-4 gap-3">
-                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
-                      <p className="text-gray-500 text-xs mb-1">Daily</p>
-                      <p className="font-semibold text-sm">{fmtUSD(dailyFees)}</p>
-                    </div>
-                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
-                      <p className="text-gray-500 text-xs mb-1">Weekly</p>
-                      <p className="font-semibold text-sm">{fmtUSD(weeklyFees)}</p>
-                    </div>
-                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
-                      <p className="text-gray-500 text-xs mb-1">Monthly</p>
-                      <p className="font-semibold text-sm">{fmtUSD(monthlyFees)}</p>
-                    </div>
-                    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
-                      <p className="text-gray-500 text-xs mb-1">Yearly</p>
-                      <p className="font-semibold text-sm">{fmtUSD(yearlyFees)}</p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {!activityLoading && !activity && (
-              <p className="text-gray-500 text-sm">Could not load activity data.</p>
+              <p className="text-sm text-gray-400">Could not load activity data.</p>
             )}
           </div>
         )}
