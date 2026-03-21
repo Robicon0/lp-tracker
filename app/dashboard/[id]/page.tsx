@@ -335,10 +335,10 @@ export default function PositionDetail() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-white">{pos.pair}</h1>
+            <h1 className="text-2xl font-extrabold text-white">{pos.pair}</h1>
             <p className="text-gray-400 text-sm mt-1">{pos.protocol} &bull; {pos.chain}</p>
           </div>
-          <span className={`px-4 py-2 rounded-full text-sm font-semibold ${
+          <span className={`px-4 py-2 rounded-full text-sm font-bold ${
             pos.status === "In Range"
               ? "bg-emerald-950 text-emerald-400 border border-emerald-400/30"
               : pos.status === "Closed"
@@ -352,20 +352,20 @@ export default function PositionDetail() {
         {/* Row 1: Top Stats — 4 cards */}
         <div className="grid grid-cols-4 gap-3 mb-6">
           <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
-            <p className="text-xs font-medium text-emerald-300 mb-1">Position Value</p>
-            <p className="text-2xl font-bold text-white">
+            <p className="text-xs font-semibold text-emerald-300 mb-1">Position Value</p>
+            <p className="text-2xl font-extrabold text-white">
               ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
 
           <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
-            <p className="text-xs font-medium text-emerald-300 mb-1">Realized APR</p>
+            <p className="text-xs font-semibold text-emerald-300 mb-1">Realized APR</p>
             {activityLoading ? (
               <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
             ) : aprMetrics ? (
               <button onClick={() => setAprExpanded(v => !v)} className="text-left w-full">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-2xl font-bold text-white">~{aprMetrics.aprYearly.toFixed(1)}%</span>
+                  <span className="text-2xl font-extrabold text-white">~{aprMetrics.aprYearly.toFixed(1)}%</span>
                   <span className="text-gray-400 text-xs">/yr</span>
                   <svg className={`w-3 h-3 text-gray-400 ml-auto transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -375,37 +375,37 @@ export default function PositionDetail() {
                   <div className="mt-2 grid grid-cols-2 gap-1">
                     <div className="bg-emerald-900/30 rounded p-1.5 text-center">
                       <p className="text-xs text-gray-400">Yearly</p>
-                      <p className="text-xs font-semibold text-emerald-300">~{aprMetrics.aprYearly.toFixed(1)}%</p>
+                      <p className="text-xs font-bold text-emerald-300">~{aprMetrics.aprYearly.toFixed(1)}%</p>
                     </div>
                     <div className="bg-blue-900/30 rounded p-1.5 text-center">
                       <p className="text-xs text-gray-400">Monthly</p>
-                      <p className="text-xs font-semibold text-blue-300">~{aprMetrics.aprMonthly.toFixed(2)}%</p>
+                      <p className="text-xs font-bold text-blue-300">~{aprMetrics.aprMonthly.toFixed(2)}%</p>
                     </div>
                     <div className="bg-purple-900/30 rounded p-1.5 text-center">
                       <p className="text-xs text-gray-400">Weekly</p>
-                      <p className="text-xs font-semibold text-purple-300">~{aprMetrics.aprWeekly.toFixed(2)}%</p>
+                      <p className="text-xs font-bold text-purple-300">~{aprMetrics.aprWeekly.toFixed(2)}%</p>
                     </div>
                     <div className="bg-emerald-900/20 rounded p-1.5 text-center">
                       <p className="text-xs text-gray-400">Daily</p>
-                      <p className="text-xs font-semibold text-white/60">~{aprMetrics.aprDaily.toFixed(3)}%</p>
+                      <p className="text-xs font-bold text-white/60">~{aprMetrics.aprDaily.toFixed(3)}%</p>
                     </div>
                   </div>
                 )}
               </button>
             ) : (
-              <p className="text-2xl font-bold text-white/30">—</p>
+              <p className="text-2xl font-extrabold text-white/30">—</p>
             )}
           </div>
 
           <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
-            <p className="text-xs font-medium text-emerald-300 mb-1">Total Fees Earned</p>
-            <p className="text-2xl font-bold text-white">
+            <p className="text-xs font-semibold text-emerald-300 mb-1">Total Fees Earned</p>
+            <p className="text-2xl font-extrabold text-white">
               ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
 
           <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
-            <p className="text-xs font-medium text-emerald-300 mb-1">IL</p>
+            <p className="text-xs font-semibold text-emerald-300 mb-1">IL</p>
             {ilData ? (
               <>
                 <p className={`text-2xl font-bold ${ilData.ilUSD < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -416,17 +416,17 @@ export default function PositionDetail() {
                 </p>
               </>
             ) : (
-              <p className="text-2xl font-bold text-white/30">—</p>
+              <p className="text-2xl font-extrabold text-white/30">—</p>
             )}
           </div>
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid gap-3 mb-3 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-2 mb-2 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
             <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
-              <h2 className="text-sm font-bold text-emerald-300 mb-3">Assets</h2>
+              <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Assets</h2>
 
               {activityLoading && (
                 <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
@@ -466,25 +466,25 @@ export default function PositionDetail() {
                   </div>
                   <div className="grid grid-cols-4 gap-2 py-2 border-b border-emerald-500/10 px-1 items-center">
                     <span className="text-sm text-gray-400">Invested</span>
-                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(inv0)}</span>
-                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(inv1)}</span>
-                    <span className="text-right text-sm font-semibold text-white">{fmtUSD(investedUSD)}</span>
+                    <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(inv0)}</span>
+                    <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(inv1)}</span>
+                    <span className="text-right text-sm font-bold text-white">{fmtUSD(investedUSD)}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-2 py-2 border-b border-emerald-500/10 px-1 items-center">
                     <span className="text-sm text-gray-400">Current</span>
-                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(cur0)}</span>
-                    <span className="text-right font-mono text-sm font-semibold text-white">{fmtAmt(cur1)}</span>
-                    <span className="text-right text-sm font-semibold text-white">{fmtUSD(currentUSD)}</span>
+                    <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(cur0)}</span>
+                    <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(cur1)}</span>
+                    <span className="text-right text-sm font-bold text-white">{fmtUSD(currentUSD)}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-2 py-2 px-1 items-center">
                     <span className="text-sm text-gray-400">Gain / Loss</span>
-                    <span className={`text-right font-mono text-sm font-semibold ${gainLoss0 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <span className={`text-right font-mono text-sm font-bold ${gainLoss0 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLoss0)}{fmtAmt(Math.abs(gainLoss0))}
                     </span>
-                    <span className={`text-right font-mono text-sm font-semibold ${gainLoss1 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <span className={`text-right font-mono text-sm font-bold ${gainLoss1 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLoss1)}{fmtAmt(Math.abs(gainLoss1))}
                     </span>
-                    <span className={`text-right text-sm font-semibold ${gainLossUSD >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <span className={`text-right text-sm font-bold ${gainLossUSD >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLossUSD)}{fmtUSD(gainLossUSD)}
                     </span>
                   </div>
@@ -505,36 +505,36 @@ export default function PositionDetail() {
 
           {/* Position Details */}
           <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
-            <h2 className="text-sm font-bold text-emerald-300 mb-3">Position Details</h2>
+            <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Position Details</h2>
             <div className="space-y-0">
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
                 <span className="text-sm text-gray-400">Trading Pair</span>
-                <span className="text-sm font-semibold text-white">{pos.pair}</span>
+                <span className="text-sm font-bold text-white">{pos.pair}</span>
               </div>
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
                 <span className="text-sm text-gray-400">Protocol</span>
-                <span className="text-sm font-semibold text-white">{pos.protocol}</span>
+                <span className="text-sm font-bold text-white">{pos.protocol}</span>
               </div>
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
                 <span className="text-sm text-gray-400">Blockchain</span>
-                <span className="text-sm font-semibold text-white">{pos.chain}</span>
+                <span className="text-sm font-bold text-white">{pos.chain}</span>
               </div>
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
                 <span className="text-sm text-gray-400">Status</span>
-                <span className={`text-sm font-semibold ${pos.status === "In Range" ? "text-emerald-400" : pos.status === "Closed" ? "text-gray-400" : "text-red-400"}`}>
+                <span className={`text-sm font-bold ${pos.status === "In Range" ? "text-emerald-400" : pos.status === "Closed" ? "text-gray-400" : "text-red-400"}`}>
                   {pos.status}
                 </span>
               </div>
               {hasFeeTier && (
                 <div className="flex justify-between py-2 border-b border-emerald-500/10">
                   <span className="text-sm text-gray-400">Fee Tier</span>
-                  <span className="text-sm font-semibold text-white">{pos.feeTier}%</span>
+                  <span className="text-sm font-bold text-white">{pos.feeTier}%</span>
                 </div>
               )}
               {hasTickRange && (
                 <div className="flex justify-between py-2 border-b border-emerald-500/10">
                   <span className="text-sm text-gray-400">Price Range</span>
-                  <span className="text-sm font-semibold text-white">
+                  <span className="text-sm font-bold text-white">
                     {tickRangeLabel ?? `${pos.tickLower} → ${pos.tickUpper}`}
                   </span>
                 </div>
@@ -544,7 +544,7 @@ export default function PositionDetail() {
                   Est. Daily Fees
                   <span className="text-gray-400/50 text-xs ml-1">(pool APY × value)</span>
                 </span>
-                <span className="text-sm font-semibold text-white">
+                <span className="text-sm font-bold text-white">
                   {pos.apy > 0 ? `$${estimatedDailyFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
                 </span>
               </div>
@@ -553,7 +553,7 @@ export default function PositionDetail() {
                   Est. Monthly Yield
                   <span className="text-gray-400/50 text-xs ml-1">(pool APY × value)</span>
                 </span>
-                <span className="text-sm font-semibold text-emerald-400">
+                <span className="text-sm font-bold text-emerald-400">
                   {pos.apy > 0 ? `$${estimatedMonthlyYield.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
                 </span>
               </div>
@@ -563,38 +563,38 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid gap-3 mb-3 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-2 mb-2 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
               <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
-                <h2 className="text-sm font-bold text-emerald-300 mb-3">IL Breakdown</h2>
+                <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
                     <span className="text-sm text-gray-400">Entry price (est.)</span>
-                    <span className="text-sm font-semibold text-white">
+                    <span className="text-sm font-bold text-white">
                       {formatPrice(ilData.entryPriceUSD)} / {ilData.entryPriceLabel}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
                     <span className="text-sm text-gray-400">HODL value</span>
-                    <span className="text-sm font-semibold text-white">
+                    <span className="text-sm font-bold text-white">
                       ${ilData.hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
                     <span className="text-sm text-gray-400">Current value</span>
-                    <span className="text-sm font-semibold text-white">
+                    <span className="text-sm font-bold text-white">
                       ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
                     <span className="text-sm text-gray-400">IL ($)</span>
-                    <span className={`text-sm font-semibold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                    <span className={`text-sm font-bold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
                       {ilData.ilUSD < 0 ? "−" : "+"}${Math.abs(ilData.ilUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between py-2">
                     <span className="text-sm text-gray-400">IL (%)</span>
-                    <span className={`text-sm font-semibold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                    <span className={`text-sm font-bold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
                       {ilData.ilUSD >= 0 ? "+" : ""}{ilData.ilPct.toFixed(2)}%
                     </span>
                   </div>
@@ -607,19 +607,19 @@ export default function PositionDetail() {
 
             {hasFeeBreakdown && (
               <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
-                <h2 className="text-sm font-bold text-emerald-300 mb-3">Unclaimed Fees</h2>
+                <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Unclaimed Fees</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
                     <span className="text-sm text-gray-400">{pos.token0Symbol}</span>
-                    <span className="text-sm font-semibold text-white">{pos.fees0!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
+                    <span className="text-sm font-bold text-white">{pos.fees0!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
                     <span className="text-sm text-gray-400">{pos.token1Symbol}</span>
-                    <span className="text-sm font-semibold text-white">{pos.fees1!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
+                    <span className="text-sm font-bold text-white">{pos.fees1!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
                     <span className="text-sm text-gray-400">Total (USD)</span>
-                    <span className="text-sm font-semibold text-emerald-400">
+                    <span className="text-sm font-bold text-emerald-400">
                       ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
@@ -632,7 +632,7 @@ export default function PositionDetail() {
         {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
           <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15 mb-3">
-            <h2 className="text-sm font-bold text-emerald-300 mb-3">Actual Performance</h2>
+            <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Actual Performance</h2>
             <p className="text-xs text-gray-400/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
             {activityLoading && (
@@ -664,11 +664,11 @@ export default function PositionDetail() {
                   <div className="space-y-0">
                     <div className="flex justify-between py-2 border-b border-emerald-500/10">
                       <span className="text-sm text-gray-400">Total fees earned</span>
-                      <span className="text-sm font-semibold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
+                      <span className="text-sm font-bold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
                     </div>
                     <div className="flex justify-between py-2">
                       <span className="text-sm text-gray-400">Position active</span>
-                      <span className="text-sm font-semibold text-white">&lt; 1 day</span>
+                      <span className="text-sm font-bold text-white">&lt; 1 day</span>
                     </div>
                     <p className="text-gray-400/40 text-xs mt-2">APR not shown — position active less than 1 day</p>
                   </div>
@@ -689,16 +689,16 @@ export default function PositionDetail() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 mb-4">
                     <div className="flex justify-between py-2 border-b border-emerald-500/10">
                       <span className="text-sm text-gray-400">Total fees earned</span>
-                      <span className="text-sm font-semibold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
+                      <span className="text-sm font-bold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-emerald-500/10">
                       <span className="text-sm text-gray-400">Position active</span>
-                      <span className="text-sm font-semibold text-white">{daysLabel}</span>
+                      <span className="text-sm font-bold text-white">{daysLabel}</span>
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
                       <span className="text-sm text-gray-400">Realized APR</span>
                       <button onClick={() => setAprExpanded(v => !v)} className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold text-emerald-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
+                        <span className="text-sm font-bold text-emerald-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
                         <svg className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
@@ -709,19 +709,19 @@ export default function PositionDetail() {
                     <div className="grid grid-cols-4 gap-2 mb-4">
                       <div className="bg-emerald-900/20 rounded p-2 text-center">
                         <p className="text-xs text-gray-400">Yearly</p>
-                        <p className="text-sm font-semibold text-emerald-300">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</p>
+                        <p className="text-sm font-extrabold text-emerald-300">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</p>
                       </div>
                       <div className="bg-blue-900/20 rounded p-2 text-center">
                         <p className="text-xs text-gray-400">Monthly</p>
-                        <p className="text-sm font-semibold text-blue-300">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
+                        <p className="text-sm font-bold text-blue-300">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
                       </div>
                       <div className="bg-purple-900/20 rounded p-2 text-center">
                         <p className="text-xs text-gray-400">Weekly</p>
-                        <p className="text-sm font-semibold text-purple-300">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
+                        <p className="text-sm font-bold text-purple-300">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
                       </div>
                       <div className="bg-emerald-900/20 rounded p-2 text-center">
                         <p className="text-xs text-gray-400">Daily</p>
-                        <p className="text-sm font-semibold text-white/60">~{(aprYearly / 365).toLocaleString('en-US', { maximumFractionDigits: 3 })}%</p>
+                        <p className="text-sm font-bold text-white/60">~{(aprYearly / 365).toLocaleString('en-US', { maximumFractionDigits: 3 })}%</p>
                       </div>
                     </div>
                   )}
@@ -756,7 +756,7 @@ export default function PositionDetail() {
         {/* Row 5: Activity History — full width */}
         {isActivityProtocol && (
           <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15 mb-6">
-            <h2 className="text-sm font-bold text-emerald-300 mb-3">Activity History</h2>
+            <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Activity History</h2>
 
             {activityLoading && (
               <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
@@ -823,18 +823,18 @@ export default function PositionDetail() {
                       {activity.events.map((ev, i) => (
                         <tr key={i} className="border-b border-emerald-500/10 hover:bg-[rgba(6,78,59,0.2)]">
                           <td className="py-2 pr-4 text-sm text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
-                          <td className={`py-2 pr-4 text-sm font-semibold ${ACTION_COLORS[ev.type] ?? 'text-gray-400'}`}>
+                          <td className={`py-2 pr-4 text-sm font-bold ${ACTION_COLORS[ev.type] ?? 'text-gray-400'}`}>
                             {ACTION_LABELS[ev.type] ?? ev.type}
                           </td>
-                          <td className="py-2 pr-4 text-right font-mono text-sm font-semibold text-white">
+                          <td className="py-2 pr-4 text-right font-mono text-sm font-bold text-white">
                             {ev.type === 'reward_claim'
                               ? <span>{fmtAmt(ev.amount0)}<span className="text-gray-400 font-normal text-xs ml-1">{ev.rewardSymbol}</span></span>
                               : fmtAmt(ev.amount0)}
                           </td>
-                          <td className="py-2 pr-4 text-right font-mono text-sm font-semibold text-white">
+                          <td className="py-2 pr-4 text-right font-mono text-sm font-bold text-white">
                             {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
                           </td>
-                          <td className="py-2 pr-4 text-right text-sm font-semibold text-white">{fmtUSD(ev.usdAtTime)}</td>
+                          <td className="py-2 pr-4 text-right text-sm font-bold text-white">{fmtUSD(ev.usdAtTime)}</td>
                           <td className="py-2 pr-4 text-right text-sm text-gray-400">
                             {(ev.type === 'fee_claim' || ev.type === 'reward_claim') ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
                           </td>
