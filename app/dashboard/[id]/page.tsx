@@ -372,7 +372,7 @@ export default function PositionDetail() {
                   </svg>
                 </div>
                 {aprExpanded && (
-                  <div className="mt-2 grid grid-cols-2 gap-1">
+                  <div className="mt-2 grid grid-cols-2
                     <div className="bg-emerald-900/30 rounded p-1.5 text-center">
                       <p className="text-xs text-gray-400">Yearly</p>
                       <p className="text-xs font-bold text-emerald-300">~{aprMetrics.aprYearly.toFixed(1)}%</p>
@@ -422,7 +422,7 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid gap-2 mb-1.5 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid mb-1.5 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
             <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
@@ -563,7 +563,7 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid gap-2 mb-1.5 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid mb-1.5 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
               <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>

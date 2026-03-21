@@ -73,7 +73,14 @@
       "Bash(sed -i '' 's/rounded-xl p-5 border border-emerald-500\\\\/15/rounded-xl p-4 border border-emerald-500\\\\/15/g' app/dashboard/[id]/page.tsx)",
       "Bash(sed -i '' 's/gap-1\\\\.5/gap-1/g' app/dashboard/[id]/page.tsx)",
       "Bash(sed -i '' 's/gap-2/gap-1/g' app/dashboard/[id]/page.tsx)",
-      "Bash(sed -i '' 's/mb-2/mb-1.5/g' app/dashboard/[id]/page.tsx)"
+      "Bash(sed -i '' 's/mb-2/mb-1.5/g' app/dashboard/[id]/page.tsx)",
+      "Bash(grep -n \"max-w-\" app/dashboard/[id]/page.tsx)",
+      "Bash(grep -n \"grid grid-cols-2\" app/dashboard/[id]/page.tsx)",
+      "Bash(grep -n \"grid-cols-2\\\\|grid gap\" app/dashboard/[id]/page.tsx)",
+      "Bash(grep -n \"px-4\\\\|pt-24\\\\|max-w-7xl\" app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/grid gap-3 mb-1\\\\.5 items-start/grid gap-2 mb-1.5 items-start/g' app/dashboard/[id]/page.tsx)",
+      "Bash(grep -n \"grid gap-\" app/dashboard/[id]/page.tsx)",
+      "Bash(grep -n \"grid gap-\\\\|grid grid-cols-2\" app/dashboard/[id]/page.tsx)"
     ],
     "additionalDirectories": [
       "/Users/johnnyarya/lp-tracker-fresh/app/dashboard/[id]"
