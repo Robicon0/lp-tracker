@@ -372,7 +372,7 @@ export default function PositionDetail() {
                   </svg>
                 </div>
                 {aprExpanded && (
-                  <div className="mt-2 grid grid-cols-2
+                  <div className="mt-2 grid grid-cols-2 gap-1">
                     <div className="bg-emerald-900/30 rounded p-1.5 text-center">
                       <p className="text-xs text-gray-400">Yearly</p>
                       <p className="text-xs font-bold text-emerald-300">~{aprMetrics.aprYearly.toFixed(1)}%</p>
