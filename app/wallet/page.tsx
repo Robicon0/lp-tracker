@@ -146,54 +146,54 @@ export default function WalletPage() {
   }, [suiAddress]);
 
   return (
-    <div className="p-8 pt-24 bg-black text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl font-bold">Wallet Balances</h1>
-        <p className="text-gray-400 mt-2">Token balances across all supported chains</p>
+        <p className="text-emerald-300/70 mt-2">Token balances across all supported chains</p>
 
         {!isConnected && !solanaAddress && !suiAddress ? (
-          <div className="mt-8 bg-gray-900 border border-gray-800 rounded-lg p-8 text-center">
-            <p className="text-gray-400 text-lg">Connect a wallet to view balances</p>
-            <p className="text-gray-500 text-sm mt-2">Use &quot;Connect EVM&quot;, &quot;Connect Phantom&quot;, or &quot;Connect Sui&quot; in the navbar</p>
+          <div className="mt-8 bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-8 text-center">
+            <p className="text-emerald-300/70 text-lg">Connect a wallet to view balances</p>
+            <p className="text-emerald-400/40 text-sm mt-2">Use &quot;Connect EVM&quot;, &quot;Connect Phantom&quot;, or &quot;Connect Sui&quot; in the navbar</p>
           </div>
         ) : (
           <div className="mt-8 space-y-6">
             {/* EVM section */}
             {address && (
               <div className="space-y-3">
-                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-                  <p className="text-gray-400 text-xs mb-1">EVM Wallet</p>
+                <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-4">
+                  <p className="text-emerald-300/70 text-xs mb-1">EVM Wallet</p>
                   <p className="text-white font-mono text-sm">{address}</p>
                 </div>
                 {loading ? (
-                  <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                  <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
                     <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-                      <span className="text-gray-400">Fetching EVM balances...</span>
+                      <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse" />
+                      <span className="text-emerald-300/70">Fetching EVM balances...</span>
                     </div>
                   </div>
                 ) : chainBalances.map((cb) => (
-                  <div key={cb.chain} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
-                    <div className="px-4 py-3 border-b border-gray-800 bg-gray-800/40">
+                  <div key={cb.chain} className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-emerald-400/10 bg-emerald-900/20">
                       <span className="text-white font-semibold text-sm">{cb.chain}</span>
                     </div>
                     <table className="w-full">
                       <thead>
-                        <tr className="border-b border-gray-800">
-                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Token</th>
-                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Balance</th>
+                        <tr className="border-b border-emerald-400/10">
+                          <th className="text-left text-emerald-300/70 text-xs font-medium px-4 py-3">Token</th>
+                          <th className="text-right text-emerald-300/70 text-xs font-medium px-4 py-3">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
                         {cb.nativeBalance && cb.nativeBalance !== "0.0000" && (
-                          <tr className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <tr className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
                                 <span className="text-lg">⟠</span>
                                 <div>
                                   <p className="text-white font-medium text-sm">{cb.nativeSymbol}</p>
-                                  <p className="text-gray-500 text-xs">{cb.chain} native</p>
+                                  <p className="text-emerald-400/40 text-xs">{cb.chain} native</p>
                                 </div>
                               </div>
                             </td>
@@ -201,19 +201,19 @@ export default function WalletPage() {
                           </tr>
                         )}
                         {cb.tokens.map((token, i) => (
-                          <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <tr key={i} className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
                                 {token.logo ? (
                                   <img src={token.logo} alt={token.symbol} className="w-6 h-6 rounded-full" />
                                 ) : (
-                                  <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center text-xs text-gray-300">
+                                  <div className="w-6 h-6 bg-emerald-900/40 rounded-full flex items-center justify-center text-xs text-emerald-300">
                                     {token.symbol.charAt(0)}
                                   </div>
                                 )}
                                 <div>
                                   <p className="text-white font-medium text-sm">{token.symbol}</p>
-                                  <p className="text-gray-500 text-xs">{token.name}</p>
+                                  <p className="text-emerald-400/40 text-xs">{token.name}</p>
                                 </div>
                               </div>
                             </td>
@@ -222,7 +222,7 @@ export default function WalletPage() {
                         ))}
                         {cb.nativeBalance === "0.0000" && cb.tokens.length === 0 && (
                           <tr>
-                            <td colSpan={2} className="px-4 py-4 text-center text-gray-500 text-sm">No tokens found on {cb.chain}</td>
+                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-sm">No tokens found on {cb.chain}</td>
                           </tr>
                         )}
                       </tbody>
@@ -235,38 +235,38 @@ export default function WalletPage() {
             {/* Solana section */}
             {solanaAddress && (
               <div className="space-y-3">
-                <div className="bg-gray-900 border border-purple-800/50 rounded-lg p-4">
+                <div className="bg-emerald-950/30 border border-purple-800/50 rounded-xl p-4">
                   <p className="text-purple-400 text-xs mb-1">Solana Wallet (Phantom)</p>
                   <p className="text-white font-mono text-sm">{solanaAddress}</p>
                 </div>
                 {solanaLoading ? (
-                  <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                  <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
                     <div className="flex items-center space-x-2">
                       <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
-                      <span className="text-gray-400">Fetching Solana balances...</span>
+                      <span className="text-emerald-300/70">Fetching Solana balances...</span>
                     </div>
                   </div>
                 ) : solanaBalances ? (
-                  <div className="bg-gray-900 border border-purple-800/40 rounded-lg overflow-hidden">
+                  <div className="bg-emerald-950/30 border border-purple-800/40 rounded-xl overflow-hidden">
                     <div className="px-4 py-3 border-b border-purple-800/40 bg-purple-900/10">
                       <span className="text-purple-300 font-semibold text-sm">Solana</span>
                     </div>
                     <table className="w-full">
                       <thead>
-                        <tr className="border-b border-gray-800">
-                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Token</th>
-                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Balance</th>
+                        <tr className="border-b border-emerald-400/10">
+                          <th className="text-left text-emerald-300/70 text-xs font-medium px-4 py-3">Token</th>
+                          <th className="text-right text-emerald-300/70 text-xs font-medium px-4 py-3">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
                         {solanaBalances.solBalance !== "0.0000" && (
-                          <tr className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <tr className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
                                 <span className="text-lg">◎</span>
                                 <div>
                                   <p className="text-white font-medium text-sm">SOL</p>
-                                  <p className="text-gray-500 text-xs">Solana native</p>
+                                  <p className="text-emerald-400/40 text-xs">Solana native</p>
                                 </div>
                               </div>
                             </td>
@@ -274,7 +274,7 @@ export default function WalletPage() {
                           </tr>
                         )}
                         {solanaBalances.tokens.map((token, i) => (
-                          <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <tr key={i} className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
                                 <div className="w-6 h-6 bg-purple-900/40 rounded-full flex items-center justify-center text-xs text-purple-300">
@@ -282,7 +282,7 @@ export default function WalletPage() {
                                 </div>
                                 <div>
                                   <p className="text-white font-medium text-sm">{token.symbol}</p>
-                                  <p className="text-gray-500 text-xs">{token.name}</p>
+                                  <p className="text-emerald-400/40 text-xs">{token.name}</p>
                                 </div>
                               </div>
                             </td>
@@ -291,7 +291,7 @@ export default function WalletPage() {
                         ))}
                         {solanaBalances.solBalance === "0.0000" && solanaBalances.tokens.length === 0 && (
                           <tr>
-                            <td colSpan={2} className="px-4 py-4 text-center text-gray-500 text-sm">No tokens found on Solana</td>
+                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-sm">No tokens found on Solana</td>
                           </tr>
                         )}
                       </tbody>
@@ -304,38 +304,38 @@ export default function WalletPage() {
             {/* Sui section */}
             {suiAddress && (
               <div className="space-y-3">
-                <div className="bg-gray-900 border border-cyan-800/50 rounded-lg p-4">
+                <div className="bg-emerald-950/30 border border-cyan-800/50 rounded-xl p-4">
                   <p className="text-cyan-400 text-xs mb-1">Sui Wallet</p>
                   <p className="text-white font-mono text-sm">{suiAddress}</p>
                 </div>
                 {suiLoading ? (
-                  <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                  <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
                     <div className="flex items-center space-x-2">
                       <div className="w-3 h-3 bg-cyan-500 rounded-full animate-pulse" />
-                      <span className="text-gray-400">Fetching Sui balances...</span>
+                      <span className="text-emerald-300/70">Fetching Sui balances...</span>
                     </div>
                   </div>
                 ) : suiBalances ? (
-                  <div className="bg-gray-900 border border-cyan-800/40 rounded-lg overflow-hidden">
+                  <div className="bg-emerald-950/30 border border-cyan-800/40 rounded-xl overflow-hidden">
                     <div className="px-4 py-3 border-b border-cyan-800/40 bg-cyan-900/10">
                       <span className="text-cyan-300 font-semibold text-sm">Sui</span>
                     </div>
                     <table className="w-full">
                       <thead>
-                        <tr className="border-b border-gray-800">
-                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Token</th>
-                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Balance</th>
+                        <tr className="border-b border-emerald-400/10">
+                          <th className="text-left text-emerald-300/70 text-xs font-medium px-4 py-3">Token</th>
+                          <th className="text-right text-emerald-300/70 text-xs font-medium px-4 py-3">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
                         {suiBalances.suiBalance !== "0.0000" && (
-                          <tr className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <tr className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
                                 <span className="text-lg">🌊</span>
                                 <div>
                                   <p className="text-white font-medium text-sm">SUI</p>
-                                  <p className="text-gray-500 text-xs">Sui native</p>
+                                  <p className="text-emerald-400/40 text-xs">Sui native</p>
                                 </div>
                               </div>
                             </td>
@@ -343,7 +343,7 @@ export default function WalletPage() {
                           </tr>
                         )}
                         {suiBalances.tokens.map((token, i) => (
-                          <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <tr key={i} className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
                                 <div className="w-6 h-6 bg-cyan-900/40 rounded-full flex items-center justify-center text-xs text-cyan-300">
@@ -351,7 +351,7 @@ export default function WalletPage() {
                                 </div>
                                 <div>
                                   <p className="text-white font-medium text-sm">{token.symbol}</p>
-                                  <p className="text-gray-500 text-xs">{token.name}</p>
+                                  <p className="text-emerald-400/40 text-xs">{token.name}</p>
                                 </div>
                               </div>
                             </td>
@@ -360,7 +360,7 @@ export default function WalletPage() {
                         ))}
                         {suiBalances.suiBalance === "0.0000" && suiBalances.tokens.length === 0 && (
                           <tr>
-                            <td colSpan={2} className="px-4 py-4 text-center text-gray-500 text-sm">No tokens found on Sui</td>
+                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-sm">No tokens found on Sui</td>
                           </tr>
                         )}
                       </tbody>

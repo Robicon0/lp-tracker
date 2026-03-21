@@ -43,10 +43,22 @@ export default function PriceTicker() {
 
   if (loading) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
-        <div className="flex items-center space-x-2">
-          <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-          <span className="text-gray-400 text-sm">Loading live prices...</span>
+      <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-4 mb-6">
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-emerald-400/30 rounded-full animate-pulse" />
+            <span className="text-emerald-300/50 text-sm font-medium">Live Prices</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {[...Array(7)].map((_, i) => (
+            <div key={i} className="flex items-center space-x-2 bg-emerald-900/20 border border-emerald-400/10 rounded-lg px-3 py-2 animate-pulse">
+              <div className="w-5 h-5 bg-emerald-900/50 rounded-full" />
+              <div className="w-8 h-3 bg-emerald-900/50 rounded" />
+              <div className="w-14 h-3 bg-emerald-900/50 rounded" />
+              <div className="w-8 h-3 bg-emerald-900/40 rounded" />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -54,20 +66,20 @@ export default function PriceTicker() {
 
   if (prices.length === 0) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
-        <p className="text-gray-500 text-sm">Unable to load live prices. Will retry shortly.</p>
+      <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-4 mb-6">
+        <p className="text-emerald-400/40 text-sm">Unable to load live prices. Will retry shortly.</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
+    <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-4 mb-6">
       <div className="flex justify-between items-center mb-3">
         <div className="flex items-center space-x-2">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-gray-400 text-sm font-medium">Live Prices</span>
+          <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+          <span className="text-emerald-300/70 text-sm font-medium">Live Prices</span>
         </div>
-        <span className="text-gray-600 text-xs">Updated: {lastUpdated}</span>
+        <span className="text-emerald-400/30 text-xs">Updated: {lastUpdated}</span>
       </div>
       <div className="flex flex-wrap gap-3">
         {prices.map((coin) => {
@@ -76,14 +88,14 @@ export default function PriceTicker() {
           return (
             <div
               key={coin.id}
-              className="flex items-center space-x-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2"
+              className="flex items-center space-x-2 bg-emerald-900/20 border border-emerald-400/10 rounded-lg px-3 py-2"
             >
               <img src={coin.image} alt={coin.symbol} className="w-5 h-5" />
-              <span className="text-white text-sm font-medium uppercase">{coin.symbol}</span>
-              <span className="text-white text-sm">
+              <span className="text-emerald-50 text-sm font-medium uppercase">{coin.symbol}</span>
+              <span className="text-emerald-100/80 text-sm">
                 ${coin.current_price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span className={`text-xs ${change >= 0 ? "text-green-500" : "text-red-500"}`}>
+              <span className={`text-xs ${change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {change >= 0 ? "+" : ""}{change.toFixed(1)}%
               </span>
             </div>

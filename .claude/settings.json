@@ -56,7 +56,27 @@
       "Bash(head -5 grep -rn \"DEMO\\\\|demoPositions\\\\|hardcoded\" ~/lp-tracker-fresh/app/ --include=\"*.ts\" --include=\"*.tsx\")",
       "Bash(curl -s -X POST https://fullnode.mainnet.sui.io:443 -H \"Content-Type: application/json\" -d '{:*)",
       "Read(//private/tmp/**)",
-      "Bash(curl -s \"http://localhost:3000/api/bluefin/activity?positionId=0xa867e87bbc385d25431de45443ea7e43d5867fb40a41de305cb5236ebb3c5d8a&account=0xdce8af889df949cacbef1188e6eb59d70508b76eba4c74cb1c8dc4f34454c30d&decimalsA=9&decimalsB=6&coinTypeA=0x2::sui::SUI&coinTypeB=0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC&priceA=2.5&priceB=1\")"
+      "Bash(curl -s \"http://localhost:3000/api/bluefin/activity?positionId=0xa867e87bbc385d25431de45443ea7e43d5867fb40a41de305cb5236ebb3c5d8a&account=0xdce8af889df949cacbef1188e6eb59d70508b76eba4c74cb1c8dc4f34454c30d&decimalsA=9&decimalsB=6&coinTypeA=0x2::sui::SUI&coinTypeB=0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC&priceA=2.5&priceB=1\")",
+      "Bash(curl -s https://rpc.hyperliquid.xyz/evm -X POST -H \"Content-Type: application/json\" -d '{\"\"jsonrpc\"\":\"\"2.0\"\",\"\"method\"\":\"\"eth_blockNumber\"\",\"\"params\"\":[],\"\"id\"\":1}')",
+      "Bash(curl -s https://rpc.hyperliquid.xyz/evm -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"jsonrpc\"\"\"\":\"\"\"\"2.0\"\"\"\",\"\"\"\"method\"\"\"\":\"\"\"\"eth_getLogs\"\"\"\",\"\"\"\"params\"\"\"\":[{\"\"\"\"address\"\"\"\":\"\"\"\"0xead19ae861c29bbb2101e834922b2feee69b9091\"\"\"\",\"\"\"\"fromBlock\"\"\"\":\"\"\"\"0x1cd6000\"\"\"\",\"\"\"\"toBlock\"\"\"\":\"\"\"\"0x1cd7372\"\"\"\"}],\"\"\"\"id\"\"\"\":1}')",
+      "Bash(curl -s https://rpc.hyperliquid.xyz/evm -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"jsonrpc\"\"\"\":\"\"\"\"2.0\"\"\"\",\"\"\"\"method\"\"\"\":\"\"\"\"eth_getLogs\"\"\"\",\"\"\"\"params\"\"\"\":[{\"\"\"\"address\"\"\"\":\"\"\"\"0xead19ae861c29bbb2101e834922b2feee69b9091\"\"\"\",\"\"\"\"fromBlock\"\"\"\":\"\"\"\"0x1cd6f72\"\"\"\",\"\"\"\"toBlock\"\"\"\":\"\"\"\"0x1cd7372\"\"\"\"}],\"\"\"\"id\"\"\"\":1}')",
+      "Bash(curl -s \"https://api.hypurrscan.io\")",
+      "Bash(git add:*)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//Users/johnnyarya/lp-tracker-fresh/**)",
+      "Bash(sed -i '' 's/font-semibold/font-bold/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/font-medium/font-semibold/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/text-2xl font-bold text-white/text-2xl font-extrabold text-white/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/text-sm font-bold text-emerald-300/text-sm font-extrabold text-emerald-300/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/grid gap-2 mb-2 items-start/grid gap-1.5 mb-2 items-start/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/rounded-xl p-5 border border-emerald-500\\\\/15/rounded-xl p-4 border border-emerald-500\\\\/15/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/gap-1\\\\.5/gap-1/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/gap-2/gap-1/g' app/dashboard/[id]/page.tsx)",
+      "Bash(sed -i '' 's/mb-2/mb-1.5/g' app/dashboard/[id]/page.tsx)"
+    ],
+    "additionalDirectories": [
+      "/Users/johnnyarya/lp-tracker-fresh/app/dashboard/[id]"
     ]
   }
 }

@@ -512,6 +512,8 @@ export async function GET(request: Request) {
         price0,
         price1,
         walletAddress: account,
+        token0Address: pos.token0,
+        token1Address: pos.token1,
       };
     });
 

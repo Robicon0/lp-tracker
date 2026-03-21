@@ -25,8 +25,8 @@ const shortName = (pair: string) => pair.replace(" / ", "/");
 
 
 const CustomTooltipStyle = {
-  backgroundColor: "#1F2937",
-  border: "1px solid #374151",
+  backgroundColor: "#052e16",
+  border: "1px solid #064e3b",
   borderRadius: "8px",
   padding: "8px 12px",
   color: "#FFFFFF",
@@ -47,7 +47,7 @@ const renderLegend = (props: any) => {
         return (
           <div key={index} className="flex items-center space-x-1.5 text-xs">
             <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
-            <span className="text-gray-300">{entry.value} {pct}% (${dollars})</span>
+            <span className="text-emerald-300/70">{entry.value} {pct}% (${dollars})</span>
           </div>
         );
       })}
@@ -102,11 +102,11 @@ export default function Analytics() {
 
   if (isLoading) {
     return (
-      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+      <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
         <div className="max-w-7xl mx-auto">
           <h1 className="text-4xl font-bold">Portfolio Analytics</h1>
-          <p className="text-gray-400 mt-2">Loading positions...</p>
+          <p className="text-emerald-300/70 mt-2">Loading positions...</p>
         </div>
       </div>
     );
@@ -114,37 +114,37 @@ export default function Analytics() {
 
   if (mounted && !hasWallet) {
     return (
-      <div className="p-8 pt-24 bg-black text-white min-h-screen">
+      <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
         <div className="max-w-7xl mx-auto flex flex-col items-center justify-center py-32 text-center">
           <div className="text-5xl mb-6">📊</div>
           <h1 className="text-4xl font-bold mb-4">Portfolio Analytics</h1>
-          <p className="text-gray-400 max-w-sm">Connect your wallet to see charts and analytics for your LP positions.</p>
+          <p className="text-emerald-300/70 max-w-sm">Connect your wallet to see charts and analytics for your LP positions.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-8 pt-24 bg-black text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
       <div className="max-w-7xl mx-auto">
         <h1 className="text-4xl font-bold">Portfolio Analytics</h1>
-        <p className="text-gray-400 mt-2">Visual breakdown of your DeFi positions</p>
+        <p className="text-emerald-300/70 mt-2">Visual breakdown of your DeFi positions</p>
 
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Total Portfolio Value</p>
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Total Portfolio Value</p>
             <p className="text-3xl font-bold">
               ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Average APY</p>
-            <p className="text-3xl font-bold text-green-500">{avgApy.toFixed(1)}%</p>
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Average APY</p>
+            <p className="text-3xl font-bold text-emerald-400">{avgApy.toFixed(1)}%</p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Total Fees Earned</p>
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Total Fees Earned</p>
             <p className="text-3xl font-bold">
               ${totalFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
@@ -152,11 +152,11 @@ export default function Analytics() {
         </div>
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
             <h2 className="text-xl font-bold mb-4">Value by Position</h2>
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={valueData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#052e16" />
                 <XAxis type="number" tick={{ fill: "#9CA3AF", fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
                 <YAxis type="category" dataKey="name" tick={{ fill: "#9CA3AF", fontSize: 12 }} width={80} />
                 <Tooltip contentStyle={CustomTooltipStyle} formatter={fmtDollar} />
@@ -169,11 +169,11 @@ export default function Analytics() {
             </ResponsiveContainer>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
             <h2 className="text-xl font-bold mb-4">APY Comparison</h2>
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={apyData} margin={{ bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#052e16" />
                 <XAxis
                   dataKey="name"
                   tick={{ fill: "#9CA3AF", fontSize: 10 }}
@@ -195,7 +195,7 @@ export default function Analytics() {
         </div>
 
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
             <h2 className="text-xl font-bold mb-4">Value by Chain</h2>
             <ResponsiveContainer width="100%" height={350}>
               <PieChart>
@@ -218,7 +218,7 @@ export default function Analytics() {
             </ResponsiveContainer>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
             <h2 className="text-xl font-bold mb-4">Value by Protocol</h2>
             <ResponsiveContainer width="100%" height={350}>
               <PieChart>

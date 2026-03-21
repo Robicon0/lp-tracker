@@ -54,11 +54,11 @@ export default function WatchedPage() {
   }
 
   return (
-    <div className="p-8 pt-24 bg-black text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-8">
-          <Link href="/dashboard" className="text-gray-500 hover:text-gray-300 transition-colors text-sm">
+          <Link href="/dashboard" className="text-emerald-400/40 hover:text-emerald-300 transition-colors text-sm">
             ← Dashboard
           </Link>
           <h1 className="text-3xl font-bold">Watched Wallets</h1>
@@ -66,7 +66,7 @@ export default function WatchedPage() {
 
         {/* Watched list */}
         {mounted && watchedWallets.length === 0 && (
-          <p className="text-gray-500 mb-8">No watched wallets yet. Add one below.</p>
+          <p className="text-emerald-400/40 mb-8">No watched wallets yet. Add one below.</p>
         )}
 
         {mounted && watchedWallets.length > 0 && (
@@ -77,8 +77,8 @@ export default function WatchedPage() {
                 ? `${w.address.slice(0, 8)}...${w.address.slice(-6)}`
                 : w.address;
               return (
-                <div key={key} className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-center gap-4">
-                  <span className="text-xs font-mono bg-gray-800 text-gray-400 px-2 py-1 rounded shrink-0">
+                <div key={key} className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-4 flex items-center gap-4">
+                  <span className="text-xs font-mono bg-emerald-900/20 text-emerald-300/70 px-2 py-1 rounded shrink-0">
                     {CHAIN_LABELS[w.chain]}
                   </span>
                   <span className="font-mono text-sm text-gray-300 shrink-0">{short}</span>
@@ -94,11 +94,11 @@ export default function WatchedPage() {
                             if (e.key === "Escape") setEditingKey(null);
                           }}
                           placeholder="Nickname"
-                          className="bg-gray-800 border border-gray-600 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
+                          className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-400"
                         />
                         <button
                           onClick={() => commitEdit(w.address, w.chain)}
-                          className="text-blue-400 hover:text-blue-300 text-sm"
+                          className="text-emerald-400 hover:text-emerald-300 text-sm"
                         >
                           Save
                         </button>
@@ -112,10 +112,10 @@ export default function WatchedPage() {
                     ) : (
                       <button
                         onClick={() => startEdit(key, w.label ?? "")}
-                        className="text-gray-500 hover:text-gray-300 text-sm transition-colors text-left"
+                        className="text-emerald-400/40 hover:text-emerald-300 text-sm transition-colors text-left"
                       >
                         {w.label ? (
-                          <span className="text-gray-300">{w.label}</span>
+                          <span className="text-emerald-300/80">{w.label}</span>
                         ) : (
                           <span className="italic">Add label…</span>
                         )}
@@ -135,7 +135,7 @@ export default function WatchedPage() {
         )}
 
         {/* Add wallet form */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-4">Add Wallet</h2>
           <div className="flex flex-col gap-3">
             <div className="flex gap-3">
@@ -145,12 +145,12 @@ export default function WatchedPage() {
                 onChange={(e) => { setAddInput(e.target.value); setAddError(""); }}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 placeholder="Paste wallet address"
-                className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                className="flex-1 bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
               />
               <select
                 value={addChain}
                 onChange={(e) => { setAddChain(e.target.value as WatchedWalletChain); setAddError(""); }}
-                className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 shrink-0"
+                className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400 shrink-0"
               >
                 <option value="evm">EVM</option>
                 <option value="solana">Solana</option>
@@ -163,12 +163,12 @@ export default function WatchedPage() {
               value={addLabel}
               onChange={(e) => setAddLabel(e.target.value)}
               placeholder="Nickname (optional)"
-              className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
             />
             {addError && <p className="text-red-400 text-xs">{addError}</p>}
             <button
               onClick={handleAdd}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors self-start"
+              className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors self-start"
             >
               Add Wallet
             </button>

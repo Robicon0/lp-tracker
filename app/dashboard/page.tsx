@@ -83,6 +83,7 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortIndex, setSortIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedApyIds, setExpandedApyIds] = useState<Set<string>>(new Set());
   const [secondsAgo, setSecondsAgo] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -202,26 +203,26 @@ export default function Dashboard() {
   }));
 
   return (
-    <div className="p-8 pt-24 bg-black text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
       <div className="max-w-7xl mx-auto">
         <PriceTicker />
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-4xl font-bold">Portfolio Overview</h1>
-            <p className="text-gray-400 mt-2">Track your DeFi liquidity positions</p>
+            <p className="text-emerald-300/70 mt-2">Track your DeFi liquidity positions</p>
           </div>
           {hasWallet && mounted && (
             <div className="flex items-center gap-3">
               {dataUpdatedAt > 0 && (
-                <span className="text-gray-500 text-sm">
+                <span className="text-emerald-400/40 text-sm">
                   Updated {lastUpdatedLabel()}
                 </span>
               )}
               <button
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 px-3 py-1.5 rounded-lg text-sm transition-colors"
+                className="flex items-center gap-2 bg-emerald-900/40 hover:bg-emerald-900/60 disabled:opacity-50 text-emerald-300 px-3 py-1.5 rounded-lg text-sm transition-colors"
                 title="Refresh positions"
               >
                 <svg
@@ -239,33 +240,33 @@ export default function Dashboard() {
 
         {/* Stats Cards */}
         <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-6">
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Total Portfolio Value</p>
-            <p className="text-3xl font-bold">${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] border border-emerald-400/20 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Total Portfolio Value</p>
+            <p className="text-3xl font-bold text-emerald-50">${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Active Positions</p>
-            <p className="text-3xl font-bold">{allPositions.length}</p>
-            <p className="text-gray-400 text-sm mt-2">Across {uniqueChains} chains</p>
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] border border-emerald-400/20 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Active Positions</p>
+            <p className="text-3xl font-bold text-emerald-50">{allPositions.length}</p>
+            <p className="text-emerald-300/70 text-sm mt-2">Across {uniqueChains} chains</p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Total Fees Earned</p>
-            <p className="text-3xl font-bold">${totalFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            <p className="text-gray-400 text-sm mt-2">All time</p>
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] border border-emerald-400/20 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Total Fees Earned</p>
+            <p className="text-3xl font-bold text-emerald-50">${totalFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-emerald-300/70 text-sm mt-2">All time</p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-            <p className="text-gray-400 text-sm mb-2">Total IL</p>
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] border border-emerald-400/20 rounded-xl p-6">
+            <p className="text-emerald-300/70 text-sm mb-2">Total IL</p>
             {totalILHodlValue > 0 ? (
               <>
-                <p className={`text-3xl font-bold ${totalILUSD < 0 ? "text-red-400" : "text-green-400"}`}>
+                <p className={`text-3xl font-bold ${totalILUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
                   {totalILUSD < 0 ? "−" : "+"}${Math.abs(totalILUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
-                <p className={`text-sm mt-2 ${totalILUSD < 0 ? "text-red-400/70" : "text-green-400/70"}`}>
+                <p className={`text-sm mt-2 ${totalILUSD < 0 ? "text-red-400/70" : "text-emerald-400/70"}`}>
                   {totalILUSD >= 0 ? "+" : ""}{((totalILUSD / totalILHodlValue) * 100).toFixed(2)}% vs HODL
                 </p>
               </>
             ) : (
-              <p className="text-3xl font-bold text-gray-600">—</p>
+              <p className="text-3xl font-bold text-emerald-400/30">—</p>
             )}
           </div>
         </div>
@@ -273,19 +274,19 @@ export default function Dashboard() {
         {/* Watch Wallet Quick-Add */}
         {mounted && (
           <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-2">
-            <span className="text-gray-500 text-sm shrink-0">👁 Watch:</span>
+            <span className="text-emerald-400/40 text-sm shrink-0">👁 Watch:</span>
             <input
               type="text"
               value={watchInput}
               onChange={(e) => { setWatchInput(e.target.value); setWatchError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleWatch()}
               placeholder="Paste wallet address"
-              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500"
+              className="flex-1 min-w-0 bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-400"
             />
             <select
               value={watchChain}
               onChange={(e) => { setWatchChain(e.target.value as WatchedWalletChain); setWatchError(""); }}
-              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 shrink-0"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-400 shrink-0"
             >
               <option value="evm">EVM</option>
               <option value="solana">Solana</option>
@@ -294,12 +295,12 @@ export default function Dashboard() {
             </select>
             <button
               onClick={handleWatch}
-              className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-sm transition-colors shrink-0"
+              className="bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-300 px-3 py-1.5 rounded-lg text-sm transition-colors shrink-0"
             >
               Watch
             </button>
             {watchedWallets.length > 0 && (
-              <Link href="/watched" className="text-blue-400 hover:text-blue-300 text-sm shrink-0 transition-colors">
+              <Link href="/watched" className="text-emerald-400 hover:text-emerald-300 text-sm shrink-0 transition-colors">
                 Manage ({watchedWallets.length})
               </Link>
             )}
@@ -311,7 +312,7 @@ export default function Dashboard() {
 
         {/* Portfolio History */}
         {hasWallet && mounted && (
-          <div className="mt-6 bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <div className="mt-6 bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-xl font-bold">Portfolio History</h2>
@@ -326,10 +327,10 @@ export default function Dashboard() {
                         title={!hasData ? "Not enough history yet" : undefined}
                         className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
                           rangeKey === r.key
-                            ? "bg-blue-600 text-white"
+                            ? "bg-emerald-700 text-white"
                             : hasData
-                            ? "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
-                            : "bg-gray-800 text-gray-600"
+                            ? "bg-emerald-950/40 text-emerald-400/60 hover:text-emerald-300 hover:bg-emerald-900/40"
+                            : "bg-emerald-950/40 text-emerald-400/30"
                         }`}
                       >
                         {r.key}
@@ -339,19 +340,19 @@ export default function Dashboard() {
                 </div>
               </div>
               {effectiveHistory.length >= 2 && (
-                <div className={`text-sm font-medium ${pnlDollar >= 0 ? "text-green-500" : "text-red-500"}`}>
+                <div className={`text-sm font-medium ${pnlDollar >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   {pnlDollar >= 0 ? "+" : ""}
                   ${Math.abs(pnlDollar).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   {" "}
                   <span className="opacity-75">
                     ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
                   </span>
-                  <span className="text-gray-500 font-normal ml-1">{pnlLabel}</span>
+                  <span className="text-emerald-400/40 font-normal ml-1">{pnlLabel}</span>
                 </div>
               )}
             </div>
             {portfolioHistory.length < 2 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-gray-500">
+              <div className="flex flex-col items-center justify-center py-10 text-emerald-400/40">
                 <svg className="w-8 h-8 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -362,7 +363,7 @@ export default function Dashboard() {
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={chartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#052e16" />
                   <XAxis
                     dataKey="label"
                     tick={{ fill: "#6b7280", fontSize: 11 }}
@@ -378,17 +379,17 @@ export default function Dashboard() {
                     width={72}
                   />
                   <Tooltip
-                    contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: "8px", color: "#fff" }}
+                    contentStyle={{ backgroundColor: "#052e16", border: "1px solid #064e3b", borderRadius: "8px", color: "#fff" }}
                     formatter={(v: number | undefined) => [`$${(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Portfolio Value"]}
                     labelStyle={{ color: "#9ca3af", marginBottom: 4 }}
                   />
                   <Line
                     type="monotone"
                     dataKey="value"
-                    stroke="#3b82f6"
+                    stroke="#34d399"
                     strokeWidth={2}
                     dot={chartData.length <= 20}
-                    activeDot={{ r: 4, fill: "#3b82f6" }}
+                    activeDot={{ r: 4, fill: "#34d399" }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -405,17 +406,17 @@ export default function Dashboard() {
               placeholder="Search pairs, protocols, chains..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-64"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400 w-64"
             />
           </div>
 
           {/* Chain Filter */}
           <div>
-            <label className="text-gray-400 text-sm mr-2">Chain:</label>
+            <label className="text-emerald-300/70 text-sm mr-2">Chain:</label>
             <select
               value={chainFilter}
               onChange={(e) => setChainFilter(e.target.value)}
-              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
             >
               {chains.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -425,11 +426,11 @@ export default function Dashboard() {
 
           {/* Status Filter */}
           <div>
-            <label className="text-gray-400 text-sm mr-2">Status:</label>
+            <label className="text-emerald-300/70 text-sm mr-2">Status:</label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
             >
               {statuses.map((s) => (
                 <option key={s} value={s}>{s}</option>
@@ -439,11 +440,11 @@ export default function Dashboard() {
 
           {/* Sort */}
           <div>
-            <label className="text-gray-400 text-sm mr-2">Sort:</label>
+            <label className="text-emerald-300/70 text-sm mr-2">Sort:</label>
             <select
               value={sortIndex}
               onChange={(e) => setSortIndex(Number(e.target.value))}
-              className="bg-gray-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
             >
               {sortOptions.map((opt, i) => (
                 <option key={i} value={i}>{opt.label}</option>
@@ -452,18 +453,18 @@ export default function Dashboard() {
           </div>
 
           {/* Result count */}
-          <span className="text-gray-500 text-sm ml-auto">
+          <span className="text-emerald-400/40 text-sm ml-auto">
             Showing {filtered.length} of {allPositions.length} positions
           </span>
         </div>
 
         {/* Positions Grid */}
-        <div className="flex justify-between items-center mt-8 mb-4"><h2 className="text-2xl font-bold">Your Positions</h2><button onClick={() => { const headers = "Pair,Protocol,Chain,Value,APY,Fees,Status\n"; const rows = filtered.map((p) => `${p.pair},${p.protocol},${p.chain},${p.value},${p.apy}%,${p.fees},${p.status}`).join("\n"); const blob = new Blob([headers + rows], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "lp-positions.csv"; a.click(); URL.revokeObjectURL(url); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Export CSV</button></div>
+        <div className="flex justify-between items-center mt-8 mb-4"><h2 className="text-2xl font-bold">Your Positions</h2><button onClick={() => { const headers = "Pair,Protocol,Chain,Value,APY,Fees,Status\n"; const rows = filtered.map((p) => `${p.pair},${p.protocol},${p.chain},${p.value},${p.apy}%,${p.fees},${p.status}`).join("\n"); const blob = new Blob([headers + rows], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "lp-positions.csv"; a.click(); URL.revokeObjectURL(url); }} className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Export CSV</button></div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {mounted && isLoading && (
-            <div className="col-span-2 flex flex-col items-center justify-center py-16 text-gray-400">
-              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+            <div className="col-span-2 flex flex-col items-center justify-center py-16 text-emerald-300/70">
+              <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mb-4" />
               <p>Fetching your positions...</p>
             </div>
           )}
@@ -472,24 +473,24 @@ export default function Dashboard() {
             const isClosed = posStatus === "Closed";
             return (
             <Link key={pos.id} href={`/dashboard/${pos.id}`}>
-              <div className={`bg-gray-900 border border-gray-800 rounded-lg p-6 hover:border-blue-500 transition-colors cursor-pointer${isClosed ? " opacity-50" : ""}`}>
+              <div className={`bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-6 hover:border-emerald-400/40 transition-colors cursor-pointer${isClosed ? " opacity-50" : ""}`}>
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="text-xl font-bold">{pos.pair}</h3>
-                    <p className="text-gray-400 text-sm">
+                    <p className="text-emerald-300/70 text-sm">
                       {pos.protocol} • {pos.chain}
                       {connectedWalletCount >= 2 && pos.walletAddress && (
-                        <span className="ml-2 text-gray-600 text-xs font-mono">...{pos.walletAddress.slice(-4)}</span>
+                        <span className="ml-2 text-emerald-400/30 text-xs font-mono">...{pos.walletAddress.slice(-4)}</span>
                       )}
                     </p>
                   </div>
                   <span
                     className={`px-3 py-1 rounded-full text-sm ${
                       posStatus === "In Range"
-                        ? "bg-green-500/10 text-green-500"
+                        ? "bg-emerald-950 text-emerald-400 border border-emerald-400/30"
                         : posStatus === "Closed"
-                        ? "bg-gray-500/10 text-gray-400"
-                        : "bg-red-500/10 text-red-500"
+                        ? "bg-gray-800/50 text-gray-400 border border-gray-600/30"
+                        : "bg-red-950/50 text-red-400 border border-red-400/30"
                     }`}
                   >
                     {posStatus}
@@ -497,22 +498,51 @@ export default function Dashboard() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Position Value</span>
+                    <span className="text-emerald-300/70">Position Value</span>
                     <span className="font-semibold">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between items-start">
-                    <span className="text-gray-400">APY</span>
+                    <span className="text-emerald-300/70">APY</span>
                     <div className="text-right">
-                      <span className="text-green-500">{pos.apy}% <span className="text-green-500/60 text-xs">/yr</span></span>
-                      {pos.apy > 0 && (
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {(pos.apy / 12).toFixed(2)}% /mo · {(pos.apy / 365).toFixed(3)}% /day
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setExpandedApyIds(prev => {
+                            const next = new Set(prev);
+                            next.has(pos.id) ? next.delete(pos.id) : next.add(pos.id);
+                            return next;
+                          });
+                        }}
+                        className="flex items-center gap-1 text-right"
+                      >
+                        <span className="text-emerald-400">{pos.apy}% <span className="text-emerald-400/60 text-xs">/yr</span></span>
+                        {pos.apy > 0 && (
+                          <svg className={`w-3 h-3 text-emerald-400/50 transition-transform duration-200 ${expandedApyIds.has(pos.id) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        )}
+                      </button>
+                      {expandedApyIds.has(pos.id) && pos.apy > 0 && (
+                        <div className="mt-1.5 grid grid-cols-2 gap-1">
+                          <div className="bg-emerald-900/20 rounded p-1.5 text-center">
+                            <p className="text-emerald-400/40 text-xs">Monthly</p>
+                            <p className="text-xs font-semibold text-emerald-300">{(pos.apy / 12).toFixed(2)}%</p>
+                          </div>
+                          <div className="bg-blue-900/20 rounded p-1.5 text-center">
+                            <p className="text-blue-400/40 text-xs">Weekly</p>
+                            <p className="text-xs font-semibold text-blue-300">{(pos.apy / 52).toFixed(2)}%</p>
+                          </div>
+                          <div className="bg-purple-900/20 rounded p-1.5 text-center col-span-2">
+                            <p className="text-purple-400/40 text-xs">Daily</p>
+                            <p className="text-xs font-semibold text-purple-300">{(pos.apy / 365).toFixed(3)}%</p>
+                          </div>
                         </div>
                       )}
                     </div>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Fees Earned</span>
+                    <span className="text-emerald-300/70">Fees Earned</span>
                     <span className="font-semibold">${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
@@ -527,17 +557,17 @@ export default function Dashboard() {
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="text-5xl mb-6">💼</div>
                   <h3 className="text-xl font-semibold text-white mb-2">No wallet connected</h3>
-                  <p className="text-gray-400 mb-8 max-w-sm">Connect your wallet to track your LP positions across EVM chains, Solana, and Sui.</p>
-                  <div className="flex flex-wrap justify-center gap-4 text-sm text-gray-500">
-                    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-2">
+                  <p className="text-emerald-300/70 mb-8 max-w-sm">Connect your wallet to track your LP positions across EVM chains, Solana, and Sui.</p>
+                  <div className="flex flex-wrap justify-center gap-4 text-sm text-emerald-400/40">
+                    <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-lg px-4 py-3 flex items-center gap-2">
                       <span className="text-blue-400 font-medium">EVM</span>
                       <span>Ethereum · Base · Arbitrum · Optimism</span>
                     </div>
-                    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-2">
+                    <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-lg px-4 py-3 flex items-center gap-2">
                       <span className="text-purple-400 font-medium">Solana</span>
                       <span>Raydium · Orca</span>
                     </div>
-                    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-2">
+                    <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-lg px-4 py-3 flex items-center gap-2">
                       <span className="text-cyan-400 font-medium">Sui</span>
                       <span>Bluefin · Cetus</span>
                     </div>
@@ -547,10 +577,10 @@ export default function Dashboard() {
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="text-5xl mb-6">📭</div>
                   <h3 className="text-xl font-semibold text-white mb-2">No positions found</h3>
-                  <p className="text-gray-400 max-w-sm">No LP positions were found for your connected wallet(s). Open a position on Aerodrome, Uniswap, Orca, Bluefin, or another supported protocol.</p>
+                  <p className="text-emerald-300/70 max-w-sm">No LP positions were found for your connected wallet(s). Open a position on Aerodrome, Uniswap, Orca, Bluefin, or another supported protocol.</p>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500">
+                <div className="text-center py-12 text-emerald-400/40">
                   No positions match your filters.
                 </div>
               )}
@@ -560,7 +590,7 @@ export default function Dashboard() {
 
         {/* Closed position limitation note — shown when Solana or Sui wallet is connected */}
         {mounted && (solanaAddress || suiAddress) && (
-          <div className="mt-6 text-sm text-gray-500 border border-gray-800 rounded-lg px-4 py-3 flex items-start gap-2">
+          <div className="mt-6 text-sm text-emerald-400/40 border border-emerald-400/10 rounded-lg px-4 py-3 flex items-start gap-2">
             <span className="mt-0.5 shrink-0">ℹ️</span>
             <span>
               Some closed positions may not appear: on Solana, NFTs are burned when a position is fully closed; on Sui, position objects are destroyed. These no longer exist on-chain and cannot be recovered. Only positions whose on-chain record still exists (zero liquidity but unburned) show as &quot;Closed&quot;.

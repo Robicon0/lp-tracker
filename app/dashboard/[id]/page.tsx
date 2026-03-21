@@ -422,7 +422,7 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid gap-1 mb-2 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-1 mb-1.5 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
             <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
@@ -458,7 +458,7 @@ export default function PositionDetail() {
 
               return (
                 <div>
-                  <div className="grid grid-cols-4 gap-1 text-xs text-gray-400 mb-2 px-1">
+                  <div className="grid grid-cols-4 gap-1 text-xs text-gray-400 mb-1.5 px-1">
                     <span></span>
                     <span className="text-right">{sym0}</span>
                     <span className="text-right">{sym1}</span>
@@ -563,7 +563,7 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid gap-1 mb-2 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-1 mb-1.5 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
               <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>

@@ -886,3 +886,64 @@ Anchor 8-byte discriminators computed via Node's `createHash('sha256').update('g
 - [ ] Raydium: same three sections visible (when position exists)
 - [ ] TX links open Solscan in new tab
 - [ ] localStorage cache with 5-min TTL working
+
+---
+
+---
+
+# Phase 6: HyperEVM Activity Expansion
+
+_Last updated: 2026-03-20_
+
+## Overview
+
+Replicate Features 7, 8, and 9 for **HyperSwap V3, KittenSwap, and ProjectX on HyperEVM**. Same three sections — Assets (Invested vs Current), Activity History table, and Actual Performance (realized APR) — on the position detail page. Uses EVM `eth_getLogs` pattern, same as Aerodrome.
+
+---
+
+## Technical Approach
+
+### Event log scanning
+
+`eth_getLogs` via HyperEVM public RPC (`rpc.hyperliquid.xyz/evm`) — no API key needed. Filter by NFT manager address + standard V3 event topics + tokenId (indexed topic1). Topic hashes are identical to Aerodrome/Uni V3 since the event signatures are the same.
+
+Full-range scan (block 0 → latest) attempted first. If the RPC rejects the range, falls back to 500k-block chunks.
+
+### NFT manager lookup
+
+Derived from `pos.protocol` in the hook:
+- `'HyperSwap'` → `0x6eda206207c09e5428f281761ddc0d300851fbc8`
+- `'KittenSwap'` → `0xb9201e89f94a01ff13ad4caecf43a2e232513754`
+- `'ProjectX'` → `0xead19ae861c29bbb2101e834922b2feee69b9091`
+
+### CoinGecko IDs
+
+- HYPE (native `0x5555...5555`) → `hyperliquid`
+- WHYPE → `hyperliquid`
+- USDC → `usd-coin`
+
+### TX links
+
+`https://hypurrscan.io/tx/{hash}`
+
+---
+
+## New files
+
+- `app/api/hyperswap/activity/route.ts` — eth_getLogs scanning, CoinGecko historical prices
+- `app/hooks/useHyperSwapActivity.ts` — 5-min localStorage cache, protocol→nftManager lookup
+
+## Changed files
+
+- `app/api/hyperswap/route.ts` — added `token0Address`, `token1Address` to response
+- `app/dashboard/[id]/page.tsx` — added `useHyperSwapActivity` hook, extended `isActivityProtocol`, updated `txUrl`
+
+---
+
+## Acceptance Criteria
+
+- [x] Build passes with no TypeScript errors
+- [ ] ProjectX: Assets / Activity History / Actual Performance visible on position detail
+- [ ] TX links open hypurrscan.io in new tab
+- [ ] localStorage cache with 5-min TTL working
+- [ ] HyperSwap and KittenSwap sections appear when those positions exist

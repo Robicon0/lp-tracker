@@ -340,6 +340,45 @@ Key design decisions:
 [ ] Confirm Orca activity data in dashboard (connect Solana wallet, open Orca position detail)
 [ ] Confirm Raydium activity data when Raydium position exists
 
+====================================================
+PHASE 6 — HYPEREVM ACTIVITY EXPANSION
+====================================================
+Started: 2026-03-20
+Scope: Replicate Features 7/8/9 (Assets, Activity History, Actual APR) for HyperSwap/KittenSwap/ProjectX on HyperEVM.
+No new env vars — uses rpc.hyperliquid.xyz/evm (public, no key).
+
+Key design decisions:
+- eth_getLogs on HyperEVM public RPC, same topic hashes as Aerodrome (standard V3 events)
+- Full-range scan (block 0→latest) first; chunks of 500k blocks on error
+- nftManager derived from protocol name in hook (no extra field on position type)
+- token0Address/token1Address added to hyperswap route response
+- CoinGecko: HYPE=hyperliquid, USDC=usd-coin
+- TX links: https://hypurrscan.io/tx/{hash}
+- localStorage cache: 5-min TTL, key: hyperswap-activity-{tokenId}
+
+[DONE] app/api/hyperswap/route.ts — added token0Address, token1Address to response
+[DONE] app/api/hyperswap/activity/route.ts
+       - Standard V3 topic hashes CONFIRMED correct (same as Aerodrome)
+       - tokenId IS at topic[1] for IncreaseLiquidity/DecreaseLiquidity/Collect (confirmed via DRPC)
+       - HyperEVM public RPC caps eth_getLogs at 1000 blocks → useless for history scans
+       - DRPC (hyperliquid.drpc.org) supports 10k blocks per eth_getLogs request (free tier)
+       - Positions opened ~1M blocks before current (~2 weeks), so scan last 5M blocks
+       - Parallel scanning: 500 chunks × 10k blocks, 20 concurrent = ~25 batches
+       - Block timestamps via eth_getBlockByNumber on public RPC (no eth_getLogs needed)
+       - CoinGecko historical prices (cap 30 dates, fallback to current)
+       - Returns ActivityResponse shape (events, netInvested0/1, totalFees0/1)
+[DONE] app/hooks/useHyperSwapActivity.ts
+       - Protocol→NFT manager lookup (HyperSwap/KittenSwap/ProjectX)
+       - localStorage cache, 5-min TTL, hyperswap-activity-{tokenId}
+[DONE] app/dashboard/[id]/page.tsx
+       - Imports useHyperSwapActivity (called unconditionally before early returns)
+       - tokenId extracted from pos.id (format: hyperswap-{protocol}-{tokenId})
+       - isActivityProtocol + activity + activityLoading extended to HyperEVM protocols
+       - txUrl: HyperEVM → hypurrscan.io/tx/{hash}
+[DONE] Build passes (npm run build ✓)
+
+[ ] Confirm ProjectX activity data (connect EVM wallet, open ProjectX position detail)
+
 --- POST-PRD BACKLOG ---
 
 [ ] Remove demo data — show empty state with connect-wallet prompt when no wallet connected
