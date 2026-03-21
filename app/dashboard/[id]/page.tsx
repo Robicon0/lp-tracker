@@ -422,10 +422,10 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid gap-2 mb-2 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-1.5 mb-2 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
-            <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+            <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
               <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Assets</h2>
 
               {activityLoading && (
@@ -504,7 +504,7 @@ export default function PositionDetail() {
           )}
 
           {/* Position Details */}
-          <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+          <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Position Details</h2>
             <div className="space-y-0">
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
@@ -563,9 +563,9 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid gap-2 mb-2 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-1.5 mb-2 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
-              <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+              <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
@@ -606,7 +606,7 @@ export default function PositionDetail() {
             )}
 
             {hasFeeBreakdown && (
-              <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15">
+              <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Unclaimed Fees</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
@@ -631,7 +631,7 @@ export default function PositionDetail() {
 
         {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15 mb-3">
+          <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15 mb-3">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Actual Performance</h2>
             <p className="text-xs text-gray-400/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
@@ -755,7 +755,7 @@ export default function PositionDetail() {
 
         {/* Row 5: Activity History — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 rounded-xl p-5 border border-emerald-500/15 mb-6">
+          <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15 mb-6">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Activity History</h2>
 
             {activityLoading && (
