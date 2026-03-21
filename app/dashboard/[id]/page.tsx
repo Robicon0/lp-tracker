@@ -350,15 +350,15 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 1: Top Stats — 4 cards */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+        <div className="grid grid-cols-4 gap-[2px] mb-4 bg-emerald-500/20 rounded-xl overflow-hidden">
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
             <p className="text-xs font-semibold text-emerald-300 mb-1">Position Value</p>
             <p className="text-2xl font-extrabold text-white">
               ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
 
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
             <p className="text-xs font-semibold text-emerald-300 mb-1">Realized APR</p>
             {activityLoading ? (
               <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
@@ -397,14 +397,14 @@ export default function PositionDetail() {
             )}
           </div>
 
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
             <p className="text-xs font-semibold text-emerald-300 mb-1">Total Fees Earned</p>
             <p className="text-2xl font-extrabold text-white">
               ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
 
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] rounded-xl p-4 border border-emerald-500/20">
+          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
             <p className="text-xs font-semibold text-emerald-300 mb-1">IL</p>
             {ilData ? (
               <>
@@ -422,10 +422,10 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid mb-1.5 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-[2px] mb-1.5 bg-emerald-500/20 rounded-xl overflow-hidden items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
-            <div className="bg-[#0a2e1a]/60 rounded-l-xl p-4 border border-r-0 border-emerald-500/15">
+            <div className="bg-[#0a2e1a]/60 p-4">
               <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Assets</h2>
 
               {activityLoading && (
@@ -504,7 +504,7 @@ export default function PositionDetail() {
           )}
 
           {/* Position Details */}
-          <div className="bg-[#0a2e1a]/60 rounded-r-xl p-4 border border-emerald-500/15">
+          <div className="bg-[#0a2e1a]/60 p-4">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Position Details</h2>
             <div className="space-y-0">
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
@@ -563,9 +563,9 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid mb-1.5 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-[2px] mb-1.5 bg-emerald-500/20 rounded-xl overflow-hidden items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
-              <div className="bg-[#0a2e1a]/60 rounded-l-xl p-4 border border-r-0 border-emerald-500/15">
+              <div className="bg-[#0a2e1a]/60 p-4">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
@@ -606,7 +606,7 @@ export default function PositionDetail() {
             )}
 
             {hasFeeBreakdown && (
-              <div className="bg-[#0a2e1a]/60 rounded-r-xl p-4 border border-emerald-500/15">
+              <div className="bg-[#0a2e1a]/60 p-4">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Unclaimed Fees</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
@@ -631,7 +631,7 @@ export default function PositionDetail() {
 
         {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15 mb-3">
+          <div className="bg-[#0a2e1a]/60 p-4 mb-3">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Actual Performance</h2>
             <p className="text-xs text-gray-400/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
@@ -755,7 +755,7 @@ export default function PositionDetail() {
 
         {/* Row 5: Activity History — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15 mb-6">
+          <div className="bg-[#0a2e1a]/60 p-4 mb-6">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Activity History</h2>
 
             {activityLoading && (
