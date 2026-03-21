@@ -234,7 +234,7 @@ export default function PositionDetail() {
     return (
       <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
-        <div className="max-w-5xl mx-auto">
+        <div className="w-full max-w-7xl mx-auto px-4">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
@@ -250,7 +250,7 @@ export default function PositionDetail() {
     return (
       <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
-        <div className="max-w-5xl mx-auto">
+        <div className="w-full max-w-7xl mx-auto px-4">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
             &larr; Back to Dashboard
           </Link>
@@ -327,7 +327,7 @@ export default function PositionDetail() {
   return (
     <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
-      <div className="max-w-5xl mx-auto">
+      <div className="w-full max-w-7xl mx-auto px-4">
         <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
           &larr; Back to Dashboard
         </Link>
