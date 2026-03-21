@@ -232,7 +232,7 @@ export default function PositionDetail() {
 
   if (!mounted || isLoading) {
     return (
-      <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
+      <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
         <div className="max-w-5xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
@@ -248,7 +248,7 @@ export default function PositionDetail() {
 
   if (!pos) {
     return (
-      <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
+      <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
         <Navbar />
         <div className="max-w-5xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
@@ -325,7 +325,7 @@ export default function PositionDetail() {
   })();
 
   return (
-    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
+    <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
       <div className="max-w-5xl mx-auto">
         <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-sm mb-6 inline-block">
@@ -364,7 +364,7 @@ export default function PositionDetail() {
               <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
             ) : aprMetrics ? (
               <button onClick={() => setAprExpanded(v => !v)} className="text-left w-full">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <span className="text-2xl font-extrabold text-white">~{aprMetrics.aprYearly.toFixed(1)}%</span>
                   <span className="text-gray-400 text-xs">/yr</span>
                   <svg className={`w-3 h-3 text-gray-400 ml-auto transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -422,14 +422,14 @@ export default function PositionDetail() {
         </div>
 
         {/* Row 2: Assets + Position Details */}
-        <div className={`grid gap-1.5 mb-2 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-1 mb-2 items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
             <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
               <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Assets</h2>
 
               {activityLoading && (
-                <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
                   <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                   Scanning on-chain history…
                 </div>
@@ -458,25 +458,25 @@ export default function PositionDetail() {
 
               return (
                 <div>
-                  <div className="grid grid-cols-4 gap-2 text-xs text-gray-400 mb-2 px-1">
+                  <div className="grid grid-cols-4 gap-1 text-xs text-gray-400 mb-2 px-1">
                     <span></span>
                     <span className="text-right">{sym0}</span>
                     <span className="text-right">{sym1}</span>
                     <span className="text-right">USD</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 py-2 border-b border-emerald-500/10 px-1 items-center">
+                  <div className="grid grid-cols-4 gap-1 py-2 border-b border-emerald-500/10 px-1 items-center">
                     <span className="text-sm text-gray-400">Invested</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(inv0)}</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(inv1)}</span>
                     <span className="text-right text-sm font-bold text-white">{fmtUSD(investedUSD)}</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 py-2 border-b border-emerald-500/10 px-1 items-center">
+                  <div className="grid grid-cols-4 gap-1 py-2 border-b border-emerald-500/10 px-1 items-center">
                     <span className="text-sm text-gray-400">Current</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(cur0)}</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(cur1)}</span>
                     <span className="text-right text-sm font-bold text-white">{fmtUSD(currentUSD)}</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 py-2 px-1 items-center">
+                  <div className="grid grid-cols-4 gap-1 py-2 px-1 items-center">
                     <span className="text-sm text-gray-400">Gain / Loss</span>
                     <span className={`text-right font-mono text-sm font-bold ${gainLoss0 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLoss0)}{fmtAmt(Math.abs(gainLoss0))}
@@ -563,7 +563,7 @@ export default function PositionDetail() {
 
         {/* Row 3: IL Breakdown + Unclaimed Fees */}
         {(ilData || hasFeeBreakdown) && (
-          <div className={`grid gap-1.5 mb-2 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-1 mb-2 items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
               <div className="bg-[#0a2e1a]/60 rounded-xl p-4 border border-emerald-500/15">
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
@@ -636,7 +636,7 @@ export default function PositionDetail() {
             <p className="text-xs text-gray-400/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
             {activityLoading && (
-              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+              <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Calculating…
               </div>
@@ -697,7 +697,7 @@ export default function PositionDetail() {
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
                       <span className="text-sm text-gray-400">Realized APR</span>
-                      <button onClick={() => setAprExpanded(v => !v)} className="flex items-center gap-1.5">
+                      <button onClick={() => setAprExpanded(v => !v)} className="flex items-center gap-1">
                         <span className="text-sm font-bold text-emerald-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
                         <svg className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -706,7 +706,7 @@ export default function PositionDetail() {
                     </div>
                   </div>
                   {aprExpanded && (
-                    <div className="grid grid-cols-4 gap-2 mb-4">
+                    <div className="grid grid-cols-4 gap-1 mb-4">
                       <div className="bg-emerald-900/20 rounded p-2 text-center">
                         <p className="text-xs text-gray-400">Yearly</p>
                         <p className="text-sm font-extrabold text-emerald-300">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</p>
@@ -725,7 +725,7 @@ export default function PositionDetail() {
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-4 gap-1">
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
                       <p className="text-xs text-emerald-300">Daily</p>
                       <p className="text-base font-bold text-white">{fmtUSD(dailyFees)}</p>
@@ -759,7 +759,7 @@ export default function PositionDetail() {
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Activity History</h2>
 
             {activityLoading && (
-              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+              <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Loading activity…
               </div>
