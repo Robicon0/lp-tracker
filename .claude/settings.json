@@ -90,7 +90,8 @@
       "Bash(grep -n \"rounded-l-xl\\\\|rounded-r-xl\\\\|border-r-0\\\\|grid mb-1\\\\|grid-cols-4 gap-\\\\[2px\\\\]\\\\|grid-cols-2\\\\|rounded-xl p-4 border\" app/dashboard/[id]/page.tsx)"
     ],
     "additionalDirectories": [
-      "/Users/johnnyarya/lp-tracker-fresh/app/dashboard/[id]"
+      "/Users/johnnyarya/lp-tracker-fresh/app/dashboard/[id]",
+      "/Users/johnnyarya/lp-tracker-fresh/app/dashboard/position"
     ]
   }
 }
