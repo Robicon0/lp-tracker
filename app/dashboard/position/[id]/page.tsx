@@ -1,0 +1,589 @@
+"use client";
+
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import Navbar from "../../../Navbar";
+import { usePositions } from "../../../contexts/PositionsContext";
+import type { AerodromePosition } from "../../../lib/aerodrome";
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function effectiveStatus(p: AerodromePosition): "In Range" | "Out of Range" | "Closed" {
+  if (p.value === 0 && p.fees === 0) return "Closed";
+  return p.status as "In Range" | "Out of Range";
+}
+
+function getManageUrl(protocol: string): string {
+  if (protocol.includes("Aerodrome"))  return "https://aerodrome.finance/positions";
+  if (protocol.includes("Velodrome"))  return "https://velodrome.finance/positions";
+  if (protocol.includes("Uniswap"))    return "https://app.uniswap.org/pools";
+  if (protocol.includes("Orca"))       return "https://v2.orca.so/";
+  if (protocol.includes("Raydium"))    return "https://raydium.io/portfolio/";
+  if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/liquidity";
+  if (protocol.includes("Cetus"))      return "https://app.cetus.zone/liquidity";
+  if (protocol.includes("Momentum"))   return "https://app.mmt.finance";
+  if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.exchange/#/pool";
+  if (protocol.includes("KittenSwap")) return "https://www.kittenswap.org";
+  if (protocol.includes("ProjectX") || protocol.includes("PRJX")) return "https://prjx.com";
+  if (protocol.includes("PancakeSwap")) return "https://pancakeswap.finance/liquidity";
+  return "";
+}
+
+function tickToUSD(tick: number, pos: AerodromePosition): number | null {
+  const d0 = pos.token0Decimals ?? 18;
+  const d1 = pos.token1Decimals ?? 6;
+  try {
+    const raw = Math.pow(1.0001, tick) * Math.pow(10, d0 - d1);
+    if (!isFinite(raw) || raw <= 0) return null;
+    if (STABLES.has(pos.token1Symbol ?? "")) return raw;
+    if (STABLES.has(pos.token0Symbol ?? "")) {
+      const inv = 1 / raw;
+      return isFinite(inv) && inv > 0 ? inv : null;
+    }
+    if (pos.price1 && pos.price1 > 0) return raw * pos.price1;
+    return raw;
+  } catch { return null; }
+}
+
+function fmtPrice(n: number): string {
+  if (n >= 1_000) return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  if (n >= 1)     return `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  if (n >= 0.0001) return `$${n.toFixed(6)}`;
+  return `$${n.toExponential(2)}`;
+}
+
+function fmt$(n: number, dec = 2): string {
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
+}
+
+function getCurrentPrice(pos: AerodromePosition): number | null {
+  if (STABLES.has(pos.token1Symbol ?? "")) return pos.price0 ?? null;
+  if (STABLES.has(pos.token0Symbol ?? "")) return pos.price1 ?? null;
+  return pos.price0 ?? null;
+}
+
+function chainGradient(chain: string): string {
+  const map: Record<string, string> = {
+    Base:        "linear-gradient(135deg, #059669, #10b981)",
+    Ethereum:    "linear-gradient(135deg, #0d9488, #14b8a6)",
+    Solana:      "linear-gradient(135deg, #065f46, #047857)",
+    Sui:         "linear-gradient(135deg, #0d9488, #2dd4bf)",
+    Arbitrum:    "linear-gradient(135deg, #0891b2, #06b6d4)",
+    Optimism:    "linear-gradient(135deg, #dc2626, #b91c1c)",
+    Polygon:     "linear-gradient(135deg, #047857, #0d9488)",
+    HyperEVM:    "linear-gradient(135deg, #065f46, #059669)",
+    "BNB Chain": "linear-gradient(135deg, #92400e, #b45309)",
+    Avalanche:   "linear-gradient(135deg, #991b1b, #dc2626)",
+  };
+  return map[chain] ?? "linear-gradient(135deg, #064e3b, #065f46)";
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+function Card({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: 14,
+      padding: 20,
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function SectionHeader({ icon, label }: { icon: string; label: string }) {
+  return (
+    <p style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 1,
+      color: "#6ee7b7", margin: "0 0 16px", display: "flex", alignItems: "center", gap: 6 }}>
+      <span>{icon}</span> {label}
+    </p>
+  );
+}
+
+function StatCard({
+  label, value, sub, valueColor = "white",
+}: {
+  label: string; value: string; sub?: string; valueColor?: string;
+}) {
+  return (
+    <Card>
+      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
+        color: "rgba(255,255,255,0.4)", margin: "0 0 8px" }}>{label}</p>
+      <p style={{ fontSize: 28, fontWeight: 700, color: valueColor, margin: 0,
+        letterSpacing: -0.5 }}>{value}</p>
+      {sub && (
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "4px 0 0" }}>{sub}</p>
+      )}
+    </Card>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+export default function PositionDetail() {
+  const params = useParams();
+  const { positions, isLoading } = usePositions();
+
+  const rawId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
+  const posId = decodeURIComponent(rawId);
+  const pos   = positions.find((p) => p.id === posId) ?? null;
+
+  // ── Derived data ────────────────────────────────────────────────────────────
+  const posStatus  = pos ? effectiveStatus(pos) : "Closed";
+  const isClosed   = posStatus === "Closed";
+  const manageUrl  = pos ? getManageUrl(pos.protocol) : "";
+
+  const t0  = pos?.token0Symbol ?? "Token0";
+  const t1  = pos?.token1Symbol ?? "Token1";
+  const d0  = pos?.token0Decimals ?? 18;
+  const d1  = pos?.token1Decimals ?? 6;
+
+  // Price range
+  const hasRange   = pos != null && pos.tickLower != null && pos.tickUpper != null;
+  const minPriceUSD = hasRange && pos ? tickToUSD(pos.tickLower!, pos) : null;
+  const maxPriceUSD = hasRange && pos ? tickToUSD(pos.tickUpper!, pos) : null;
+  const curPriceUSD = pos ? getCurrentPrice(pos) : null;
+
+  let rangeBarPct = 50;
+  if (minPriceUSD !== null && maxPriceUSD !== null && curPriceUSD !== null && maxPriceUSD > minPriceUSD) {
+    rangeBarPct = Math.max(2, Math.min(98, ((curPriceUSD - minPriceUSD) / (maxPriceUSD - minPriceUSD)) * 100));
+  }
+
+  const rangeWidthPct = (minPriceUSD && maxPriceUSD && minPriceUSD > 0)
+    ? ((maxPriceUSD - minPriceUSD) / minPriceUSD * 100).toFixed(2)
+    : null;
+
+  // APR / cashflow
+  const hasApr     = (pos?.apy ?? 0) > 0 && (pos?.value ?? 0) > 0;
+  const dailyUSD   = hasApr ? pos!.value * pos!.apy / 100 / 365 : null;
+  const weeklyUSD  = hasApr ? pos!.value * pos!.apy / 100 / 52  : null;
+  const monthlyUSD = hasApr ? pos!.value * pos!.apy / 100 / 12  : null;
+  const yearlyUSD  = hasApr ? pos!.value * pos!.apy / 100       : null;
+
+  // Amounts
+  const hasAmounts = pos != null && (pos.amount0 != null || pos.amount1 != null);
+  const hasFees    = pos != null && (pos.fees0 != null || pos.fees1 != null);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
+  // Loading
+  if (isLoading && !pos) {
+    return (
+      <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
+        <Navbar />
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "96px 28px 28px", textAlign: "center" }}>
+          <div style={{ width: 32, height: 32, border: "2px solid #10b981",
+            borderTopColor: "transparent", borderRadius: "50%", margin: "0 auto 16px",
+            animation: "spin 1s linear infinite" }} />
+          <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
+          <p style={{ color: "rgba(255,255,255,0.4)" }}>Loading position…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Not found
+  if (!pos) {
+    return (
+      <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
+        <Navbar />
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "96px 28px 28px", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 24 }}>🔍</div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>Position not found</h2>
+          <p style={{ color: "rgba(255,255,255,0.4)", marginBottom: 32 }}>
+            This position could not be located. It may have been closed or the data hasn&apos;t loaded yet.
+          </p>
+          <Link href="/dashboard" style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.3)",
+            color: "#6ee7b7", borderRadius: 10, padding: "10px 20px", textDecoration: "none", fontSize: 14 }}>
+            ← Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const void_d0_d1 = [d0, d1]; void void_d0_d1; // suppress unused vars (used in build helpers)
+
+  return (
+    <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
+      <style>{`
+        @keyframes _spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @media (max-width:640px) {
+          .detail-4col  { grid-template-columns: 1fr 1fr !important; }
+          .detail-2col  { grid-template-columns: 1fr !important; }
+          .detail-3col  { grid-template-columns: 1fr 1fr !important; }
+        }
+      `}</style>
+      <Navbar />
+
+      {/* Small gradient accent at top */}
+      <div style={{
+        background: "linear-gradient(135deg, #041a0a 0%, #071f12 40%, #060d08 100%)",
+        padding: "80px 28px 24px",
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        <div style={{ position:"absolute", top:0, right:0, width:300, height:200,
+          background:"radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%)",
+          pointerEvents:"none" }} />
+
+        <div style={{ maxWidth: 1200, margin: "0 auto", position: "relative" }}>
+          {/* Back button */}
+          <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 6,
+            fontSize: 13, color: "rgba(255,255,255,0.4)", textDecoration: "none", marginBottom: 20,
+            transition: "color 0.15s" }}>
+            ← Back to Dashboard
+          </Link>
+
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+            flexWrap: "wrap", gap: 16 }}>
+            <div>
+              {/* Token avatar + pair name */}
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+                <div style={{
+                  width: 52, height: 52, borderRadius: "50%",
+                  background: chainGradient(pos.chain),
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 14, fontWeight: 700, color: "white", flexShrink: 0,
+                }}>
+                  {`${t0[0] ?? "?"}/${t1[0] ?? "?"}`}
+                </div>
+                <h1 style={{ fontSize: 28, fontWeight: 700, color: "white", margin: 0 }}>
+                  {t0} / {t1}
+                </h1>
+              </div>
+
+              {/* Badges row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <span style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                  color: "rgba(255,255,255,0.7)", fontSize: 12, padding: "3px 10px", borderRadius: 20 }}>
+                  {pos.protocol}
+                </span>
+                {pos.feeTier != null && (
+                  <span style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                    color: "rgba(255,255,255,0.7)", fontSize: 12, padding: "3px 10px", borderRadius: 20 }}>
+                    {pos.feeTier}% fee
+                  </span>
+                )}
+                <span style={{
+                  background: isClosed ? "rgba(255,255,255,0.03)"
+                    : posStatus === "In Range" ? "rgba(52,211,153,0.1)"
+                    : "rgba(245,158,11,0.1)",
+                  border: `1px solid ${isClosed ? "rgba(255,255,255,0.06)"
+                    : posStatus === "In Range" ? "rgba(52,211,153,0.2)"
+                    : "rgba(245,158,11,0.2)"}`,
+                  color: isClosed ? "rgba(255,255,255,0.3)"
+                    : posStatus === "In Range" ? "#34d399"
+                    : "#f59e0b",
+                  fontSize: 12, padding: "3px 10px", borderRadius: 20,
+                }}>
+                  {posStatus === "In Range" ? "● In Range" : posStatus}
+                </span>
+              </div>
+
+              {/* Meta info */}
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: 0 }}>
+                {pos.chain}
+                {pos.walletAddress && (
+                  <span style={{ marginLeft: 8 }}>
+                    · wallet …{pos.walletAddress.slice(-6)}
+                  </span>
+                )}
+                {/^\d+$/.test(pos.id) && (
+                  <span style={{ marginLeft: 8 }}>· NFT #{pos.id}</span>
+                )}
+              </p>
+            </div>
+
+            {/* Manage Position button */}
+            {manageUrl && (
+              <a href={manageUrl} target="_blank" rel="noopener noreferrer"
+                style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.3)",
+                  color: "#6ee7b7", borderRadius: 10, padding: "10px 18px", textDecoration: "none",
+                  fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", alignSelf: "flex-start" }}>
+                Manage Position ↗
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Content ─────────────────────────────────────────────────────────── */}
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 28px 60px" }}>
+
+        {/* ── 2B: Value Summary Row ──────────────────────────────────────────── */}
+        <div className="detail-4col" style={{
+          display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16, marginBottom: 28,
+        }}>
+          <StatCard label="Total Value" value={fmt$(pos.value)} />
+          <StatCard
+            label="Uncollected Fees"
+            value={pos.fees > 0 ? fmt$(pos.fees) : "$0.00"}
+            sub={pos.fees > 0 ? "Ready to collect" : "No fees pending"}
+            valueColor="#34d399"
+          />
+          <StatCard
+            label="Estimated APR"
+            value={hasApr ? `+${pos.apy.toFixed(2)}%` : "N/A"}
+            sub={hasApr ? "Based on pool APY" : undefined}
+            valueColor="#6ee7b7"
+          />
+          {/* Cashflow card */}
+          <Card>
+            <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
+              color: "rgba(255,255,255,0.4)", margin: "0 0 8px" }}>Est. Cashflow</p>
+            {hasApr ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Daily</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#34d399" }}>+{fmt$(dailyUSD!)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Monthly</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#34d399" }}>+{fmt$(monthlyUSD!)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Yearly</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#34d399" }}>+{fmt$(yearlyUSD!)}</span>
+                </div>
+              </div>
+            ) : (
+              <p style={{ fontSize: 28, fontWeight: 700, color: "#6ee7b7", margin: 0 }}>N/A</p>
+            )}
+          </Card>
+        </div>
+
+        {/* ── 2C: Current Liquidity ─────────────────────────────────────────── */}
+        {hasAmounts && (
+          <Card style={{ marginBottom: 20 }}>
+            <SectionHeader icon="◎" label="Current Liquidity" />
+            <div className="detail-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[
+                { sym: t0, amount: pos.amount0, price: pos.price0 },
+                { sym: t1, amount: pos.amount1, price: pos.price1 },
+              ].map(({ sym, amount, price }) => (
+                <div key={sym} style={{ background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 16 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#6ee7b7", margin: "0 0 8px" }}>{sym}</p>
+                  <p style={{ fontSize: 22, fontWeight: 700, color: "white", margin: "0 0 4px" }}>
+                    {amount != null
+                      ? amount.toLocaleString("en-US", { maximumFractionDigits: 6 })
+                      : "—"}
+                  </p>
+                  {amount != null && price && (
+                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                      {fmt$(amount * price)}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* ── 2D: Uncollected Fees ──────────────────────────────────────────── */}
+        {hasFees && (
+          <Card style={{ marginBottom: 20 }}>
+            <SectionHeader icon="$" label="Uncollected Fees" />
+            <div className="detail-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              {[
+                { sym: t0, fee: pos.fees0, price: pos.price0 },
+                { sym: t1, fee: pos.fees1, price: pos.price1 },
+              ].map(({ sym, fee, price }) => (
+                <div key={sym} style={{ background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 16 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#6ee7b7", margin: "0 0 8px" }}>{sym}</p>
+                  <p style={{ fontSize: 22, fontWeight: 700, color: "white", margin: "0 0 4px" }}>
+                    {fee != null
+                      ? fee.toLocaleString("en-US", { maximumFractionDigits: 6 })
+                      : "—"}
+                  </p>
+                  {fee != null && price && (
+                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                      {fmt$(fee * price)}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+            {pos.fees > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Total Uncollected</span>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: "#34d399" }}>{fmt$(pos.fees)}</span>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginLeft: 8 }}>
+                    Ready to collect
+                  </span>
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* ── 2E: Concentrated Liquidity Range ─────────────────────────────── */}
+        {hasRange && (
+          <Card style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+              marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+              <SectionHeader icon="◉" label="Concentrated Liquidity Range" />
+              <span style={{
+                fontSize: 12,
+                padding: "3px 10px",
+                borderRadius: 20,
+                background: isClosed ? "rgba(255,255,255,0.03)"
+                  : posStatus === "In Range" ? "rgba(52,211,153,0.1)"
+                  : "rgba(245,158,11,0.1)",
+                border: `1px solid ${isClosed ? "rgba(255,255,255,0.06)"
+                  : posStatus === "In Range" ? "rgba(52,211,153,0.2)"
+                  : "rgba(245,158,11,0.2)"}`,
+                color: isClosed ? "rgba(255,255,255,0.3)"
+                  : posStatus === "In Range" ? "#34d399"
+                  : "#f59e0b",
+              }}>
+                {isClosed ? "Position Closed" : posStatus === "In Range" ? "Position Active" : "Out of Range"}
+              </span>
+            </div>
+
+            {/* Price labels */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+              <div>
+                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
+                  color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Min Price</p>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
+                  {minPriceUSD != null ? fmtPrice(minPriceUSD) : "—"}
+                </p>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
+                  color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Current Price</p>
+                <p style={{ fontSize: 14, fontWeight: 600,
+                  color: isClosed ? "rgba(255,255,255,0.4)"
+                    : posStatus === "In Range" ? "#34d399"
+                    : "#f59e0b",
+                  margin: 0 }}>
+                  {curPriceUSD != null ? fmtPrice(curPriceUSD) : "—"}
+                </p>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
+                  color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Max Price</p>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
+                  {maxPriceUSD != null ? fmtPrice(maxPriceUSD) : "—"}
+                </p>
+              </div>
+            </div>
+
+            {/* Range bar */}
+            <div style={{ position: "relative", height: 6, background: "rgba(255,255,255,0.06)",
+              borderRadius: 3, marginBottom: 8 }}>
+              <div style={{
+                position: "absolute", inset: 0, borderRadius: 3,
+                background: isClosed ? "#374151"
+                  : posStatus === "In Range"
+                  ? "linear-gradient(90deg, #059669, #34d399)"
+                  : "rgba(245,158,11,0.3)",
+              }} />
+              {!isClosed && curPriceUSD !== null && (
+                <div style={{
+                  position: "absolute", top: "50%", transform: "translate(-50%, -50%)",
+                  left: `${rangeBarPct}%`,
+                  width: 12, height: 12, borderRadius: "50%",
+                  background: posStatus === "In Range" ? "#34d399" : "#f59e0b",
+                  border: "2px solid white",
+                  zIndex: 1,
+                }} />
+              )}
+            </div>
+
+            {rangeWidthPct != null && (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", textAlign: "right", margin: 0 }}>
+                Range Width: {rangeWidthPct}%
+              </p>
+            )}
+          </Card>
+        )}
+
+        {/* ── 2F: Yield & APR Projections ──────────────────────────────────── */}
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeader icon="%" label="Yield & APR Projections" />
+          <div className="detail-4col"
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+            {([
+              { label: "Daily",   div: 365,  amt: dailyUSD,   unit: "/day" },
+              { label: "Weekly",  div: 52,   amt: weeklyUSD,  unit: "/week" },
+              { label: "Monthly", div: 12,   amt: monthlyUSD, unit: "/month" },
+              { label: "Yearly",  div: 1,    amt: yearlyUSD,  unit: "/year" },
+            ] as const).map(({ label, div, amt, unit }) => (
+              <div key={label} style={{ background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10,
+                padding: 14, textAlign: "center" }}>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
+                  textTransform: "uppercase", letterSpacing: 1 }}>{label}</p>
+                {hasApr ? (
+                  <>
+                    <p style={{ fontSize: 16, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>
+                      +{(pos.apy / div).toFixed(div >= 52 ? 2 : 1)}%
+                    </p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                      {amt != null ? fmt$(amt) : "—"}{unit}
+                    </p>
+                  </>
+                ) : (
+                  <p style={{ fontSize: 16, fontWeight: 700, color: "#6ee7b7", margin: 0 }}>N/A</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* ── 2G: Pool Statistics ───────────────────────────────────────────── */}
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeader icon="⚡" label="Pool Statistics" />
+          <div className="detail-3col"
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            {["Pool TVL", "24h Volume", "24h Fees"].map((label) => (
+              <div key={label} style={{ background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10,
+                padding: 14, textAlign: "center" }}>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
+                  textTransform: "uppercase", letterSpacing: 1 }}>{label}</p>
+                <p style={{ fontSize: 16, color: "rgba(255,255,255,0.3)", margin: 0 }}>N/A</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* ── Footer: Position ID & manage link ─────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 20 }}>
+          <div>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Position ID</p>
+            <p style={{ fontSize: 12, fontFamily: "monospace", color: "rgba(255,255,255,0.5)", margin: 0,
+              wordBreak: "break-all" }}>{pos.id}</p>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Link href="/dashboard" style={{ background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)",
+              borderRadius: 10, padding: "8px 16px", textDecoration: "none", fontSize: 13 }}>
+              ← Dashboard
+            </Link>
+            {manageUrl && (
+              <a href={manageUrl} target="_blank" rel="noopener noreferrer"
+                style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.3)",
+                  color: "#6ee7b7", borderRadius: 10, padding: "8px 16px", textDecoration: "none",
+                  fontSize: 13, fontWeight: 500 }}>
+                Manage Position ↗
+              </a>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
