@@ -129,7 +129,7 @@ export default function Navbar() {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link href="/" className="flex-shrink-0">
-              <h1 className="text-2xl font-bold text-white">LP Tracker</h1>
+              <h1 className="text-2xl font-bold text-white">DefiDesh</h1>
             </Link>
 
             {/* Desktop Navigation */}

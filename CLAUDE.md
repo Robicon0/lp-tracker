@@ -52,9 +52,9 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 
 ---
 
-## Project: LP Tracker
+## Project: DefiDesh (formerly LP Tracker)
 
-- DeFi liquidity position tracking dashboard
+- DeFi liquidity position tracking dashboard — rebranded to DefiDesh
 - Deployed at lp-tracker-two.vercel.app
 - GitHub: Robicon0/lp-tracker
 - Tech: Next.js, TypeScript, Tailwind CSS, React Query
@@ -96,6 +96,7 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 - ~~Feature 8: Activity History Table (Aerodrome)~~ ✅ Done
 - ~~Feature 9: Actual APR from claimed fees (Aerodrome)~~ ✅ Done
 - Remove demo data, show empty state when no wallet connected
+- ~~DefiDesh rebrand + full dashboard redesign~~ ✅ Done
 
 ## Dev Workflow
 

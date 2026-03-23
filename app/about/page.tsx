@@ -5,7 +5,7 @@ export default function About() {
     <div className="min-h-screen bg-[#0a0f0d] text-white p-8 pt-24">
       <Navbar />
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-4">About LP Tracker</h1>
+        <h1 className="text-4xl font-bold mb-4">About DefiDesh</h1>
         <p className="text-emerald-300/70 mb-8">
           A DeFi portfolio tracker for monitoring liquidity positions across multiple blockchains.
         </p>
@@ -14,7 +14,7 @@ export default function About() {
         <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6 mb-6">
           <h2 className="text-2xl font-bold mb-3">What It Does</h2>
           <p className="text-emerald-100/80 leading-relaxed">
-            LP Tracker helps liquidity providers monitor their positions across decentralized exchanges
+            DefiDesh helps liquidity providers monitor their positions across decentralized exchanges
             like Uniswap, Aerodrome, Velodrome, QuickSwap, Trader Joe, and Raydium. Track your portfolio
             value, APY, fees earned, and position status — all in one place.
           </p>

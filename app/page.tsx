@@ -6,7 +6,7 @@ export default function Home() {
     <div className="min-h-screen bg-[#0a0f0d] text-white">
       <Navbar />
       <div className="flex flex-col items-center justify-center min-h-screen px-4 pt-16">
-        <h1 className="text-6xl font-bold mb-4 text-center">LP Tracker</h1>
+        <h1 className="text-6xl font-bold mb-4 text-center">DefiDesh</h1>
         <p className="text-xl text-emerald-300/70 mb-8 text-center max-w-2xl">
           Track your DeFi liquidity positions across multiple chains. Monitor value, APY, fees, and more — all in one place.
         </p>
