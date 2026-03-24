@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, type CSSProperties } from "react";
 import Link from "next/link";
 import Navbar from "../Navbar";
+import { getTokenLogo } from "../lib/tokenLogos";
+import { useWalletTokens } from "../hooks/useWalletTokens";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -111,6 +113,37 @@ export const TOKEN_COLORS: Record<string, string> = {
 
 export function getTokenColor(symbol: string): string {
   return TOKEN_COLORS[symbol] ?? "#6B7280";
+}
+
+// ── TokenCircle: circular token logo with colored-letter fallback ─────────────
+function TokenCircle({
+  symbol, size = 32, style,
+}: { symbol: string; size?: number; style?: CSSProperties }) {
+  const [imgError, setImgError] = useState(false);
+  const logoUrl = getTokenLogo(symbol);
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
+  const shared: CSSProperties = {
+    width: size, height: size, borderRadius: "50%",
+    border: "2px solid #060d08", flexShrink: 0, ...style,
+  };
+  if (logoUrl && !imgError) {
+    return (
+      <img
+        src={logoUrl} alt={symbol}
+        onError={() => setImgError(true)}
+        style={{ ...shared, objectFit: "cover", display: "block" }}
+      />
+    );
+  }
+  return (
+    <div style={{
+      ...shared, background: color,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: size * 0.35, fontWeight: 700, color: "white",
+    }}>
+      {symbol.charAt(0).toUpperCase()}
+    </div>
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +256,13 @@ export default function Dashboard() {
 
   const { watchedWallets, addWallet, removeWallet, updateLabel } = useWatchedWallets();
   const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
+
+  // Wallet token balances (for Tokens + Lending summary cards)
+  const {
+    totalTokenValue, totalLendingValue,
+    tokenCount, lendingCount,
+    isLoading: walletTokensLoading,
+  } = useWalletTokens();
 
   // Manage Wallets modal state
   const [showManageWallets, setShowManageWallets] = useState(false);
@@ -542,7 +582,7 @@ export default function Dashboard() {
           <div style={{ maxWidth:1200, margin:"0 auto" }}>
 
             {/* Row 1 */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
 
               {/* Card 1: Wallets */}
               <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
@@ -618,22 +658,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Card 2: Total Value */}
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Total Value</h3>
-                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 8px",
-                  letterSpacing:-1 }}>{fmt$(totalValue)}</p>
-                {effectiveHistory.length >= 2 && (
-                  <p style={{ fontSize:13, color: pnlDollar >= 0 ? "#34d399" : "#ef4444", margin:0 }}>
-                    {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
-                    ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
-                    <span style={{ color:"rgba(255,255,255,0.35)", fontSize:11, marginLeft:4 }}>{pnlLabel}</span>
-                  </p>
-                )}
-              </div>
-
               {/* Card 3: Estimated Net Cashflow */}
               <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
                 borderRadius:14, padding:20 }}>
@@ -664,16 +688,30 @@ export default function Dashboard() {
             </div>
 
             {/* Row 2 */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
 
               {/* Card 4: Tokens */}
               <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
                 borderRadius:14, padding:20 }}>
                 <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
                   color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Tokens</h3>
-                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                  letterSpacing:-1 }}>$0.00</p>
-                <p style={{ fontSize:12, color:"rgba(255,255,255,0.3)", margin:0 }}>Coming soon</p>
+                {!hasWallet ? (
+                  <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see balances.</p>
+                ) : walletTokensLoading ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
+                      animation:"_spin 1s linear infinite" }} />
+                    <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                      letterSpacing:-1 }}>{fmt$(totalTokenValue)}</p>
+                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                      {tokenCount > 0 ? `${tokenCount} token${tokenCount === 1 ? "" : "s"}` : "No tokens found"}
+                    </p>
+                  </>
+                )}
               </div>
 
               {/* Card 5: Lending / Borrowing */}
@@ -681,26 +719,23 @@ export default function Dashboard() {
                 borderRadius:14, padding:20 }}>
                 <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
                   color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Lending / Borrowing</h3>
-                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                  letterSpacing:-1 }}>$0.00</p>
-                <p style={{ fontSize:12, color:"rgba(255,255,255,0.3)", margin:0 }}>Coming soon</p>
-              </div>
-
-              {/* Card 6: Liquidity Positions */}
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Liquidity Positions</h3>
-                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                  letterSpacing:-1 }}>{fmt$(totalValue)}</p>
-                {totalFees > 0 && (
-                  <p style={{ fontSize:13, color:"#34d399", margin:"0 0 6px" }}>
-                    +{fmt$(totalFees)} Ready to Collect
-                  </p>
+                {!hasWallet ? (
+                  <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see positions.</p>
+                ) : walletTokensLoading ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
+                      animation:"_spin 1s linear infinite" }} />
+                    <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                      letterSpacing:-1 }}>{fmt$(totalLendingValue)}</p>
+                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                      {lendingCount > 0 ? `${lendingCount} position${lendingCount === 1 ? "" : "s"}` : "No positions found"}
+                    </p>
+                  </>
                 )}
-                <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
-                  {allPositions.length === 1 ? "1 position" : `${allPositions.length} positions`}
-                </p>
               </div>
             </div>
 
@@ -1021,34 +1056,19 @@ export default function Dashboard() {
                   >
                     {/* Col 1: Pair info */}
                     <div style={{ display:"flex", alignItems:"center", gap:12, overflow:"hidden" }}>
-                      {/* Dual overlapping token pills */}
+                      {/* Dual overlapping token circles */}
                       {(() => {
                         const parts = pos.pair.split(/\s*\/\s*/);
                         const sym0 = parts[0]?.trim() ?? "";
                         const sym1 = parts[1]?.trim() ?? "";
-                        const c0 = getTokenColor(sym0);
-                        const c1 = getTokenColor(sym1);
-                        const pw = (s: string) => s.length <= 3 ? 36 : s.length === 4 ? 46 : 54;
-                        const w0 = pw(sym0); const w1 = pw(sym1);
+                        const SIZE = 32;
                         const OVERLAP = 10;
                         return (
-                          <div style={{ position:"relative", width:w0+w1-OVERLAP, height:28, flexShrink:0 }}>
-                            <div style={{ position:"absolute", left:w0-OVERLAP, top:0, width:w1, height:28,
-                              borderRadius:14, background:c1, display:"flex",
-                              alignItems:"center", justifyContent:"center",
-                              fontSize:10, fontWeight:700, color:"white", letterSpacing:0.3,
-                              border:"2px solid #060d08", zIndex:1, overflow:"hidden",
-                              whiteSpace:"nowrap", padding:"0 4px" }}>
-                              {sym1 || "?"}
-                            </div>
-                            <div style={{ position:"absolute", left:0, top:0, width:w0, height:28,
-                              borderRadius:14, background:c0, display:"flex",
-                              alignItems:"center", justifyContent:"center",
-                              fontSize:10, fontWeight:700, color:"white", letterSpacing:0.3,
-                              border:"2px solid #060d08", zIndex:2, overflow:"hidden",
-                              whiteSpace:"nowrap", padding:"0 4px" }}>
-                              {sym0 || "?"}
-                            </div>
+                          <div style={{ position:"relative", width:SIZE * 2 - OVERLAP, height:SIZE, flexShrink:0 }}>
+                            <TokenCircle symbol={sym1} size={SIZE}
+                              style={{ position:"absolute", right:0, top:0, zIndex:1 }} />
+                            <TokenCircle symbol={sym0} size={SIZE}
+                              style={{ position:"absolute", left:0, top:0, zIndex:2 }} />
                           </div>
                         );
                       })()}
