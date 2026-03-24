@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import Navbar from "../../Navbar";
+import { getTokenLogo, getTokenColor } from "../../lib/tokenLogos";
 import { usePositions } from "../../contexts/PositionsContext";
 import { usePositionActivity } from "../../hooks/usePositionActivity";
 import { useBluefinActivity } from "../../hooks/useBluefinActivity";
@@ -12,6 +13,29 @@ import { useRaydiumActivity } from "../../hooks/useRaydiumActivity";
 import { useHyperSwapActivity } from "../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../hooks/useVelodromeActivity";
+
+function TokenCircle({ symbol, size = 32, overlap = false }: { symbol: string; size?: number; overlap?: boolean }) {
+  const [imgError, setImgError] = useState(false);
+  const logoUrl = getTokenLogo(symbol);
+  const color = getTokenColor(symbol);
+  const baseStyle: React.CSSProperties = {
+    width: size, height: size, borderRadius: "50%",
+    border: "2px solid #0a0f0d", flexShrink: 0,
+    ...(overlap ? { marginLeft: -size * 0.3 } : {}),
+  };
+  if (logoUrl && !imgError) {
+    return (
+      <img src={logoUrl} alt={symbol} onError={() => setImgError(true)}
+        style={{ ...baseStyle, objectFit: "cover", display: "block" }} />
+    );
+  }
+  return (
+    <div style={{ ...baseStyle, background: color, display: "flex", alignItems: "center",
+      justifyContent: "center", fontSize: size * 0.36, fontWeight: 700, color: "white" }}>
+      {symbol.charAt(0).toUpperCase()}
+    </div>
+  );
+}
 
 const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
@@ -230,6 +254,33 @@ export default function PositionDetail() {
     || pos?.protocol === 'Orca' || pos?.protocol === 'Raydium' || isHyperEVM
     || pos?.protocol === 'Uniswap V3' || pos?.protocol === 'Velodrome';
 
+  // localStorage fee snapshot — saves current uncollected fees so we can detect
+  // future claims on chains where tx scanning isn't available (Solana/Sui).
+  // Must be called here (after pos is defined) but before any early returns.
+  useEffect(() => {
+    if (!pos || !mounted) return;
+    try {
+      const snapshot = {
+        timestamp: Math.floor(Date.now() / 1000),
+        uncollectedFeesUSD: pos.fees,
+        token0Uncollected: pos.fees0 ?? 0,
+        token1Uncollected: pos.fees1 ?? 0,
+      };
+      const key = `defidesh-fee-snapshots-${pos.id}`;
+      const existing: typeof snapshot[] = JSON.parse(localStorage.getItem(key) ?? '[]');
+      const last = existing[existing.length - 1];
+      // Only append a new snapshot every 5+ minutes to avoid flooding storage
+      if (!last || snapshot.timestamp - last.timestamp > 300) {
+        existing.push(snapshot);
+        if (existing.length > 1000) existing.shift();
+        localStorage.setItem(key, JSON.stringify(existing));
+      }
+    } catch {
+      // localStorage unavailable — ignore
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos?.id, pos?.fees, mounted]);
+
   if (!mounted || isLoading) {
     return (
       <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
@@ -324,6 +375,19 @@ export default function PositionDetail() {
     return { aprYearly, aprMonthly: aprYearly / 12, aprWeekly: aprYearly / 52, aprDaily: aprYearly / 365 };
   })();
 
+  // Total claimed fees from on-chain activity (fee_claim + reward_claim events)
+  const totalClaimedUSD = (() => {
+    if (!activity) return 0;
+    return activity.events
+      .filter(e => e.type === 'fee_claim' || e.type === 'reward_claim')
+      .reduce((sum, e) => {
+        if (e.usdAtTime != null) return sum + e.usdAtTime;
+        return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+      }, 0);
+  })();
+  // Lifetime = claimed (historical) + currently uncollected
+  const totalLifetimeFeesUSD = totalClaimedUSD + pos.fees;
+
   return (
     <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
       <Navbar />
@@ -334,9 +398,17 @@ export default function PositionDetail() {
 
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-extrabold text-white">{pos.pair}</h1>
-            <p className="text-gray-400 text-sm mt-1">{pos.protocol} &bull; {pos.chain}</p>
+          <div className="flex items-center gap-3">
+            {(pos.token0Symbol || pos.token1Symbol) && (
+              <div className="flex items-center">
+                <TokenCircle symbol={pos.token0Symbol ?? ''} size={44} />
+                <TokenCircle symbol={pos.token1Symbol ?? ''} size={44} overlap />
+              </div>
+            )}
+            <div>
+              <h1 className="text-2xl font-extrabold text-white">{pos.pair}</h1>
+              <p className="text-gray-400 text-sm mt-1">{pos.protocol} &bull; {pos.chain}</p>
+            </div>
           </div>
           <span className={`px-4 py-2 rounded-full text-sm font-bold ${
             pos.status === "In Range"
@@ -399,9 +471,20 @@ export default function PositionDetail() {
 
           <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
             <p className="text-xs font-semibold text-emerald-300 mb-1">Total Fees Earned</p>
-            <p className="text-2xl font-extrabold text-white">
-              ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
+            {activityLoading && isActivityProtocol ? (
+              <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
+            ) : (
+              <>
+                <p className="text-2xl font-extrabold text-white">
+                  ${(isActivityProtocol ? totalLifetimeFeesUSD : pos.fees).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                {isActivityProtocol && totalClaimedUSD > 0 && (
+                  <p className="text-xs text-emerald-300/60 mt-1">
+                    ${totalClaimedUSD.toFixed(2)} claimed + ${pos.fees.toFixed(2)} uncollected
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
           <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
@@ -761,7 +844,7 @@ export default function PositionDetail() {
             {activityLoading && (
               <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
-                Loading activity…
+                Scanning on-chain history…
               </div>
             )}
 
@@ -854,6 +937,20 @@ export default function PositionDetail() {
 
             {!activityLoading && !activity && (
               <p className="text-sm text-gray-400">Could not load activity data.</p>
+            )}
+
+            {/* Solana / Sui scanning note */}
+            {(pos.protocol === 'Orca' || pos.protocol === 'Raydium') && (
+              <p className="text-xs text-gray-500 mt-3 border-t border-emerald-500/10 pt-3">
+                Note: Fully closed Solana positions have their NFT burned on-chain and cannot be recovered.
+                Fee snapshots are saved locally each visit to track future claims.
+              </p>
+            )}
+            {(pos.protocol === 'Cetus' || pos.protocol === 'Bluefin' || pos.protocol === 'Momentum') && (
+              <p className="text-xs text-gray-500 mt-3 border-t border-emerald-500/10 pt-3">
+                Note: Fully closed Sui positions have their object destroyed on-chain and cannot be recovered.
+                Fee snapshots are saved locally each visit to track future claims.
+              </p>
             )}
           </div>
         )}
