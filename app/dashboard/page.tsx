@@ -67,6 +67,52 @@ const CHAIN_COLORS: Record<string, string> = {
 
 const STABLES_SET = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
+// ── Token color map (reusable across the app) ─────────────────────────────────
+export const TOKEN_COLORS: Record<string, string> = {
+  // Ethereum
+  ETH:     "#627EEA",
+  WETH:    "#627EEA",
+  // USDC variants
+  USDC:    "#2775CA",
+  "USDC.e":"#2775CA",
+  USDbC:   "#2775CA",
+  // USDT
+  USDT:    "#26A17B",
+  // Bitcoin
+  BTC:     "#F7931A",
+  WBTC:    "#F7931A",
+  cbBTC:   "#F7931A",
+  tBTC:    "#F7931A",
+  // Solana
+  SOL:     "#9945FF",
+  WSOL:    "#9945FF",
+  // Sui
+  SUI:     "#6FBCF0",
+  // HYPE (HyperEVM)
+  HYPE:    "#00D4AA",
+  WHYPE:   "#00D4AA",
+  // DAI
+  DAI:     "#F5AC37",
+  // BNB
+  BNB:     "#F0B90B",
+  WBNB:    "#F0B90B",
+  // MATIC / POL
+  MATIC:   "#8247E5",
+  POL:     "#8247E5",
+  // AVAX
+  AVAX:    "#E84142",
+  // ARB
+  ARB:     "#2D9CDB",
+  // OP
+  OP:      "#FF0420",
+  // USDS
+  USDS:    "#26A17B",
+};
+
+export function getTokenColor(symbol: string): string {
+  return TOKEN_COLORS[symbol] ?? "#6B7280";
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getProtocolColor(protocol: string): string {
   for (const [key, color] of Object.entries(PROTOCOL_COLORS)) {
@@ -803,14 +849,32 @@ export default function Dashboard() {
                   >
                     {/* Col 1: Pair info */}
                     <div style={{ display:"flex", alignItems:"center", gap:12, overflow:"hidden" }}>
-                      <div style={{
-                        width:36, height:36, borderRadius:"50%",
-                        background: chainGradient(pos.chain),
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        fontSize:11, fontWeight:700, color:"white", flexShrink:0,
-                      }}>
-                        {tokenInitials(pos.pair)}
-                      </div>
+                      {/* Dual overlapping token circles */}
+                      {(() => {
+                        const parts = pos.pair.split(/\s*\/\s*/);
+                        const sym0 = parts[0]?.trim() ?? "";
+                        const sym1 = parts[1]?.trim() ?? "";
+                        const c0 = getTokenColor(sym0);
+                        const c1 = getTokenColor(sym1);
+                        return (
+                          <div style={{ position:"relative", width:52, height:32, flexShrink:0 }}>
+                            <div style={{ position:"absolute", left:20, top:0, width:32, height:32,
+                              borderRadius:"50%", background:c1, display:"flex",
+                              alignItems:"center", justifyContent:"center",
+                              fontSize:12, fontWeight:700, color:"white",
+                              border:"2px solid #060d08", zIndex:1 }}>
+                              {sym1[0]?.toUpperCase() ?? "?"}
+                            </div>
+                            <div style={{ position:"absolute", left:0, top:0, width:32, height:32,
+                              borderRadius:"50%", background:c0, display:"flex",
+                              alignItems:"center", justifyContent:"center",
+                              fontSize:12, fontWeight:700, color:"white",
+                              border:"2px solid #060d08", zIndex:2 }}>
+                              {sym0[0]?.toUpperCase() ?? "?"}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <div style={{ overflow:"hidden" }}>
                         <p style={{ fontSize:15, fontWeight:600, color:"white", margin:0,
                           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
