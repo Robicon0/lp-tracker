@@ -808,7 +808,7 @@ export default function PositionDetail() {
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-4 gap-1">
+                  <div className="grid grid-cols-4 gap-1 mb-3">
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
                       <p className="text-xs text-emerald-300">Daily</p>
                       <p className="text-base font-bold text-white">{fmtUSD(dailyFees)}</p>
@@ -826,12 +826,143 @@ export default function PositionDetail() {
                       <p className="text-base font-bold text-white">{fmtUSD(yearlyFees)}</p>
                     </div>
                   </div>
+                  {/* Position Age card */}
+                  <div className="bg-emerald-900/10 rounded-lg p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400">Position Age</p>
+                      <p className="text-sm font-bold text-white mt-0.5">{daysLabel}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400">Opened</p>
+                      <p className="text-sm font-bold text-white mt-0.5">
+                        {firstTs > 0 ? new Date(firstTs * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               );
             })()}
 
             {!activityLoading && !activity && (
               <p className="text-sm text-gray-400">Could not load activity data.</p>
+            )}
+          </div>
+        )}
+
+        {/* Row 4b: Fee Claims Log — full width */}
+        {isActivityProtocol && (
+          <div className="bg-[#0a2e1a]/60 p-4 mb-3">
+            <h2 className="text-sm font-extrabold text-yellow-400 mb-1">📋 FEE CLAIMS LOG</h2>
+            <p className="text-xs text-gray-400/60 mb-4">Collected fees only · deposits and withdrawals shown in Activity History below</p>
+
+            {activityLoading && (
+              <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
+                <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
+                Scanning blockchain for fee history…
+              </div>
+            )}
+
+            {!activityLoading && activity && (() => {
+              const sym0 = pos.token0Symbol ?? 'Token0';
+              const sym1 = pos.token1Symbol ?? 'Token1';
+              const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
+
+              const txUrl = (hash: string) => {
+                if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
+                if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
+                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
+                if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
+                if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
+                if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
+                if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
+                return `https://basescan.org/tx/${hash}`;
+              };
+              const fmtDate = (ts: number) => {
+                if (!ts) return '—';
+                const d = new Date(ts * 1000);
+                return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+              };
+              const fmtAmt = (n: number) =>
+                n === 0 ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 6, minimumFractionDigits: 0 });
+              const fmtUSD = (n: number | null) =>
+                n == null ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              const shortHash = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
+
+              const totalClaimed = feeClaims.reduce((sum, e) => {
+                if (e.usdAtTime != null) return sum + e.usdAtTime;
+                return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+              }, 0);
+
+              if (feeClaims.length === 0) {
+                return (
+                  <p className="text-sm text-gray-400 py-2">
+                    No fee claims detected yet. Claims will appear here after you collect fees.
+                  </p>
+                );
+              }
+
+              return (
+                <div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-400 border-b border-emerald-500/10">
+                          <th className="text-left py-2 pr-4 font-normal">Date</th>
+                          <th className="text-left py-2 pr-4 font-normal">Type</th>
+                          <th className="text-right py-2 pr-4 font-normal">{sym0}</th>
+                          <th className="text-right py-2 pr-4 font-normal">{sym1}</th>
+                          <th className="text-right py-2 pr-4 font-normal">Total USD</th>
+                          <th className="text-right py-2 font-normal">Tx</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {feeClaims.map((ev, i) => (
+                          <tr key={i} className="border-b border-emerald-500/10 hover:bg-[rgba(6,78,59,0.2)]">
+                            <td className="py-2 pr-4 text-xs text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
+                            <td className="py-2 pr-4">
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                ev.type === 'reward_claim'
+                                  ? 'bg-blue-900/40 text-blue-300'
+                                  : 'bg-emerald-900/40 text-emerald-300'
+                              }`}>
+                                {ev.type === 'reward_claim' ? 'Reward' : 'Fee Claim'}
+                              </span>
+                            </td>
+                            <td className="py-2 pr-4 text-right font-mono text-xs text-white">
+                              {ev.type === 'reward_claim'
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                ? `${fmtAmt(ev.amount0)} ${(ev as any).rewardSymbol ?? ''}`
+                                : fmtAmt(ev.amount0)}
+                            </td>
+                            <td className="py-2 pr-4 text-right font-mono text-xs text-white">
+                              {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
+                            </td>
+                            <td className="py-2 pr-4 text-right text-xs font-bold text-emerald-300">{fmtUSD(ev.usdAtTime)}</td>
+                            <td className="py-2 text-right">
+                              <a href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
+                                className="text-emerald-400 hover:text-emerald-300 font-mono text-xs">
+                                {shortHash(ev.txHash)}
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-emerald-500/10 flex justify-between items-center">
+                    <span className="text-xs text-gray-400">
+                      {feeClaims.length} collection{feeClaims.length !== 1 ? 's' : ''}
+                    </span>
+                    <span className="text-sm font-bold text-emerald-400">
+                      Total Claimed: {fmtUSD(totalClaimed)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!activityLoading && !activity && (
+              <p className="text-sm text-gray-400">Could not load fee claim data.</p>
             )}
           </div>
         )}

@@ -137,7 +137,7 @@ export function useWalletTokens(): WalletTokensData {
             const nonZero = (balRes.result?.tokenBalances ?? []).filter(
               (t: { tokenBalance: string }) => t.tokenBalance && t.tokenBalance !== ZERO_HEX,
             );
-            const top = nonZero.slice(0, 15);
+            const top = nonZero.slice(0, 50);
 
             await Promise.allSettled(
               top.map(async (token: { contractAddress: string; tokenBalance: string }) => {
