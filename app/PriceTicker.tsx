@@ -20,7 +20,7 @@ export default function PriceTicker() {
   const fetchPrices = async () => {
     try {
       const res = await fetch(
-        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${COIN_IDS}&order=market_cap_desc&sparkline=false`
+        `/api/prices?endpoint=coins/markets&ids=${COIN_IDS}&vs_currencies=usd&order=market_cap_desc`
       );
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();

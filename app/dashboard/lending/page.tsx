@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
 import Navbar from "../../Navbar";
 import { useAccount } from "wagmi";
@@ -157,6 +157,13 @@ export default function LendingPage() {
   const { solanaAddress, suiAddress } = useWalletAuth();
   const hasWallet = !!(address || solanaAddress || suiAddress);
   const { tokens, isLoading } = useWalletTokens();
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading) { setLoadingTimeout(false); return; }
+    const t = setTimeout(() => setLoadingTimeout(true), 15000);
+    return () => clearTimeout(t);
+  }, [isLoading]);
 
   const positions = useMemo(() => buildPositions(tokens), [tokens]);
 
@@ -204,6 +211,11 @@ export default function LendingPage() {
               animation: "spin 1s linear infinite" }} />
             <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
             Scanning wallet for lending positions…
+            {loadingTimeout && (
+              <p style={{ fontSize: 13, color: "#f59e0b", marginTop: 12 }}>
+                Taking longer than expected. Token prices may be temporarily unavailable.
+              </p>
+            )}
           </div>
         )}
 

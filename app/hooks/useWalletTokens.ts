@@ -86,7 +86,7 @@ export function useWalletTokens(): WalletTokensData {
       const prices: Record<string, number> = {};
       try {
         const res = await fetch(
-          "https://api.coingecko.com/api/v3/simple/price?ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd",
+          "/api/prices?endpoint=simple/price&ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd",
         ).then((r) => r.json());
         prices.ethereum   = res?.ethereum?.usd   ?? 0;
         prices.bitcoin    = res?.bitcoin?.usd    ?? 0;

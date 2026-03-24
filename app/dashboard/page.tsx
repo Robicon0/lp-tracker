@@ -369,7 +369,7 @@ export default function Dashboard() {
   const [heroPrices, setHeroPrices] = useState<Record<string, number>>({});
   useEffect(() => {
     fetch(
-      "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum,solana&order=market_cap_desc&sparkline=false",
+      "/api/prices?endpoint=coins/markets&ids=bitcoin,ethereum,solana&vs_currencies=usd&order=market_cap_desc",
     )
       .then((r) => r.json())
       .then((data: Array<{ id: string; current_price: number }>) => {
