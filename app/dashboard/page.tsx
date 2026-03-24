@@ -3,9 +3,11 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import Navbar from "../Navbar";
-import PriceTicker from "../PriceTicker";
 import { usePositions } from "../contexts/PositionsContext";
-import { useAccount } from "wagmi";
+import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useWallet } from "@solana/wallet-adapter-react";
+import type { WalletName } from "@solana/wallet-adapter-base";
+import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
@@ -139,33 +141,53 @@ function tokenInitials(pair: string): string {
 export default function Dashboard() {
   const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch } = usePositions();
   const { address } = useAccount();
-  const { solanaAddress, suiAddress } = useWalletAuth();
+  const { connect: evmConnect, connectors } = useConnect();
+  const { disconnect: evmDisconnect } = useDisconnect();
+  const { solanaAddress, suiAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const { watchedWallets, addWallet } = useWatchedWallets();
+  // Solana wallet adapter (for modal connect)
+  const { select: solanaSelect, connect: connectSolanaWallet, disconnect: disconnectSolanaWallet,
+    connected: adapterSolanaConnected, publicKey: adapterPublicKey, wallets: solanaWallets } = useWallet();
+  const awaitingSolanaConnectModal = useRef(false);
+
+  // Sui wallet adapter (for modal connect)
+  const adapterSuiAccount = useCurrentAccount();
+  const modalSuiWallets = useWallets();
+  const { mutateAsync: connectSuiAsync } = useConnectWallet();
+  const { mutate: disconnectSuiWallet } = useDisconnectWallet();
+  const awaitingSuiConnectModal = useRef(false);
+
+  // Track modal Solana connect
+  useEffect(() => {
+    if (awaitingSolanaConnectModal.current && adapterSolanaConnected && adapterPublicKey) {
+      setSolanaAddress(adapterPublicKey.toBase58());
+      awaitingSolanaConnectModal.current = false;
+    }
+  }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
+
+  // Track modal Sui connect
+  useEffect(() => {
+    if (awaitingSuiConnectModal.current && adapterSuiAccount) {
+      setSuiAddress(adapterSuiAccount.address);
+      awaitingSuiConnectModal.current = false;
+    }
+  }, [adapterSuiAccount, setSuiAddress]);
+
+  const { watchedWallets, addWallet, removeWallet, updateLabel } = useWatchedWallets();
   const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
 
-  // Watch wallet
-  const [watchInput, setWatchInput] = useState("");
-  const [watchChain, setWatchChain] = useState<WatchedWalletChain>("evm");
-  const [watchError, setWatchError] = useState("");
-  const [showWatchPanel, setShowWatchPanel] = useState(false);
-
-  function validateAddress(addr: string, chain: WatchedWalletChain): string {
-    if (!addr.trim()) return "Address is required";
-    if (chain === "evm"    && !/^0x[0-9a-fA-F]{40}$/.test(addr)) return "Invalid EVM address (0x + 40 hex chars)";
-    if (chain === "solana" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return "Invalid Solana address";
-    if (chain === "sui"    && !/^0x[0-9a-fA-F]{63,64}$/.test(addr)) return "Invalid Sui address (0x + 64 hex chars)";
-    if (chain === "aptos"  && !/^0x[0-9a-fA-F]{64}$/.test(addr)) return "Invalid Aptos address (0x + 64 hex chars)";
-    return "";
-  }
-  function handleWatch() {
-    const err = validateAddress(watchInput.trim(), watchChain);
-    if (err) { setWatchError(err); return; }
-    addWallet(watchInput.trim(), watchChain);
-    setWatchInput(""); setWatchError("");
-  }
+  // Manage Wallets modal state
+  const [showManageWallets, setShowManageWallets] = useState(false);
+  const [showEvmConnectors, setShowEvmConnectors] = useState(false);
+  const [showSolanaWalletList, setShowSolanaWalletList] = useState(false);
+  const [showSuiWalletList, setShowSuiWalletList] = useState(false);
+  const [addWalletAddress, setAddWalletAddress] = useState("");
+  const [addWalletLabel, setAddWalletLabel] = useState("");
+  const [addWalletError, setAddWalletError] = useState("");
+  const [editingWallet, setEditingWallet] = useState<string | null>(null);
+  const [editLabelValue, setEditLabelValue] = useState("");
 
   // Status filter
   const [statusFilter, setStatusFilter] = useState("All");
@@ -287,8 +309,52 @@ export default function Dashboard() {
     URL.revokeObjectURL(url);
   };
 
-  // Suppress unused-var lint for secondsAgo-derived label (used indirectly via isFetching display)
+  // Detect chain from address format
+  function detectChain(addr: string): WatchedWalletChain | null {
+    if (/^0x[0-9a-fA-F]{40}$/.test(addr)) return "evm";
+    if (/^0x[0-9a-fA-F]{63,64}$/.test(addr)) return "sui";
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return "solana";
+    return null;
+  }
+
+  function handleAddWatchedWallet() {
+    const addr = addWalletAddress.trim();
+    if (!addr) { setAddWalletError("Address is required"); return; }
+    const chain = detectChain(addr);
+    if (!chain) { setAddWalletError("Invalid address format. Please enter a valid EVM, Solana, or SUI address."); return; }
+    addWallet(addr, chain, addWalletLabel.trim() || undefined);
+    setAddWalletAddress("");
+    setAddWalletLabel("");
+    setAddWalletError("");
+  }
+
+  async function handleSolanaConnectFromModal(walletName: string) {
+    try {
+      solanaSelect(walletName as WalletName);
+      awaitingSolanaConnectModal.current = true;
+      await connectSolanaWallet();
+    } catch (err) {
+      awaitingSolanaConnectModal.current = false;
+      console.error("Solana connect error:", err);
+    }
+    setShowSolanaWalletList(false);
+  }
+
+  async function handleSuiConnectFromModal(wallet: (typeof modalSuiWallets)[0]) {
+    try {
+      awaitingSuiConnectModal.current = true;
+      await connectSuiAsync({ wallet });
+    } catch (err) {
+      awaitingSuiConnectModal.current = false;
+      console.error("Sui connect error:", err);
+    }
+    setShowSuiWalletList(false);
+  }
+
+  // Suppress unused-var lint
   void secondsAgo;
+  void getTickPriceUSD;
+  void getManageUrl;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -315,19 +381,12 @@ export default function Dashboard() {
 
       <Navbar />
 
-      {/* Price Ticker */}
-      <div className="pt-16">
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 28px 0" }}>
-          <PriceTicker />
-        </div>
-      </div>
-
       {/* ── Hero Section ──────────────────────────────────────────────────────── */}
       <div style={{
         background: "linear-gradient(135deg, #041a0a 0%, #071f12 30%, #0a1e1a 55%, #061215 100%)",
         position: "relative",
         overflow: "hidden",
-        padding: "28px 28px 24px",
+        padding: "80px 28px 24px",
       }}>
         {/* Glow orbs */}
         <div style={{ position:"absolute", top:0, right:0, width:400, height:300,
@@ -418,22 +477,199 @@ export default function Dashboard() {
                 <span className={isFetching ? "spin-icon" : ""}>↻</span>{" "}
                 {isFetching ? "Refreshing…" : "Refresh"}
               </button>
-              <Link
-                href="/wallet"
+              <button
+                onClick={() => setShowManageWallets(true)}
                 style={{ background:"rgba(16,185,129,0.2)", borderRadius:12, padding:"6px 14px",
-                  fontSize:12, color:"#6ee7b7", border:"1px solid rgba(16,185,129,0.3)",
-                  textDecoration:"none" }}
+                  fontSize:12, color:"#6ee7b7", border:"1px solid rgba(16,185,129,0.3)", cursor:"pointer" }}
               >
                 Manage Wallets
-              </Link>
+              </button>
             </div>
           </div>
 
         </div>
       </div>
 
+      {/* ── Charts Section ────────────────────────────────────────────────────── */}
+      {mounted && (
+        <div style={{ background:"#060d08", padding:"20px 28px 0" }}>
+          <div style={{ maxWidth:1200, margin:"0 auto" }}>
+
+            {allPositions.some((p) => p.value > 0) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+
+                {/* Portfolio Allocation */}
+                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                  borderRadius:14, padding:20 }}>
+                  <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                    color:"rgba(255,255,255,0.35)", margin:"0 0 16px" }}>Portfolio Allocation</h3>
+                  <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                    <div style={{ flexShrink:0 }}>
+                      <ResponsiveContainer width={130} height={130}>
+                        <PieChart>
+                          <Pie data={protocolBreakdown} cx="50%" cy="50%"
+                            innerRadius={38} outerRadius={62} dataKey="value" strokeWidth={0}>
+                            {protocolBreakdown.map((entry) => (
+                              <Cell key={entry.name} fill={getProtocolColor(entry.name)} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{ backgroundColor:"#0a1410",
+                              border:"1px solid rgba(255,255,255,0.06)",
+                              borderRadius:8, color:"#fff", fontSize:12 }}
+                            formatter={(v: number | undefined) => [fmt$(v ?? 0), ""]}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div style={{ flex:1, overflow:"hidden" }}>
+                      {protocolBreakdown.map((entry) => (
+                        <div key={entry.name}
+                          style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                            gap:8, marginBottom:6 }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:6, overflow:"hidden" }}>
+                            <div style={{ width:8, height:8, borderRadius:"50%",
+                              background:getProtocolColor(entry.name), flexShrink:0 }} />
+                            <span style={{ fontSize:12, color:"rgba(255,255,255,0.5)",
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {entry.name}
+                            </span>
+                          </div>
+                          <div style={{ fontSize:12, textAlign:"right", flexShrink:0 }}>
+                            <span style={{ color:"white", fontWeight:500 }}>{fmt$(entry.value, 0)}</span>
+                            <span style={{ color:"rgba(255,255,255,0.3)", marginLeft:4 }}>
+                              ({totalValue > 0 ? ((entry.value / totalValue) * 100).toFixed(1) : "0"}%)
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Chain Distribution */}
+                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                  borderRadius:14, padding:20 }}>
+                  <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                    color:"rgba(255,255,255,0.35)", margin:"0 0 16px" }}>Chain Distribution</h3>
+                  <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                    {chainBreakdown.map((entry) => {
+                      const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
+                      return (
+                        <div key={entry.chain}>
+                          <div style={{ display:"flex", justifyContent:"space-between",
+                            alignItems:"center", marginBottom:4 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                              <div style={{ width:8, height:8, borderRadius:"50%",
+                                background:getChainColor(entry.chain) }} />
+                              <span style={{ fontSize:12, color:"rgba(255,255,255,0.7)" }}>{entry.chain}</span>
+                            </div>
+                            <div style={{ fontSize:12 }}>
+                              <span style={{ color:"white" }}>{fmt$(entry.value, 0)}</span>
+                              <span style={{ color:"rgba(255,255,255,0.3)", marginLeft:4 }}>
+                                ({pct.toFixed(1)}%)
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ height:4, background:"rgba(255,255,255,0.06)",
+                            borderRadius:2, overflow:"hidden" }}>
+                            <div style={{ height:"100%", borderRadius:2,
+                              background:getChainColor(entry.chain), width:`${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {chainBreakdown.length === 0 && (
+                      <p style={{ color:"rgba(255,255,255,0.3)", fontSize:13 }}>No chain data</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Portfolio History */}
+            {hasWallet && (
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20, marginBottom:20 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                  marginBottom:16, flexWrap:"wrap", gap:12 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                      color:"rgba(255,255,255,0.35)", margin:0 }}>Portfolio History</h3>
+                    <div style={{ display:"flex", gap:4 }}>
+                      {TIME_RANGES.map((r) => {
+                        const hasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
+                        return (
+                          <button
+                            key={r.key}
+                            onClick={() => setRangeKey(r.key)}
+                            style={{
+                              padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:500, border:"none",
+                              cursor:"pointer",
+                              background: rangeKey === r.key ? "#10b981" : "rgba(255,255,255,0.06)",
+                              color: rangeKey === r.key ? "white"
+                                : hasData ? "rgba(255,255,255,0.5)"
+                                : "rgba(255,255,255,0.2)",
+                            }}
+                          >{r.key}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {effectiveHistory.length >= 2 && (
+                    <div style={{ fontSize:13, fontWeight:500,
+                      color: pnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
+                      {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
+                      <span style={{ opacity:0.75 }}>
+                        ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
+                      </span>
+                      <span style={{ color:"rgba(255,255,255,0.4)", fontWeight:400, marginLeft:4 }}>
+                        {pnlLabel}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {portfolioHistory.length < 2 ? (
+                  <div style={{ textAlign:"center", padding:"32px 0" }}>
+                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.4)" }}>
+                      Tracking started — chart appears after the next refresh.
+                    </p>
+                    <p style={{ fontSize:11, color:"rgba(255,255,255,0.2)", marginTop:4 }}>
+                      A data point is saved on every 60-second refresh.
+                    </p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={chartData} margin={{ top:4, right:16, left:8, bottom:4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                      <XAxis dataKey="label" tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11 }}
+                        axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                      <YAxis tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11 }}
+                        axisLine={false} tickLine={false} width={72}
+                        tickFormatter={(v) =>
+                          `$${Number(v).toLocaleString("en-US", { maximumFractionDigits:0 })}`} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor:"#0a1410",
+                          border:"1px solid rgba(255,255,255,0.06)",
+                          borderRadius:8, color:"#fff" }}
+                        formatter={(v: number | undefined) => [fmt$(v ?? 0), "Portfolio Value"]}
+                        labelStyle={{ color:"rgba(255,255,255,0.5)", marginBottom:4 }}
+                      />
+                      <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
+                        dot={chartData.length <= 20}
+                        activeDot={{ r:4, fill:"#34d399" }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+
       {/* ── Positions Section ─────────────────────────────────────────────────── */}
-      <div style={{ background:"#060d08", padding:"20px 28px" }}>
+      <div style={{ background:"#060d08", padding:"20px 28px 40px" }}>
         <div style={{ maxWidth:1200, margin:"0 auto" }}>
 
           {/* Filter / action bar */}
@@ -468,12 +704,6 @@ export default function Dashboard() {
             </div>
             <div style={{ display:"flex", gap:8 }}>
               <button
-                onClick={() => setShowWatchPanel((v) => !v)}
-                style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.06)",
-                  color:"rgba(255,255,255,0.4)", borderRadius:8, padding:"6px 14px",
-                  fontSize:12, cursor:"pointer" }}
-              >👁 Watch</button>
-              <button
                 onClick={exportCSV}
                 style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.06)",
                   color:"rgba(255,255,255,0.4)", borderRadius:8, padding:"6px 14px",
@@ -481,48 +711,6 @@ export default function Dashboard() {
               >Export CSV</button>
             </div>
           </div>
-
-          {/* Watch Wallet Panel */}
-          {showWatchPanel && mounted && (
-            <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-              borderRadius:12, padding:16, marginBottom:16 }}>
-              <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:8 }}>
-                <span style={{ fontSize:13, color:"rgba(255,255,255,0.4)" }}>Watch wallet:</span>
-                <input
-                  type="text"
-                  value={watchInput}
-                  onChange={(e) => { setWatchInput(e.target.value); setWatchError(""); }}
-                  onKeyDown={(e) => e.key === "Enter" && handleWatch()}
-                  placeholder="Paste wallet address"
-                  style={{ flex:1, minWidth:180, background:"#060d08", border:"1px solid rgba(255,255,255,0.1)",
-                    color:"white", borderRadius:8, padding:"6px 12px", fontSize:13, outline:"none" }}
-                />
-                <select
-                  value={watchChain}
-                  onChange={(e) => { setWatchChain(e.target.value as WatchedWalletChain); setWatchError(""); }}
-                  style={{ background:"#060d08", border:"1px solid rgba(255,255,255,0.1)", color:"white",
-                    borderRadius:8, padding:"6px 12px", fontSize:13, outline:"none" }}
-                >
-                  <option value="evm">EVM</option>
-                  <option value="solana">Solana</option>
-                  <option value="sui">Sui</option>
-                  <option value="aptos">Aptos</option>
-                </select>
-                <button
-                  onClick={handleWatch}
-                  style={{ background:"rgba(16,185,129,0.2)", border:"1px solid rgba(16,185,129,0.3)",
-                    color:"#6ee7b7", borderRadius:8, padding:"6px 14px", fontSize:13, cursor:"pointer" }}
-                >Add</button>
-                {watchedWallets.length > 0 && (
-                  <Link href="/watched"
-                    style={{ fontSize:13, color:"rgba(255,255,255,0.4)", textDecoration:"none" }}>
-                    Manage ({watchedWallets.length})
-                  </Link>
-                )}
-              </div>
-              {watchError && <p style={{ color:"#ef4444", fontSize:12, marginTop:6, marginBottom:0 }}>{watchError}</p>}
-            </div>
-          )}
 
           {/* Loading */}
           {mounted && isLoading && (
@@ -698,193 +886,450 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Closed position note */}
-          {mounted && (solanaAddress || suiAddress) && (
-            <div style={{ marginTop:16, fontSize:13, color:"rgba(255,255,255,0.4)",
-              border:"1px solid rgba(255,255,255,0.06)", borderRadius:10,
-              padding:"12px 16px", display:"flex", gap:8 }}>
-              <span style={{ flexShrink:0 }}>ℹ️</span>
-              <span>
-                Some closed positions may not appear: on Solana, NFTs are burned when a position is fully
-                closed; on Sui, position objects are destroyed. These no longer exist on-chain.
-              </span>
-            </div>
-          )}
-
         </div>
       </div>
 
-      {/* ── Charts Section ────────────────────────────────────────────────────── */}
-      {mounted && (
-        <div style={{ background:"#060d08", padding:"0 28px 40px" }}>
-          <div style={{ maxWidth:1200, margin:"0 auto" }}>
+      {/* ── Manage Wallets Modal ───────────────────────────────────────────────── */}
+      {showManageWallets && mounted && (
+        <div style={{ position:"fixed", inset:0, zIndex:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", backdropFilter:"blur(4px)" }}
+            onClick={() => { setShowManageWallets(false); setShowEvmConnectors(false); setShowSolanaWalletList(false); setShowSuiWalletList(false); }} />
+          <div style={{ position:"relative", background:"#070e09", border:"1px solid rgba(16,185,129,0.2)",
+            borderRadius:20, width:"100%", maxWidth:520, margin:"0 16px", maxHeight:"90vh", overflowY:"auto" }}>
 
-            {allPositions.some((p) => p.value > 0) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            {/* Modal Header */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+              padding:"20px 20px 16px", borderBottom:"1px solid rgba(255,255,255,0.05)",
+              position:"sticky", top:0, background:"#070e09", zIndex:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontSize:20 }}>💼</span>
+                <h2 style={{ fontSize:17, fontWeight:700, color:"white", margin:0 }}>Manage Wallets</h2>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <button onClick={() => refetch()} title="Refresh positions"
+                  style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)",
+                    cursor:"pointer", fontSize:18, padding:"4px 6px", borderRadius:6,
+                    display:"flex", alignItems:"center" }}>
+                  <span className={isFetching ? "spin-icon" : ""}>↻</span>
+                </button>
+                <button onClick={() => { setShowManageWallets(false); setShowEvmConnectors(false); setShowSolanaWalletList(false); setShowSuiWalletList(false); }}
+                  style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)",
+                    cursor:"pointer", fontSize:20, padding:"4px 6px", borderRadius:6 }}>✕</button>
+              </div>
+            </div>
 
-                {/* Portfolio Allocation */}
-                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                  borderRadius:14, padding:20 }}>
-                  <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                    color:"rgba(255,255,255,0.35)", margin:"0 0 16px" }}>Portfolio Allocation</h3>
-                  <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-                    <div style={{ flexShrink:0 }}>
-                      <ResponsiveContainer width={130} height={130}>
-                        <PieChart>
-                          <Pie data={protocolBreakdown} cx="50%" cy="50%"
-                            innerRadius={38} outerRadius={62} dataKey="value" strokeWidth={0}>
-                            {protocolBreakdown.map((entry) => (
-                              <Cell key={entry.name} fill={getProtocolColor(entry.name)} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{ backgroundColor:"#0a1410",
-                              border:"1px solid rgba(255,255,255,0.06)",
-                              borderRadius:8, color:"#fff", fontSize:12 }}
-                            formatter={(v: number | undefined) => [fmt$(v ?? 0), ""]}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div style={{ flex:1, overflow:"hidden" }}>
-                      {protocolBreakdown.map((entry) => (
-                        <div key={entry.name}
-                          style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                            gap:8, marginBottom:6 }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:6, overflow:"hidden" }}>
-                            <div style={{ width:8, height:8, borderRadius:"50%",
-                              background:getProtocolColor(entry.name), flexShrink:0 }} />
-                            <span style={{ fontSize:12, color:"rgba(255,255,255,0.5)",
-                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {entry.name}
-                            </span>
-                          </div>
-                          <div style={{ fontSize:12, textAlign:"right", flexShrink:0 }}>
-                            <span style={{ color:"white", fontWeight:500 }}>{fmt$(entry.value, 0)}</span>
-                            <span style={{ color:"rgba(255,255,255,0.3)", marginLeft:4 }}>
-                              ({totalValue > 0 ? ((entry.value / totalValue) * 100).toFixed(1) : "0"}%)
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+            <div style={{ padding:20, display:"flex", flexDirection:"column", gap:24 }}>
+
+              {/* ── Section 1: Add New Wallet ── */}
+              <div style={{ border:"1px solid rgba(255,255,255,0.08)", borderRadius:14, padding:16 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                  <span style={{ fontSize:14, fontWeight:700, color:"white" }}>Add New Wallet</span>
+                  <button title="Watch any wallet address — read-only, no private keys needed"
+                    style={{ background:"rgba(255,255,255,0.06)", border:"none", color:"rgba(255,255,255,0.4)",
+                      cursor:"pointer", fontSize:12, width:22, height:22, borderRadius:"50%",
+                      display:"flex", alignItems:"center", justifyContent:"center" }}>?</button>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  <input
+                    type="text"
+                    value={addWalletAddress}
+                    onChange={(e) => { setAddWalletAddress(e.target.value); setAddWalletError(""); }}
+                    onKeyDown={(e) => e.key === "Enter" && handleAddWatchedWallet()}
+                    placeholder="Enter EVM, Solana, or SUI Address"
+                    style={{ width:"100%", background:"#060d08", border:"1px solid rgba(255,255,255,0.1)",
+                      color:"white", borderRadius:8, padding:"10px 12px", fontSize:13,
+                      outline:"none", boxSizing:"border-box" }}
+                  />
+                  <input
+                    type="text"
+                    value={addWalletLabel}
+                    onChange={(e) => setAddWalletLabel(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleAddWatchedWallet()}
+                    placeholder="Label (Optional) — e.g., Main Wallet, Trading Account"
+                    style={{ width:"100%", background:"#060d08", border:"1px solid rgba(255,255,255,0.1)",
+                      color:"white", borderRadius:8, padding:"10px 12px", fontSize:13,
+                      outline:"none", boxSizing:"border-box" }}
+                  />
+                  {addWalletError && (
+                    <p style={{ color:"#ef4444", fontSize:12, margin:0 }}>{addWalletError}</p>
+                  )}
+                  <button
+                    onClick={handleAddWatchedWallet}
+                    style={{
+                      width:"100%",
+                      background: addWalletAddress.trim() ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.04)",
+                      border: `1px solid ${addWalletAddress.trim() ? "rgba(16,185,129,0.35)" : "rgba(255,255,255,0.08)"}`,
+                      color: addWalletAddress.trim() ? "#6ee7b7" : "rgba(255,255,255,0.3)",
+                      borderRadius:8, padding:"10px", fontSize:14, fontWeight:600,
+                      cursor: addWalletAddress.trim() ? "pointer" : "default",
+                    }}
+                  >
+                    Add Wallet
+                  </button>
+                  <div style={{ background:"rgba(16,185,129,0.07)", border:"1px solid rgba(16,185,129,0.15)",
+                    borderRadius:8, padding:"10px 12px", display:"flex", alignItems:"flex-start", gap:10 }}>
+                    <span style={{ color:"#34d399", fontSize:15, flexShrink:0, marginTop:1 }}>✓</span>
+                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.5)", margin:0, lineHeight:1.6 }}>
+                      <strong style={{ color:"#6ee7b7" }}>100% Safe &amp; Read-Only.</strong>{" "}
+                      We never connect to your wallet or request private keys. DefiDesh only reads public blockchain data.
+                    </p>
                   </div>
                 </div>
+              </div>
 
-                {/* Chain Distribution */}
-                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                  borderRadius:14, padding:20 }}>
-                  <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                    color:"rgba(255,255,255,0.35)", margin:"0 0 16px" }}>Chain Distribution</h3>
-                  <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-                    {chainBreakdown.map((entry) => {
-                      const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
-                      return (
-                        <div key={entry.chain}>
-                          <div style={{ display:"flex", justifyContent:"space-between",
-                            alignItems:"center", marginBottom:4 }}>
-                            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                              <div style={{ width:8, height:8, borderRadius:"50%",
-                                background:getChainColor(entry.chain) }} />
-                              <span style={{ fontSize:12, color:"rgba(255,255,255,0.7)" }}>{entry.chain}</span>
-                            </div>
-                            <div style={{ fontSize:12 }}>
-                              <span style={{ color:"white" }}>{fmt$(entry.value, 0)}</span>
-                              <span style={{ color:"rgba(255,255,255,0.3)", marginLeft:4 }}>
-                                ({pct.toFixed(1)}%)
-                              </span>
-                            </div>
-                          </div>
-                          <div style={{ height:4, background:"rgba(255,255,255,0.06)",
-                            borderRadius:2, overflow:"hidden" }}>
-                            <div style={{ height:"100%", borderRadius:2,
-                              background:getChainColor(entry.chain), width:`${pct}%` }} />
-                          </div>
+              {/* ── Section 2: Connect Browser Wallet ── */}
+              <div>
+                <h3 style={{ fontSize:14, fontWeight:700, color:"white", margin:"0 0 12px" }}>Connect Browser Wallet</h3>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {/* EVM */}
+                  {mounted && address ? (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                      background:"rgba(255,255,255,0.03)", border:"1px solid rgba(16,185,129,0.2)",
+                      borderRadius:10, padding:"10px 14px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontSize:20 }}>🦊</span>
+                        <div>
+                          <p style={{ fontSize:13, fontWeight:600, color:"white", margin:0 }}>EVM Wallet</p>
+                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0, fontFamily:"monospace" }}>
+                            {address.slice(0,8)}...{address.slice(-6)}
+                          </p>
                         </div>
-                      );
-                    })}
-                    {chainBreakdown.length === 0 && (
-                      <p style={{ color:"rgba(255,255,255,0.3)", fontSize:13 }}>No chain data</p>
-                    )}
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ color:"#34d399", fontSize:13, fontWeight:600 }}>● Connected</span>
+                        <button onClick={() => evmDisconnect()}
+                          style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)",
+                            color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer" }}>
+                          Disconnect
+                        </button>
+                      </div>
+                    </div>
+                  ) : mounted && (
+                    <button onClick={() => setShowEvmConnectors(true)}
+                      style={{ display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.03)",
+                        border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
+                        width:"100%", cursor:"pointer", color:"white", textAlign:"left" }}>
+                      <span style={{ fontSize:20 }}>🦊</span>
+                      <span style={{ fontSize:13 }}>Connect EVM Wallet</span>
+                    </button>
+                  )}
+
+                  {/* Solana */}
+                  {mounted && solanaAddress ? (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                      background:"rgba(255,255,255,0.03)", border:"1px solid rgba(153,69,255,0.3)",
+                      borderRadius:10, padding:"10px 14px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontSize:20 }}>◎</span>
+                        <div>
+                          <p style={{ fontSize:13, fontWeight:600, color:"white", margin:0 }}>Solana Wallet</p>
+                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0, fontFamily:"monospace" }}>
+                            {solanaAddress.slice(0,8)}...{solanaAddress.slice(-6)}
+                          </p>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ color:"#34d399", fontSize:13, fontWeight:600 }}>● Connected</span>
+                        <button onClick={() => { setSolanaAddress(null); disconnectSolanaWallet(); }}
+                          style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)",
+                            color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer" }}>
+                          Disconnect
+                        </button>
+                      </div>
+                    </div>
+                  ) : mounted && (
+                    <button onClick={() => setShowSolanaWalletList(true)}
+                      style={{ display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.03)",
+                        border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
+                        width:"100%", cursor:"pointer", color:"white", textAlign:"left" }}>
+                      <span style={{ fontSize:20 }}>◎</span>
+                      <span style={{ fontSize:13 }}>Connect Solana Wallet</span>
+                    </button>
+                  )}
+
+                  {/* Sui */}
+                  {mounted && suiAddress ? (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                      background:"rgba(255,255,255,0.03)", border:"1px solid rgba(111,188,240,0.3)",
+                      borderRadius:10, padding:"10px 14px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontSize:20 }}>◈</span>
+                        <div>
+                          <p style={{ fontSize:13, fontWeight:600, color:"white", margin:0 }}>Sui Wallet</p>
+                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0, fontFamily:"monospace" }}>
+                            {suiAddress.slice(0,8)}...{suiAddress.slice(-6)}
+                          </p>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ color:"#34d399", fontSize:13, fontWeight:600 }}>● Connected</span>
+                        <button onClick={() => { setSuiAddress(null); disconnectSuiWallet(); }}
+                          style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)",
+                            color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer" }}>
+                          Disconnect
+                        </button>
+                      </div>
+                    </div>
+                  ) : mounted && (
+                    <button onClick={() => setShowSuiWalletList(true)}
+                      style={{ display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.03)",
+                        border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
+                        width:"100%", cursor:"pointer", color:"white", textAlign:"left" }}>
+                      <span style={{ fontSize:20 }}>◈</span>
+                      <span style={{ fontSize:13 }}>Connect Sui Wallet</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Section 3: Your Wallets ── */}
+              {(() => {
+                type WalletEntry = { addr: string; label?: string; type: "browser" | "watched" };
+                const evmWalletList: WalletEntry[] = [];
+                const solWalletList: WalletEntry[] = [];
+                const suiWalletList: WalletEntry[] = [];
+
+                if (address) evmWalletList.push({ addr: address, type: "browser" });
+                if (solanaAddress) solWalletList.push({ addr: solanaAddress, type: "browser" });
+                if (suiAddress) suiWalletList.push({ addr: suiAddress, type: "browser" });
+
+                for (const w of watchedWallets) {
+                  const entry: WalletEntry = { addr: w.address, label: w.label, type: "watched" };
+                  if (w.chain === "evm") evmWalletList.push(entry);
+                  else if (w.chain === "solana") solWalletList.push(entry);
+                  else if (w.chain === "sui") suiWalletList.push(entry);
+                }
+
+                const hasAny = evmWalletList.length > 0 || solWalletList.length > 0 || suiWalletList.length > 0;
+                if (!hasAny) return null;
+
+                const groups = [
+                  { label: "EVM Wallets", icon: "⟠", wallets: evmWalletList },
+                  { label: "Solana Wallets", icon: "◎", wallets: solWalletList },
+                  { label: "Sui Wallets", icon: "◈", wallets: suiWalletList },
+                ].filter((g) => g.wallets.length > 0);
+
+                return (
+                  <div>
+                    <h3 style={{ fontSize:14, fontWeight:700, color:"white", margin:"0 0 12px" }}>Your Wallets</h3>
+                    {groups.map((group) => (
+                      <div key={group.label} style={{ marginBottom:16 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                          <span style={{ color:"rgba(255,255,255,0.4)", fontSize:14 }}>{group.icon}</span>
+                          <span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", fontWeight:600,
+                            textTransform:"uppercase", letterSpacing:1 }}>{group.label}</span>
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                          {group.wallets.map((w) => {
+                            const isEditing = editingWallet === w.addr;
+                            return (
+                              <div key={w.addr} style={{ background:"rgba(255,255,255,0.03)",
+                                border:"1px solid rgba(255,255,255,0.06)", borderRadius:10,
+                                padding:"10px 14px", display:"flex", alignItems:"center",
+                                justifyContent:"space-between", gap:12 }}>
+                                <div style={{ flex:1, overflow:"hidden" }}>
+                                  {isEditing ? (
+                                    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        value={editLabelValue}
+                                        onChange={(e) => setEditLabelValue(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") {
+                                            const ww = watchedWallets.find((wl) => wl.address === w.addr);
+                                            if (ww) updateLabel(ww.address, ww.chain, editLabelValue);
+                                            setEditingWallet(null);
+                                          }
+                                          if (e.key === "Escape") setEditingWallet(null);
+                                        }}
+                                        style={{ background:"#060d08", border:"1px solid rgba(255,255,255,0.2)",
+                                          color:"white", borderRadius:6, padding:"4px 8px",
+                                          fontSize:12, outline:"none", flex:1 }}
+                                      />
+                                      <button onClick={() => {
+                                        const ww = watchedWallets.find((wl) => wl.address === w.addr);
+                                        if (ww) updateLabel(ww.address, ww.chain, editLabelValue);
+                                        setEditingWallet(null);
+                                      }} style={{ color:"#34d399", background:"none", border:"none",
+                                        cursor:"pointer", fontSize:12, whiteSpace:"nowrap" }}>Save</button>
+                                      <button onClick={() => setEditingWallet(null)}
+                                        style={{ color:"rgba(255,255,255,0.4)", background:"none",
+                                          border:"none", cursor:"pointer", fontSize:12 }}>✕</button>
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+                                        <span style={{ fontSize:13, fontWeight:600, color:"white" }}>
+                                          {w.label || (w.type === "browser" ? group.label.replace(" Wallets","") : "Watched")}
+                                        </span>
+                                        {w.type === "watched" && (
+                                          <button
+                                            onClick={() => { setEditingWallet(w.addr); setEditLabelValue(w.label ?? ""); }}
+                                            style={{ color:"rgba(255,255,255,0.3)", background:"none",
+                                              border:"none", cursor:"pointer", fontSize:12, padding:0 }}
+                                            title="Edit label"
+                                          >✎</button>
+                                        )}
+                                        <span style={{ fontSize:10,
+                                          color: w.type === "browser" ? "#6ee7b7" : "rgba(255,255,255,0.35)",
+                                          background: w.type === "browser" ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.05)",
+                                          borderRadius:4, padding:"1px 6px", marginLeft:2 }}>
+                                          {w.type === "browser" ? "Browser" : "Watched"}
+                                        </span>
+                                      </div>
+                                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                        <span style={{ fontSize:11, color:"rgba(255,255,255,0.35)", fontFamily:"monospace" }}>
+                                          {w.addr.slice(0,8)}...{w.addr.slice(-6)}
+                                        </span>
+                                        <button
+                                          onClick={() => navigator.clipboard.writeText(w.addr)}
+                                          style={{ color:"rgba(255,255,255,0.3)", background:"none",
+                                            border:"none", cursor:"pointer", fontSize:12, padding:0 }}
+                                          title="Copy address"
+                                        >⧉</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                                  <span style={{ color:"#34d399", fontSize:14 }}>✓</span>
+                                  {w.type === "watched" ? (
+                                    <button
+                                      onClick={() => {
+                                        const ww = watchedWallets.find((wl) => wl.address === w.addr);
+                                        if (ww) removeWallet(ww.address, ww.chain);
+                                      }}
+                                      title="Remove watched wallet"
+                                      style={{ color:"#ef4444", background:"rgba(239,68,68,0.08)",
+                                        border:"1px solid rgba(239,68,68,0.15)", borderRadius:6,
+                                        padding:"3px 8px", fontSize:12, cursor:"pointer" }}
+                                    >🗑</button>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        if (w.addr === address) evmDisconnect();
+                                        else if (w.addr === solanaAddress) { setSolanaAddress(null); disconnectSolanaWallet(); }
+                                        else if (w.addr === suiAddress) { setSuiAddress(null); disconnectSuiWallet(); }
+                                      }}
+                                      title="Disconnect wallet"
+                                      style={{ color:"#ef4444", background:"rgba(239,68,68,0.08)",
+                                        border:"1px solid rgba(239,68,68,0.15)", borderRadius:6,
+                                        padding:"3px 8px", fontSize:12, cursor:"pointer" }}
+                                    >✕</button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+            </div>
+
+            {/* EVM wallet picker sub-modal */}
+            {showEvmConnectors && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)",
+                borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ background:"#070e09", border:"1px solid rgba(255,255,255,0.1)",
+                  borderRadius:14, padding:20, width:"85%", maxWidth:320 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                    <h3 style={{ fontSize:15, fontWeight:700, color:"white", margin:0 }}>Choose EVM Wallet</h3>
+                    <button onClick={() => setShowEvmConnectors(false)}
+                      style={{ color:"rgba(255,255,255,0.4)", background:"none", border:"none", cursor:"pointer", fontSize:18 }}>✕</button>
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {connectors.map((connector, i) => (
+                      <button key={connector.id}
+                        onClick={() => { evmConnect({ connector: connectors[i] }); setShowEvmConnectors(false); }}
+                        style={{ display:"flex", alignItems:"center", gap:12, background:"rgba(255,255,255,0.03)",
+                          border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
+                          width:"100%", cursor:"pointer", color:"white" }}>
+                        <span style={{ fontSize:22 }}>{connector.name === "MetaMask" ? "🦊" : "🔗"}</span>
+                        <div style={{ textAlign:"left" }}>
+                          <p style={{ fontSize:14, fontWeight:500, color:"white", margin:0 }}>{connector.name}</p>
+                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0 }}>Connect with browser extension</p>
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Portfolio History */}
-            {hasWallet && (
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                  marginBottom:16, flexWrap:"wrap", gap:12 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                      color:"rgba(255,255,255,0.35)", margin:0 }}>Portfolio History</h3>
-                    <div style={{ display:"flex", gap:4 }}>
-                      {TIME_RANGES.map((r) => {
-                        const hasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
-                        return (
-                          <button
-                            key={r.key}
-                            onClick={() => setRangeKey(r.key)}
-                            style={{
-                              padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:500, border:"none",
-                              cursor:"pointer",
-                              background: rangeKey === r.key ? "#10b981" : "rgba(255,255,255,0.06)",
-                              color: rangeKey === r.key ? "white"
-                                : hasData ? "rgba(255,255,255,0.5)"
-                                : "rgba(255,255,255,0.2)",
-                            }}
-                          >{r.key}</button>
-                        );
-                      })}
-                    </div>
+            {/* Solana wallet picker sub-modal */}
+            {showSolanaWalletList && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)",
+                borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ background:"#070e09", border:"1px solid rgba(153,69,255,0.3)",
+                  borderRadius:14, padding:20, width:"85%", maxWidth:320 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                    <h3 style={{ fontSize:15, fontWeight:700, color:"white", margin:0 }}>Choose Solana Wallet</h3>
+                    <button onClick={() => setShowSolanaWalletList(false)}
+                      style={{ color:"rgba(255,255,255,0.4)", background:"none", border:"none", cursor:"pointer", fontSize:18 }}>✕</button>
                   </div>
-                  {effectiveHistory.length >= 2 && (
-                    <div style={{ fontSize:13, fontWeight:500,
-                      color: pnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
-                      {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
-                      <span style={{ opacity:0.75 }}>
-                        ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
-                      </span>
-                      <span style={{ color:"rgba(255,255,255,0.4)", fontWeight:400, marginLeft:4 }}>
-                        {pnlLabel}
-                      </span>
+                  {solanaWallets.length === 0 ? (
+                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.5)", textAlign:"center", padding:"8px 0" }}>
+                      No Solana wallet detected. Install Phantom, Backpack, or Solflare.
+                    </p>
+                  ) : (
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {solanaWallets.map((w) => (
+                        <button key={w.adapter.name}
+                          onClick={() => handleSolanaConnectFromModal(w.adapter.name)}
+                          style={{ display:"flex", alignItems:"center", gap:12, background:"rgba(255,255,255,0.03)",
+                            border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
+                            width:"100%", cursor:"pointer", color:"white" }}>
+                          {w.adapter.icon && (
+                            <img src={w.adapter.icon} alt={w.adapter.name}
+                              style={{ width:28, height:28, borderRadius:6 }} />
+                          )}
+                          <span style={{ fontSize:14 }}>{w.adapter.name}</span>
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
-                {portfolioHistory.length < 2 ? (
-                  <div style={{ textAlign:"center", padding:"32px 0" }}>
-                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.4)" }}>
-                      Tracking started — chart appears after the next refresh.
-                    </p>
-                    <p style={{ fontSize:11, color:"rgba(255,255,255,0.2)", marginTop:4 }}>
-                      A data point is saved on every 60-second refresh.
-                    </p>
+              </div>
+            )}
+
+            {/* Sui wallet picker sub-modal */}
+            {showSuiWalletList && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)",
+                borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ background:"#070e09", border:"1px solid rgba(111,188,240,0.3)",
+                  borderRadius:14, padding:20, width:"85%", maxWidth:320 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                    <h3 style={{ fontSize:15, fontWeight:700, color:"white", margin:0 }}>Choose Sui Wallet</h3>
+                    <button onClick={() => setShowSuiWalletList(false)}
+                      style={{ color:"rgba(255,255,255,0.4)", background:"none", border:"none", cursor:"pointer", fontSize:18 }}>✕</button>
                   </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={chartData} margin={{ top:4, right:16, left:8, bottom:4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                      <XAxis dataKey="label" tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11 }}
-                        axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                      <YAxis tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11 }}
-                        axisLine={false} tickLine={false} width={72}
-                        tickFormatter={(v) =>
-                          `$${Number(v).toLocaleString("en-US", { maximumFractionDigits:0 })}`} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor:"#0a1410",
-                          border:"1px solid rgba(255,255,255,0.06)",
-                          borderRadius:8, color:"#fff" }}
-                        formatter={(v: number | undefined) => [fmt$(v ?? 0), "Portfolio Value"]}
-                        labelStyle={{ color:"rgba(255,255,255,0.5)", marginBottom:4 }}
-                      />
-                      <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
-                        dot={chartData.length <= 20}
-                        activeDot={{ r:4, fill:"#34d399" }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
+                  {modalSuiWallets.length === 0 ? (
+                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.5)", textAlign:"center", padding:"8px 0" }}>
+                      No Sui wallet detected. Install Phantom, Suiet, or Slush.
+                    </p>
+                  ) : (
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {modalSuiWallets.map((w) => (
+                        <button key={w.name}
+                          onClick={() => handleSuiConnectFromModal(w)}
+                          style={{ display:"flex", alignItems:"center", gap:12, background:"rgba(255,255,255,0.03)",
+                            border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
+                            width:"100%", cursor:"pointer", color:"white" }}>
+                          {w.icon && (
+                            <img src={w.icon} alt={w.name}
+                              style={{ width:28, height:28, borderRadius:6 }} />
+                          )}
+                          <span style={{ fontSize:14 }}>{w.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

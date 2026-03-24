@@ -1,11 +1,17 @@
 import Navbar from "./Navbar";
 import Link from "next/link";
+import PriceTicker from "./PriceTicker";
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-[#0a0f0d] text-white">
       <Navbar />
-      <div className="flex flex-col items-center justify-center min-h-screen px-4 pt-16">
+      <div className="pt-16">
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 28px 0" }}>
+          <PriceTicker />
+        </div>
+      </div>
+      <div className="flex flex-col items-center justify-center px-4 py-20">
         <h1 className="text-6xl font-bold mb-4 text-center">DefiDesh</h1>
         <p className="text-xl text-emerald-300/70 mb-8 text-center max-w-2xl">
           Track your DeFi liquidity positions across multiple chains. Monitor value, APY, fees, and more — all in one place.
@@ -35,7 +41,7 @@ export default function Home() {
           </div>
           <div className="text-center">
             <p className="text-3xl font-bold text-yellow-500 mb-2">Live</p>
-            <p className="text-emerald-300/70">Price & APY Updates</p>
+            <p className="text-emerald-300/70">Price &amp; APY Updates</p>
           </div>
         </div>
       </div>

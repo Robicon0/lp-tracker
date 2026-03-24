@@ -139,7 +139,6 @@ export default function Navbar() {
               <Link href="/analytics" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Analytics</Link>
               <Link href="/about" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">About</Link>
               <Link href="/wallet" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Wallet</Link>
-              <Link href="/watched" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Watched</Link>
 
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (
@@ -218,7 +217,6 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Analytics</Link>
               <Link href="/about" className="block text-emerald-300/80 hover:text-emerald-300 py-2">About</Link>
-              <Link href="/watched" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Watched</Link>
 
               {/* EVM — mobile */}
               {isConnected && address ? (
