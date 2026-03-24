@@ -38,3 +38,35 @@ export const TOKEN_LOGOS: Record<string, string> = {
 export function getTokenLogo(symbol: string): string | null {
   return TOKEN_LOGOS[symbol] ?? TOKEN_LOGOS[symbol.toUpperCase()] ?? null;
 }
+
+// ── Token color map ────────────────────────────────────────────────────────────
+export const TOKEN_COLORS: Record<string, string> = {
+  ETH:      "#627EEA",
+  WETH:     "#627EEA",
+  USDC:     "#2775CA",
+  "USDC.e": "#2775CA",
+  USDbC:    "#2775CA",
+  USDT:     "#26A17B",
+  BTC:      "#F7931A",
+  WBTC:     "#F7931A",
+  cbBTC:    "#F7931A",
+  tBTC:     "#F7931A",
+  SOL:      "#9945FF",
+  WSOL:     "#9945FF",
+  SUI:      "#6FBCF0",
+  HYPE:     "#00D4AA",
+  WHYPE:    "#00D4AA",
+  DAI:      "#F5AC37",
+  BNB:      "#F0B90B",
+  WBNB:     "#F0B90B",
+  MATIC:    "#8247E5",
+  POL:      "#8247E5",
+  AVAX:     "#E84142",
+  ARB:      "#2D9CDB",
+  OP:       "#FF0420",
+  USDS:     "#26A17B",
+};
+
+export function getTokenColor(symbol: string): string {
+  return TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
+}

@@ -690,53 +690,69 @@ export default function Dashboard() {
             {/* Row 2 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
 
-              {/* Card 4: Tokens */}
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Tokens</h3>
-                {!hasWallet ? (
-                  <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see balances.</p>
-                ) : walletTokensLoading ? (
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
-                      animation:"_spin 1s linear infinite" }} />
-                    <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+              {/* Card 4: Tokens — clickable */}
+              <Link href="/dashboard/tokens" style={{ textDecoration:"none" }}>
+                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                  borderRadius:14, padding:20, cursor:"pointer", transition:"border-color 0.15s",
+                  height:"100%", boxSizing:"border-box" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(251,191,36,0.25)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                      color:"#FBBF24", margin:0, fontWeight:600 }}>Tokens</h3>
+                    <span style={{ fontSize:11, color:"rgba(255,255,255,0.25)" }}>View →</span>
                   </div>
-                ) : (
-                  <>
-                    <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                      letterSpacing:-1 }}>{fmt$(totalTokenValue)}</p>
-                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
-                      {tokenCount > 0 ? `${tokenCount} token${tokenCount === 1 ? "" : "s"}` : "No tokens found"}
-                    </p>
-                  </>
-                )}
-              </div>
+                  {!hasWallet ? (
+                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see balances.</p>
+                  ) : walletTokensLoading ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
+                        animation:"_spin 1s linear infinite" }} />
+                      <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                        letterSpacing:-1 }}>{fmt$(totalTokenValue)}</p>
+                      <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                        {tokenCount > 0 ? `${tokenCount} token${tokenCount === 1 ? "" : "s"}` : "No tokens found"}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </Link>
 
-              {/* Card 5: Lending / Borrowing */}
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Lending / Borrowing</h3>
-                {!hasWallet ? (
-                  <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see positions.</p>
-                ) : walletTokensLoading ? (
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
-                      animation:"_spin 1s linear infinite" }} />
-                    <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+              {/* Card 5: Lending / Borrowing — clickable */}
+              <Link href="/dashboard/lending" style={{ textDecoration:"none" }}>
+                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                  borderRadius:14, padding:20, cursor:"pointer", transition:"border-color 0.15s",
+                  height:"100%", boxSizing:"border-box" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(251,191,36,0.25)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                      color:"#FBBF24", margin:0, fontWeight:600 }}>Lending / Borrowing</h3>
+                    <span style={{ fontSize:11, color:"rgba(255,255,255,0.25)" }}>View →</span>
                   </div>
-                ) : (
-                  <>
-                    <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                      letterSpacing:-1 }}>{fmt$(totalLendingValue)}</p>
-                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
-                      {lendingCount > 0 ? `${lendingCount} position${lendingCount === 1 ? "" : "s"}` : "No positions found"}
-                    </p>
-                  </>
-                )}
-              </div>
+                  {!hasWallet ? (
+                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see positions.</p>
+                  ) : walletTokensLoading ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
+                        animation:"_spin 1s linear infinite" }} />
+                      <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                        letterSpacing:-1 }}>{fmt$(totalLendingValue)}</p>
+                      <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                        {lendingCount > 0 ? `${lendingCount} position${lendingCount === 1 ? "" : "s"}` : "No positions found"}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </Link>
             </div>
 
           </div>

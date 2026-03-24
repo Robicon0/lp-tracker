@@ -1,10 +1,74 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Navbar from "../../../Navbar";
 import { usePositions } from "../../../contexts/PositionsContext";
 import type { AerodromePosition } from "../../../lib/aerodrome";
+import { getTokenLogo, TOKEN_COLORS } from "../../../lib/tokenLogos";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
+
+// ── Token logo circle ─────────────────────────────────────────────────────────
+function TokenCircle({ symbol, size = 32, style }: {
+  symbol: string; size?: number; style?: React.CSSProperties;
+}) {
+  const [imgErr, setImgErr] = useState(false);
+  const logoUrl = getTokenLogo(symbol);
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
+  const base: React.CSSProperties = {
+    width: size, height: size, borderRadius: "50%",
+    border: "2px solid #060d08", flexShrink: 0, ...style,
+  };
+  if (logoUrl && !imgErr) {
+    return <img src={logoUrl} alt={symbol} onError={() => setImgErr(true)}
+      style={{ ...base, objectFit: "cover", display: "block" }} />;
+  }
+  return (
+    <div style={{ ...base, background: color,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: size * 0.35, fontWeight: 700, color: "white" }}>
+      {symbol.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+// ── Fee-snapshot localStorage helpers ────────────────────────────────────────
+const FEE_LS_KEY = "defidesh-fee-history";
+const MIN_SNAPSHOT_MS = 5 * 60 * 1000; // save at most once per 5 min
+
+interface FeeSnapshot {
+  timestamp: number;
+  feesUSD: number;
+  fees0?: number;
+  fees1?: number;
+}
+
+function loadSnapshots(posId: string): FeeSnapshot[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(FEE_LS_KEY);
+    if (!raw) return [];
+    return (JSON.parse(raw) as Record<string, FeeSnapshot[]>)[posId] ?? [];
+  } catch { return []; }
+}
+
+function appendSnapshot(posId: string, snap: FeeSnapshot): FeeSnapshot[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(FEE_LS_KEY);
+    const all = raw ? (JSON.parse(raw) as Record<string, FeeSnapshot[]>) : {};
+    const existing = all[posId] ?? [];
+    const last = existing[existing.length - 1];
+    if (last && snap.timestamp - last.timestamp < MIN_SNAPSHOT_MS) return existing;
+    const updated = [...existing, snap].slice(-1000);
+    all[posId] = updated;
+    localStorage.setItem(FEE_LS_KEY, JSON.stringify(all));
+    return updated;
+  } catch { return []; }
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const STABLES = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
@@ -167,6 +231,57 @@ export default function PositionDetail() {
   const hasAmounts = pos != null && (pos.amount0 != null || pos.amount1 != null);
   const hasFees    = pos != null && (pos.fees0 != null || pos.fees1 != null);
 
+  // ── Fee tracking ────────────────────────────────────────────────────────────
+  const [snapshots, setSnapshots] = useState<FeeSnapshot[]>([]);
+
+  // Load history on mount; append new snapshot whenever fees change
+  useEffect(() => {
+    if (!pos) return;
+    const snap: FeeSnapshot = {
+      timestamp: Date.now(),
+      feesUSD: pos.fees,
+      fees0: pos.fees0,
+      fees1: pos.fees1,
+    };
+    const updated = appendSnapshot(pos.id, snap);
+    setSnapshots(updated);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos?.id, pos?.fees]);
+
+  const feeMetrics = useMemo(() => {
+    if (!pos || snapshots.length === 0) return null;
+
+    // Estimated claimed = sum of fee drops between consecutive snapshots
+    let estimatedClaimed = 0;
+    for (let i = 1; i < snapshots.length; i++) {
+      const drop = snapshots[i - 1].feesUSD - snapshots[i].feesUSD;
+      if (drop > 0.005) estimatedClaimed += drop;
+    }
+
+    const totalEarned  = estimatedClaimed + pos.fees;
+    const feeVsHoldPct = pos.value > 0 ? (totalEarned / pos.value) * 100 : 0;
+    const firstSnap    = snapshots[0];
+    const ageDays      = (Date.now() - firstSnap.timestamp) / 86_400_000;
+
+    // Build cumulative chart data
+    let claimed = 0;
+    const chartData = snapshots.map((s, i) => {
+      if (i > 0) {
+        const drop = snapshots[i - 1].feesUSD - s.feesUSD;
+        if (drop > 0.005) claimed += drop;
+      }
+      return {
+        label: new Date(s.timestamp).toLocaleDateString("en-US", {
+          month: "short", day: "numeric",
+          hour: snapshots.length <= 48 ? "numeric" : undefined,
+        }),
+        value: claimed + s.feesUSD,
+      };
+    });
+
+    return { estimatedClaimed, totalEarned, feeVsHoldPct, ageDays, firstSnap, chartData };
+  }, [snapshots, pos]);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   // Loading
@@ -242,15 +357,14 @@ export default function PositionDetail() {
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
             flexWrap: "wrap", gap: 16 }}>
             <div>
-              {/* Token avatar + pair name */}
+              {/* Token pair logos + pair name */}
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
-                <div style={{
-                  width: 52, height: 52, borderRadius: "50%",
-                  background: chainGradient(pos.chain),
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 14, fontWeight: 700, color: "white", flexShrink: 0,
-                }}>
-                  {`${t0[0] ?? "?"}/${t1[0] ?? "?"}`}
+                {/* Overlapping token circles */}
+                <div style={{ position: "relative", width: 60, height: 36, flexShrink: 0 }}>
+                  <TokenCircle symbol={t1} size={36}
+                    style={{ position: "absolute", right: 0, top: 0, zIndex: 1 }} />
+                  <TokenCircle symbol={t0} size={36}
+                    style={{ position: "absolute", left: 0, top: 0, zIndex: 2 }} />
                 </div>
                 <h1 style={{ fontSize: 28, fontWeight: 700, color: "white", margin: 0 }}>
                   {t0} / {t1}
@@ -422,6 +536,138 @@ export default function PositionDetail() {
                 </div>
               </div>
             )}
+          </Card>
+        )}
+
+        {/* ── 2D.5: Performance Metrics ─────────────────────────────────────── */}
+        <Card style={{ marginBottom: 20, border: "1px solid rgba(251,191,36,0.15)" }}>
+          <SectionHeader icon="📊" label="Performance Metrics" />
+
+          {/* Total Fees row */}
+          {(pos.fees > 0 || (feeMetrics && feeMetrics.estimatedClaimed > 0)) && (
+            <div style={{ background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.12)",
+              borderRadius: 10, padding: 16, marginBottom: 12 }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: "0 0 4px",
+                textTransform: "uppercase", letterSpacing: 1 }}>Total Fees (Lifetime)</p>
+              <p style={{ fontSize: 26, fontWeight: 700, color: "#34d399", margin: "0 0 10px",
+                letterSpacing: -0.5 }}>
+                {fmt$(feeMetrics ? feeMetrics.totalEarned : pos.fees)}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {feeMetrics && feeMetrics.estimatedClaimed > 0.005 && (
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                    Collected (est.): {fmt$(feeMetrics.estimatedClaimed)}
+                    {pos.fees0 != null && pos.fees1 != null && (
+                      <span style={{ color: "rgba(255,255,255,0.25)", marginLeft: 6 }}>
+                        (previous claims detected)
+                      </span>
+                    )}
+                  </p>
+                )}
+                <p style={{ fontSize: 12, color: "#34d399", margin: 0 }}>
+                  +{fmt$(pos.fees)} uncollected
+                  {pos.fees0 != null && pos.price0 && (
+                    <span style={{ color: "rgba(255,255,255,0.35)", marginLeft: 6 }}>
+                      ({pos.fees0.toFixed(4)} {t0} + {(pos.fees1 ?? 0).toFixed(4)} {t1})
+                    </span>
+                  )}
+                </p>
+                {(!feeMetrics || feeMetrics.estimatedClaimed < 0.005) && (
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", margin: 0 }}>
+                    Collected fees: tracking starts from first page view
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3-col performance summary */}
+          <div className="detail-3col"
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            {/* Total Fees Earned */}
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 10, padding: 14, textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
+                textTransform: "uppercase", letterSpacing: 1 }}>Total Fees</p>
+              <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>
+                {fmt$(feeMetrics ? feeMetrics.totalEarned : pos.fees)}
+              </p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
+                {feeMetrics
+                  ? `Since ${new Date(feeMetrics.firstSnap.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                  : "Uncollected only"}
+              </p>
+            </div>
+
+            {/* Fee vs Hold */}
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 10, padding: 14, textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
+                textTransform: "uppercase", letterSpacing: 1 }}>Fee Income</p>
+              <p style={{ fontSize: 20, fontWeight: 700, color: "#6ee7b7", margin: "0 0 4px" }}>
+                {pos.value > 0
+                  ? `+${((feeMetrics ? feeMetrics.totalEarned : pos.fees) / pos.value * 100).toFixed(3)}%`
+                  : "—"}
+              </p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
+                of position value
+              </p>
+            </div>
+
+            {/* Position Age */}
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 10, padding: 14, textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
+                textTransform: "uppercase", letterSpacing: 1 }}>Tracking Age</p>
+              {feeMetrics ? (
+                <>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: "white", margin: "0 0 4px" }}>
+                    {feeMetrics.ageDays < 1
+                      ? `${Math.round(feeMetrics.ageDays * 24)}h`
+                      : `${Math.floor(feeMetrics.ageDays)}d`}
+                  </p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
+                    Tracking since {new Date(feeMetrics.firstSnap.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </p>
+                </>
+              ) : (
+                <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.3)", margin: 0 }}>—</p>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* ── 2D.6: Fee Accumulation Chart ──────────────────────────────────── */}
+        {feeMetrics && feeMetrics.chartData.length >= 2 && (
+          <Card style={{ marginBottom: 20 }}>
+            <SectionHeader icon="📈" label="Fee Accumulation" />
+            <div style={{ height: 160 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={feeMetrics.chartData}
+                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
+                    tickLine={false} axisLine={false}
+                    interval={Math.max(0, Math.floor(feeMetrics.chartData.length / 5) - 1)} />
+                  <YAxis tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
+                    tickLine={false} axisLine={false}
+                    tickFormatter={(v: number) => `$${v.toFixed(2)}`} width={52} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#0a1410",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                      borderRadius: 8, color: "#fff", fontSize: 12 }}
+                    formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(4)}`, "Cumulative Fees"]}
+                  />
+                  <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
+                    dot={false} activeDot={{ r: 4, fill: "#34d399" }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: "10px 0 0", textAlign: "center" }}>
+              Fee tracking started{" "}
+              {new Date(feeMetrics.firstSnap.timestamp).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.
+              {" "}Data before this date is not available.
+            </p>
           </Card>
         )}
 
