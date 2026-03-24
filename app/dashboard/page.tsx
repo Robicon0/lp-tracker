@@ -536,6 +536,178 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ── Summary Cards ─────────────────────────────────────────────────────── */}
+      {mounted && (
+        <div style={{ background:"#060d08", padding:"20px 28px 0" }}>
+          <div style={{ maxWidth:1200, margin:"0 auto" }}>
+
+            {/* Row 1 */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+
+              {/* Card 1: Wallets */}
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20 }}>
+                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Wallets</h3>
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {address && (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                      <div>
+                        <span style={{ fontSize:10, color:"#3b82f6", fontWeight:700,
+                          textTransform:"uppercase", letterSpacing:0.5 }}>EVM</span>
+                        <p style={{ fontSize:12, fontFamily:"monospace",
+                          color:"rgba(255,255,255,0.65)", margin:0, marginTop:2 }}>
+                          {address.slice(0,8)}…{address.slice(-6)}
+                        </p>
+                      </div>
+                      <button onClick={() => navigator.clipboard.writeText(address)}
+                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
+                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
+                    </div>
+                  )}
+                  {solanaAddress && (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                      <div>
+                        <span style={{ fontSize:10, color:"#9945ff", fontWeight:700,
+                          textTransform:"uppercase", letterSpacing:0.5 }}>Solana</span>
+                        <p style={{ fontSize:12, fontFamily:"monospace",
+                          color:"rgba(255,255,255,0.65)", margin:0, marginTop:2 }}>
+                          {solanaAddress.slice(0,6)}…{solanaAddress.slice(-4)}
+                        </p>
+                      </div>
+                      <button onClick={() => navigator.clipboard.writeText(solanaAddress)}
+                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
+                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
+                    </div>
+                  )}
+                  {suiAddress && (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                      <div>
+                        <span style={{ fontSize:10, color:"#6fbcf0", fontWeight:700,
+                          textTransform:"uppercase", letterSpacing:0.5 }}>Sui</span>
+                        <p style={{ fontSize:12, fontFamily:"monospace",
+                          color:"rgba(255,255,255,0.65)", margin:0, marginTop:2 }}>
+                          {suiAddress.slice(0,8)}…{suiAddress.slice(-6)}
+                        </p>
+                      </div>
+                      <button onClick={() => navigator.clipboard.writeText(suiAddress)}
+                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
+                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
+                    </div>
+                  )}
+                  {watchedWallets.map((w) => (
+                    <div key={w.address} style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                      <div>
+                        <span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", fontWeight:700,
+                          textTransform:"uppercase", letterSpacing:0.5 }}>
+                          {w.chain} · {w.label ?? "Watched"}
+                        </span>
+                        <p style={{ fontSize:12, fontFamily:"monospace",
+                          color:"rgba(255,255,255,0.5)", margin:0, marginTop:2 }}>
+                          {w.address.slice(0,6)}…{w.address.slice(-4)}
+                        </p>
+                      </div>
+                      <button onClick={() => navigator.clipboard.writeText(w.address)}
+                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
+                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
+                    </div>
+                  ))}
+                  {!hasWallet && (
+                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.3)", margin:0 }}>No wallet connected</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Card 2: Total Value */}
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20 }}>
+                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Total Value</h3>
+                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 8px",
+                  letterSpacing:-1 }}>{fmt$(totalValue)}</p>
+                {effectiveHistory.length >= 2 && (
+                  <p style={{ fontSize:13, color: pnlDollar >= 0 ? "#34d399" : "#ef4444", margin:0 }}>
+                    {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
+                    ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
+                    <span style={{ color:"rgba(255,255,255,0.35)", fontSize:11, marginLeft:4 }}>{pnlLabel}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Card 3: Estimated Net Cashflow */}
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20 }}>
+                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Estimated Net Cashflow</h3>
+                {hasCashflowData ? (
+                  <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                    {[
+                      { label:"Daily",   value: dailyCashflow },
+                      { label:"Monthly", value: dailyCashflow * 30 },
+                      { label:"Yearly",  value: dailyCashflow * 365 },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display:"flex", justifyContent:"space-between",
+                        alignItems:"center" }}>
+                        <span style={{ fontSize:13, color:"rgba(255,255,255,0.45)" }}>{label}</span>
+                        <span style={{ fontSize:15, fontWeight:600, color:"#34d399" }}>
+                          +{fmt$(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>
+                    Connect wallet to see cashflow estimates.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Row 2 */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+
+              {/* Card 4: Tokens */}
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20 }}>
+                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Tokens</h3>
+                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                  letterSpacing:-1 }}>$0.00</p>
+                <p style={{ fontSize:12, color:"rgba(255,255,255,0.3)", margin:0 }}>Coming soon</p>
+              </div>
+
+              {/* Card 5: Lending / Borrowing */}
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20 }}>
+                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Lending / Borrowing</h3>
+                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                  letterSpacing:-1 }}>$0.00</p>
+                <p style={{ fontSize:12, color:"rgba(255,255,255,0.3)", margin:0 }}>Coming soon</p>
+              </div>
+
+              {/* Card 6: Liquidity Positions */}
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                borderRadius:14, padding:20 }}>
+                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
+                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Liquidity Positions</h3>
+                <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
+                  letterSpacing:-1 }}>{fmt$(totalValue)}</p>
+                {totalFees > 0 && (
+                  <p style={{ fontSize:13, color:"#34d399", margin:"0 0 6px" }}>
+                    +{fmt$(totalFees)} Ready to Collect
+                  </p>
+                )}
+                <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                  {allPositions.length === 1 ? "1 position" : `${allPositions.length} positions`}
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* ── Charts Section ────────────────────────────────────────────────────── */}
       {mounted && (
         <div style={{ background:"#060d08", padding:"20px 28px 0" }}>
@@ -849,28 +1021,33 @@ export default function Dashboard() {
                   >
                     {/* Col 1: Pair info */}
                     <div style={{ display:"flex", alignItems:"center", gap:12, overflow:"hidden" }}>
-                      {/* Dual overlapping token circles */}
+                      {/* Dual overlapping token pills */}
                       {(() => {
                         const parts = pos.pair.split(/\s*\/\s*/);
                         const sym0 = parts[0]?.trim() ?? "";
                         const sym1 = parts[1]?.trim() ?? "";
                         const c0 = getTokenColor(sym0);
                         const c1 = getTokenColor(sym1);
+                        const pw = (s: string) => s.length <= 3 ? 36 : s.length === 4 ? 46 : 54;
+                        const w0 = pw(sym0); const w1 = pw(sym1);
+                        const OVERLAP = 10;
                         return (
-                          <div style={{ position:"relative", width:52, height:32, flexShrink:0 }}>
-                            <div style={{ position:"absolute", left:20, top:0, width:32, height:32,
-                              borderRadius:"50%", background:c1, display:"flex",
+                          <div style={{ position:"relative", width:w0+w1-OVERLAP, height:28, flexShrink:0 }}>
+                            <div style={{ position:"absolute", left:w0-OVERLAP, top:0, width:w1, height:28,
+                              borderRadius:14, background:c1, display:"flex",
                               alignItems:"center", justifyContent:"center",
-                              fontSize:12, fontWeight:700, color:"white",
-                              border:"2px solid #060d08", zIndex:1 }}>
-                              {sym1[0]?.toUpperCase() ?? "?"}
+                              fontSize:10, fontWeight:700, color:"white", letterSpacing:0.3,
+                              border:"2px solid #060d08", zIndex:1, overflow:"hidden",
+                              whiteSpace:"nowrap", padding:"0 4px" }}>
+                              {sym1 || "?"}
                             </div>
-                            <div style={{ position:"absolute", left:0, top:0, width:32, height:32,
-                              borderRadius:"50%", background:c0, display:"flex",
+                            <div style={{ position:"absolute", left:0, top:0, width:w0, height:28,
+                              borderRadius:14, background:c0, display:"flex",
                               alignItems:"center", justifyContent:"center",
-                              fontSize:12, fontWeight:700, color:"white",
-                              border:"2px solid #060d08", zIndex:2 }}>
-                              {sym0[0]?.toUpperCase() ?? "?"}
+                              fontSize:10, fontWeight:700, color:"white", letterSpacing:0.3,
+                              border:"2px solid #060d08", zIndex:2, overflow:"hidden",
+                              whiteSpace:"nowrap", padding:"0 4px" }}>
+                              {sym0 || "?"}
                             </div>
                           </div>
                         );
