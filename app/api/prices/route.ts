@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Server-side proxy for CoinGecko API — avoids CORS errors from browser clients.
 // All client-side code should call /api/prices?... instead of api.coingecko.com directly.
+
+// In-memory cache: key → { data, expiresAt }
+const cache = new Map<string, { data: unknown; expiresAt: number }>();
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const endpoint = searchParams.get("endpoint") || "simple/price";
@@ -27,12 +32,21 @@ export async function GET(request: NextRequest) {
       url = `https://api.coingecko.com/api/v3/${endpoint}?${params.toString()}`;
     }
 
+    // Return cached response if still fresh
+    const cached = cache.get(url);
+    if (cached && Date.now() < cached.expiresAt) {
+      return NextResponse.json(cached.data);
+    }
+
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
-      next: { revalidate: 60 },
     });
 
     if (!response.ok) {
+      // On 429, return stale cache if available rather than an error
+      if (response.status === 429 && cached) {
+        return NextResponse.json(cached.data);
+      }
       return NextResponse.json(
         { error: `CoinGecko returned ${response.status}` },
         { status: response.status }
@@ -40,6 +54,7 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json();
+    cache.set(url, { data, expiresAt: Date.now() + CACHE_TTL_MS });
     return NextResponse.json(data);
   } catch (err) {
     console.error("[api/prices] proxy error:", err);

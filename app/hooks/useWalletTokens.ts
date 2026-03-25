@@ -97,7 +97,7 @@ export function useWalletTokens(): WalletTokensData {
         prices.optimism   = res?.optimism?.usd   ?? 0;
         prices.bnb        = res?.binancecoin?.usd ?? 0;
         prices.avax       = res?.["avalanche-2"]?.usd ?? 0;
-      } catch { /* continue with 0 prices */ }
+      } catch (err) { console.error("[useWalletTokens] price fetch failed:", err); }
 
       function priceOf(symbol: string): number {
         const s = symbol.toUpperCase();
@@ -171,10 +171,10 @@ export function useWalletTokens(): WalletTokensData {
                       contractAddress: token.contractAddress,
                     });
                   }
-                } catch { /* skip bad token */ }
+                } catch (err) { console.error(`[useWalletTokens] ${chain.name} token metadata failed for ${token.contractAddress}:`, err); }
               }),
             );
-          } catch { /* skip chain on error */ }
+          } catch (err) { console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
         }),
       );
 
