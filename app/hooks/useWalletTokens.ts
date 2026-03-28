@@ -81,6 +81,14 @@ export function useWalletTokens(): WalletTokensData {
     let cancelled = false;
     setData((prev) => ({ ...prev, isLoading: true }));
 
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) {
+        console.error("[useWalletTokens] timed out after 30s — showing partial data");
+        cancelled = true;
+        setData((prev) => ({ ...prev, isLoading: false }));
+      }
+    }, 30_000);
+
     (async () => {
       // Fetch prices for common non-stable tokens
       const prices: Record<string, number> = {};
@@ -184,6 +192,7 @@ export function useWalletTokens(): WalletTokensData {
       const lending  = tokens.filter((t) => t.isLending);
       const debt     = tokens.filter((t) => t.isDebt);
 
+      clearTimeout(timeoutId);
       setData({
         tokens,
         totalTokenValue:  regular.reduce((s, t) => s + t.usdValue, 0),
@@ -195,7 +204,7 @@ export function useWalletTokens(): WalletTokensData {
       });
     })();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timeoutId); };
   }, [address]);
 
   return data;
