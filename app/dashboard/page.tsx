@@ -555,7 +555,7 @@ export default function Dashboard() {
             <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
               <button
                 onClick={() => refetch()}
-                disabled={isFetching}
+                disabled={mounted ? isFetching : false}
                 style={{ background:"rgba(255,255,255,0.06)", borderRadius:12, padding:"6px 14px",
                   fontSize:12, color:"rgba(255,255,255,0.5)", border:"none", cursor:"pointer",
                   opacity: isFetching ? 0.6 : 1 }}
