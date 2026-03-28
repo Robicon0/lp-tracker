@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -143,22 +144,7 @@ function estimateAmounts(
 }
 
 async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, number>> {
-  try {
-    const unique = [...new Set(coingeckoIds.filter(Boolean))].join(',');
-    if (!unique) return {};
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${unique}&vs_currencies=usd`,
-      { next: { revalidate: 60 } }
-    );
-    const data = await res.json();
-    const prices: Record<string, number> = {};
-    for (const [id, val] of Object.entries(data)) {
-      prices[id] = (val as { usd?: number })?.usd || 0;
-    }
-    return prices;
-  } catch {
-    return {};
-  }
+  return fetchCachedCoinGeckoPrices(coingeckoIds);
 }
 
 async function fetchPancakeAPYs(): Promise<Record<string, number>> {

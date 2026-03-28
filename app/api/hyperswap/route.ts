@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -323,22 +324,7 @@ function calculateAmounts(
 }
 
 async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, number>> {
-  const unique = [...new Set(coingeckoIds.filter(Boolean))];
-  if (unique.length === 0) return {};
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${unique.join(',')}&vs_currencies=usd`,
-      { next: { revalidate: 60 } },
-    );
-    const data = await res.json();
-    const prices: Record<string, number> = {};
-    for (const [id, val] of Object.entries(data)) {
-      prices[id] = (val as { usd: number })?.usd || 0;
-    }
-    return prices;
-  } catch {
-    return {};
-  }
+  return fetchCachedCoinGeckoPrices(coingeckoIds);
 }
 
 async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {

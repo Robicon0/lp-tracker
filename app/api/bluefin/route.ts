@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -138,25 +139,19 @@ async function fetchCoinMetadata(coinType: string): Promise<{ symbol: string; de
 }
 
 async function fetchPrices(coinTypes: string[]): Promise<Record<string, number>> {
-  const ids: string[] = [];
   const coinTypeToId: Record<string, string> = {};
   for (const ct of coinTypes) {
     const known = KNOWN_COINS[ct];
-    if (known) { ids.push(known.coingeckoId); coinTypeToId[ct] = known.coingeckoId; }
+    if (known) coinTypeToId[ct] = known.coingeckoId;
   }
+  const ids = [...new Set(Object.values(coinTypeToId))];
   if (ids.length === 0) return {};
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${[...new Set(ids)].join(',')}&vs_currencies=usd`,
-      { next: { revalidate: 60 } },
-    );
-    const data = await res.json();
-    const prices: Record<string, number> = {};
-    for (const [ct, geckoId] of Object.entries(coinTypeToId)) {
-      prices[ct] = data[geckoId]?.usd || 0;
-    }
-    return prices;
-  } catch { return {}; }
+  const geckoData = await fetchCachedCoinGeckoPrices(ids);
+  const prices: Record<string, number> = {};
+  for (const [ct, geckoId] of Object.entries(coinTypeToId)) {
+    prices[ct] = geckoData[geckoId] || 0;
+  }
+  return prices;
 }
 
 // I32 package used for tick keys in the ticks Table

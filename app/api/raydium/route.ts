@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
+import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -226,21 +227,13 @@ function calculateAmounts(
 }
 
 async function fetchPrices(): Promise<Record<string, number>> {
-  try {
-    const ids = [...new Set(Object.values(TOKENS).map((t) => t.coingeckoId))].join(',');
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
-      { next: { revalidate: 60 } }
-    );
-    const data = await res.json();
-    const prices: Record<string, number> = {};
-    for (const [mint, token] of Object.entries(TOKENS)) {
-      prices[mint] = data[token.coingeckoId]?.usd || 0;
-    }
-    return prices;
-  } catch {
-    return {};
+  const ids = [...new Set(Object.values(TOKENS).map((t) => t.coingeckoId))];
+  const geckoData = await fetchCachedCoinGeckoPrices(ids);
+  const prices: Record<string, number> = {};
+  for (const [mint, token] of Object.entries(TOKENS)) {
+    prices[mint] = geckoData[token.coingeckoId] || 0;
   }
+  return prices;
 }
 
 interface DasTokenInfo {

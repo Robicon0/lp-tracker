@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -72,26 +73,13 @@ async function getPoolTokens(poolAddress: string): Promise<{ token0: string; tok
 
 // Fetch prices from CoinGecko
 async function fetchPrices(): Promise<Record<string, number>> {
-  try {
-    const ids = [...new Set(Object.values(TOKENS).map(t => t.coingeckoId))].join(',');
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
-      { next: { revalidate: 60 } }
-    );
-    const data = await res.json();
-    const prices: Record<string, number> = {};
-    for (const [addr, token] of Object.entries(TOKENS)) {
-      prices[addr] = data[token.coingeckoId]?.usd || 0;
-    }
-    return prices;
-  } catch {
-    // Fallback prices
-    return {
-      '0x4200000000000000000000000000000000000006': 2700,
-      '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 1,
-      '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 96000,
-    };
+  const ids = [...new Set(Object.values(TOKENS).map(t => t.coingeckoId))];
+  const geckoData = await fetchCachedCoinGeckoPrices(ids);
+  const prices: Record<string, number> = {};
+  for (const [addr, token] of Object.entries(TOKENS)) {
+    prices[addr] = geckoData[token.coingeckoId] || 0;
   }
+  return prices;
 }
 
 // Fetch APY data from DefiLlama yields API
