@@ -83,6 +83,7 @@ export function useWalletTokens(): WalletTokensData {
     console.log("[useWalletTokens] Starting fetch for address:", address);
     fetchedForRef.current = address;
     let cancelled = false;
+    let fetchCompleted = false;
     setData((prev) => ({ ...prev, isLoading: true }));
 
     const timeoutId = setTimeout(() => {
@@ -203,6 +204,7 @@ export function useWalletTokens(): WalletTokensData {
       const lending  = tokens.filter((t) => t.isLending);
       const debt     = tokens.filter((t) => t.isDebt);
 
+      fetchCompleted = true;
       clearTimeout(timeoutId);
       setData({
         tokens,
@@ -223,10 +225,15 @@ export function useWalletTokens(): WalletTokensData {
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
-      // Reset so StrictMode remount (dev) or wallet change re-runs the fetch.
-      // Without this, cleanup sets cancelled=true and the remount skips fetching
-      // because fetchedForRef.current === address, leaving isLoading stuck at true.
-      fetchedForRef.current = null;
+      // Only reset fetchedForRef when the fetch didn't complete. This lets
+      // StrictMode's immediate cleanup trigger a retry on remount (fetchCompleted=false
+      // since the async work was cancelled before finishing). But when a fetch DID
+      // complete, we keep fetchedForRef set so that address oscillations caused by
+      // Solana/Sui wallet connect events (which briefly make address undefined and
+      // then restore it) don't trigger an unnecessary re-fetch that sets isLoading=true.
+      if (!fetchCompleted) {
+        fetchedForRef.current = null;
+      }
     };
   }, [address]);
 
