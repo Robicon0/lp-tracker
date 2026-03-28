@@ -90,6 +90,7 @@ export function useWalletTokens(): WalletTokensData {
     }, 30_000);
 
     (async () => {
+      try {
       // Fetch prices for common non-stable tokens
       const prices: Record<string, number> = {};
       try {
@@ -202,6 +203,11 @@ export function useWalletTokens(): WalletTokensData {
         lendingCount: lending.length,
         isLoading: false,
       });
+      } catch (err) {
+        console.error("[useWalletTokens] unexpected error — clearing loading state:", err);
+        clearTimeout(timeoutId);
+        if (!cancelled) setData((prev) => ({ ...prev, isLoading: false }));
+      }
     })();
 
     return () => { cancelled = true; clearTimeout(timeoutId); };
