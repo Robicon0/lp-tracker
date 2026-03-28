@@ -554,11 +554,12 @@ export default function Dashboard() {
 
             <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
               <button
-                onClick={() => refetch()}
-                disabled={mounted ? isFetching : false}
+                onClick={() => { if (!isFetching) refetch(); }}
+                aria-disabled={isFetching}
                 style={{ background:"rgba(255,255,255,0.06)", borderRadius:12, padding:"6px 14px",
-                  fontSize:12, color:"rgba(255,255,255,0.5)", border:"none", cursor:"pointer",
-                  opacity: isFetching ? 0.6 : 1 }}
+                  fontSize:12, color:"rgba(255,255,255,0.5)", border:"none",
+                  cursor: isFetching ? "not-allowed" : "pointer",
+                  opacity: isFetching ? 0.5 : 1 }}
               >
                 <span className={isFetching ? "spin-icon" : ""}>↻</span>{" "}
                 {isFetching ? "Refreshing…" : "Refresh"}
