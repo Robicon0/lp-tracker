@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useAccount } from "wagmi";
+import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { getTokenLogo } from "../lib/tokenLogos";
 
 const CHAINS = [
@@ -61,6 +62,7 @@ export interface WalletTokensData {
 
 export function useWalletTokens(): WalletTokensData {
   const { address } = useAccount();
+  const { solanaAddress, suiAddress } = useWalletAuth();
   const fetchedForRef = useRef<string | null>(null);
 
   const [data, setData] = useState<WalletTokensData>({
@@ -74,14 +76,13 @@ export function useWalletTokens(): WalletTokensData {
   });
 
   useEffect(() => {
-    if (!address || fetchedForRef.current === address) return;
-    if (!process.env.NEXT_PUBLIC_ALCHEMY_KEY) {
-      console.warn("[useWalletTokens] NEXT_PUBLIC_ALCHEMY_KEY missing — skipping token scan");
-      return;
-    }
+    // Composite key — refetch whenever any wallet address changes
+    const fetchKey = [address, solanaAddress, suiAddress].filter(Boolean).join("|") || null;
 
-    console.log("[useWalletTokens] Starting fetch for address:", address);
-    fetchedForRef.current = address;
+    if (!fetchKey || fetchedForRef.current === fetchKey) return;
+
+    console.log("[useWalletTokens] Starting fetch for wallets:", { evm: address, solana: solanaAddress, sui: suiAddress });
+    fetchedForRef.current = fetchKey;
     let cancelled = false;
     let fetchCompleted = false;
     setData((prev) => ({ ...prev, isLoading: true }));
@@ -96,125 +97,233 @@ export function useWalletTokens(): WalletTokensData {
 
     (async () => {
       try {
-      // Fetch prices for common non-stable tokens
-      const prices: Record<string, number> = {};
-      try {
-        const res = await fetch(
-          "/api/prices?endpoint=simple/price&ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd",
-        ).then((r) => r.json());
-        prices.ethereum   = res?.ethereum?.usd   ?? 0;
-        prices.bitcoin    = res?.bitcoin?.usd    ?? 0;
-        prices.solana     = res?.solana?.usd     ?? 0;
-        prices.sui        = res?.sui?.usd        ?? 0;
-        prices.matic      = res?.["matic-network"]?.usd ?? 0;
-        prices.arbitrum   = res?.arbitrum?.usd   ?? 0;
-        prices.optimism   = res?.optimism?.usd   ?? 0;
-        prices.bnb        = res?.binancecoin?.usd ?? 0;
-        prices.avax       = res?.["avalanche-2"]?.usd ?? 0;
-      } catch (err) { console.error("[useWalletTokens] price fetch failed:", err); }
+        // Fetch prices for common tokens across all chains
+        const prices: Record<string, number> = {};
+        try {
+          const res = await fetch(
+            "/api/prices?endpoint=simple/price&ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd",
+          ).then((r) => r.json());
+          prices.ethereum   = res?.ethereum?.usd   ?? 0;
+          prices.bitcoin    = res?.bitcoin?.usd    ?? 0;
+          prices.solana     = res?.solana?.usd     ?? 0;
+          prices.sui        = res?.sui?.usd        ?? 0;
+          prices.matic      = res?.["matic-network"]?.usd ?? 0;
+          prices.arbitrum   = res?.arbitrum?.usd   ?? 0;
+          prices.optimism   = res?.optimism?.usd   ?? 0;
+          prices.bnb        = res?.binancecoin?.usd ?? 0;
+          prices.avax       = res?.["avalanche-2"]?.usd ?? 0;
+        } catch (err) { console.error("[useWalletTokens] price fetch failed:", err); }
 
-      function priceOf(symbol: string): number {
-        const s = symbol.toUpperCase();
-        if (STABLE_SYMBOLS.has(s)) return 1;
-        if (s === "ETH" || s === "WETH" || s === "STETH" || s === "WSTETH") return prices.ethereum;
-        if (s === "BTC" || s === "WBTC" || s === "CBBTC" || s === "TBTC") return prices.bitcoin;
-        if (s === "SOL" || s === "WSOL") return prices.solana;
-        if (s === "SUI") return prices.sui;
-        if (s === "MATIC" || s === "POL") return prices.matic;
-        if (s === "ARB") return prices.arbitrum;
-        if (s === "OP") return prices.optimism;
-        if (s === "BNB" || s === "WBNB") return prices.bnb;
-        if (s === "AVAX") return prices.avax;
-        // aToken: resolve underlying price
-        const underlying = getATokenUnderlying(symbol);
-        if (underlying) return priceOf(underlying);
-        return 0;
-      }
+        function priceOf(symbol: string): number {
+          const s = symbol.toUpperCase();
+          if (STABLE_SYMBOLS.has(s)) return 1;
+          if (s === "ETH" || s === "WETH" || s === "STETH" || s === "WSTETH") return prices.ethereum;
+          if (s === "BTC" || s === "WBTC" || s === "CBBTC" || s === "TBTC") return prices.bitcoin;
+          if (s === "SOL" || s === "WSOL") return prices.solana;
+          if (s === "SUI") return prices.sui;
+          if (s === "MATIC" || s === "POL") return prices.matic;
+          if (s === "ARB") return prices.arbitrum;
+          if (s === "OP") return prices.optimism;
+          if (s === "BNB" || s === "WBNB") return prices.bnb;
+          if (s === "AVAX") return prices.avax;
+          // aToken: resolve underlying price
+          const underlying = getATokenUnderlying(symbol);
+          if (underlying) return priceOf(underlying);
+          return 0;
+        }
 
-      const tokens: TokenItem[] = [];
+        const tokens: TokenItem[] = [];
 
-      await Promise.allSettled(
-        CHAINS.map(async (chain) => {
-          const post = (body: object) =>
-            fetch(chain.url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-            }).then((r) => r.json());
+        // Build parallel scan tasks for each connected wallet
+        const scanTasks: Promise<void>[] = [];
 
-          try {
-            console.log(`[useWalletTokens] Scanning ${chain.name}...`);
-            const balRes = await post({
-              jsonrpc: "2.0", id: 1,
-              method: "alchemy_getTokenBalances",
-              params: [address, "erc20"],
-            });
-            const nonZero = (balRes.result?.tokenBalances ?? []).filter(
-              (t: { tokenBalance: string }) => t.tokenBalance && t.tokenBalance !== ZERO_HEX,
-            );
-            const top = nonZero.slice(0, 50);
+        // ── EVM chains via Alchemy ────────────────────────────────────────────
+        if (address && process.env.NEXT_PUBLIC_ALCHEMY_KEY) {
+          scanTasks.push(
+            ...CHAINS.map(async (chain) => {
+              const post = (body: object) =>
+                fetch(chain.url, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                }).then((r) => r.json());
 
-            await Promise.allSettled(
-              top.map(async (token: { contractAddress: string; tokenBalance: string }) => {
-                try {
-                  const meta = await post({
-                    jsonrpc: "2.0", id: 2,
-                    method: "alchemy_getTokenMetadata",
-                    params: [token.contractAddress],
-                  });
-                  const m = meta.result;
-                  if (!m?.symbol || m.symbol.length >= 20) return;
-                  const decimals = m.decimals || 18;
-                  const rawBal = BigInt(token.tokenBalance);
-                  const balance = Number(rawBal) / Math.pow(10, decimals);
-                  if (balance < 0.0001) return;
-                  const price = priceOf(m.symbol);
-                  const usdValue = balance * price;
-                  const lending = isLendingToken(m.symbol);
-                  const debt = isDebtToken(m.symbol);
-                  if (!cancelled) {
-                    tokens.push({
-                      symbol: m.symbol,
-                      name: m.name && m.name.length < 40 ? m.name : m.symbol,
-                      balance,
-                      usdValue,
-                      price,
-                      chain: chain.name,
-                      logo: m.logo || getTokenLogo(m.symbol) || "",
-                      isLending: lending,
-                      isDebt: debt,
-                      contractAddress: token.contractAddress,
-                    });
-                  }
-                } catch (err) { console.error(`[useWalletTokens] ${chain.name} token metadata failed for ${token.contractAddress}:`, err); }
-              }),
-            );
-            console.log(`[useWalletTokens] ${chain.name} done`);
-          } catch (err) { console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
-        }),
-      );
+              try {
+                console.log(`[useWalletTokens] Scanning ${chain.name}...`);
+                const balRes = await post({
+                  jsonrpc: "2.0", id: 1,
+                  method: "alchemy_getTokenBalances",
+                  params: [address, "erc20"],
+                });
+                const nonZero = (balRes.result?.tokenBalances ?? []).filter(
+                  (t: { tokenBalance: string }) => t.tokenBalance && t.tokenBalance !== ZERO_HEX,
+                );
+                const top = nonZero.slice(0, 50);
 
-      if (cancelled) {
-        console.log("[useWalletTokens] Cancelled before setData — isLoading will not be cleared by this run");
-        return;
-      }
+                await Promise.allSettled(
+                  top.map(async (token: { contractAddress: string; tokenBalance: string }) => {
+                    try {
+                      const meta = await post({
+                        jsonrpc: "2.0", id: 2,
+                        method: "alchemy_getTokenMetadata",
+                        params: [token.contractAddress],
+                      });
+                      const m = meta.result;
+                      if (!m?.symbol || m.symbol.length >= 20) return;
+                      const decimals = m.decimals || 18;
+                      const rawBal = BigInt(token.tokenBalance);
+                      const balance = Number(rawBal) / Math.pow(10, decimals);
+                      if (balance < 0.0001) return;
+                      const price = priceOf(m.symbol);
+                      const usdValue = balance * price;
+                      const lending = isLendingToken(m.symbol);
+                      const debt = isDebtToken(m.symbol);
+                      if (!cancelled) {
+                        tokens.push({
+                          symbol: m.symbol,
+                          name: m.name && m.name.length < 40 ? m.name : m.symbol,
+                          balance,
+                          usdValue,
+                          price,
+                          chain: chain.name,
+                          logo: m.logo || getTokenLogo(m.symbol) || "",
+                          isLending: lending,
+                          isDebt: debt,
+                          contractAddress: token.contractAddress,
+                        });
+                      }
+                    } catch (err) { console.error(`[useWalletTokens] ${chain.name} token metadata failed for ${token.contractAddress}:`, err); }
+                  }),
+                );
+                console.log(`[useWalletTokens] ${chain.name} done`);
+              } catch (err) { console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
+            }),
+          );
+        } else if (address) {
+          console.warn("[useWalletTokens] NEXT_PUBLIC_ALCHEMY_KEY missing — skipping EVM token scan");
+        }
 
-      console.log("[useWalletTokens] Fetch complete, found", tokens.length, "tokens");
-      const regular  = tokens.filter((t) => !t.isLending && !t.isDebt);
-      const lending  = tokens.filter((t) => t.isLending);
-      const debt     = tokens.filter((t) => t.isDebt);
+        // ── Solana via /api/solana/balances (Helius server-side) ─────────────
+        if (solanaAddress) {
+          scanTasks.push((async () => {
+            try {
+              console.log("[useWalletTokens] Scanning Solana...");
+              const res = await fetch(`/api/solana/balances?account=${solanaAddress}`).then((r) => r.json());
+              if (cancelled) return;
 
-      fetchCompleted = true;
-      clearTimeout(timeoutId);
-      setData({
-        tokens,
-        totalTokenValue:  regular.reduce((s, t) => s + t.usdValue, 0),
-        totalLendingValue: lending.reduce((s, t) => s + t.usdValue, 0),
-        totalDebtValue:   debt.reduce((s, t) => s + t.usdValue, 0),
-        tokenCount:  regular.length,
-        lendingCount: lending.length,
-        isLoading: false,
-      });
+              // Native SOL
+              const solBal = parseFloat(res.solBalance ?? "0");
+              if (solBal >= 0.0001) {
+                tokens.push({
+                  symbol: "SOL",
+                  name: "Solana",
+                  balance: solBal,
+                  usdValue: solBal * (prices.solana ?? 0),
+                  price: prices.solana ?? 0,
+                  chain: "Solana",
+                  logo: getTokenLogo("SOL") || "",
+                  isLending: false,
+                  isDebt: false,
+                  contractAddress: "native",
+                });
+              }
+
+              // SPL tokens
+              for (const t of (res.tokens ?? [])) {
+                if (cancelled) return;
+                const balance = parseFloat(t.balance ?? "0");
+                if (balance < 0.0001) continue;
+                const price = priceOf(t.symbol);
+                tokens.push({
+                  symbol: t.symbol,
+                  name: t.name,
+                  balance,
+                  usdValue: balance * price,
+                  price,
+                  chain: "Solana",
+                  logo: getTokenLogo(t.symbol) || "",
+                  isLending: false,
+                  isDebt: false,
+                  contractAddress: t.mint ?? "",
+                });
+              }
+              console.log("[useWalletTokens] Solana done");
+            } catch (err) { console.error("[useWalletTokens] Solana scan failed:", err); }
+          })());
+        }
+
+        // ── Sui via /api/sui/balances ─────────────────────────────────────────
+        if (suiAddress) {
+          scanTasks.push((async () => {
+            try {
+              console.log("[useWalletTokens] Scanning Sui...");
+              const res = await fetch(`/api/sui/balances?account=${suiAddress}`).then((r) => r.json());
+              if (cancelled) return;
+
+              // Native SUI
+              const suiBal = parseFloat(res.suiBalance ?? "0");
+              if (suiBal >= 0.0001) {
+                tokens.push({
+                  symbol: "SUI",
+                  name: "Sui",
+                  balance: suiBal,
+                  usdValue: suiBal * (prices.sui ?? 0),
+                  price: prices.sui ?? 0,
+                  chain: "Sui",
+                  logo: getTokenLogo("SUI") || "",
+                  isLending: false,
+                  isDebt: false,
+                  contractAddress: "0x2::sui::SUI",
+                });
+              }
+
+              // Other Sui coins
+              for (const t of (res.tokens ?? [])) {
+                if (cancelled) return;
+                const balance = parseFloat(t.balance ?? "0");
+                if (balance < 0.0001) continue;
+                const price = priceOf(t.symbol);
+                tokens.push({
+                  symbol: t.symbol,
+                  name: t.name,
+                  balance,
+                  usdValue: balance * price,
+                  price,
+                  chain: "Sui",
+                  logo: getTokenLogo(t.symbol) || "",
+                  isLending: false,
+                  isDebt: false,
+                  contractAddress: t.coinType ?? "",
+                });
+              }
+              console.log("[useWalletTokens] Sui done");
+            } catch (err) { console.error("[useWalletTokens] Sui scan failed:", err); }
+          })());
+        }
+
+        await Promise.allSettled(scanTasks);
+
+        if (cancelled) {
+          console.log("[useWalletTokens] Cancelled before setData — isLoading will not be cleared by this run");
+          return;
+        }
+
+        console.log("[useWalletTokens] Fetch complete, found", tokens.length, "tokens");
+        const regular  = tokens.filter((t) => !t.isLending && !t.isDebt);
+        const lending  = tokens.filter((t) => t.isLending);
+        const debt     = tokens.filter((t) => t.isDebt);
+
+        fetchCompleted = true;
+        clearTimeout(timeoutId);
+        setData({
+          tokens,
+          totalTokenValue:   regular.reduce((s, t) => s + t.usdValue, 0),
+          totalLendingValue: lending.reduce((s, t) => s + t.usdValue, 0),
+          totalDebtValue:    debt.reduce((s, t) => s + t.usdValue, 0),
+          tokenCount:  regular.length,
+          lendingCount: lending.length,
+          isLoading: false,
+        });
       } catch (err) {
         console.error("[useWalletTokens] unexpected error — clearing loading state:", err);
         clearTimeout(timeoutId);
@@ -229,13 +338,12 @@ export function useWalletTokens(): WalletTokensData {
       // StrictMode's immediate cleanup trigger a retry on remount (fetchCompleted=false
       // since the async work was cancelled before finishing). But when a fetch DID
       // complete, we keep fetchedForRef set so that address oscillations caused by
-      // Solana/Sui wallet connect events (which briefly make address undefined and
-      // then restore it) don't trigger an unnecessary re-fetch that sets isLoading=true.
+      // Solana/Sui wallet connect events don't trigger unnecessary re-fetches.
       if (!fetchCompleted) {
         fetchedForRef.current = null;
       }
     };
-  }, [address]);
+  }, [address, solanaAddress, suiAddress]);
 
   return data;
 }
