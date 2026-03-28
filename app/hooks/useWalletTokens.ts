@@ -75,8 +75,12 @@ export function useWalletTokens(): WalletTokensData {
 
   useEffect(() => {
     if (!address || fetchedForRef.current === address) return;
-    if (!process.env.NEXT_PUBLIC_ALCHEMY_KEY) return;
+    if (!process.env.NEXT_PUBLIC_ALCHEMY_KEY) {
+      console.warn("[useWalletTokens] NEXT_PUBLIC_ALCHEMY_KEY missing — skipping token scan");
+      return;
+    }
 
+    console.log("[useWalletTokens] Starting fetch for address:", address);
     fetchedForRef.current = address;
     let cancelled = false;
     setData((prev) => ({ ...prev, isLoading: true }));
@@ -138,6 +142,7 @@ export function useWalletTokens(): WalletTokensData {
             }).then((r) => r.json());
 
           try {
+            console.log(`[useWalletTokens] Scanning ${chain.name}...`);
             const balRes = await post({
               jsonrpc: "2.0", id: 1,
               method: "alchemy_getTokenBalances",
@@ -183,12 +188,17 @@ export function useWalletTokens(): WalletTokensData {
                 } catch (err) { console.error(`[useWalletTokens] ${chain.name} token metadata failed for ${token.contractAddress}:`, err); }
               }),
             );
+            console.log(`[useWalletTokens] ${chain.name} done`);
           } catch (err) { console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
         }),
       );
 
-      if (cancelled) return;
+      if (cancelled) {
+        console.log("[useWalletTokens] Cancelled before setData — isLoading will not be cleared by this run");
+        return;
+      }
 
+      console.log("[useWalletTokens] Fetch complete, found", tokens.length, "tokens");
       const regular  = tokens.filter((t) => !t.isLending && !t.isDebt);
       const lending  = tokens.filter((t) => t.isLending);
       const debt     = tokens.filter((t) => t.isDebt);
@@ -210,7 +220,14 @@ export function useWalletTokens(): WalletTokensData {
       }
     })();
 
-    return () => { cancelled = true; clearTimeout(timeoutId); };
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      // Reset so StrictMode remount (dev) or wallet change re-runs the fetch.
+      // Without this, cleanup sets cancelled=true and the remount skips fetching
+      // because fetchedForRef.current === address, leaving isLoading stuck at true.
+      fetchedForRef.current = null;
+    };
   }, [address]);
 
   return data;
