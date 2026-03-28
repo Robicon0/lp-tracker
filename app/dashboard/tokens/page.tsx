@@ -8,12 +8,25 @@ import { useWalletAuth } from "../../contexts/WalletAuthContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
 import { getTokenLogo, TOKEN_COLORS } from "../../lib/tokenLogos";
 
+// EVM chain set — any chain added here automatically groups under the EVM section
+const EVM_CHAINS = new Set([
+  "Ethereum", "Base", "Arbitrum", "Optimism", "Polygon",
+  "BNB Chain", "Avalanche", "HyperEVM",
+]);
+
 const CHAIN_COLORS: Record<string, string> = {
+  // EVM chains
   Ethereum: "#627eea",
   Base:     "#0052ff",
   Arbitrum: "#2d9cdb",
   Optimism: "#ff0420",
   Polygon:  "#8247e5",
+  "BNB Chain": "#f0b90b",
+  Avalanche:   "#e84142",
+  HyperEVM:    "#00d4aa",
+  // Non-EVM chains
+  Solana: "#9945ff",
+  Sui:    "#6fbcf0",
 };
 
 // Inline TokenIcon (circular, with error fallback)
@@ -51,6 +64,52 @@ function fmtBalance(n: number) {
   return n.toFixed(6);
 }
 
+interface ChainGroup { chain: string; toks: TokenItem[]; total: number }
+interface Section { section: string; chains: ChainGroup[]; total: number; isEvm: boolean }
+
+// Token rows — shared between EVM sub-chains and non-EVM sections
+function TokenRows({ toks }: { toks: TokenItem[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {toks.map((token) => (
+        <div key={`${token.chain}-${token.contractAddress}`}
+          style={{ display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 12px", borderRadius: 10,
+            background: "rgba(255,255,255,0.02)",
+            border: "1px solid rgba(255,255,255,0.04)",
+            opacity: token.price === 0 ? 0.5 : 1 }}>
+          <TokenIcon symbol={token.symbol} size={32} logo={token.logo} />
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
+              {token.symbol}
+            </p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {token.name}
+            </p>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
+              {token.price > 0 ? fmt$(token.usdValue) : "—"}
+            </p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+              {fmtBalance(token.balance)} {token.symbol}
+              {token.price > 0 && (
+                <span style={{ marginLeft: 4, color: "rgba(255,255,255,0.2)" }}>
+                  @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
+                </span>
+              )}
+              {token.price === 0 && (
+                <span style={{ marginLeft: 4, color: "rgba(255,100,100,0.5)" }}>no price data</span>
+              )}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TokensPage() {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
@@ -80,20 +139,49 @@ export default function TokensPage() {
     return list;
   }, [regularTokens, search, hideDust, hideUnknown]);
 
-  // Group by chain, sorted by total USD value desc
-  const byChain = useMemo(() => {
-    const map = new Map<string, TokenItem[]>();
+  // Group into sections: EVM (all EVM chains together) + non-EVM (Solana, Sui, etc.)
+  const sections = useMemo((): Section[] => {
+    // Step 1: group tokens by individual chain
+    const chainMap = new Map<string, TokenItem[]>();
     for (const t of filtered) {
-      const arr = map.get(t.chain) ?? [];
+      const arr = chainMap.get(t.chain) ?? [];
       arr.push(t);
-      map.set(t.chain, arr);
+      chainMap.set(t.chain, arr);
     }
     // Sort tokens within each chain by USD value desc
-    for (const [, arr] of map) arr.sort((a, b) => b.usdValue - a.usdValue);
-    // Sort chains by total value desc
-    return [...map.entries()]
-      .map(([chain, toks]) => ({ chain, toks, total: toks.reduce((s, t) => s + t.usdValue, 0) }))
-      .sort((a, b) => b.total - a.total);
+    for (const arr of chainMap.values()) arr.sort((a, b) => b.usdValue - a.usdValue);
+
+    // Step 2: bucket chains into EVM vs non-EVM
+    const evmGroups: ChainGroup[] = [];
+    const nonEvmSections: Section[] = [];
+
+    for (const [chain, toks] of chainMap) {
+      const total = toks.reduce((s, t) => s + t.usdValue, 0);
+      if (EVM_CHAINS.has(chain)) {
+        evmGroups.push({ chain, toks, total });
+      } else {
+        nonEvmSections.push({ section: chain, chains: [{ chain, toks, total }], total, isEvm: false });
+      }
+    }
+
+    const result: Section[] = [];
+
+    // EVM section: sub-chains sorted by value desc
+    if (evmGroups.length > 0) {
+      evmGroups.sort((a, b) => b.total - a.total);
+      result.push({
+        section: "EVM",
+        chains: evmGroups,
+        total: evmGroups.reduce((s, c) => s + c.total, 0),
+        isEvm: true,
+      });
+    }
+
+    // Non-EVM sections sorted by value desc
+    nonEvmSections.sort((a, b) => b.total - a.total);
+    result.push(...nonEvmSections);
+
+    return result;
   }, [filtered]);
 
   const uniqueChains = new Set(regularTokens.map((t) => t.chain)).size;
@@ -174,8 +262,8 @@ export default function TokensPage() {
               ))}
             </div>
 
-            {/* Chain sections */}
-            {isLoading && byChain.length === 0 ? (
+            {/* Sections */}
+            {isLoading && sections.length === 0 ? (
               <div style={{ textAlign: "center", padding: "60px 0", color: "rgba(255,255,255,0.3)" }}>
                 <div style={{ width: 28, height: 28, border: "2px solid #10b981",
                   borderTopColor: "transparent", borderRadius: "50%", margin: "0 auto 16px",
@@ -183,66 +271,75 @@ export default function TokensPage() {
                 <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
                 Fetching token balances…
               </div>
-            ) : byChain.length === 0 ? (
+            ) : sections.length === 0 ? (
               <div style={{ textAlign: "center", padding: "60px 0", color: "rgba(255,255,255,0.3)" }}>
                 No tokens found{search ? ` matching "${search}"` : ""}.
               </div>
-            ) : byChain.map(({ chain, toks, total }) => (
-              <div key={chain} style={{ marginBottom: 28 }}>
-                {/* Chain header */}
+            ) : sections.map((sec) => (
+              <div key={sec.section} style={{ marginBottom: 32 }}>
+
+                {/* Top-level section header */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                  marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%",
-                      background: CHAIN_COLORS[chain] ?? "#6b7280" }} />
-                    <span style={{ fontSize: 14, fontWeight: 600, color: "white" }}>{chain}</span>
+                  marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {sec.isEvm ? (
+                      // EVM: show a small multi-dot cluster
+                      <div style={{ display: "flex", gap: 3 }}>
+                        {sec.chains.slice(0, 4).map((cg) => (
+                          <div key={cg.chain} style={{ width: 7, height: 7, borderRadius: "50%",
+                            background: CHAIN_COLORS[cg.chain] ?? "#6b7280" }} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ width: 8, height: 8, borderRadius: "50%",
+                        background: CHAIN_COLORS[sec.section] ?? "#6b7280" }} />
+                    )}
+                    <span style={{ fontSize: 16, fontWeight: 700, color: "white" }}>{sec.section}</span>
+                    {sec.isEvm && (
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)",
+                        background: "rgba(255,255,255,0.06)", borderRadius: 6, padding: "2px 7px" }}>
+                        {sec.chains.length} chain{sec.chains.length === 1 ? "" : "s"}
+                      </span>
+                    )}
                     <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>
-                      {toks.length} token{toks.length === 1 ? "" : "s"}
+                      {sec.chains.reduce((s, c) => s + c.toks.length, 0)} token{sec.chains.reduce((s, c) => s + c.toks.length, 0) === 1 ? "" : "s"}
                     </span>
                   </div>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "white" }}>
-                    {total > 0 ? fmt$(total) : "—"}
+                  <span style={{ fontSize: 16, fontWeight: 700, color: "white" }}>
+                    {sec.total > 0 ? fmt$(sec.total) : "—"}
                   </span>
                 </div>
 
-                {/* Token rows */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  {toks.map((token) => (
-                    <div key={token.contractAddress}
-                      style={{ display: "flex", alignItems: "center", gap: 12,
-                        padding: "10px 12px", borderRadius: 10,
-                        background: "rgba(255,255,255,0.02)",
-                        border: "1px solid rgba(255,255,255,0.04)",
-                        opacity: token.price === 0 ? 0.5 : 1 }}>
-                      <TokenIcon symbol={token.symbol} size={32} logo={token.logo} />
-                      <div style={{ flex: 1, overflow: "hidden" }}>
-                        <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-                          {token.symbol}
-                        </p>
-                        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {token.name}
-                        </p>
-                      </div>
-                      <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-                          {token.price > 0 ? fmt$(token.usdValue) : "—"}
-                        </p>
-                        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                          {fmtBalance(token.balance)} {token.symbol}
-                          {token.price > 0 && (
-                            <span style={{ marginLeft: 4, color: "rgba(255,255,255,0.2)" }}>
-                              @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
+                {sec.isEvm ? (
+                  // EVM: render each chain as an indented sub-section
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    {sec.chains.map((cg) => (
+                      <div key={cg.chain} style={{ paddingLeft: 16,
+                        borderLeft: `2px solid ${CHAIN_COLORS[cg.chain] ?? "#6b7280"}30` }}>
+                        {/* Chain sub-header */}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                          marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                            <div style={{ width: 7, height: 7, borderRadius: "50%",
+                              background: CHAIN_COLORS[cg.chain] ?? "#6b7280" }} />
+                            <span style={{ fontSize: 13, fontWeight: 600,
+                              color: "rgba(255,255,255,0.7)" }}>{cg.chain}</span>
+                            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
+                              {cg.toks.length} token{cg.toks.length === 1 ? "" : "s"}
                             </span>
-                          )}
-                          {token.price === 0 && (
-                            <span style={{ marginLeft: 4, color: "rgba(255,100,100,0.5)" }}>no price data</span>
-                          )}
-                        </p>
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>
+                            {cg.total > 0 ? fmt$(cg.total) : "—"}
+                          </span>
+                        </div>
+                        <TokenRows toks={cg.toks} />
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  // Non-EVM (Solana, Sui, etc.): token rows directly
+                  <TokenRows toks={sec.chains[0].toks} />
+                )}
               </div>
             ))}
           </>
