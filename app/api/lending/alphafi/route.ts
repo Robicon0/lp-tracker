@@ -121,7 +121,7 @@ async function getMarketData(marketId: string): Promise<{ symbol: string; decima
 const STABLE: Record<string, number> = { USDC: 1, USDT: 1, DAI: 1, WUSDC: 1 };
 const CG_IDS: Record<string, string> = {
   SUI: 'sui', STSUI: 'sui', WETH: 'ethereum', ETH: 'ethereum',
-  BTC: 'bitcoin', WBTC: 'bitcoin', DEEP: 'deepbook', BLUE: 'blue-sui',
+  BTC: 'bitcoin', WBTC: 'bitcoin', DEEP: 'deep', BLUE: 'blue-move',
 };
 
 const _priceCache: Record<string, { price: number; ts: number }> = {};

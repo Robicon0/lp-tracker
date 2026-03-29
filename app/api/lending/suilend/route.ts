@@ -2,24 +2,23 @@ import { NextResponse } from 'next/server';
 
 // Suilend on Sui — raw Sui RPC (no SDK)
 //
-// Verified from suilend/suilend-public SDK source (2026-03-29):
-//   Package:            0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf
-//   MAIN_POOL type arg: 0xf95b...::suilend::MAIN_POOL
-//   Lending Market ID:  0x84030d26d85eaa7035084a057f2f11f701b7e2e4eda87551becbc7c97505ece1
+// Data model:
+//   1. User owns ObligationOwnerCap<MAIN_POOL> → cap.fields.obligation_id
+//   2. Fetch Obligation → deposits[] + borrows[]
+//   3. Each deposit has reserve_array_index + deposited_ctoken_amount (u64)
+//   4. Fetch LendingMarket → reserves[]; each reserve has exchange rate data
+//   5. exchange_rate = (available + borrowed_base - spread_base) / ctoken_supply (all base units)
+//   6. underlying = deposited_ctoken_amount * exchange_rate / 10^decimals
+//   7. For borrows: current = obligation_borrow.borrowed_amount * reserve_cbr / obligation_cbr
 //
-// User position flow:
-//   1. User wallet owns ObligationOwnerCap<MAIN_POOL> objects (NOT Obligation directly)
-//   2. Cap fields: { id, obligation_id }
-//   3. Fetch Obligation by obligation_id via sui_getObject
-//   4. Obligation.deposits: vector<Deposit>  — { coin_type, deposited_ctoken_amount, market_value (Decimal) }
-//   5. Obligation.borrows:  vector<Borrow>   — { coin_type, borrowed_amount (Decimal), market_value (Decimal) }
-//   Decimal type: { fields: { value: string } } scaled by 10^18
+// Decimal type: { fields: { value: string } } where value = amount_in_base_units * 10^18
 
 const SUI_RPC = process.env.SUI_RPC_URL ?? 'https://fullnode.mainnet.sui.io:443';
 
-const SUILEND_PKG  = '0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf';
-const MAIN_POOL    = `${SUILEND_PKG}::suilend::MAIN_POOL`;
-const OBLIG_CAP_TYPE = `${SUILEND_PKG}::lending_market::ObligationOwnerCap<${MAIN_POOL}>`;
+const SUILEND_PKG     = '0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf';
+const MAIN_POOL       = `${SUILEND_PKG}::suilend::MAIN_POOL`;
+const OBLIG_CAP_TYPE  = `${SUILEND_PKG}::lending_market::ObligationOwnerCap<${MAIN_POOL}>`;
+const LENDING_MARKET  = '0x84030d26d85eaa7035084a057f2f11f701b7e2e4eda87551becbc7c97505ece1';
 
 async function suiPost(method: string, params: unknown[]): Promise<unknown> {
   const res = await fetch(SUI_RPC, {
@@ -32,47 +31,67 @@ async function suiPost(method: string, params: unknown[]): Promise<unknown> {
   return json.result;
 }
 
-// Decode Suilend Decimal type: { fields: { value: "123..." } } / 10^18
-function decodeDecimal(val: unknown): number {
-  if (val == null) return 0;
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') {
-    const n = Number(val);
-    // If the raw string is a large integer it's likely 10^18 scaled
-    return val.length > 10 ? n / 1e18 : n;
-  }
-  const fields = (val as Record<string, unknown>).fields as Record<string, unknown> | undefined;
-  if (fields?.value != null) {
-    const n = Number(fields.value);
-    return n / 1e18;
-  }
-  return 0;
-}
-
-// Extract symbol from Sui TypeName struct or coin type string
+// Extract symbol from Sui TypeName struct or plain string
 function symbolFromTypeName(coinType: unknown): string {
   if (coinType == null) return 'UNKNOWN';
-  let str = '';
-  if (typeof coinType === 'string') {
-    str = coinType;
-  } else {
-    // TypeName struct: { fields: { name: "0x2::sui::SUI" } }
-    const f = (coinType as Record<string, unknown>).fields as Record<string, unknown> | undefined;
-    str = String(f?.name ?? coinType);
-  }
+  let str = typeof coinType === 'string' ? coinType
+    : String(((coinType as Record<string, unknown>).fields as Record<string, unknown> | undefined)?.name ?? coinType);
   const parts = str.split('::');
   return (parts[parts.length - 1] ?? str).toUpperCase();
 }
 
-// Token prices for converting USD value → token amount
+// Extract raw bigint from a Suilend Decimal: { fields: { value: "..." } }
+function decimalRaw(val: unknown): bigint {
+  if (val == null) return 0n;
+  if (typeof val === 'string') return BigInt(val);
+  const f = (val as Record<string, unknown>).fields as Record<string, unknown> | undefined;
+  return f?.value != null ? BigInt(String(f.value)) : 0n;
+}
+
+// Compute underlying token amount from ctokens using reserve exchange rate (all BigInt, no precision loss)
+//   exchange_rate = (available_base + borrow_decimal/WAD - spread_decimal/WAD) / ctoken_supply_base
+//   underlying_base = deposited_ctokens * numerator / ctoken_supply
+//   underlying_human = underlying_base / 10^decimals
+function computeUnderlyingHuman(
+  depositedCtokens: bigint,
+  availableRaw: bigint,
+  borrowedDecimal: bigint,
+  spreadDecimal: bigint,
+  ctokenSupply: bigint,
+  decimals: number,
+): number {
+  if (ctokenSupply === 0n) return 0;
+  const WAD = 10n ** 18n;
+  const borrowBase = borrowedDecimal / WAD;
+  const spreadBase = spreadDecimal / WAD;
+  const totalBase = availableRaw + borrowBase - spreadBase;
+  const underlyingBase = depositedCtokens * totalBase / ctokenSupply;
+  return Number(underlyingBase) / Math.pow(10, decimals);
+}
+
+// Compute current borrow with interest: obligation_amount * reserve_cbr / obligation_cbr
+function computeCurrentBorrowHuman(
+  obBorrowedDecimal: bigint,
+  obCbrDecimal: bigint,
+  reserveCbrDecimal: bigint,
+  decimals: number,
+): number {
+  if (obCbrDecimal === 0n) return 0;
+  const WAD = 10n ** 18n;
+  const currentVal = obBorrowedDecimal * reserveCbrDecimal / obCbrDecimal;
+  const borrowBase = currentVal / WAD;
+  return Number(borrowBase) / Math.pow(10, decimals);
+}
+
+// Token price via CoinGecko (stable coins short-circuited)
 const STABLE_PRICE: Record<string, number> = {
   USDC: 1, USDT: 1, DAI: 1, BUCK: 1, USDY: 1, FDUSD: 1,
 };
 const CG_IDS: Record<string, string> = {
   SUI: 'sui', SPRING_SUI: 'sui', STSUI: 'sui', SSUI: 'sui',
   WETH: 'ethereum', ETH: 'ethereum', WBTC: 'bitcoin', BTC: 'bitcoin',
-  DEEP: 'deepbook', CETUS: 'cetus-protocol', NS: 'name-service-sui',
-  NAVX: 'navi-protocol', BLUE: 'blue-sui',
+  DEEP: 'deep', CETUS: 'cetus-protocol', NS: 'name-service-sui',
+  NAVX: 'navi-protocol', BLUE: 'blue-move',
 };
 const _priceCache: Record<string, { price: number; ts: number }> = {};
 async function getPriceUsd(symbol: string): Promise<number> {
@@ -91,29 +110,99 @@ async function getPriceUsd(symbol: string): Promise<number> {
   } catch { return cached?.price ?? 0; }
 }
 
-// DefiLlama APY cache for Suilend
-let _apyCache: { data: Record<string, number>; ts: number } | null = null;
-async function getSuilendApys(): Promise<Record<string, number>> {
-  const now = Date.now();
-  if (_apyCache && now - _apyCache.ts < 300_000) return _apyCache.data;
-  try {
-    const res = await fetch('https://yields.llama.fi/pools').then(r => r.json()) as {
-      data?: Array<{ project: string; chain: string; symbol: string; apyBase: number | null }>;
-    };
-    const apys: Record<string, number> = {};
-    for (const pool of res?.data ?? []) {
-      if (pool.project?.toLowerCase().includes('suilend') && pool.chain === 'Sui' && pool.apyBase != null) {
-        const sym = pool.symbol.split('-')[0].trim().toUpperCase();
-        if (!apys[sym] || pool.apyBase > apys[sym]) apys[sym] = pool.apyBase;
-      }
+// Interpolate APR from piecewise-linear interest rate curve
+// utils: utilization breakpoints [0..100], aprs: APR in bps at each breakpoint
+function interpolateAprBps(utils: number[], aprsBps: number[], utilizationPct: number): number {
+  if (utils.length === 0) return 0;
+  const u = Math.max(0, Math.min(100, utilizationPct));
+  for (let i = 1; i < utils.length; i++) {
+    if (u <= utils[i]) {
+      const t = (u - utils[i - 1]) / (utils[i] - utils[i - 1]);
+      return aprsBps[i - 1] + t * (aprsBps[i] - aprsBps[i - 1]);
     }
-    _apyCache = { data: apys, ts: now };
-    console.log(`[suilend/route] DefiLlama APYs loaded: ${JSON.stringify(apys)}`);
-    return apys;
-  } catch (err) {
-    console.error('[suilend/route] DefiLlama APY fetch failed:', err);
-    return _apyCache?.data ?? {};
   }
+  return aprsBps[aprsBps.length - 1] ?? 0;
+}
+
+// Reserve data extracted from LendingMarket object
+interface ReserveInfo {
+  arrayIndex: number;
+  symbol: string;
+  decimals: number;
+  availableRaw: bigint;        // u64 base units
+  borrowedDecimalRaw: bigint;  // Decimal.value (base * WAD)
+  spreadDecimalRaw: bigint;    // Decimal.value
+  ctokenSupplyRaw: bigint;     // u64 base units
+  cbrDecimalRaw: bigint;       // cumulative_borrow_rate Decimal.value
+  supplyAprPct: number;        // computed from on-chain interest rate curve
+  oraclePriceUsd: number;      // real-time Pyth oracle price (fallback for CoinGecko failures)
+}
+
+// Reserve cache — refresh every 30s
+let _reserveCache: { data: Map<number, ReserveInfo>; ts: number } | null = null;
+
+async function loadReserves(): Promise<Map<number, ReserveInfo>> {
+  const now = Date.now();
+  if (_reserveCache && now - _reserveCache.ts < 30_000) return _reserveCache.data;
+
+  const obj = await suiPost('sui_getObject', [LENDING_MARKET, { showContent: true }]) as {
+    data?: { content?: { fields?: Record<string, unknown> } };
+  };
+  const lmFields = obj?.data?.content?.fields ?? {};
+  const reservesRaw = (lmFields.reserves as unknown[]) ?? [];
+
+  const map = new Map<number, ReserveInfo>();
+  for (const r of reservesRaw) {
+    try {
+      const rf = (r as Record<string, unknown>).fields as Record<string, unknown> ?? r as Record<string, unknown>;
+      const arrayIndex = Number(rf.array_index ?? 0);
+
+      const availableRaw = BigInt(String(rf.available_amount ?? '0'));
+      const borrowedDecimalRaw = decimalRaw(rf.borrowed_amount);
+      const spreadDecimalRaw = decimalRaw(rf.unclaimed_spread_fees);
+      const ctokenSupplyRaw = BigInt(String(rf.ctoken_supply ?? '0'));
+
+      // Compute supply APR from on-chain interest rate curve
+      const WAD = 10n ** 18n;
+      const borrowBase = borrowedDecimalRaw / WAD;
+      const totalBase = availableRaw + borrowBase;
+      const utilizationPct = totalBase > 0n
+        ? Number(borrowBase * 10000n / totalBase) / 100
+        : 0;
+
+      // Extract interest rate config: config.fields.element.fields
+      const configEl = (rf.config as Record<string, unknown>)
+        ?.fields as Record<string, unknown> | undefined;
+      const configInner = (configEl?.element as Record<string, unknown>)
+        ?.fields as Record<string, unknown> | undefined;
+      const irUtils = (configInner?.interest_rate_utils as number[]) ?? [];
+      const irAprsBps = (configInner?.interest_rate_aprs as string[])?.map(Number) ?? [];
+      const spreadFeeBps = Number(configInner?.spread_fee_bps ?? 0);
+
+      const borrowAprBps = interpolateAprBps(irUtils, irAprsBps, utilizationPct);
+      const supplyAprPct = (borrowAprBps / 100) * (utilizationPct / 100) * (1 - spreadFeeBps / 10000);
+
+      const oraclePriceUsd = Number(decimalRaw(rf.price)) / 1e18;
+
+      map.set(arrayIndex, {
+        arrayIndex,
+        symbol: symbolFromTypeName(rf.coin_type),
+        decimals: Number(rf.mint_decimals ?? 9),
+        availableRaw,
+        borrowedDecimalRaw,
+        spreadDecimalRaw,
+        ctokenSupplyRaw,
+        cbrDecimalRaw: decimalRaw(rf.cumulative_borrow_rate),
+        supplyAprPct,
+        oraclePriceUsd,
+      });
+    } catch (e) {
+      console.error('[suilend/route] Reserve parse error:', e);
+    }
+  }
+  _reserveCache = { data: map, ts: now };
+  console.log(`[suilend/route] Loaded ${map.size} reserves from LendingMarket`);
+  return map;
 }
 
 export async function GET(request: Request) {
@@ -122,10 +211,7 @@ export async function GET(request: Request) {
   if (!account) return NextResponse.json({ error: 'account required' }, { status: 400 });
 
   try {
-    console.log(`[suilend/route] Querying ObligationOwnerCap for account: ${account}`);
-    console.log(`[suilend/route] StructType filter: ${OBLIG_CAP_TYPE}`);
-
-    // Step 1: find all ObligationOwnerCap objects owned by the user
+    // Step 1: find ObligationOwnerCap objects
     const caps: Record<string, unknown>[] = [];
     let cursor: string | null = null;
     let page = 0;
@@ -137,9 +223,6 @@ export async function GET(request: Request) {
         cursor,
         50,
       ]) as { data?: Array<{ data?: Record<string, unknown> }>; nextCursor?: string; hasNextPage?: boolean };
-
-      console.log(`[suilend/route] Page ${page} raw result: ${JSON.stringify(res).slice(0, 400)}`);
-
       for (const item of res?.data ?? []) {
         if (item.data) caps.push(item.data);
       }
@@ -147,13 +230,13 @@ export async function GET(request: Request) {
     } while (cursor && page < 5);
 
     if (caps.length === 0) {
-      console.log(`[suilend/route] No ObligationOwnerCap objects found for address: ${account}`);
       return NextResponse.json({ supplies: [], borrows: [], protocol: 'Suilend', chain: 'Sui' });
     }
+    console.log(`[suilend/route] Found ${caps.length} ObligationOwnerCap for ${account}`);
 
-    console.log(`[suilend/route] Found ${caps.length} ObligationOwnerCap object(s)`);
+    // Step 2: load reserves (supply APR is computed on-chain inside loadReserves)
+    const reserves = await loadReserves();
 
-    const apys = await getSuilendApys();
     const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
     const borrows:  Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
 
@@ -161,73 +244,81 @@ export async function GET(request: Request) {
       try {
         const content = (cap as Record<string, unknown>).content as Record<string, unknown> | undefined;
         const capFields = (content?.fields ?? {}) as Record<string, unknown>;
-        console.log(`[suilend/route] Cap fields: ${JSON.stringify(capFields).slice(0, 400)}`);
-
-        // obligation_id is an ID struct: { id: "0x..." } or plain string
         const obligRef = capFields.obligation_id as string | Record<string, string> | undefined;
         const obligId = typeof obligRef === 'string' ? obligRef : obligRef?.id ?? null;
+        if (!obligId) continue;
 
-        if (!obligId) {
-          console.warn(`[suilend/route] Cap missing obligation_id. All fields: ${JSON.stringify(capFields)}`);
-          continue;
-        }
-
-        console.log(`[suilend/route] Fetching Obligation object: ${obligId}`);
-        const obligObj = await suiPost('sui_getObject', [
-          obligId,
-          { showContent: true, showType: true },
-        ]) as { data?: { content?: { fields?: Record<string, unknown> }; type?: string } };
-
-        console.log(`[suilend/route] Obligation type: ${obligObj?.data?.type}`);
+        const obligObj = await suiPost('sui_getObject', [obligId, { showContent: true }]) as {
+          data?: { content?: { fields?: Record<string, unknown> } };
+        };
         const obligFields = obligObj?.data?.content?.fields ?? {};
-        console.log(`[suilend/route] Obligation fields keys: ${Object.keys(obligFields).join(', ')}`);
-        console.log(`[suilend/route] Obligation raw (first 800): ${JSON.stringify(obligFields).slice(0, 800)}`);
 
-        // deposits: vector<Deposit>
-        const depositsRaw = (obligFields.deposits as unknown[]) ?? [];
-        console.log(`[suilend/route] deposits count: ${depositsRaw.length}`);
-
-        for (const dep of depositsRaw) {
+        // ── Deposits ────────────────────────────────────────────────────────────
+        for (const dep of (obligFields.deposits as unknown[]) ?? []) {
           try {
-            // Each Deposit may be: { type: "...", fields: { coin_type, market_value, ... } }
             const df = (dep as Record<string, unknown>).fields as Record<string, unknown>
               ?? dep as Record<string, unknown>;
-            console.log(`[suilend/route] Deposit raw fields: ${JSON.stringify(df).slice(0, 300)}`);
-
-            const symbol   = symbolFromTypeName(df.coin_type);
-            const usdValue = decodeDecimal(df.market_value);
-
-            if (usdValue < 0.001) {
-              console.log(`[suilend/route] Skipping deposit ${symbol}: usdValue=${usdValue} (too small)`);
+            const reserveIdx = Number(df.reserve_array_index ?? -1);
+            const reserve = reserves.get(reserveIdx);
+            if (!reserve) {
+              console.warn(`[suilend/route] Deposit: reserve ${reserveIdx} not found`);
               continue;
             }
 
-            const apy    = apys[symbol] ?? apys[symbol.replace('W', '')] ?? 0;
-            const price  = await getPriceUsd(symbol);
-            const amount = price > 0 ? usdValue / price : usdValue;
-            console.log(`[suilend/route] Deposit: ${symbol} usd=$${usdValue.toFixed(4)} amount=${amount.toFixed(4)} apy=${apy}`);
-            supplies.push({ symbol, amount, usdValue, apy });
+            const ctokens = BigInt(String(df.deposited_ctoken_amount ?? '0'));
+            const underlying = computeUnderlyingHuman(
+              ctokens,
+              reserve.availableRaw,
+              reserve.borrowedDecimalRaw,
+              reserve.spreadDecimalRaw,
+              reserve.ctokenSupplyRaw,
+              reserve.decimals,
+            );
+            if (underlying < 0.0001) continue;
+
+            const symbol = reserve.symbol;
+            const cgPrice = await getPriceUsd(symbol);
+            // Fall back to on-chain Pyth oracle price if CoinGecko is unavailable
+            const price = cgPrice > 0 ? cgPrice : reserve.oraclePriceUsd;
+            const usdValue = underlying * price;
+            if (usdValue < 0.001) continue;
+
+            const apy = reserve.supplyAprPct;
+            console.log(`[suilend/route] Deposit: ${symbol} amount=${underlying.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
+            supplies.push({ symbol, amount: underlying, usdValue, apy });
           } catch (err) {
-            console.error('[suilend/route] Deposit parse error:', err, JSON.stringify(dep).slice(0, 200));
+            console.error('[suilend/route] Deposit parse error:', err);
           }
         }
 
-        // borrows: vector<Borrow>
-        const borrowsRaw = (obligFields.borrows as unknown[]) ?? [];
-        console.log(`[suilend/route] borrows count: ${borrowsRaw.length}`);
-
-        for (const bor of borrowsRaw) {
+        // ── Borrows ─────────────────────────────────────────────────────────────
+        for (const bor of (obligFields.borrows as unknown[]) ?? []) {
           try {
             const bf = (bor as Record<string, unknown>).fields as Record<string, unknown>
               ?? bor as Record<string, unknown>;
-            const symbol   = symbolFromTypeName(bf.coin_type);
-            const usdValue = decodeDecimal(bf.market_value);
+            const reserveIdx = Number(bf.reserve_array_index ?? -1);
+            const reserve = reserves.get(reserveIdx);
+            if (!reserve) continue;
 
+            const obBorrowedVal = decimalRaw(bf.borrowed_amount);
+            const obCbrVal      = decimalRaw(bf.cumulative_borrow_rate);
+
+            const amount = computeCurrentBorrowHuman(
+              obBorrowedVal,
+              obCbrVal,
+              reserve.cbrDecimalRaw,
+              reserve.decimals,
+            );
+            if (amount < 0.0001) continue;
+
+            const symbol = reserve.symbol;
+            const cgPrice = await getPriceUsd(symbol);
+            const price = cgPrice > 0 ? cgPrice : reserve.oraclePriceUsd;
+            const usdValue = amount * price;
             if (usdValue < 0.001) continue;
-            const bPrice  = await getPriceUsd(symbol);
-            const bAmount = bPrice > 0 ? usdValue / bPrice : usdValue;
-            console.log(`[suilend/route] Borrow: ${symbol} usd=$${usdValue.toFixed(4)} amount=${bAmount.toFixed(4)}`);
-            borrows.push({ symbol, amount: bAmount, usdValue, apy: 0 });
+
+            console.log(`[suilend/route] Borrow: ${symbol} amount=${amount.toFixed(4)} usd=$${usdValue.toFixed(2)}`);
+            borrows.push({ symbol, amount, usdValue, apy: 0 });
           } catch (err) {
             console.error('[suilend/route] Borrow parse error:', err);
           }

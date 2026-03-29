@@ -209,7 +209,7 @@ export function useLendingPositions(): UseLendingPositionsData {
       clearTimeout(timeoutId);
       if (!fetchCompleted) fetchedForRef.current = null;
     };
-  }, [address, solanaAddress]);
+  }, [address, solanaAddress, suiAddress]);
 
   return data;
 }

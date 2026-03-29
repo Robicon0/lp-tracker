@@ -558,23 +558,19 @@ function ExternalPositionCard({ pos }: { pos: ExternalLendingPosition }) {
           {statBox("Net Worth", fmt$(pos.totalSupplied - pos.totalBorrowed), "#34d399")}
         </div>
 
-        {pos.supplyApy > 0 && (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
-              className="pos-3col">
-              {statBox("Lending APY", `${pos.supplyApy.toFixed(2)}%`, "#34d399", "rgba(52,211,153,0.05)")}
-              {statBox("Borrowing APY", `${pos.borrowApy.toFixed(2)}%`,
-                pos.borrowApy > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
-              {statBox("Net APY", `${(pos.supplyApy - pos.borrowApy).toFixed(2)}%`, "#6ee7b7", "rgba(52,211,153,0.05)")}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
-              className="pos-3col">
-              {statBox("Daily Cashflow",   `+${fmt$(dailyCashflow, 4)}`,          "#34d399", "rgba(52,211,153,0.05)")}
-              {statBox("Monthly Cashflow", `+${fmt$(dailyCashflow * 30)}`,         "#34d399", "rgba(52,211,153,0.05)")}
-              {statBox("Yearly Cashflow",  `+${fmt$(dailyCashflow * 365)}`,        "#34d399", "rgba(52,211,153,0.05)")}
-            </div>
-          </>
-        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
+          className="pos-3col">
+          {statBox("Lending APY", `${pos.supplyApy.toFixed(2)}%`, "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Borrowing APY", `${pos.borrowApy.toFixed(2)}%`,
+            pos.borrowApy > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
+          {statBox("Net APY", `${(pos.supplyApy - pos.borrowApy).toFixed(2)}%`, "#6ee7b7", "rgba(52,211,153,0.05)")}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
+          className="pos-3col">
+          {statBox("Daily Cashflow",   `+${fmt$(dailyCashflow, 4)}`,    "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Monthly Cashflow", `+${fmt$(dailyCashflow * 30)}`,   "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Yearly Cashflow",  `+${fmt$(dailyCashflow * 365)}`,  "#34d399", "rgba(52,211,153,0.05)")}
+        </div>
 
         {/* Supplied assets */}
         {pos.suppliedAssets.length > 0 && (
