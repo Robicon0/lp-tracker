@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
-// Blast public RPCs — support full-history eth_getLogs scans (single tokenId = tiny result set)
+// LlamaRPC public RPCs — support full-history eth_getLogs scans with no block-range limit
+// (Blast now limits to 10 blocks; Alchemy free tier also limits to 10 blocks)
 const BLAST_RPCS: Record<string, string> = {
-  ethereum: 'https://eth-mainnet.public.blastapi.io',
-  arbitrum: 'https://arbitrum-one.public.blastapi.io',
-  polygon:  'https://polygon-mainnet.public.blastapi.io',
-  optimism: 'https://optimism-mainnet.public.blastapi.io',
+  ethereum: 'https://eth.llamarpc.com',
+  arbitrum: 'https://arb1.llamarpc.com',
+  polygon:  'https://polygon.llamarpc.com',
+  optimism: 'https://op.llamarpc.com',
 };
 
 // Alchemy RPCs — used only for eth_getBlockByNumber (timestamp lookups)

@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server';
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy Optimism — used only for eth_getBlockByNumber (timestamp lookups)
 const ALCHEMY_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-// Blast Optimism public RPC — supports full-history eth_getLogs filtered by tokenId
-const BLAST_RPC = 'https://optimism-mainnet.public.blastapi.io';
+// LlamaRPC Optimism — supports full-history eth_getLogs with no block-range limit
+const LLAMA_RPC = 'https://op.llamarpc.com';
 
 // Velodrome Slipstream (CL) NonfungiblePositionManager on Optimism
 // keccak256 verified to emit the same event signatures as all standard V3 forks
@@ -72,7 +72,7 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
 }
 
 async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
-  const result = await rpcPost(BLAST_RPC, {
+  const result = await rpcPost(LLAMA_RPC, {
     jsonrpc: '2.0',
     method: 'eth_getLogs',
     params: [{

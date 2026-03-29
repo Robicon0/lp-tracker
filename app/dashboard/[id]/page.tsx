@@ -728,115 +728,103 @@ export default function PositionDetail() {
             {!activityLoading && activity && (() => {
               const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
               const deposits = activity.events.filter(e => e.type === 'deposit');
-              const totalFeesUSD = feeClaims.reduce((sum, e) => {
+
+              const claimedUSD = feeClaims.reduce((sum, e) => {
                 if (e.usdAtTime != null) return sum + e.usdAtTime;
                 return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
               }, 0);
+              const uncollectedUSD = pos.fees;
+              const lifetimeUSD = claimedUSD + uncollectedUSD;
+
               const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
               const firstTs = firstDeposit?.timestamp ?? 0;
               const nowTs = Math.floor(Date.now() / 1000);
               const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+
+              const actualAPR = daysActive >= 1 && pos.value > 0
+                ? (claimedUSD / pos.value) / (daysActive / 365) * 100
+                : null;
+              const estimatedAPR = pos.apy > 0 ? pos.apy : null;
+              const actualDailyIncome = daysActive >= 1 ? claimedUSD / daysActive : null;
+              const feeIncomePct = pos.value > 0 ? (lifetimeUSD / pos.value) * 100 : 0;
+
+              const daysLabel = daysActive >= 1
+                ? `${Math.floor(daysActive)}d`
+                : (firstTs > 0 ? '<1d' : '—');
+
               const fmtUSD = (n: number) =>
                 `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-              if (feeClaims.length === 0) {
-                return <p className="text-sm text-gray-400">No fees claimed yet.</p>;
-              }
-              if (daysActive < 1) {
-                return (
-                  <div className="space-y-0">
-                    <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                      <span className="text-sm text-gray-400">Total fees earned</span>
-                      <span className="text-sm font-bold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
-                    </div>
-                    <div className="flex justify-between py-2">
-                      <span className="text-sm text-gray-400">Position active</span>
-                      <span className="text-sm font-bold text-white">&lt; 1 day</span>
-                    </div>
-                    <p className="text-gray-400/40 text-xs mt-2">APR not shown — position active less than 1 day</p>
-                  </div>
-                );
-              }
-
-              const dailyFees = totalFeesUSD / daysActive;
-              const weeklyFees = dailyFees * 7;
-              const monthlyFees = dailyFees * 30;
-              const yearlyFees = dailyFees * 365;
-              const aprYearly = pos.value > 0 ? (totalFeesUSD / pos.value) / (daysActive / 365) * 100 : 0;
-              const aprMonthly = aprYearly / 12;
-              const aprWeekly = aprYearly / 52;
-              const daysLabel = `${Math.floor(daysActive)} day${Math.floor(daysActive) !== 1 ? 's' : ''}`;
-
               return (
-                <div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 mb-4">
-                    <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                      <span className="text-sm text-gray-400">Total fees earned</span>
-                      <span className="text-sm font-bold text-emerald-400">{fmtUSD(totalFeesUSD)}</span>
-                    </div>
-                    <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                      <span className="text-sm text-gray-400">Position active</span>
-                      <span className="text-sm font-bold text-white">{daysLabel}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
-                      <span className="text-sm text-gray-400">Realized APR</span>
-                      <button onClick={() => setAprExpanded(v => !v)} className="flex items-center gap-1">
-                        <span className="text-sm font-bold text-emerald-400">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}% / yr</span>
-                        <svg className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  {aprExpanded && (
-                    <div className="grid grid-cols-4 gap-1 mb-4">
-                      <div className="bg-emerald-900/20 rounded p-2 text-center">
-                        <p className="text-xs text-gray-400">Yearly</p>
-                        <p className="text-sm font-extrabold text-emerald-300">~{aprYearly.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</p>
-                      </div>
-                      <div className="bg-blue-900/20 rounded p-2 text-center">
-                        <p className="text-xs text-gray-400">Monthly</p>
-                        <p className="text-sm font-bold text-blue-300">~{aprMonthly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
-                      </div>
-                      <div className="bg-purple-900/20 rounded p-2 text-center">
-                        <p className="text-xs text-gray-400">Weekly</p>
-                        <p className="text-sm font-bold text-purple-300">~{aprWeekly.toLocaleString('en-US', { maximumFractionDigits: 2 })}%</p>
-                      </div>
-                      <div className="bg-emerald-900/20 rounded p-2 text-center">
-                        <p className="text-xs text-gray-400">Daily</p>
-                        <p className="text-sm font-bold text-white/60">~{(aprYearly / 365).toLocaleString('en-US', { maximumFractionDigits: 3 })}%</p>
-                      </div>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-4 gap-1 mb-3">
+                <div className="space-y-1">
+                  {/* Row 1: TOTAL CLAIMED | TOTAL UNCOLLECTED | TOTAL LIFETIME */}
+                  <div className="grid grid-cols-3 gap-1">
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-emerald-300">Daily</p>
-                      <p className="text-base font-bold text-white">{fmtUSD(dailyFees)}</p>
-                    </div>
-                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-emerald-300">Weekly</p>
-                      <p className="text-base font-bold text-white">{fmtUSD(weeklyFees)}</p>
-                    </div>
-                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-emerald-300">Monthly</p>
-                      <p className="text-base font-bold text-white">{fmtUSD(monthlyFees)}</p>
-                    </div>
-                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-emerald-300">Yearly</p>
-                      <p className="text-base font-bold text-white">{fmtUSD(yearlyFees)}</p>
-                    </div>
-                  </div>
-                  {/* Position Age card */}
-                  <div className="bg-emerald-900/10 rounded-lg p-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-400">Position Age</p>
-                      <p className="text-sm font-bold text-white mt-0.5">{daysLabel}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">Opened</p>
-                      <p className="text-sm font-bold text-white mt-0.5">
-                        {firstTs > 0 ? new Date(firstTs * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      <p className="text-xs text-gray-400 mb-1">Total Claimed</p>
+                      <p className="text-xl font-extrabold text-emerald-400">{fmtUSD(claimedUSD)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {feeClaims.length > 0
+                          ? `${feeClaims.length} collection${feeClaims.length !== 1 ? 's' : ''}`
+                          : 'no claims yet'}
                       </p>
+                    </div>
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Total Uncollected</p>
+                      <p className="text-xl font-extrabold text-white">{fmtUSD(uncollectedUSD)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">pending</p>
+                    </div>
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Total Lifetime</p>
+                      <p className="text-xl font-extrabold text-white">{fmtUSD(lifetimeUSD)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">claimed + pending</p>
+                    </div>
+                  </div>
+
+                  {/* Row 2: ACTUAL APR | ESTIMATED APR | TRACKING AGE */}
+                  <div className="grid grid-cols-3 gap-1">
+                    <div className="bg-emerald-900/20 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Actual APR</p>
+                      {actualAPR != null
+                        ? <p className="text-xl font-extrabold text-emerald-400">~{actualAPR.toFixed(1)}%</p>
+                        : <p className="text-xl font-extrabold text-white/30">{feeClaims.length === 0 ? 'No claims' : '<1d'}</p>
+                      }
+                      <p className="text-xs text-gray-500 mt-0.5">from real claims</p>
+                    </div>
+                    <div className="bg-blue-900/20 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Estimated APR</p>
+                      {estimatedAPR != null
+                        ? <p className="text-xl font-extrabold text-blue-300">~{estimatedAPR.toFixed(1)}%</p>
+                        : <p className="text-xl font-extrabold text-white/30">—</p>
+                      }
+                      <p className="text-xs text-gray-500 mt-0.5">pool APY</p>
+                    </div>
+                    <div className="bg-emerald-900/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Tracking Age</p>
+                      <p className="text-xl font-extrabold text-white">{daysLabel}</p>
+                      {firstTs > 0 && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          since {new Date(firstTs * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 3: ACTUAL DAILY INCOME | FEE INCOME % */}
+                  <div className="grid grid-cols-2 gap-1">
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Actual Daily Income</p>
+                      {actualDailyIncome != null
+                        ? (
+                          <p className="text-lg font-bold text-white">
+                            {fmtUSD(actualDailyIncome)}<span className="text-gray-400 text-sm font-normal">/day</span>
+                          </p>
+                        )
+                        : <p className="text-lg font-bold text-white/30">—</p>
+                      }
+                    </div>
+                    <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Fee Income (% of position)</p>
+                      <p className="text-lg font-bold text-white">{feeIncomePct.toFixed(3)}%</p>
                     </div>
                   </div>
                 </div>

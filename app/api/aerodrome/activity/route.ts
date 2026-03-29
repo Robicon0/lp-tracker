@@ -3,9 +3,9 @@ import { NextResponse } from 'next/server';
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy used only for eth_getBlockByNumber (timestamp lookups) — free tier supports this
 const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-// Blast public RPC used for eth_getLogs — supports full-history scans filtered by tokenId
-// (Alchemy free tier caps eth_getLogs at 10 blocks; Blast allows any range when result count < 10K)
-const BLAST_RPC = 'https://base-mainnet.public.blastapi.io';
+// LlamaRPC used for eth_getLogs — supports full-history scans with no block-range limit
+// (Blast now limits to 10 blocks; Alchemy free tier also limits to 10 blocks)
+const LLAMA_RPC = 'https://base.llamarpc.com';
 
 // Aerodrome Slipstream (CL) NonfungiblePositionManager on Base
 // Verified: factory() returns 0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A (matches CL_FACTORY)
@@ -57,10 +57,10 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
   return res.json();
 }
 
-// eth_getLogs via Blast — supports full-history scans when result count < 10K
+// eth_getLogs via LlamaRPC — supports full-history scans with no block-range limit
 // A specific tokenId has at most ~20-50 events, so this works across the full chain history
 async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
-  const result = await rpcPost(BLAST_RPC, {
+  const result = await rpcPost(LLAMA_RPC, {
     jsonrpc: '2.0',
     method: 'eth_getLogs',
     params: [{
@@ -69,7 +69,7 @@ async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
         [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT],
         tokenIdHex,                   // topics[1] = indexed tokenId
       ],
-      fromBlock: '0x1000000',         // Base block ~17M (pre-dates all Aerodrome positions)
+      fromBlock: '0x0',               // Scan all Base history — filtered by address+tokenId so result count stays tiny
       toBlock: 'latest',
     }],
     id: 1,
@@ -197,6 +197,7 @@ export async function GET(request: Request) {
     const tokenIdHex = '0x' + tokenIdBig.toString(16).padStart(64, '0');
 
     const logs = await fetchLogs(tokenIdHex);
+    console.log(`[aerodrome/activity] tokenId=${positionId} tokenIdHex=${tokenIdHex} → ${logs.length} logs`);
 
     if (logs.length === 0) {
       const empty: ActivityResponse = {
