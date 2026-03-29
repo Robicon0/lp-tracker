@@ -36,6 +36,7 @@ const MANAGE_URLS: Record<string, string> = {
   Dolomite:       "https://app.dolomite.io/balances",
   "Jupiter Lend": "https://jup.ag/lend",
   AlphaFi:        "https://app.alphafi.xyz/alphalend",
+  Suilend:        "https://app.suilend.fi",
 };
 
 function buildPosition(
@@ -139,6 +140,26 @@ export function useLendingPositions(): UseLendingPositionsData {
               });
             } catch (err) {
               console.error("[useLendingPositions] Jupiter Lend fetch failed:", err);
+              return null;
+            }
+          })());
+        }
+
+        // ── Suilend (Sui) ────────────────────────────────────────────────────
+        if (suiAddress) {
+          tasks.push((async () => {
+            try {
+              console.log("[useLendingPositions] Fetching Suilend...");
+              const res = await fetch(`/api/lending/suilend?account=${suiAddress}`).then((r) => r.json());
+              if (cancelled) return null;
+              return buildPosition({
+                supplies: res.supplies ?? [],
+                borrows:  res.borrows  ?? [],
+                protocol: "Suilend",
+                chain:    "Sui",
+              });
+            } catch (err) {
+              console.error("[useLendingPositions] Suilend fetch failed:", err);
               return null;
             }
           })());

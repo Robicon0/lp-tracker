@@ -5,6 +5,7 @@ import Link from "next/link";
 import Navbar from "../Navbar";
 import { getTokenLogo } from "../lib/tokenLogos";
 import { useWalletTokens } from "../hooks/useWalletTokens";
+import { useLendingPositions } from "../hooks/useLendingPositions";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -263,6 +264,13 @@ export default function Dashboard() {
     tokenCount, lendingCount,
     isLoading: walletTokensLoading,
   } = useWalletTokens();
+
+  // External lending platforms (Dolomite, Jupiter Lend, AlphaFi, Suilend)
+  const { positions: externalLendingPositions } = useLendingPositions();
+  const externalLendingValue = externalLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
+  const externalLendingCount = externalLendingPositions.length;
+  const combinedLendingValue = totalLendingValue + externalLendingValue;
+  const combinedLendingCount = lendingCount + externalLendingCount;
 
   // Manage Wallets modal state
   const [showManageWallets, setShowManageWallets] = useState(false);
@@ -746,9 +754,9 @@ export default function Dashboard() {
                   ) : (
                     <>
                       <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                        letterSpacing:-1 }}>{fmt$(totalLendingValue)}</p>
+                        letterSpacing:-1 }}>{fmt$(combinedLendingValue)}</p>
                       <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
-                        {lendingCount > 0 ? `${lendingCount} position${lendingCount === 1 ? "" : "s"}` : "No positions found"}
+                        {combinedLendingCount > 0 ? `${combinedLendingCount} position${combinedLendingCount === 1 ? "" : "s"}` : "No positions found"}
                       </p>
                     </>
                   )}
