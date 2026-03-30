@@ -87,19 +87,25 @@ function effectiveStatus(p: AerodromePosition): "In Range" | "Out of Range" | "C
 }
 
 function getManageUrl(protocol: string): string {
-  if (protocol.includes("Aerodrome"))  return "https://aerodrome.finance/positions";
-  if (protocol.includes("Velodrome"))  return "https://velodrome.finance/positions";
-  if (protocol.includes("Uniswap"))    return "https://app.uniswap.org/pools";
-  if (protocol.includes("Orca"))       return "https://v2.orca.so/";
+  if (protocol.includes("Aerodrome"))  return "https://aerodrome.finance/dash";
+  if (protocol.includes("Velodrome"))  return "https://velodrome.finance/dash";
+  if (protocol.includes("Uniswap"))    return "https://app.uniswap.org/pool";
+  if (protocol.includes("Orca"))       return "https://www.orca.so/portfolio";
   if (protocol.includes("Raydium"))    return "https://raydium.io/portfolio/";
-  if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/liquidity";
-  if (protocol.includes("Cetus"))      return "https://app.cetus.zone/liquidity";
+  if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/lend";
+  if (protocol.includes("Cetus"))      return "https://app.cetus.zone/position";
   if (protocol.includes("Momentum"))   return "https://app.mmt.finance";
-  if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.exchange/#/pool";
+  if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.fi/pool";
   if (protocol.includes("KittenSwap")) return "https://www.kittenswap.org";
   if (protocol.includes("ProjectX") || protocol.includes("PRJX")) return "https://prjx.com";
   if (protocol.includes("PancakeSwap")) return "https://pancakeswap.finance/liquidity";
   return "";
+}
+
+function fmtLarge(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
 }
 
 function tickToUSD(tick: number, pos: AerodromePosition): number | null {
@@ -240,6 +246,21 @@ export default function PositionDetail() {
 
   // ── Fee tracking ────────────────────────────────────────────────────────────
   const [snapshots, setSnapshots] = useState<FeeSnapshot[]>([]);
+
+  // ── Pool statistics (from DefiLlama) ────────────────────────────────────────
+  const [poolStats, setPoolStats] = useState<{ tvlUsd: number | null; volumeUsd1d: number | null; feesUsd1d: number | null } | null>(null);
+  const [poolStatsLoading, setPoolStatsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pos) return;
+    setPoolStatsLoading(true);
+    const params = new URLSearchParams({ protocol: pos.protocol, chain: pos.chain, pair: pos.pair });
+    fetch(`/api/pool-stats?${params.toString()}`)
+      .then(r => r.json())
+      .then(data => { setPoolStats(data); setPoolStatsLoading(false); })
+      .catch(() => setPoolStatsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos?.id]);
 
   // Load history on mount; append new snapshot whenever fees change
   useEffect(() => {
@@ -616,6 +637,9 @@ export default function PositionDetail() {
         {/* ── 2D.5: Performance Metrics ─────────────────────────────────────── */}
         <Card style={{ marginBottom: 20, border: "1px solid rgba(251,191,36,0.15)" }}>
           <SectionHeader icon="📊" label="Performance Metrics" />
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "-10px 0 16px", letterSpacing: 0.3 }}>
+            Based on actual fee claims
+          </p>
           {(() => {
             const feeClaims = activity?.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim') ?? [];
             const deposits = activity?.events.filter(e => e.type === 'deposit') ?? [];
@@ -771,7 +795,7 @@ export default function PositionDetail() {
           {!activityLoading && isActivityProtocol && activity && (() => {
             const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
             const txUrl = (hash: string): string => {
-              if (pos.protocol === 'Bluefin') return `https://suiscan.xyz/mainnet/tx/${hash}`;
+              if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
               if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
               if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
               if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
@@ -953,6 +977,9 @@ export default function PositionDetail() {
         {/* ── 2F: Yield & APR Projections ──────────────────────────────────── */}
         <Card style={{ marginBottom: 20 }}>
           <SectionHeader icon="%" label="Yield & APR Projections" />
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "-10px 0 16px", letterSpacing: 0.3 }}>
+            Based on current pool rate
+          </p>
           <div className="detail-4col"
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
             {([
@@ -988,13 +1015,23 @@ export default function PositionDetail() {
           <SectionHeader icon="⚡" label="Pool Statistics" />
           <div className="detail-3col"
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            {["Pool TVL", "24h Volume", "24h Fees"].map((label) => (
+            {([
+              { label: "Pool TVL",   value: poolStats?.tvlUsd ?? null },
+              { label: "24h Volume", value: poolStats?.volumeUsd1d ?? null },
+              { label: "24h Fees",   value: poolStats?.feesUsd1d ?? null },
+            ] as const).map(({ label, value }) => (
               <div key={label} style={{ background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10,
                 padding: 14, textAlign: "center" }}>
                 <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
                   textTransform: "uppercase", letterSpacing: 1 }}>{label}</p>
-                <p style={{ fontSize: 16, color: "rgba(255,255,255,0.3)", margin: 0 }}>N/A</p>
+                {poolStatsLoading ? (
+                  <p style={{ fontSize: 16, color: "rgba(255,255,255,0.2)", margin: 0 }}>…</p>
+                ) : value != null ? (
+                  <p style={{ fontSize: 16, fontWeight: 700, color: "#6ee7b7", margin: 0 }}>{fmtLarge(value)}</p>
+                ) : (
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.2)", margin: 0 }}>Data unavailable</p>
+                )}
               </div>
             ))}
           </div>
