@@ -10,6 +10,13 @@ import { getTokenLogo, TOKEN_COLORS } from "../../../lib/tokenLogos";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
+import { usePositionActivity } from "../../../hooks/usePositionActivity";
+import { useBluefinActivity } from "../../../hooks/useBluefinActivity";
+import { useOrcaActivity } from "../../../hooks/useOrcaActivity";
+import { useRaydiumActivity } from "../../../hooks/useRaydiumActivity";
+import { useHyperSwapActivity } from "../../../hooks/useHyperSwapActivity";
+import { useUniswapActivity } from "../../../hooks/useUniswapActivity";
+import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
 
 // ── Token logo circle ─────────────────────────────────────────────────────────
 function TokenCircle({ symbol, size = 32, style }: {
@@ -282,6 +289,73 @@ export default function PositionDetail() {
     return { estimatedClaimed, totalEarned, feeVsHoldPct, ageDays, firstSnap, chartData };
   }, [snapshots, pos]);
 
+  // ── Activity data (on-chain fee claim history) ───────────────────────────
+  const HYPEREVM_PROTOCOLS = new Set(['HyperSwap', 'KittenSwap', 'ProjectX']);
+  const isHyperEVM = pos ? HYPEREVM_PROTOCOLS.has(pos.protocol) : false;
+
+  const aeroTokenId = pos?.protocol === 'Aerodrome' ? pos.id.replace('aero-', '') : null;
+  const { data: aeroActivity, isLoading: aeroActivityLoading } = usePositionActivity(
+    aeroTokenId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+  );
+
+  const bluefinObjId = pos?.protocol === 'Bluefin' ? pos.id.replace('bluefin-', '') : null;
+  const { data: bluefinActivity, isLoading: bluefinActivityLoading } = useBluefinActivity(
+    bluefinObjId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
+    pos?.coinTypeA, pos?.coinTypeB, pos?.price0, pos?.price1, pos?.walletAddress,
+  );
+
+  const orcaPosId = pos?.protocol === 'Orca' ? pos.id.replace('orca-', '') : null;
+  const { data: orcaActivity, isLoading: orcaActivityLoading } = useOrcaActivity(
+    orcaPosId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1, pos?.walletAddress,
+  );
+
+  const raydiumPosId = pos?.protocol === 'Raydium' ? pos.id.replace('ray-', '') : null;
+  const { data: raydiumActivity, isLoading: raydiumActivityLoading } = useRaydiumActivity(
+    raydiumPosId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1, pos?.walletAddress,
+  );
+
+  const hyperswapTokenId = pos && HYPEREVM_PROTOCOLS.has(pos.protocol)
+    ? pos.id.replace(/^hyperswap-[^-]+-/, '')
+    : null;
+  const { data: hyperswapActivity, isLoading: hyperswapActivityLoading } = useHyperSwapActivity(
+    hyperswapTokenId, pos && HYPEREVM_PROTOCOLS.has(pos.protocol) ? pos.protocol : null,
+    pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 6,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+  );
+
+  const uniswapPosId = pos?.protocol === 'Uniswap V3' ? pos.id : null;
+  const { data: uniswapActivity, isLoading: uniswapActivityLoading } = useUniswapActivity(
+    uniswapPosId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+  );
+
+  const velodromePosId = pos?.protocol === 'Velodrome' ? pos.id.replace('velo-', '') : null;
+  const { data: velodromeActivity, isLoading: velodromeActivityLoading } = useVelodromeActivity(
+    velodromePosId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+  );
+
+  const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
+    : pos?.protocol === 'Bluefin' ? bluefinActivity
+    : pos?.protocol === 'Orca' ? orcaActivity
+    : pos?.protocol === 'Raydium' ? raydiumActivity
+    : isHyperEVM ? hyperswapActivity
+    : pos?.protocol === 'Uniswap V3' ? uniswapActivity
+    : pos?.protocol === 'Velodrome' ? velodromeActivity
+    : null;
+  const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
+    : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
+    : pos?.protocol === 'Orca' ? orcaActivityLoading
+    : pos?.protocol === 'Raydium' ? raydiumActivityLoading
+    : isHyperEVM ? hyperswapActivityLoading
+    : pos?.protocol === 'Uniswap V3' ? uniswapActivityLoading
+    : pos?.protocol === 'Velodrome' ? velodromeActivityLoading
+    : false;
+  const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome'].includes(pos?.protocol ?? '') || isHyperEVM;
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   // Loading
@@ -542,99 +616,102 @@ export default function PositionDetail() {
         {/* ── 2D.5: Performance Metrics ─────────────────────────────────────── */}
         <Card style={{ marginBottom: 20, border: "1px solid rgba(251,191,36,0.15)" }}>
           <SectionHeader icon="📊" label="Performance Metrics" />
-
-          {/* Total Fees row */}
-          {(pos.fees > 0 || (feeMetrics && feeMetrics.estimatedClaimed > 0)) && (
-            <div style={{ background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.12)",
-              borderRadius: 10, padding: 16, marginBottom: 12 }}>
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: "0 0 4px",
-                textTransform: "uppercase", letterSpacing: 1 }}>Total Fees (Lifetime)</p>
-              <p style={{ fontSize: 26, fontWeight: 700, color: "#34d399", margin: "0 0 10px",
-                letterSpacing: -0.5 }}>
-                {fmt$(feeMetrics ? feeMetrics.totalEarned : pos.fees)}
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {feeMetrics && feeMetrics.estimatedClaimed > 0.005 && (
-                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                    Collected (est.): {fmt$(feeMetrics.estimatedClaimed)}
-                    {pos.fees0 != null && pos.fees1 != null && (
-                      <span style={{ color: "rgba(255,255,255,0.25)", marginLeft: 6 }}>
-                        (previous claims detected)
-                      </span>
-                    )}
-                  </p>
-                )}
-                <p style={{ fontSize: 12, color: "#34d399", margin: 0 }}>
-                  +{fmt$(pos.fees)} uncollected
-                  {pos.fees0 != null && pos.price0 && (
-                    <span style={{ color: "rgba(255,255,255,0.35)", marginLeft: 6 }}>
-                      ({pos.fees0.toFixed(4)} {t0} + {(pos.fees1 ?? 0).toFixed(4)} {t1})
-                    </span>
-                  )}
-                </p>
-                {(!feeMetrics || feeMetrics.estimatedClaimed < 0.005) && (
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", margin: 0 }}>
-                    Collected fees: tracking starts from first page view
-                  </p>
-                )}
+          {(() => {
+            const feeClaims = activity?.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim') ?? [];
+            const deposits = activity?.events.filter(e => e.type === 'deposit') ?? [];
+            const claimedUSD = feeClaims.reduce((sum, e) => {
+              if (e.usdAtTime != null) return sum + e.usdAtTime;
+              return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+            }, 0);
+            const uncollectedUSD = pos.fees;
+            const lifetimeUSD = claimedUSD + uncollectedUSD;
+            const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
+            const firstTs = firstDeposit?.timestamp ?? (feeMetrics?.firstSnap.timestamp ? feeMetrics.firstSnap.timestamp / 1000 : 0);
+            const nowTs = Math.floor(Date.now() / 1000);
+            const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+            const actualAPR = daysActive >= 1 && pos.value > 0 && claimedUSD > 0
+              ? (claimedUSD / pos.value) / (daysActive / 365) * 100
+              : null;
+            const actualDailyIncome = daysActive >= 1 && claimedUSD > 0 ? claimedUSD / daysActive : null;
+            const feeIncomePct = pos.value > 0 ? (lifetimeUSD / pos.value) * 100 : 0;
+            const daysLabel = daysActive >= 1 ? `${Math.floor(daysActive)}d` : (firstTs > 0 ? '<1d' : '—');
+            const cellStyle: React.CSSProperties = {
+              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 10, padding: 14, textAlign: "center",
+            };
+            return (
+              <div>
+                {/* Row 1: Claimed | Uncollected | Lifetime */}
+                <div className="detail-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+                  <div style={{ ...cellStyle, border: "1px solid rgba(52,211,153,0.15)" }}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Total Claimed</p>
+                    {activityLoading
+                      ? <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>…</p>
+                      : <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>{fmt$(claimedUSD)}</p>
+                    }
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
+                      {activityLoading ? "loading…" : isActivityProtocol ? `${feeClaims.length} claim${feeClaims.length !== 1 ? "s" : ""}` : "no data"}
+                    </p>
+                  </div>
+                  <div style={cellStyle}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Uncollected</p>
+                    <p style={{ fontSize: 20, fontWeight: 700, color: "#6ee7b7", margin: "0 0 4px" }}>{fmt$(uncollectedUSD)}</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>pending</p>
+                  </div>
+                  <div style={cellStyle}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Total Lifetime</p>
+                    <p style={{ fontSize: 20, fontWeight: 700, color: "white", margin: "0 0 4px" }}>{fmt$(lifetimeUSD)}</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>claimed + pending</p>
+                  </div>
+                </div>
+                {/* Row 2: Actual APR | Estimated APR | Position Age */}
+                <div className="detail-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+                  <div style={{ ...cellStyle, border: "1px solid rgba(52,211,153,0.12)" }}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Actual APR</p>
+                    {activityLoading
+                      ? <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>…</p>
+                      : actualAPR != null
+                        ? <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>~{actualAPR.toFixed(1)}%</p>
+                        : <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>—</p>
+                    }
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>from real claims</p>
+                  </div>
+                  <div style={{ ...cellStyle, border: "1px solid rgba(96,165,250,0.12)" }}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Estimated APR</p>
+                    {hasApr
+                      ? <p style={{ fontSize: 20, fontWeight: 700, color: "#93c5fd", margin: "0 0 4px" }}>~{pos.apy.toFixed(1)}%</p>
+                      : <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>N/A</p>
+                    }
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>pool APY</p>
+                  </div>
+                  <div style={cellStyle}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Position Age</p>
+                    <p style={{ fontSize: 20, fontWeight: 700, color: "white", margin: "0 0 4px" }}>{daysLabel}</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
+                      {firstTs > 0 ? `since ${new Date(firstTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "tracking age"}
+                    </p>
+                  </div>
+                </div>
+                {/* Row 3: Daily Income | Fee Income % */}
+                <div className="detail-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div style={cellStyle}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Actual Daily Income</p>
+                    {activityLoading
+                      ? <p style={{ fontSize: 18, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: 0 }}>…</p>
+                      : actualDailyIncome != null
+                        ? <p style={{ fontSize: 18, fontWeight: 700, color: "white", margin: 0 }}>{fmt$(actualDailyIncome)}<span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 400 }}>/day</span></p>
+                        : <p style={{ fontSize: 18, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: 0 }}>—</p>
+                    }
+                  </div>
+                  <div style={cellStyle}>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Fee Income</p>
+                    <p style={{ fontSize: 18, fontWeight: 700, color: "white", margin: 0 }}>{feeIncomePct.toFixed(3)}%</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "4px 0 0" }}>of position value</p>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* 3-col performance summary */}
-          <div className="detail-3col"
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            {/* Total Fees Earned */}
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: 14, textAlign: "center" }}>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
-                textTransform: "uppercase", letterSpacing: 1 }}>Total Fees</p>
-              <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>
-                {fmt$(feeMetrics ? feeMetrics.totalEarned : pos.fees)}
-              </p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                {feeMetrics
-                  ? `Since ${new Date(feeMetrics.firstSnap.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
-                  : "Uncollected only"}
-              </p>
-            </div>
-
-            {/* Fee vs Hold */}
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: 14, textAlign: "center" }}>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
-                textTransform: "uppercase", letterSpacing: 1 }}>Fee Income</p>
-              <p style={{ fontSize: 20, fontWeight: 700, color: "#6ee7b7", margin: "0 0 4px" }}>
-                {pos.value > 0
-                  ? `+${((feeMetrics ? feeMetrics.totalEarned : pos.fees) / pos.value * 100).toFixed(3)}%`
-                  : "—"}
-              </p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                of position value
-              </p>
-            </div>
-
-            {/* Position Age */}
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: 14, textAlign: "center" }}>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
-                textTransform: "uppercase", letterSpacing: 1 }}>Tracking Age</p>
-              {feeMetrics ? (
-                <>
-                  <p style={{ fontSize: 20, fontWeight: 700, color: "white", margin: "0 0 4px" }}>
-                    {feeMetrics.ageDays < 1
-                      ? `${Math.round(feeMetrics.ageDays * 24)}h`
-                      : `${Math.floor(feeMetrics.ageDays)}d`}
-                  </p>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                    Tracking since {new Date(feeMetrics.firstSnap.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </p>
-                </>
-              ) : (
-                <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.3)", margin: 0 }}>—</p>
-              )}
-            </div>
-          </div>
+            );
+          })()}
         </Card>
 
         {/* ── 2D.6: Fee Accumulation Chart ──────────────────────────────────── */}
@@ -670,6 +747,125 @@ export default function PositionDetail() {
             </p>
           </Card>
         )}
+
+        {/* ── 2D.7: Activity Log ────────────────────────────────────────────── */}
+        <Card style={{ marginBottom: 20, border: "1px solid rgba(52,211,153,0.12)" }}>
+          <SectionHeader icon="📋" label="Fee Claims History" />
+          {activityLoading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,0.4)", fontSize: 13, padding: "12px 0" }}>
+              <div style={{ width: 16, height: 16, border: "2px solid #34d399", borderTopColor: "transparent",
+                borderRadius: "50%", animation: "_spin 1s linear infinite", flexShrink: 0 }} />
+              Scanning blockchain for fee history…
+            </div>
+          )}
+          {!activityLoading && !isActivityProtocol && (
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+              Activity data not available for {pos.protocol} — on-chain fee history scanning is not yet supported for this protocol.
+            </p>
+          )}
+          {!activityLoading && isActivityProtocol && !activity && (
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+              Could not load fee claim data. The blockchain scan may have timed out — try refreshing.
+            </p>
+          )}
+          {!activityLoading && isActivityProtocol && activity && (() => {
+            const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
+            const txUrl = (hash: string): string => {
+              if (pos.protocol === 'Bluefin') return `https://suiscan.xyz/mainnet/tx/${hash}`;
+              if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
+              if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
+              if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
+              if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
+              if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
+              if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
+              return `https://basescan.org/tx/${hash}`;
+            };
+            const fmtDate = (ts: number) => {
+              if (!ts) return '—';
+              return new Date(ts * 1000).toLocaleDateString('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+              });
+            };
+            const fmtAmt = (n: number) => n === 0 ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 6 });
+            const shortHash = (h: string) => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
+            const totalClaimed = feeClaims.reduce((sum, e) => {
+              if (e.usdAtTime != null) return sum + e.usdAtTime;
+              return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+            }, 0);
+
+            if (feeClaims.length === 0) {
+              return (
+                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+                  No fee claims detected yet. Claims will appear here after you collect fees on-chain.
+                </p>
+              );
+            }
+
+            const thStyle: React.CSSProperties = {
+              fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5,
+              color: "rgba(255,255,255,0.3)", padding: "0 0 10px", fontWeight: 500,
+            };
+            const tdStyle: React.CSSProperties = {
+              fontSize: 12, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.04)",
+              color: "rgba(255,255,255,0.7)",
+            };
+
+            return (
+              <div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thStyle, textAlign: "left" }}>Date (UTC)</th>
+                        <th style={{ ...thStyle, textAlign: "right" }}>{t0}</th>
+                        <th style={{ ...thStyle, textAlign: "right" }}>{t1}</th>
+                        <th style={{ ...thStyle, textAlign: "right" }}>Total USD</th>
+                        <th style={{ ...thStyle, textAlign: "right" }}>Tx</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {feeClaims.map((ev, i) => {
+                        const usd = ev.usdAtTime ?? (ev.amount0 * (pos.price0 ?? 0) + ev.amount1 * (pos.price1 ?? 0));
+                        return (
+                          <tr key={i}>
+                            <td style={{ ...tdStyle, whiteSpace: "nowrap" as const }}>{fmtDate(ev.timestamp)}</td>
+                            <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace" }}>
+                              {ev.type === 'reward_claim'
+                                ? `${fmtAmt(ev.amount0)} ${(ev as any).rewardSymbol ?? ''}`
+                                : fmtAmt(ev.amount0)}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace" }}>
+                              {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 600, color: "#34d399" }}>
+                              {fmt$(usd)}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: "right" }}>
+                              <a href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
+                                style={{ color: "#6ee7b7", fontFamily: "monospace", fontSize: 11, textDecoration: "none" }}>
+                                {shortHash(ev.txHash)}
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                  borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 12, paddingTop: 12 }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>
+                    {feeClaims.length} collection{feeClaims.length !== 1 ? "s" : ""}
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#34d399" }}>
+                    Total Claimed: {fmt$(totalClaimed)}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+        </Card>
 
         {/* ── 2E: Concentrated Liquidity Range ─────────────────────────────── */}
         {hasRange && (
