@@ -134,7 +134,7 @@ interface ReserveInfo {
   spreadDecimalRaw: bigint;    // Decimal.value
   ctokenSupplyRaw: bigint;     // u64 base units
   cbrDecimalRaw: bigint;       // cumulative_borrow_rate Decimal.value
-  supplyAprPct: number;        // computed from on-chain interest rate curve
+  supplyAprPct: number | null; // null when config missing or calculation failed
   oraclePriceUsd: number;      // real-time Pyth oracle price (fallback for CoinGecko failures)
 }
 
@@ -180,7 +180,11 @@ async function loadReserves(): Promise<Map<number, ReserveInfo>> {
       const spreadFeeBps = Number(configInner?.spread_fee_bps ?? 0);
 
       const borrowAprBps = interpolateAprBps(irUtils, irAprsBps, utilizationPct);
-      const supplyAprPct = (borrowAprBps / 100) * (utilizationPct / 100) * (1 - spreadFeeBps / 10000);
+      const rawApr = (borrowAprBps / 100) * (utilizationPct / 100) * (1 - spreadFeeBps / 10000);
+      const supplyAprPct: number | null = (irUtils.length === 0 || irAprsBps.length === 0 || isNaN(rawApr) || !isFinite(rawApr)) ? null : rawApr;
+      if (map.size < 3) {
+        console.log(`[suilend/route] Reserve ${arrayIndex}: util=${utilizationPct.toFixed(1)}% irUtils=${JSON.stringify(irUtils)} irAprsBps=${JSON.stringify(irAprsBps)} spread=${spreadFeeBps} → supplyApr=${supplyAprPct?.toFixed(4) ?? 'null'}%`);
+      }
 
       const oraclePriceUsd = Number(decimalRaw(rf.price)) / 1e18;
 
@@ -237,8 +241,8 @@ export async function GET(request: Request) {
     // Step 2: load reserves (supply APR is computed on-chain inside loadReserves)
     const reserves = await loadReserves();
 
-    const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
-    const borrows:  Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
+    const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number | null }> = [];
+    const borrows:  Array<{ symbol: string; amount: number; usdValue: number; apy: number | null }> = [];
 
     for (const cap of caps) {
       try {
@@ -284,7 +288,7 @@ export async function GET(request: Request) {
             if (usdValue < 0.001) continue;
 
             const apy = reserve.supplyAprPct;
-            console.log(`[suilend/route] Deposit: ${symbol} amount=${underlying.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
+            console.log(`[suilend/route] Deposit: ${symbol} amount=${underlying.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy?.toFixed(4) ?? 'null'}%`);
             supplies.push({ symbol, amount: underlying, usdValue, apy });
           } catch (err) {
             console.error('[suilend/route] Deposit parse error:', err);
