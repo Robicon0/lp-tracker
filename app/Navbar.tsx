@@ -17,6 +17,7 @@ export default function Navbar() {
   // Never read connected or publicKey from the adapter for display: a locked Phantom
   // wallet keeps those truthy via Wallet Standard silent reconnect.
   const {
+    wallet: currentSolanaWallet,
     select,
     connect: connectSolana,
     disconnect: disconnectSolana,
@@ -130,16 +131,32 @@ export default function Navbar() {
   };
 
   const handleSolanaConnect = async (walletName: string) => {
+    setShowSolanaModal(false);
     try {
+      // Fast path: adapter already connected to this wallet via autoConnect/Wallet Standard.
+      // In that case connectSolana() would throw "Wallet already connected" and the
+      // useEffect that captures publicKey would never fire (deps unchanged). Just set directly.
+      if (
+        adapterSolanaConnected &&
+        adapterPublicKey &&
+        currentSolanaWallet?.adapter.name === walletName
+      ) {
+        setSolanaAddress(adapterPublicKey.toBase58());
+        return;
+      }
       select(walletName as WalletName);
       awaitingSolanaConnect.current = true;
       await connectSolana();
-      // Address captured by the useEffect above once React re-renders.
+      // Address captured by the useEffect above once adapterSolanaConnected/publicKey update.
     } catch (err) {
+      // Fallback: if connect() still throws but adapter is now connected, capture address.
+      if (adapterSolanaConnected && adapterPublicKey) {
+        setSolanaAddress(adapterPublicKey.toBase58());
+      } else {
+        console.error("Solana connect error:", err);
+      }
       awaitingSolanaConnect.current = false;
-      console.error("Solana connect error:", err);
     }
-    setShowSolanaModal(false);
   };
 
   const handleSolanaDisconnect = () => {
