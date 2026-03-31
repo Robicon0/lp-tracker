@@ -48,6 +48,29 @@ export default function Navbar() {
   // knows to capture publicKey once the adapter state updates.
   const awaitingSolanaConnect = useRef(false);
 
+  // Persist solanaAddress to localStorage so it survives page refresh.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (solanaAddress) {
+      localStorage.setItem('defidesh-solana-addr', solanaAddress);
+    } else {
+      localStorage.removeItem('defidesh-solana-addr');
+    }
+  }, [solanaAddress]);
+
+  // Restore solanaAddress after autoConnect or Wallet Standard silent reconnect.
+  // Only runs when adapter has reconnected and we haven't set an address yet.
+  // The awaitingSolanaConnect guard prevents interference with manual connects.
+  useEffect(() => {
+    if (awaitingSolanaConnect.current) return;
+    if (adapterSolanaConnected && adapterPublicKey && !solanaAddress) {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('defidesh-solana-addr') : null;
+      if (saved && saved === adapterPublicKey.toBase58()) {
+        setSolanaAddress(saved);
+      }
+    }
+  }, [adapterSolanaConnected, adapterPublicKey, solanaAddress, setSolanaAddress]);
+
   useEffect(() => {
     if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
       setSolanaAddress(adapterPublicKey.toBase58());
@@ -64,6 +87,27 @@ export default function Navbar() {
 
   // --- Sui connection tracking ---
   const awaitingSuiConnect = useRef(false);
+
+  // Persist suiAddress to localStorage so it survives page refresh.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (suiAddress) {
+      localStorage.setItem('defidesh-sui-addr', suiAddress);
+    } else {
+      localStorage.removeItem('defidesh-sui-addr');
+    }
+  }, [suiAddress]);
+
+  // Restore suiAddress after autoConnect / dapp-kit persistence on page load.
+  useEffect(() => {
+    if (awaitingSuiConnect.current) return;
+    if (adapterSuiAccount && !suiAddress) {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('defidesh-sui-addr') : null;
+      if (saved && saved === adapterSuiAccount.address) {
+        setSuiAddress(saved);
+      }
+    }
+  }, [adapterSuiAccount, suiAddress, setSuiAddress]);
 
   useEffect(() => {
     if (awaitingSuiConnect.current && adapterSuiAccount) {

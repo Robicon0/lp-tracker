@@ -2,13 +2,28 @@ import { NextResponse } from 'next/server';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
-// LlamaRPC public RPCs — support full-history eth_getLogs scans with no block-range limit
-// (Blast now limits to 10 blocks; Alchemy free tier also limits to 10 blocks)
+// Tenderly public gateways — primary for eth_getLogs: full-history, no block-range limit, fast
+const TENDERLY_RPCS: Record<string, string> = {
+  ethereum: 'https://mainnet.gateway.tenderly.co',
+  arbitrum: 'https://arbitrum.gateway.tenderly.co',
+  polygon:  'https://polygon.gateway.tenderly.co',
+  optimism: 'https://optimism.gateway.tenderly.co',
+};
+
+// LlamaRPC public RPCs — secondary: now enforces 30k block range limit (code -32012)
 const BLAST_RPCS: Record<string, string> = {
   ethereum: 'https://eth.llamarpc.com',
   arbitrum: 'https://arb1.llamarpc.com',
   polygon:  'https://polygon.llamarpc.com',
   optimism: 'https://op.llamarpc.com',
+};
+
+// publicnode — tertiary fallback for chunked scanning
+const PUBLIC_NODE_RPCS: Record<string, string> = {
+  ethereum: 'https://ethereum-rpc.publicnode.com',
+  arbitrum: 'https://arbitrum-one-rpc.publicnode.com',
+  polygon:  'https://polygon-bor-rpc.publicnode.com',
+  optimism: 'https://optimism-rpc.publicnode.com',
 };
 
 // Alchemy RPCs — used only for eth_getBlockByNumber (timestamp lookups)
@@ -22,13 +37,19 @@ const ALCHEMY_RPCS: Record<string, string> = {
 // Uniswap V3 NonfungiblePositionManager — same address on all supported chains
 const NFT_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
 
-// Approximate deployment block per chain — scan from here to avoid querying ancient history
-const FROM_BLOCKS: Record<string, string> = {
-  ethereum: '0xbca074', // ~12,369,140 (Uniswap V3 launch May 2021)
-  arbitrum: '0x28560',  // ~165,216 (Uniswap V3 on Arbitrum launch)
-  polygon:  '0x15bbb73', // ~22,761,331 (Uniswap V3 on Polygon launch)
-  optimism: '0x2DC6C0', // ~3,000,000 (Uniswap V3 on Optimism launch)
+// Approximate deployment block per chain (numeric, used for chunked fallback scanning)
+const DEPLOY_BLOCKS: Record<string, number> = {
+  ethereum: 12_369_140,  // Uniswap V3 launch May 2021
+  arbitrum:    165_216,  // Uniswap V3 on Arbitrum launch
+  polygon:  22_761_331,  // Uniswap V3 on Polygon launch
+  optimism:   3_000_000, // Uniswap V3 on Optimism launch
 };
+
+// Chunk sizes: LlamaRPC just under 30k limit; publicnode supports up to 49k
+const LLAMA_CHUNK   = 29_000;
+const PUBNODE_CHUNK = 49_000;
+// Max parallel getLogs requests per batch
+const MAX_CONCURRENCY = 50;
 
 // Standard Uniswap V3 event topic0 hashes — same for all V3 forks
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
@@ -114,27 +135,115 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
   return res.json();
 }
 
-async function fetchLogs(blastRpc: string, tokenIdHex: string, fromBlock: string): Promise<RawLog[]> {
-  const result = await rpcPost(blastRpc, {
-    jsonrpc: '2.0',
-    method: 'eth_getLogs',
-    params: [{
-      address: NFT_MANAGER,
-      topics: [
-        [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT],
-        tokenIdHex,
-      ],
-      fromBlock,
-      toBlock: 'latest',
-    }],
-    id: 1,
-  }) as { result?: RawLog[]; error?: { message: string } };
-
-  if (result.error) {
-    console.error('[uniswap/activity] eth_getLogs error:', result.error);
-    return [];
+async function fetchLogsChunked(
+  tokenIdHex: string,
+  fromBlock: number,
+  toBlock: number,
+  rpcUrl: string,
+  chunkSize: number,
+): Promise<RawLog[]> {
+  const chunks: Array<[number, number]> = [];
+  for (let b = fromBlock; b <= toBlock; b += chunkSize) {
+    chunks.push([b, Math.min(b + chunkSize - 1, toBlock)]);
   }
-  return result.result ?? [];
+  console.log(`[uniswap/activity] chunked scan: ${chunks.length} chunks @ ${chunkSize} blocks, rpc=${rpcUrl}`);
+
+  const allLogs: RawLog[] = [];
+  for (let i = 0; i < chunks.length; i += MAX_CONCURRENCY) {
+    const batch = chunks.slice(i, i + MAX_CONCURRENCY);
+    let batchErrors = 0;
+    const results = await Promise.all(
+      batch.map(async ([from, to]) => {
+        const res = await rpcPost(rpcUrl, {
+          jsonrpc: '2.0',
+          method: 'eth_getLogs',
+          params: [{
+            address: NFT_MANAGER,
+            topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
+            fromBlock: '0x' + from.toString(16),
+            toBlock:   '0x' + to.toString(16),
+          }],
+          id: from,
+        }) as { result?: RawLog[]; error?: { message: string } };
+        if (res.error) {
+          batchErrors++;
+          return [] as RawLog[];
+        }
+        return res.result ?? [];
+      })
+    );
+    allLogs.push(...results.flat());
+    if (i === 0 && batchErrors === batch.length) {
+      throw new Error(`[uniswap/activity] chunked scan: first batch 100% error rate on ${rpcUrl}`);
+    }
+  }
+  return allLogs;
+}
+
+async function fetchLogs(
+  chain: string,
+  blastRpc: string,
+  alchemyRpc: string,
+  tokenIdHex: string,
+): Promise<RawLog[]> {
+  const deployBlock = DEPLOY_BLOCKS[chain] ?? 0;
+  const tenderlyRpc = TENDERLY_RPCS[chain];
+  const pubNodeRpc  = PUBLIC_NODE_RPCS[chain];
+
+  const logsParams = {
+    address: NFT_MANAGER,
+    topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
+    fromBlock: '0x' + deployBlock.toString(16),
+    toBlock: 'latest' as const,
+  };
+
+  // Tier 1: Tenderly (full-range, no limits, fast)
+  if (tenderlyRpc) {
+    const tenderlyAttempt = await rpcPost(tenderlyRpc, {
+      jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
+    }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+    if (!tenderlyAttempt.error) {
+      return tenderlyAttempt.result ?? [];
+    }
+    console.warn('[uniswap/activity] Tenderly error:', chain, tenderlyAttempt.error.message);
+  }
+
+  // Tier 2: LlamaRPC full range
+  const llamaAttempt = await rpcPost(blastRpc, {
+    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
+  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+
+  if (!llamaAttempt.error) {
+    return llamaAttempt.result ?? [];
+  }
+
+  const code = (llamaAttempt.error as unknown as { code?: number }).code;
+  const msg  = llamaAttempt.error.message;
+  console.warn('[uniswap/activity] LlamaRPC full-range error:', chain, code, msg);
+
+  const bnRes = await rpcPost(alchemyRpc, {
+    jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
+  }) as { result?: string };
+  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 21_500_000;
+
+  const isRangeErr    = code === -32012 || msg.includes('ExceededMaxAllowed') || msg.includes('range');
+  const isUnreachable = code === -32603 || msg.toLowerCase().includes('unreachable');
+
+  // Tier 3: LlamaRPC chunked
+  if (isRangeErr) {
+    try {
+      return await fetchLogsChunked(tokenIdHex, deployBlock, currentBlock, blastRpc, LLAMA_CHUNK);
+    } catch (llamaChunkErr) {
+      console.warn('[uniswap/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
+    }
+  }
+
+  // Tier 4: publicnode chunked
+  if ((isRangeErr || isUnreachable) && pubNodeRpc) {
+    return fetchLogsChunked(tokenIdHex, deployBlock, currentBlock, pubNodeRpc, PUBNODE_CHUNK);
+  }
+
+  throw new Error(`[uniswap/activity] eth_getLogs RPC error: ${msg}`);
 }
 
 async function fetchTimestamps(alchemyRpc: string, blockNumbers: number[]): Promise<Record<number, number>> {
@@ -240,10 +349,9 @@ export async function GET(request: Request) {
   try {
     const blastRpc   = BLAST_RPCS[chain];
     const alchemyRpc = ALCHEMY_RPCS[chain];
-    const fromBlock  = FROM_BLOCKS[chain] ?? '0x0';
 
     const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
-    const logs = await fetchLogs(blastRpc, tokenIdHex, fromBlock);
+    const logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex);
 
     if (logs.length === 0) {
       const empty: ActivityResponse = { events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0 };

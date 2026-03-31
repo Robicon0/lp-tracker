@@ -1,17 +1,29 @@
 import { NextResponse } from 'next/server';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
-// Alchemy Optimism — used only for eth_getBlockByNumber (timestamp lookups)
+// Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
 const ALCHEMY_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-// LlamaRPC Optimism — supports full-history eth_getLogs with no block-range limit
+// Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit
+const TENDERLY_RPC = 'https://optimism.gateway.tenderly.co';
+// LlamaRPC Optimism — secondary: now enforces 30k block range limit (code -32012)
 const LLAMA_RPC = 'https://op.llamarpc.com';
+// publicnode — tertiary fallback for chunked scanning
+const PUBLIC_NODE_RPC = 'https://optimism-rpc.publicnode.com';
 
 // Velodrome Slipstream (CL) NonfungiblePositionManager on Optimism
 // keccak256 verified to emit the same event signatures as all standard V3 forks
 const NFT_MANAGER = '0x416b433906b1B72FA758e166e239c43d68dC6F29';
 
-// Start scanning from block ~3,000,000 — well before Velodrome CL launched on Optimism
-const FROM_BLOCK = '0x2DC6C0';
+// Velodrome Slipstream deployed in late 2023 on Optimism.
+// Optimism pre-Bedrock (Dec2021-Jun2023) ~12s blocks → ~3.9M; post-Bedrock 2s blocks.
+// At Q4 2023 Optimism was at approximately block 12-15M. Use 10M as conservative start.
+const DEPLOY_BLOCK = 10_000_000;  // conservative start, before Velodrome CL launch
+
+// Chunk sizes: LlamaRPC just under 30k limit; publicnode supports up to 49k
+const LLAMA_CHUNK   = 29_000;
+const PUBNODE_CHUNK = 49_000;
+// Max parallel getLogs requests per batch
+const MAX_CONCURRENCY = 50;
 
 // Standard V3 event topic0 hashes (identical across all V3-fork NFT managers)
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
@@ -71,27 +83,105 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
   return res.json();
 }
 
-async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
-  const result = await rpcPost(LLAMA_RPC, {
-    jsonrpc: '2.0',
-    method: 'eth_getLogs',
-    params: [{
-      address: NFT_MANAGER,
-      topics: [
-        [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT],
-        tokenIdHex,
-      ],
-      fromBlock: FROM_BLOCK,
-      toBlock: 'latest',
-    }],
-    id: 1,
-  }) as { result?: RawLog[]; error?: { message: string } };
-
-  if (result.error) {
-    console.error('[velodrome/activity] eth_getLogs error:', result.error);
-    return [];
+async function fetchLogsChunked(
+  tokenIdHex: string,
+  fromBlock: number,
+  toBlock: number,
+  rpcUrl: string,
+  chunkSize: number,
+): Promise<RawLog[]> {
+  const chunks: Array<[number, number]> = [];
+  for (let b = fromBlock; b <= toBlock; b += chunkSize) {
+    chunks.push([b, Math.min(b + chunkSize - 1, toBlock)]);
   }
-  return result.result ?? [];
+  console.log(`[velodrome/activity] chunked scan: ${chunks.length} chunks @ ${chunkSize} blocks, rpc=${rpcUrl}`);
+
+  const allLogs: RawLog[] = [];
+  for (let i = 0; i < chunks.length; i += MAX_CONCURRENCY) {
+    const batch = chunks.slice(i, i + MAX_CONCURRENCY);
+    let batchErrors = 0;
+    const results = await Promise.all(
+      batch.map(async ([from, to]) => {
+        const res = await rpcPost(rpcUrl, {
+          jsonrpc: '2.0',
+          method: 'eth_getLogs',
+          params: [{
+            address: NFT_MANAGER,
+            topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
+            fromBlock: '0x' + from.toString(16),
+            toBlock:   '0x' + to.toString(16),
+          }],
+          id: from,
+        }) as { result?: RawLog[]; error?: { message: string } };
+        if (res.error) {
+          batchErrors++;
+          return [] as RawLog[];
+        }
+        return res.result ?? [];
+      })
+    );
+    allLogs.push(...results.flat());
+    if (i === 0 && batchErrors === batch.length) {
+      throw new Error(`[velodrome/activity] chunked scan: first batch 100% error rate on ${rpcUrl}`);
+    }
+  }
+  return allLogs;
+}
+
+async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
+  const logsParams = {
+    address: NFT_MANAGER,
+    topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
+    fromBlock: '0x' + DEPLOY_BLOCK.toString(16),
+    toBlock: 'latest' as const,
+  };
+
+  // Tier 1: Tenderly (full-range, no limits, fast)
+  const tenderlyAttempt = await rpcPost(TENDERLY_RPC, {
+    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
+  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+
+  if (!tenderlyAttempt.error) {
+    return tenderlyAttempt.result ?? [];
+  }
+  console.warn('[velodrome/activity] Tenderly error:', tenderlyAttempt.error.message);
+
+  // Tier 2: LlamaRPC full range
+  const llamaAttempt = await rpcPost(LLAMA_RPC, {
+    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
+  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+
+  if (!llamaAttempt.error) {
+    return llamaAttempt.result ?? [];
+  }
+
+  const code = (llamaAttempt.error as unknown as { code?: number }).code;
+  const msg  = llamaAttempt.error.message;
+  console.warn('[velodrome/activity] LlamaRPC full-range error:', code, msg);
+
+  const bnRes = await rpcPost(ALCHEMY_RPC, {
+    jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
+  }) as { result?: string };
+  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 150_000_000;
+
+  const isRangeErr    = code === -32012 || msg.includes('ExceededMaxAllowed') || msg.includes('range');
+  const isUnreachable = code === -32603 || msg.toLowerCase().includes('unreachable');
+
+  // Tier 3: LlamaRPC chunked
+  if (isRangeErr) {
+    try {
+      return await fetchLogsChunked(tokenIdHex, DEPLOY_BLOCK, currentBlock, LLAMA_RPC, LLAMA_CHUNK);
+    } catch (llamaChunkErr) {
+      console.warn('[velodrome/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
+    }
+  }
+
+  // Tier 4: publicnode chunked
+  if (isRangeErr || isUnreachable) {
+    return fetchLogsChunked(tokenIdHex, DEPLOY_BLOCK, currentBlock, PUBLIC_NODE_RPC, PUBNODE_CHUNK);
+  }
+
+  throw new Error(`[velodrome/activity] eth_getLogs RPC error: ${msg}`);
 }
 
 async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, number>> {

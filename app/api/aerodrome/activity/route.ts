@@ -1,15 +1,49 @@
 import { NextResponse } from 'next/server';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
-// Alchemy used only for eth_getBlockByNumber (timestamp lookups) — free tier supports this
+// Alchemy used only for eth_getBlockByNumber / eth_blockNumber — free tier supports this
 const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-// LlamaRPC used for eth_getLogs — supports full-history scans with no block-range limit
-// (Blast now limits to 10 blocks; Alchemy free tier also limits to 10 blocks)
+// Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit, fast
+const TENDERLY_RPC = 'https://base.gateway.tenderly.co';
+// LlamaRPC — secondary: now enforces 30k block range limit (code -32012)
 const LLAMA_RPC = 'https://base.llamarpc.com';
+// publicnode — tertiary fallback with chunked scanning; ~8s/request for historical blocks
+const PUBLIC_NODE_RPC = 'https://base-rpc.publicnode.com';
 
 // Aerodrome Slipstream (CL) NonfungiblePositionManager on Base
 // Verified: factory() returns 0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A (matches CL_FACTORY)
 const NFT_MANAGER = '0x827922686190790b37229fd06084350E74485b72';
+
+// Aerodrome CL NFT manager deployed at ~Base block 13,844,000 (April 2024)
+const DEPLOY_BLOCK = 13_844_000;
+
+// Chunk sizes: LlamaRPC just under its 30k limit; publicnode supports up to 49k
+const LLAMA_CHUNK   = 29_000;
+const PUBNODE_CHUNK = 49_000;
+// Concurrency limits per RPC — publicnode rate-limits aggressively at high concurrency
+const LLAMA_CONCURRENCY   = 10;
+const PUBNODE_CONCURRENCY =  5;
+
+// Known anchor point: tokenId 50,093,212 was minted at Base block 41,878,002 (from prod data)
+// Used to estimate the start block for a given tokenId so we scan far fewer chunks
+const ANCHOR_TOKEN_ID     = 50_093_212;
+const ANCHOR_BLOCK        = 41_878_002;
+const POSITIONS_PER_BLOCK = 4;   // observed minting rate near block 44M
+
+function estimateStartBlock(tokenId: number, currentBlock: number): number {
+  let estimated: number;
+  if (tokenId <= ANCHOR_TOKEN_ID) {
+    // Linear interpolation from deployment to anchor point
+    const fraction = tokenId / ANCHOR_TOKEN_ID;
+    estimated = Math.floor(DEPLOY_BLOCK + fraction * (ANCHOR_BLOCK - DEPLOY_BLOCK));
+  } else {
+    // Recent positions: extrapolate from anchor at ~4 positions/block
+    const blocksSinceAnchor = Math.floor((tokenId - ANCHOR_TOKEN_ID) / POSITIONS_PER_BLOCK);
+    estimated = ANCHOR_BLOCK + blocksSinceAnchor;
+  }
+  // Generous 5M block safety margin so we never miss the deposit event
+  return Math.max(DEPLOY_BLOCK, Math.min(estimated - 5_000_000, currentBlock - 10_000));
+}
 
 // Event topic0 values — computed via keccak256 with viem, verified against live Base chain events
 // IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
@@ -57,29 +91,119 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
   return res.json();
 }
 
-// eth_getLogs via LlamaRPC — supports full-history scans with no block-range limit
-// A specific tokenId has at most ~20-50 events, so this works across the full chain history
-async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
-  const result = await rpcPost(LLAMA_RPC, {
-    jsonrpc: '2.0',
-    method: 'eth_getLogs',
-    params: [{
-      address: NFT_MANAGER,
-      topics: [
-        [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT],
-        tokenIdHex,                   // topics[1] = indexed tokenId
-      ],
-      fromBlock: '0x0',               // Scan all Base history — filtered by address+tokenId so result count stays tiny
-      toBlock: 'latest',
-    }],
-    id: 1,
-  }) as { result?: RawLog[]; error?: { message: string } };
-
-  if (result.error) {
-    console.error('[aerodrome/activity] eth_getLogs error:', result.error);
-    return [];
+// Scan eth_getLogs in parallel chunks with a configurable concurrency limit.
+// Throws if the first batch is 100% errors (RPC is down — caller should try backup).
+async function fetchLogsChunked(
+  tokenIdHex: string,
+  fromBlock: number,
+  toBlock: number,
+  rpcUrl: string,
+  chunkSize: number,
+  concurrency: number,
+): Promise<RawLog[]> {
+  const chunks: Array<[number, number]> = [];
+  for (let b = fromBlock; b <= toBlock; b += chunkSize) {
+    chunks.push([b, Math.min(b + chunkSize - 1, toBlock)]);
   }
-  return result.result ?? [];
+  console.log(`[aerodrome/activity] chunked scan: ${chunks.length} chunks (${fromBlock}→${toBlock}), concurrency=${concurrency}, rpc=${rpcUrl}`);
+
+  const allLogs: RawLog[] = [];
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const batch = chunks.slice(i, i + concurrency);
+    let batchErrors = 0;
+    const results = await Promise.all(
+      batch.map(async ([from, to]) => {
+        const res = await rpcPost(rpcUrl, {
+          jsonrpc: '2.0',
+          method: 'eth_getLogs',
+          params: [{
+            address: NFT_MANAGER,
+            topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
+            fromBlock: '0x' + from.toString(16),
+            toBlock:   '0x' + to.toString(16),
+          }],
+          id: from,
+        }) as { result?: RawLog[]; error?: { message: string } };
+        if (res.error) {
+          batchErrors++;
+          return [] as RawLog[];
+        }
+        return res.result ?? [];
+      })
+    );
+    allLogs.push(...results.flat());
+    // First batch entirely failed → RPC is down; throw so caller can switch to backup
+    if (i === 0 && batchErrors === batch.length) {
+      throw new Error(`[aerodrome/activity] chunked scan: first batch 100% error on ${rpcUrl}`);
+    }
+  }
+  return allLogs;
+}
+
+// Fetch all logs for a tokenId.
+// Tier 1: Tenderly full range — no block limit, sub-second, no auth required
+// Tier 2: LlamaRPC full range — fallback if Tenderly fails
+// Tier 3: LlamaRPC chunked 29k blocks, 10 concurrent — if LlamaRPC has range limit
+// Tier 4: publicnode chunked 49k blocks, 5 concurrent — if LlamaRPC fully down
+async function fetchLogs(tokenIdHex: string, tokenId: number): Promise<RawLog[]> {
+  // Get current block to bound chunked scans
+  const bnRes = await rpcPost(ALCHEMY_RPC, {
+    jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
+  }) as { result?: string };
+  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 44_500_000;
+
+  // Smart start block: use tokenId estimation to minimize chunk count for fallbacks
+  const startBlock = estimateStartBlock(tokenId, currentBlock);
+  const startHex   = '0x' + startBlock.toString(16);
+
+  const logsParams = {
+    address: NFT_MANAGER,
+    topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
+    fromBlock: startHex,
+    toBlock: 'latest' as const,
+  };
+
+  // Tier 1: Tenderly (full-range, no limits, fast)
+  const tenderlyAttempt = await rpcPost(TENDERLY_RPC, {
+    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
+  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+
+  if (!tenderlyAttempt.error) {
+    return tenderlyAttempt.result ?? [];
+  }
+  console.warn('[aerodrome/activity] Tenderly error:', (tenderlyAttempt.error as unknown as {code?:number}).code, tenderlyAttempt.error.message);
+
+  // Tier 2: LlamaRPC full range
+  const llamaAttempt = await rpcPost(LLAMA_RPC, {
+    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
+  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+
+  if (!llamaAttempt.error) {
+    return llamaAttempt.result ?? [];
+  }
+
+  const llamaCode = (llamaAttempt.error as unknown as { code?: number }).code;
+  const llamaMsg  = llamaAttempt.error.message;
+  console.warn('[aerodrome/activity] LlamaRPC full-range error:', llamaCode, llamaMsg);
+
+  const isRangeErr    = llamaCode === -32012 || llamaMsg.includes('ExceededMaxAllowed') || llamaMsg.includes('range');
+  const isUnreachable = llamaCode === -32603 || llamaMsg.toLowerCase().includes('unreachable');
+
+  // Tier 3: LlamaRPC chunked
+  if (isRangeErr) {
+    try {
+      return await fetchLogsChunked(tokenIdHex, startBlock, currentBlock, LLAMA_RPC, LLAMA_CHUNK, LLAMA_CONCURRENCY);
+    } catch (llamaChunkErr) {
+      console.warn('[aerodrome/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
+    }
+  }
+
+  // Tier 4: publicnode chunked
+  if (isRangeErr || isUnreachable) {
+    return fetchLogsChunked(tokenIdHex, startBlock, currentBlock, PUBLIC_NODE_RPC, PUBNODE_CHUNK, PUBNODE_CONCURRENCY);
+  }
+
+  throw new Error(`[aerodrome/activity] eth_getLogs RPC error: ${llamaMsg}`);
 }
 
 // Batch-fetch block timestamps using Alchemy (eth_getBlockByNumber works fine on free tier)
@@ -194,9 +318,10 @@ export async function GET(request: Request) {
   try {
     // Pad tokenId to 32-byte hex topic
     const tokenIdBig = BigInt(positionId);
+    const tokenIdNum = Number(tokenIdBig);
     const tokenIdHex = '0x' + tokenIdBig.toString(16).padStart(64, '0');
 
-    const logs = await fetchLogs(tokenIdHex);
+    const logs = await fetchLogs(tokenIdHex, tokenIdNum);
     console.log(`[aerodrome/activity] tokenId=${positionId} tokenIdHex=${tokenIdHex} → ${logs.length} logs`);
 
     if (logs.length === 0) {

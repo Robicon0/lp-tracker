@@ -315,25 +315,25 @@ export default function PositionDetail() {
   const isHyperEVM = pos ? HYPEREVM_PROTOCOLS.has(pos.protocol) : false;
 
   const aeroTokenId = pos?.protocol === 'Aerodrome' ? pos.id.replace('aero-', '') : null;
-  const { data: aeroActivity, isLoading: aeroActivityLoading } = usePositionActivity(
+  const { data: aeroActivity, isLoading: aeroActivityLoading, error: aeroActivityError } = usePositionActivity(
     aeroTokenId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
   );
 
   const bluefinObjId = pos?.protocol === 'Bluefin' ? pos.id.replace('bluefin-', '') : null;
-  const { data: bluefinActivity, isLoading: bluefinActivityLoading } = useBluefinActivity(
+  const { data: bluefinActivity, isLoading: bluefinActivityLoading, error: bluefinActivityError } = useBluefinActivity(
     bluefinObjId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
     pos?.coinTypeA, pos?.coinTypeB, pos?.price0, pos?.price1, pos?.walletAddress,
   );
 
   const orcaPosId = pos?.protocol === 'Orca' ? pos.id.replace('orca-', '') : null;
-  const { data: orcaActivity, isLoading: orcaActivityLoading } = useOrcaActivity(
+  const { data: orcaActivity, isLoading: orcaActivityLoading, error: orcaActivityError } = useOrcaActivity(
     orcaPosId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1, pos?.walletAddress,
   );
 
   const raydiumPosId = pos?.protocol === 'Raydium' ? pos.id.replace('ray-', '') : null;
-  const { data: raydiumActivity, isLoading: raydiumActivityLoading } = useRaydiumActivity(
+  const { data: raydiumActivity, isLoading: raydiumActivityLoading, error: raydiumActivityError } = useRaydiumActivity(
     raydiumPosId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1, pos?.walletAddress,
   );
@@ -341,20 +341,20 @@ export default function PositionDetail() {
   const hyperswapTokenId = pos && HYPEREVM_PROTOCOLS.has(pos.protocol)
     ? pos.id.replace(/^hyperswap-[^-]+-/, '')
     : null;
-  const { data: hyperswapActivity, isLoading: hyperswapActivityLoading } = useHyperSwapActivity(
+  const { data: hyperswapActivity, isLoading: hyperswapActivityLoading, error: hyperswapActivityError } = useHyperSwapActivity(
     hyperswapTokenId, pos && HYPEREVM_PROTOCOLS.has(pos.protocol) ? pos.protocol : null,
     pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 6,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
   );
 
   const uniswapPosId = pos?.protocol === 'Uniswap V3' ? pos.id : null;
-  const { data: uniswapActivity, isLoading: uniswapActivityLoading } = useUniswapActivity(
+  const { data: uniswapActivity, isLoading: uniswapActivityLoading, error: uniswapActivityError } = useUniswapActivity(
     uniswapPosId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
   );
 
   const velodromePosId = pos?.protocol === 'Velodrome' ? pos.id.replace('velo-', '') : null;
-  const { data: velodromeActivity, isLoading: velodromeActivityLoading } = useVelodromeActivity(
+  const { data: velodromeActivity, isLoading: velodromeActivityLoading, error: velodromeActivityError } = useVelodromeActivity(
     velodromePosId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
   );
@@ -375,7 +375,17 @@ export default function PositionDetail() {
     : pos?.protocol === 'Uniswap V3' ? uniswapActivityLoading
     : pos?.protocol === 'Velodrome' ? velodromeActivityLoading
     : false;
+  const activityError = pos?.protocol === 'Aerodrome' ? aeroActivityError
+    : pos?.protocol === 'Bluefin' ? bluefinActivityError
+    : pos?.protocol === 'Orca' ? orcaActivityError
+    : pos?.protocol === 'Raydium' ? raydiumActivityError
+    : isHyperEVM ? hyperswapActivityError
+    : pos?.protocol === 'Uniswap V3' ? uniswapActivityError
+    : pos?.protocol === 'Velodrome' ? velodromeActivityError
+    : null;
   const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome'].includes(pos?.protocol ?? '') || isHyperEVM;
+  // True when we expect data but it hasn't arrived yet (initial render before effect fires)
+  const activityPending = isActivityProtocol && !activity && !activityError;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -775,24 +785,25 @@ export default function PositionDetail() {
         {/* ── 2D.7: Activity Log ────────────────────────────────────────────── */}
         <Card style={{ marginBottom: 20, border: "1px solid rgba(52,211,153,0.12)" }}>
           <SectionHeader icon="📋" label="Fee Claims History" />
-          {activityLoading && (
+          {/* Spinner: covers both explicit loading AND the brief initial state before the effect fires */}
+          {(activityLoading || activityPending) && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,0.4)", fontSize: 13, padding: "12px 0" }}>
               <div style={{ width: 16, height: 16, border: "2px solid #34d399", borderTopColor: "transparent",
                 borderRadius: "50%", animation: "_spin 1s linear infinite", flexShrink: 0 }} />
               Scanning blockchain for fee history…
             </div>
           )}
-          {!activityLoading && !isActivityProtocol && (
+          {!activityLoading && !activityPending && !isActivityProtocol && (
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
               Activity data not available for {pos.protocol} — on-chain fee history scanning is not yet supported for this protocol.
             </p>
           )}
-          {!activityLoading && isActivityProtocol && !activity && (
+          {!activityLoading && !activityPending && isActivityProtocol && activityError && (
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
               Could not load fee claim data. The blockchain scan may have timed out — try refreshing.
             </p>
           )}
-          {!activityLoading && isActivityProtocol && activity && (() => {
+          {!activityLoading && !activityPending && isActivityProtocol && activity && (() => {
             const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
             const txUrl = (hash: string): string => {
               if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;

@@ -22,12 +22,12 @@ const { networkConfig: suiNetworkConfig } = createNetworkConfig({
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ConnectionProvider endpoint={SOLANA_RPC}>
-      <WalletProvider wallets={solanaWallets} autoConnect={false}>
+      <WalletProvider wallets={solanaWallets} autoConnect={true}>
         <WalletAuthProvider>
           <WagmiProvider config={config}>
             <QueryClientProvider client={queryClient}>
               <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
-                <SuiWalletProvider autoConnect={false}>
+                <SuiWalletProvider autoConnect={true}>
                   <WatchedWalletsProvider>
                     <PositionsProvider>
                       {children}
