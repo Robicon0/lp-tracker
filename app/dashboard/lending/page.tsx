@@ -179,10 +179,10 @@ export default function LendingPage() {
   const netWorth      = totalCollateral - totalDebt;
   const netApy        = totalCollateral > 0
     ? (positions.reduce((s, p) => s + p.supplyApy * p.totalCollateral, 0)
-       + externalPositions.reduce((s, p) => s + p.supplyApy * p.totalSupplied, 0)) / totalCollateral
+       + externalPositions.reduce((s, p) => s + (p.supplyApy ?? 0) * p.totalSupplied, 0)) / totalCollateral
     : 0;
   const dailyCashflow = positions.reduce((s, p) => s + p.dailyCashflow, 0)
-    + externalPositions.reduce((s, p) => s + (p.totalSupplied * p.supplyApy / 100 / 365), 0);
+    + externalPositions.reduce((s, p) => s + (p.totalSupplied * (p.supplyApy ?? 0) / 100 / 365), 0);
 
   const hasAnyPositions = positions.length > 0 || externalPositions.length > 0;
 
@@ -502,8 +502,9 @@ function ExternalPositionCard({ pos }: { pos: ExternalLendingPosition }) {
   const fmt$ = (n: number, dec = 2) =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 
-  const dailyCashflow = pos.totalSupplied * pos.supplyApy / 100 / 365
+  const dailyCashflow = pos.totalSupplied * (pos.supplyApy ?? 0) / 100 / 365
     - pos.totalBorrowed * pos.borrowApy / 100 / 365;
+  const hasApyData = pos.supplyApy !== null;
 
   const statBox = (label: string, value: string, color = "white", bg = "rgba(255,255,255,0.03)") => (
     <div style={{ background: bg, border: "1px solid rgba(255,255,255,0.06)",
@@ -560,16 +561,26 @@ function ExternalPositionCard({ pos }: { pos: ExternalLendingPosition }) {
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
           className="pos-3col">
-          {statBox("Lending APY", `${pos.supplyApy.toFixed(2)}%`, "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Lending APY",
+            hasApyData ? `${pos.supplyApy!.toFixed(2)}%` : "APY unavailable",
+            hasApyData ? "#34d399" : "rgba(255,255,255,0.35)", "rgba(52,211,153,0.05)")}
           {statBox("Borrowing APY", `${pos.borrowApy.toFixed(2)}%`,
             pos.borrowApy > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
-          {statBox("Net APY", `${(pos.supplyApy - pos.borrowApy).toFixed(2)}%`, "#6ee7b7", "rgba(52,211,153,0.05)")}
+          {statBox("Net APY",
+            hasApyData ? `${(pos.supplyApy! - pos.borrowApy).toFixed(2)}%` : "—",
+            hasApyData ? "#6ee7b7" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
           className="pos-3col">
-          {statBox("Daily Cashflow",   `+${fmt$(dailyCashflow, 4)}`,    "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Monthly Cashflow", `+${fmt$(dailyCashflow * 30)}`,   "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Yearly Cashflow",  `+${fmt$(dailyCashflow * 365)}`,  "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Daily Cashflow",
+            hasApyData ? `+${fmt$(dailyCashflow, 4)}` : "—",
+            "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Monthly Cashflow",
+            hasApyData ? `+${fmt$(dailyCashflow * 30)}` : "—",
+            "#34d399", "rgba(52,211,153,0.05)")}
+          {statBox("Yearly Cashflow",
+            hasApyData ? `+${fmt$(dailyCashflow * 365)}` : "—",
+            "#34d399", "rgba(52,211,153,0.05)")}
         </div>
 
         {/* Supplied assets */}
@@ -587,8 +598,10 @@ function ExternalPositionCard({ pos }: { pos: ExternalLendingPosition }) {
                 <TokenIcon symbol={a.symbol} size={32} />
                 <div style={{ flex: 1 }}>
                   <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{a.symbol}</p>
-                  {a.apy > 0 && (
+                  {a.apy !== null ? (
                     <p style={{ fontSize: 11, color: "#34d399", margin: 0 }}>APY: {a.apy.toFixed(2)}%</p>
+                  ) : (
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>APY unavailable</p>
                   )}
                 </div>
                 <div style={{ textAlign: "right" }}>

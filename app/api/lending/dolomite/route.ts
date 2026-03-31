@@ -6,9 +6,14 @@ const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const ARB_RPC = `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 // ABI selectors (keccak256 computed with viem)
-const SEL_GET_MARKETS   = '0x0f47fab0'; // getAccountMarketsWithBalances((address,uint256))
-const SEL_GET_TOKEN     = '0x062bd3e9'; // getMarketTokenAddress(uint256)
-const SEL_GET_WEI       = '0xc190c2ec'; // getAccountWei((address,uint256),uint256)
+const SEL_GET_MARKETS       = '0x0f47fab0'; // getAccountMarketsWithBalances((address,uint256))
+const SEL_GET_TOKEN         = '0x062bd3e9'; // getMarketTokenAddress(uint256)
+const SEL_GET_WEI           = '0xc190c2ec'; // getAccountWei((address,uint256),uint256)
+const SEL_GET_INTEREST_RATE = '0xfd47eda6'; // getMarketInterestRate(uint256) → Interest.Rate{value:uint256} per-second (1e18=100%/s)
+const SEL_GET_TOTAL_PAR     = '0xcb04a34c'; // getMarketTotalPar(uint256) → TotalPar{borrow:uint128,supply:uint128}
+const SEL_GET_EARNINGS_RATE = '0xe5520228'; // getEarningsRate() → Decimal.D256{value:uint256} (1e18=100%)
+
+const SECONDS_PER_YEAR = 365 * 24 * 3600;
 
 function padAddr(addr: string) {
   return '000000000000000000000000' + addr.toLowerCase().replace('0x', '');
@@ -44,31 +49,52 @@ function decodeUint256Array(hex: string): number[] {
   return result;
 }
 
-// ── DefiLlama APY lookup for Dolomite markets ─────────────────────────────────
-// Dolomite has no public REST API for rates — fetch from DefiLlama yields
-let _defiLlamaCache: { data: Record<string, number>; ts: number } | null = null;
-async function getDolomiteApys(): Promise<Record<string, number>> {
+// ── On-chain APY for each Dolomite market ─────────────────────────────────────
+// Uses getMarketInterestRate (per-second borrow rate) + getMarketTotalPar (utilization)
+// + getEarningsRate (supplier's share) to compute supply APY.
+let _earningsRateCache: { value: number; ts: number } | null = null;
+
+async function getEarningsRate(): Promise<number> {
   const now = Date.now();
-  if (_defiLlamaCache && now - _defiLlamaCache.ts < 300_000) return _defiLlamaCache.data;
+  if (_earningsRateCache && now - _earningsRateCache.ts < 300_000) return _earningsRateCache.value;
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } }).then((r) => r.json());
-    const pools: Array<{ project: string; chain: string; symbol: string; apyBase: number | null }> =
-      Array.isArray(res?.data) ? res.data : [];
-    const apys: Record<string, number> = {};
-    for (const pool of pools) {
-      if (pool.project?.toLowerCase().includes('dolomite') && pool.chain === 'Arbitrum' && pool.apyBase != null) {
-        // symbol may be e.g. "USDC" or "WETH-USDC", take first token
-        const sym = pool.symbol.split('-')[0].trim().toUpperCase();
-        // Keep highest APY if multiple pools for same symbol
-        if (!apys[sym] || pool.apyBase > apys[sym]) apys[sym] = pool.apyBase;
-      }
-    }
-    _defiLlamaCache = { data: apys, ts: now };
-    console.log(`[dolomite/route] DefiLlama APYs loaded: ${Object.keys(apys).join(', ')}`);
-    return apys;
+    const hex = await ethCall(SEL_GET_EARNINGS_RATE);
+    const raw = BigInt('0x' + hex.replace('0x', '').padEnd(64, '0').slice(0, 64));
+    const value = Number(raw) / 1e18;
+    _earningsRateCache = { value, ts: now };
+    console.log(`[dolomite/route] earningsRate=${value.toFixed(4)}`);
+    return value;
   } catch (err) {
-    console.error('[dolomite/route] DefiLlama APY fetch failed:', err);
-    return _defiLlamaCache?.data ?? {};
+    console.error('[dolomite/route] getEarningsRate failed:', err);
+    return 0.9; // fallback: 90% of borrow interest goes to suppliers
+  }
+}
+
+async function getMarketSupplyApy(marketId: number, earningsRate: number): Promise<number | null> {
+  try {
+    const [rateHex, parHex] = await Promise.all([
+      ethCall(SEL_GET_INTEREST_RATE + padU256(marketId)),
+      ethCall(SEL_GET_TOTAL_PAR + padU256(marketId)),
+    ]);
+
+    // Decode borrow rate per second: Interest.Rate { value: uint256 } (1e18 = 100%/s)
+    const rateRaw = BigInt('0x' + rateHex.replace('0x', '').padEnd(64, '0').slice(0, 64));
+    const borrowRatePerSecond = Number(rateRaw) / 1e18;
+
+    // Decode TotalPar { borrow: uint128, supply: uint128 } — two 32-byte words
+    const parClean = parHex.replace('0x', '').padEnd(128, '0');
+    const borrowPar = Number(BigInt('0x' + parClean.slice(0, 64)));
+    const supplyPar = Number(BigInt('0x' + parClean.slice(64, 128)));
+    const totalPar = borrowPar + supplyPar;
+    if (totalPar === 0) return 0;
+
+    const utilization = borrowPar / totalPar;
+    const supplyRatePerYear = borrowRatePerSecond * utilization * earningsRate * SECONDS_PER_YEAR;
+    const supplyApyPct = supplyRatePerYear * 100;
+    return supplyApyPct;
+  } catch (err) {
+    console.error(`[dolomite/route] getMarketSupplyApy(${marketId}) failed:`, err);
+    return null;
   }
 }
 
@@ -192,13 +218,25 @@ export async function GET(request: Request) {
       }),
     );
 
-    // Step 4: Fetch prices + APYs in parallel
+    // Step 4: Fetch prices + earnings rate in parallel; then supply APYs per market
     const symbols = Object.values(metaMap).map((m) => m.symbol);
-    const [prices, apys] = await Promise.all([fetchPrices(symbols), getDolomiteApys()]);
+    const [prices, earningsRate] = await Promise.all([fetchPrices(symbols), getEarningsRate()]);
+
+    // Fetch supply APY for each unique market id in parallel
+    const uniqueMarketIds = [...new Set(markets.map((m) => m.marketId))];
+    const apyByMarketId: Record<number, number | null> = {};
+    await Promise.allSettled(
+      uniqueMarketIds.map(async (id) => {
+        apyByMarketId[id] = await getMarketSupplyApy(id, earningsRate);
+      }),
+    );
+    console.log('[dolomite/route] On-chain supply APYs:', JSON.stringify(
+      Object.fromEntries(uniqueMarketIds.map((id) => [id, apyByMarketId[id]?.toFixed(4) ?? 'null']))
+    ));
 
     // Step 5: Build supplies and borrows
-    const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
-    const borrows: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
+    const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number | null }> = [];
+    const borrows: Array<{ symbol: string; amount: number; usdValue: number; apy: number | null }> = [];
 
     for (const m of markets) {
       const meta = metaMap[m.tokenAddr];
@@ -207,8 +245,8 @@ export async function GET(request: Request) {
       if (amount < 0.000001) continue;
       const price = prices[meta.symbol] ?? 0;
       const usdValue = amount * price;
-      const symUpper = meta.symbol.toUpperCase();
-      const apy = apys[symUpper] ?? apys[symUpper.replace('.E', '')] ?? 0;
+      const apy = apyByMarketId[m.marketId] ?? null;
+      console.log(`[dolomite/route] ${m.sign ? 'Supply' : 'Borrow'}: ${meta.symbol} amount=${amount.toFixed(4)} usd=${usdValue.toFixed(2)} apy=${apy?.toFixed(4) ?? 'null'}%`);
       const asset = { symbol: meta.symbol, amount, usdValue, apy };
       if (m.sign) {
         supplies.push(asset);

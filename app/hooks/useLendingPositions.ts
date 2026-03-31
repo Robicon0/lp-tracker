@@ -12,7 +12,7 @@ export interface ExternalLendingAsset {
   symbol: string;
   amount: number;
   usdValue: number;
-  apy: number;
+  apy: number | null; // null = unavailable
 }
 
 export interface ExternalLendingPosition {
@@ -20,7 +20,7 @@ export interface ExternalLendingPosition {
   chain: string;
   totalSupplied: number;
   totalBorrowed: number;
-  supplyApy: number; // weighted avg
+  supplyApy: number | null; // null = no APY data available; weighted avg otherwise
   borrowApy: number; // weighted avg
   suppliedAssets: ExternalLendingAsset[];
   borrowedAssets: ExternalLendingAsset[];
@@ -48,11 +48,16 @@ function buildPosition(
   const totalSupplied = supplies.reduce((s, a) => s + a.usdValue, 0);
   const totalBorrowed = borrows.reduce((s, a) => s + a.usdValue, 0);
 
-  const supplyApy = totalSupplied > 0
-    ? supplies.reduce((s, a) => s + a.apy * a.usdValue, 0) / totalSupplied
+  // supplyApy is null if no asset has APY data; otherwise weighted avg (null assets treated as 0)
+  const hasAnyApyData = supplies.some((a) => a.apy !== null);
+  const supplyApy: number | null = !hasAnyApyData
+    ? null
+    : totalSupplied > 0
+    ? supplies.reduce((s, a) => s + (a.apy ?? 0) * a.usdValue, 0) / totalSupplied
     : 0;
+
   const borrowApy = totalBorrowed > 0
-    ? borrows.reduce((s, a) => s + a.apy * a.usdValue, 0) / totalBorrowed
+    ? borrows.reduce((s, a) => s + (a.apy ?? 0) * a.usdValue, 0) / totalBorrowed
     : 0;
 
   return {

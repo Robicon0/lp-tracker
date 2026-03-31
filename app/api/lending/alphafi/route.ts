@@ -37,7 +37,7 @@ const VAULT_RECEIPT_TYPE = `${VAULT_RECEIPT_PKG}::alphapool::Receipt`;
 const POSITIONS_TABLE = '0x9923cec7b613e58cc3feec1e8651096ad7970c0b4ef28b805c7d97fe58ff91ba';
 const MARKETS_TABLE   = '0x2326d387ba8bb7d24aa4cfa31f9a1e58bf9234b097574afb06c5dfb267df4c2e';
 
-type AssetEntry = { symbol: string; amount: number; usdValue: number; apy: number };
+type AssetEntry = { symbol: string; amount: number; usdValue: number; apy: number | null };
 
 async function suiPost(method: string, params: unknown[]): Promise<unknown> {
   const res = await fetch(SUI_RPC, {
@@ -87,10 +87,26 @@ function symbolFromTypeName(coinType: unknown): string {
   return (parts[parts.length - 1] ?? str).toUpperCase().replace('WUSDC', 'USDC');
 }
 
-// Market data cache
-const _marketCache: Record<string, { symbol: string; decimals: number; xtokenRatio: number }> = {};
+// Interpolate borrow APR (in bps) from piecewise-linear interest rate curve
+// kinks: utilization breakpoints [0..100], rates: APR in bps at each breakpoint
+function interpolateAprBps(kinks: number[], rates: number[], utilizationPct: number): number {
+  if (kinks.length === 0) return 0;
+  const u = Math.max(0, Math.min(100, utilizationPct));
+  for (let i = 1; i < kinks.length; i++) {
+    if (u <= kinks[i]) {
+      const span = kinks[i] - kinks[i - 1];
+      if (span === 0) return rates[i] ?? 0;
+      const t = (u - kinks[i - 1]) / span;
+      return (rates[i - 1] ?? 0) + t * ((rates[i] ?? 0) - (rates[i - 1] ?? 0));
+    }
+  }
+  return rates[rates.length - 1] ?? 0;
+}
 
-async function getMarketData(marketId: string): Promise<{ symbol: string; decimals: number; xtokenRatio: number } | null> {
+// Market data cache — includes supply APR computed from on-chain interest rate model
+const _marketCache: Record<string, { symbol: string; decimals: number; xtokenRatio: number; supplyAprPct: number | null }> = {};
+
+async function getMarketData(marketId: string): Promise<{ symbol: string; decimals: number; xtokenRatio: number; supplyAprPct: number | null } | null> {
   if (_marketCache[marketId]) return _marketCache[marketId];
   try {
     const res = await suiPost('suix_getDynamicFieldObject', [
@@ -108,8 +124,34 @@ async function getMarketData(marketId: string): Promise<{ symbol: string; decima
     const decimalDigit = decodeNumber(vf.decimal_digit);
     const decimals = decimalDigit > 0 ? Math.round(Math.log10(decimalDigit)) : 6;
 
-    console.log(`[alphafi/route] Market ${marketId}: ${symbol}, decimals=${decimals}, xtokenRatio=${xtokenRatio}`);
-    const data = { symbol, decimals, xtokenRatio };
+    // ── Supply APR from on-chain interest rate model ──────────────────────────
+    let supplyAprPct: number | null = null;
+    try {
+      const balanceHolding = Number(vf.balance_holding ?? '0');
+      const borrowedAmount = Number(vf.borrowed_amount ?? '0');
+      const total = balanceHolding + borrowedAmount;
+      const utilizationPct = total > 0 ? (borrowedAmount / total) * 100 : 0;
+
+      const cfg = (vf.config as Record<string, unknown>)?.fields as Record<string, unknown> | undefined;
+      const kinks = Array.isArray(cfg?.interest_rate_kinks)
+        ? (cfg.interest_rate_kinks as unknown[]).map(Number)
+        : [];
+      const rates = Array.isArray(cfg?.interest_rates)
+        ? (cfg.interest_rates as unknown[]).map(Number)
+        : [];
+      const spreadFeeBps = Number(cfg?.spread_fee_bps ?? 0);
+
+      if (kinks.length > 0 && rates.length > 0) {
+        const borrowAprBps = interpolateAprBps(kinks, rates, utilizationPct);
+        // supply_APR = borrow_APR × utilization × (1 - spread_fee)
+        supplyAprPct = (borrowAprBps / 100) * (utilizationPct / 100) * (1 - spreadFeeBps / 10000);
+        console.log(`[alphafi/route] Market ${marketId} (${symbol}): util=${utilizationPct.toFixed(1)}% borrowApr=${(borrowAprBps/100).toFixed(2)}% supplyApr=${supplyAprPct.toFixed(4)}%`);
+      }
+    } catch (aprErr) {
+      console.error(`[alphafi/route] Market ${marketId} APR calc failed:`, aprErr);
+    }
+
+    const data = { symbol, decimals, xtokenRatio, supplyAprPct };
     _marketCache[marketId] = data;
     return data;
   } catch (err) {
@@ -213,9 +255,10 @@ export async function GET(request: Request) {
             const underlyingHuman = (ctokenRaw * market.xtokenRatio) / Math.pow(10, market.decimals);
             const price    = await getPriceUsd(market.symbol);
             const usdValue = underlyingHuman * price;
-            console.log(`[alphafi/route] Supply: ${market.symbol} ctokenRaw=${ctokenRaw} underlying=${underlyingHuman.toFixed(4)} usd=${usdValue.toFixed(2)}`);
+            const apy = market.supplyAprPct;
+            console.log(`[alphafi/route] Supply: ${market.symbol} ctokenRaw=${ctokenRaw} underlying=${underlyingHuman.toFixed(4)} usd=${usdValue.toFixed(2)} apy=${apy?.toFixed(4) ?? 'null'}%`);
             if (usdValue > 0.01 || underlyingHuman > 0.000001) {
-              supplies.push({ symbol: market.symbol, amount: underlyingHuman, usdValue, apy: 0 });
+              supplies.push({ symbol: market.symbol, amount: underlyingHuman, usdValue, apy });
             }
           } catch (err) {
             console.error('[alphafi/route] Collateral entry error:', err);
