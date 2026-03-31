@@ -712,6 +712,50 @@ export default function PositionDetail() {
           </div>
         )}
 
+        {/* Row 3b: Pool Statistics — shown when pool TVL/volume data is available */}
+        {(pos.poolTvl != null || pos.pool24hVolume != null) && (
+          <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">
+            <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Pool Statistics</h2>
+            <div className="grid grid-cols-3 gap-1">
+              {pos.poolTvl != null && (
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Pool TVL</p>
+                  <p className="text-lg font-extrabold text-white">
+                    ${pos.poolTvl >= 1_000_000
+                      ? `${(pos.poolTvl / 1_000_000).toFixed(1)}M`
+                      : pos.poolTvl >= 1_000
+                      ? `${(pos.poolTvl / 1_000).toFixed(0)}K`
+                      : pos.poolTvl.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">all fee tiers</p>
+                </div>
+              )}
+              {pos.pool24hVolume != null && (
+                <div className="bg-blue-900/20 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">24h Volume</p>
+                  <p className="text-lg font-extrabold text-white">
+                    ${pos.pool24hVolume >= 1_000_000
+                      ? `${(pos.pool24hVolume / 1_000_000).toFixed(1)}M`
+                      : pos.pool24hVolume >= 1_000
+                      ? `${(pos.pool24hVolume / 1_000).toFixed(0)}K`
+                      : pos.pool24hVolume.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">DefiLlama</p>
+                </div>
+              )}
+              {pos.pool24hVolume != null && pos.feeTier != null && (
+                <div className="bg-emerald-900/20 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Est. 24h Fees</p>
+                  <p className="text-lg font-extrabold text-emerald-300">
+                    ${(pos.pool24hVolume * pos.feeTier / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">{pos.feeTier}% fee tier</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
           <div className="bg-[#0a2e1a]/60 p-4 mb-3">

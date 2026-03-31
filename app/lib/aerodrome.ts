@@ -27,6 +27,9 @@ export interface AerodromePosition {
   coinTypeA?: string;
   coinTypeB?: string;
   walletAddress?: string;
+  // Pool-level statistics (optional — populated when available from DefiLlama)
+  poolTvl?: number;
+  pool24hVolume?: number;
 }
 
 interface AerodromeResponse {

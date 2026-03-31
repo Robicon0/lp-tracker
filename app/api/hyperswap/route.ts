@@ -327,34 +327,57 @@ async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, numbe
   return fetchCachedCoinGeckoPrices(coingeckoIds);
 }
 
-async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
+interface PoolStats { apy: number; tvlUsd: number; volumeUsd1d: number }
+
+async function fetchHyperSwapPoolData(): Promise<{
+  apys: Record<string, number>;
+  stats: Record<string, { tvlUsd: number; volumeUsd1d: number }>;
+}> {
   try {
     const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
     const data = await res.json();
-    const pools = (data.data || []).filter(
+    const pools: Array<{
+      project: string; chain: string; apyBase?: number; apy?: number;
+      tvlUsd?: number; volumeUsd1d?: number; underlyingTokens?: string[];
+    }> = (data.data || []).filter(
       (p: { project: string; chain: string }) =>
         (p.project === 'hyperswap-v3' || p.project === 'kittenswap' || p.project === 'project-x') && p.chain === 'Hyperliquid L1',
     );
 
-    const apysByKey: Record<string, number[]> = {};
+    const byKey: Record<string, PoolStats[]> = {};
     for (const pool of pools) {
-      if (pool.underlyingTokens?.length >= 2) {
-        const key = pool.underlyingTokens.map((t: string) => t.toLowerCase()).sort().join('-');
-        if (!apysByKey[key]) apysByKey[key] = [];
-        apysByKey[key].push(pool.apyBase || pool.apy || 0);
+      if ((pool.underlyingTokens?.length ?? 0) >= 2) {
+        const key = (pool.underlyingTokens as string[]).map((t) => t.toLowerCase()).sort().join('-');
+        if (!byKey[key]) byKey[key] = [];
+        byKey[key].push({
+          apy: pool.apyBase || pool.apy || 0,
+          tvlUsd: pool.tvlUsd || 0,
+          volumeUsd1d: pool.volumeUsd1d || 0,
+        });
       }
     }
 
-    const result: Record<string, number> = {};
-    for (const [key, apys] of Object.entries(apysByKey)) {
-      const sorted = apys.sort((a, b) => a - b);
+    const apys: Record<string, number> = {};
+    const stats: Record<string, { tvlUsd: number; volumeUsd1d: number }> = {};
+    for (const [key, entries] of Object.entries(byKey)) {
+      const sorted = entries.slice().sort((a, b) => a.apy - b.apy);
       const mid = Math.floor(sorted.length / 2);
-      result[key] = Math.round((sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100) / 100;
+      apys[key] = Math.round((sorted.length % 2 ? sorted[mid].apy : (sorted[mid - 1].apy + sorted[mid].apy) / 2) * 100) / 100;
+      // Sum TVL and volume across all fee tiers for same token pair
+      stats[key] = {
+        tvlUsd: entries.reduce((s, e) => s + e.tvlUsd, 0),
+        volumeUsd1d: entries.reduce((s, e) => s + e.volumeUsd1d, 0),
+      };
     }
-    return result;
+    return { apys, stats };
   } catch {
-    return {};
+    return { apys: {}, stats: {} };
   }
+}
+
+// Keep backward-compatible wrapper used internally
+async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
+  return (await fetchHyperSwapPoolData()).apys;
 }
 
 async function fetchPositionsForManager(
@@ -434,11 +457,13 @@ export async function GET(request: Request) {
     // Fetch pool state (sqrtPriceX96, currentTick) + pending fees for all positions
     // Shared factory cache avoids duplicate factory() RPC calls
     const factoryCache: Record<string, string> = {};
-    const [prices, apyData, poolExtrasList] = await Promise.all([
+    const [prices, poolData, poolExtrasList] = await Promise.all([
       fetchPrices(coingeckoIds),
-      fetchHyperSwapAPYs(),
+      fetchHyperSwapPoolData(),
       Promise.all(allRaw.map(({ pos, nftManager, knownFactory }) => fetchPoolExtras(nftManager, knownFactory, pos, factoryCache))),
     ]);
+    const apyData = poolData.apys;
+    const poolStatsData = poolData.stats;
 
     const positions = allRaw.map(({ tokenId, pos, protocol }, i) => {
       const t0Info = tokenInfoMap[pos.token0] || { symbol: pos.token0.slice(2, 8), decimals: 18, coingeckoId: '' };
@@ -460,13 +485,14 @@ export async function GET(request: Request) {
       const fees1 = (Number(pos.tokensOwed1 + pending1)) / 10 ** t1Info.decimals;
       const feesUsd = fees0 * price0 + fees1 * price1;
 
-      // APY lookup: try both position token addresses and WHYPE alias for native HYPE
+      // APY + pool stats lookup: try both position token addresses and WHYPE alias for native HYPE
       const HYPE_NATIVE = '0x5555555555555555555555555555555555555555';
       const WHYPE = '0xadcb2f358eae6492f61a5f87eb8893d09391d160';
       const normalizeForApy = (addr: string) => addr.toLowerCase() === HYPE_NATIVE ? WHYPE : addr.toLowerCase();
       const apyKey = [pos.token0, pos.token1].map(normalizeForApy).sort().join('-');
       const apyKeyRaw = [pos.token0, pos.token1].map((t) => t.toLowerCase()).sort().join('-');
       const apy = apyData[apyKey] || apyData[apyKeyRaw] || 0;
+      const poolStats = poolStatsData[apyKey] || poolStatsData[apyKeyRaw] || null;
 
       // Range status from actual currentTick
       const status = pos.liquidity === 0n
@@ -500,6 +526,7 @@ export async function GET(request: Request) {
         walletAddress: account,
         token0Address: pos.token0,
         token1Address: pos.token1,
+        ...(poolStats ? { poolTvl: Math.round(poolStats.tvlUsd), pool24hVolume: Math.round(poolStats.volumeUsd1d) } : {}),
       };
     });
 

@@ -37,6 +37,7 @@ const MANAGE_URLS: Record<string, string> = {
   "Jupiter Lend": "https://jup.ag/lend",
   AlphaFi:        "https://app.alphafi.xyz/alphalend",
   Suilend:        "https://app.suilend.fi",
+  HyperLend:      "https://app.hyperlend.finance/dashboard",
 };
 
 function buildPosition(
@@ -185,6 +186,26 @@ export function useLendingPositions(): UseLendingPositionsData {
               });
             } catch (err) {
               console.error("[useLendingPositions] AlphaFi fetch failed:", err);
+              return null;
+            }
+          })());
+        }
+
+        // ── HyperLend (HyperEVM) — same EVM wallet address ────────────────────
+        if (address) {
+          tasks.push((async () => {
+            try {
+              console.log("[useLendingPositions] Fetching HyperLend...");
+              const res = await fetch(`/api/lending/hyperlend?account=${address}`).then((r) => r.json());
+              if (cancelled) return null;
+              return buildPosition({
+                supplies: res.supplies ?? [],
+                borrows:  res.borrows  ?? [],
+                protocol: "HyperLend",
+                chain:    "HyperEVM",
+              });
+            } catch (err) {
+              console.error("[useLendingPositions] HyperLend fetch failed:", err);
               return null;
             }
           })());
