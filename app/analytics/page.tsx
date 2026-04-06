@@ -209,7 +209,7 @@ export default function Analytics() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   // ── Actual APR card toggle ───────────────────────────────────────────────
-  const [aprView, setAprView] = useState<"daily" | "weekly" | "yearly">("yearly");
+  const [aprView, setAprView] = useState<"daily" | "weekly" | "monthly" | "yearly">("yearly");
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -498,7 +498,7 @@ export default function Analytics() {
             <div className="flex items-center justify-between mb-1">
               <p className="text-gray-500 text-xs font-medium">Actual APR</p>
               <div className="flex bg-emerald-950/40 rounded-md overflow-hidden">
-                {(["daily", "weekly", "yearly"] as const).map((v) => (
+                {(["daily", "weekly", "monthly", "yearly"] as const).map((v) => (
                   <button
                     key={v}
                     onClick={() => setAprView(v)}
@@ -508,20 +508,20 @@ export default function Analytics() {
                         : "text-gray-500 hover:text-gray-300"
                     }`}
                   >
-                    {v === "daily" ? "D" : v === "weekly" ? "W" : "Y"}
+                    {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
                   </button>
                 ))}
               </div>
             </div>
             {(() => {
               const apr = actualAPRData.apr;
-              const displayRate = aprView === "daily" ? apr / 365 : aprView === "weekly" ? apr / 52 : apr;
-              const dollarIncome = aprView === "daily"
-                ? (actualAPRData.totalValue * apr) / 100 / 365
-                : aprView === "weekly"
-                ? (actualAPRData.totalValue * apr) / 100 / 52
-                : (actualAPRData.totalValue * apr) / 100;
-              const periodLabel = aprView === "daily" ? "/day" : aprView === "weekly" ? "/week" : "/year";
+              const displayRate = aprView === "daily" ? apr / 365 : aprView === "weekly" ? apr / 52 : aprView === "monthly" ? apr / 12 : apr;
+              const yearlyDollar = (actualAPRData.totalValue * apr) / 100;
+              const dollarIncome = aprView === "daily" ? yearlyDollar / 365
+                : aprView === "weekly" ? yearlyDollar / 52
+                : aprView === "monthly" ? yearlyDollar / 12
+                : yearlyDollar;
+              const periodLabel = aprView === "daily" ? "/day" : aprView === "weekly" ? "/week" : aprView === "monthly" ? "/mo" : "/year";
               return (
                 <>
                   <p className={`text-xl sm:text-2xl font-bold ${apr > 0 ? "text-emerald-400" : "text-gray-600"}`}>
