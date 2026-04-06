@@ -131,6 +131,21 @@ async function getPosition(nftManager: string, tokenId: bigint): Promise<Positio
   return { token0, token1, fee, tickLower, tickUpper, liquidity, tokensOwed0, tokensOwed1, feeGrowthInside0LastX128, feeGrowthInside1LastX128 };
 }
 
+function decodeHexStringUtf8(hex: string, strLen: number): string {
+  const strHex = hex.slice(0, strLen * 2);
+  const bytes = new Uint8Array(strLen);
+  for (let i = 0; i < strLen; i++) {
+    bytes[i] = parseInt(strHex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return new TextDecoder('utf-8').decode(bytes).replace(/\0/g, '');
+}
+
+// Strip non-printable and non-ASCII characters from token symbols
+function cleanSymbol(s: string): string {
+  // Keep only printable ASCII (0x20-0x7E)
+  return s.replace(/[^\x20-\x7E]/g, '').trim();
+}
+
 async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
   const known = KNOWN_TOKENS[tokenAddress.toLowerCase()];
   if (known) return { symbol: known.symbol, decimals: known.decimals };
@@ -143,24 +158,15 @@ async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; d
 
     let symbol = tokenAddress.slice(0, 8);
     if (symResult && symResult.length > 130) {
+      // ABI-encoded string: offset(32) + length(32) + data
       const hex = symResult.startsWith('0x') ? symResult.slice(2) : symResult;
       const strLen = parseInt(hex.slice(64, 128), 16);
-      const strHex = hex.slice(128, 128 + strLen * 2);
-      let s = '';
-      for (let i = 0; i < strHex.length; i += 2) {
-        const c = parseInt(strHex.slice(i, i + 2), 16);
-        if (c > 0) s += String.fromCharCode(c);
-      }
+      const s = cleanSymbol(decodeHexStringUtf8(hex.slice(128), strLen));
       if (s) symbol = s;
     } else if (symResult && symResult !== '0x' && symResult.length === 66) {
       // bytes32 encoded symbol (short string without length prefix)
       const hex = symResult.startsWith('0x') ? symResult.slice(2) : symResult;
-      let s = '';
-      for (let i = 0; i < 64; i += 2) {
-        const c = parseInt(hex.slice(i, i + 2), 16);
-        if (c > 0) s += String.fromCharCode(c);
-        else break;
-      }
+      const s = cleanSymbol(decodeHexStringUtf8(hex, 32));
       if (s) symbol = s;
     }
 

@@ -3,9 +3,10 @@
 import { useMemo, useEffect, useState } from "react";
 import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
-import { useLendingPositions } from "../hooks/useLendingPositions";
+import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
+import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import {
@@ -47,6 +48,7 @@ const PROTOCOL_COLORS: Record<string, string> = {
   AlphaFi:      "#14b8a6",
   Suilend:      "#0891b2",
   HyperLend:    "#10b981",
+  "AAVE V3":    "#b6509e",
 };
 
 const CHAIN_COLORS: Record<string, string> = {
@@ -126,14 +128,78 @@ type SortDir = "asc" | "desc";
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
+// Approximate AAVE V3 supply APYs (same as lending page)
+const AAVE_SUPPLY_APY: Record<string, number> = {
+  USDC: 2.86, USDbC: 2.86, "USDC.e": 2.86,
+  USDT: 3.50, DAI: 2.20,
+  WETH: 1.80, ETH: 1.80,
+  WBTC: 0.80, cbBTC: 0.80,
+};
+
+function getAaveUnderlying(symbol: string): string {
+  const rest = symbol.startsWith("a") ? symbol.slice(1) : symbol;
+  for (const prefix of ["Bas", "Arb", "Opt", "Eth", "Pol"]) {
+    if (rest.startsWith(prefix)) return rest.slice(prefix.length);
+  }
+  return rest;
+}
+
+function getATokenChain(symbol: string): string | null {
+  const rest = symbol.startsWith("a") ? symbol.slice(1) : null;
+  if (!rest) return null;
+  if (rest.startsWith("Bas")) return "Base";
+  if (rest.startsWith("Arb")) return "Arbitrum";
+  if (rest.startsWith("Opt")) return "Optimism";
+  if (rest.startsWith("Eth")) return "Ethereum";
+  if (rest.startsWith("Pol")) return "Polygon";
+  return null;
+}
+
 export default function Analytics() {
   const { positions, isLoading, dataUpdatedAt } = usePositions();
-  const { positions: lendingPositions } = useLendingPositions();
+  const { positions: externalLendingPositions } = useLendingPositions();
+  const { tokens: walletTokens } = useWalletTokens();
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const hasWallet = mounted && !!(address || solanaAddress || suiAddress);
+
+  // ── Build AAVE lending positions from wallet tokens ─────────────────────────
+  const lendingPositions: ExternalLendingPosition[] = useMemo(() => {
+    // AAVE aTokens grouped by chain
+    const aaveByChain = new Map<string, { supplied: number; apy: number }>();
+    for (const t of walletTokens) {
+      if (!t.isLending) continue;
+      const chain = getATokenChain(t.symbol) ?? t.chain;
+      const prev = aaveByChain.get(chain) ?? { supplied: 0, apy: 0 };
+      const underlying = getAaveUnderlying(t.symbol);
+      const tokenApy = AAVE_SUPPLY_APY[underlying] ?? 0;
+      const newSupplied = prev.supplied + t.usdValue;
+      // Weighted average APY
+      prev.apy = newSupplied > 0
+        ? (prev.apy * prev.supplied + tokenApy * t.usdValue) / newSupplied
+        : 0;
+      prev.supplied = newSupplied;
+      aaveByChain.set(chain, prev);
+    }
+
+    const aavePositions: ExternalLendingPosition[] = [...aaveByChain.entries()]
+      .filter(([, v]) => v.supplied > 0)
+      .map(([chain, v]) => ({
+        protocol: "AAVE V3",
+        chain,
+        totalSupplied: v.supplied,
+        totalBorrowed: 0,
+        supplyApy: v.apy,
+        borrowApy: 0,
+        suppliedAssets: [],
+        borrowedAssets: [],
+        manageUrl: "https://app.aave.com",
+      }));
+
+    return [...aavePositions, ...externalLendingPositions];
+  }, [walletTokens, externalLendingPositions]);
 
   // ── Actual performance data from on-chain activity ────────────────────────
   const { perfMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
