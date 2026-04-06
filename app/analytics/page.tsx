@@ -208,6 +208,9 @@ export default function Analytics() {
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
+  // ── Actual APR card toggle ───────────────────────────────────────────────
+  const [aprView, setAprView] = useState<"daily" | "weekly" | "yearly">("yearly");
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -266,6 +269,23 @@ export default function Analytics() {
   }, [positions, lendingPositions]);
 
   const totalDailyIncome = dailyLpIncome + dailyLendingIncome;
+
+  // ── Weighted average actual APR across all active LP positions ─────────────
+  const actualAPRData = useMemo(() => {
+    const activeWithValue = positions.filter((p) => p.value > 0 && p.status !== "Closed");
+    if (activeWithValue.length === 0) return { apr: 0, totalValue: 0 };
+    let weightedSum = 0;
+    let totalVal = 0;
+    for (const p of activeWithValue) {
+      const perf = perfMap.get(p.id);
+      const apr = perf?.actualAPR ?? p.apy;
+      if (apr > 0) {
+        weightedSum += apr * p.value;
+        totalVal += p.value;
+      }
+    }
+    return { apr: totalVal > 0 ? weightedSum / totalVal : 0, totalValue: totalVal };
+  }, [positions, perfMap]);
 
   // ── Portfolio health score ─────────────────────────────────────────────────
   const healthScore = useMemo(() => {
@@ -332,15 +352,19 @@ export default function Analytics() {
   }, [positions, lendingPositions]);
 
   // ── Sorted position table (uses actual APR when available) ─────────────────
+  // Only show active positions (In Range / Out of Range) — closed positions
+  // with $0 value are excluded from the analytics performance table.
   const sortedPositions = useMemo(() => {
-    const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1, Closed: 2 };
-    const items = positions.map((p) => {
-      const perf = perfMap.get(p.id);
-      const displayAPR = perf?.actualAPR ?? p.apy;
-      const displayDaily = perf?.actualDaily ?? (p.apy > 0 && p.value > 0 ? (p.value * p.apy) / 100 / 365 : 0);
-      const isEstimated = !perf || perf.isEstimated;
-      return { ...p, displayAPR, displayDaily, isEstimated };
-    });
+    const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1 };
+    const items = positions
+      .filter((p) => p.status !== "Closed" && p.value > 0)
+      .map((p) => {
+        const perf = perfMap.get(p.id);
+        const displayAPR = perf?.actualAPR ?? p.apy;
+        const displayDaily = perf?.actualDaily ?? (p.apy > 0 && p.value > 0 ? (p.value * p.apy) / 100 / 365 : 0);
+        const isEstimated = !perf || perf.isEstimated;
+        return { ...p, displayAPR, displayDaily, isEstimated };
+      });
     return [...items].sort((a, b) => {
       // Status primary
       const sa = STATUS_ORDER[a.status] ?? 1;
@@ -426,17 +450,17 @@ export default function Analytics() {
   );
 
   return (
-    <div className="p-4 sm:p-8 pt-24 bg-[#060d08] text-white min-h-screen">
+    <div className="px-4 sm:px-8 pb-4 sm:pb-8 pt-20 sm:pt-24 bg-[#060d08] text-white min-h-screen">
       <Navbar />
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-8 mt-2">
           <h1 className="text-3xl font-bold">Analytics</h1>
           <p className="text-gray-500 mt-1 text-sm">Portfolio insights and performance metrics</p>
         </div>
 
         {/* ── SECTION 1: Portfolio Overview ─────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
           {/* Total Portfolio Value */}
           <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
             <p className="text-gray-500 text-xs font-medium mb-1">Total Portfolio</p>
@@ -467,6 +491,48 @@ export default function Analytics() {
             <p className="text-[10px] text-gray-600 mt-1.5">
               {positions.filter((p) => p.fees > 0).length} positions with fees
             </p>
+          </div>
+
+          {/* Actual APR */}
+          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-gray-500 text-xs font-medium">Actual APR</p>
+              <div className="flex bg-emerald-950/40 rounded-md overflow-hidden">
+                {(["daily", "weekly", "yearly"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setAprView(v)}
+                    className={`px-1.5 py-0.5 text-[9px] font-medium transition-colors ${
+                      aprView === v
+                        ? "bg-emerald-600 text-white"
+                        : "text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    {v === "daily" ? "D" : v === "weekly" ? "W" : "Y"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {(() => {
+              const apr = actualAPRData.apr;
+              const displayRate = aprView === "daily" ? apr / 365 : aprView === "weekly" ? apr / 52 : apr;
+              const dollarIncome = aprView === "daily"
+                ? (actualAPRData.totalValue * apr) / 100 / 365
+                : aprView === "weekly"
+                ? (actualAPRData.totalValue * apr) / 100 / 52
+                : (actualAPRData.totalValue * apr) / 100;
+              const periodLabel = aprView === "daily" ? "/day" : aprView === "weekly" ? "/week" : "/year";
+              return (
+                <>
+                  <p className={`text-xl sm:text-2xl font-bold ${apr > 0 ? "text-emerald-400" : "text-gray-600"}`}>
+                    {apr > 0 ? `${displayRate.toFixed(displayRate < 1 ? 3 : 1)}%` : "--"}
+                  </p>
+                  <p className="text-[10px] text-gray-600 mt-1.5">
+                    {apr > 0 ? `${fmt$(dollarIncome)}${periodLabel}` : "No active positions"}
+                  </p>
+                </>
+              );
+            })()}
           </div>
 
           {/* Health Score */}
@@ -698,8 +764,7 @@ export default function Analytics() {
               <tbody>
                 {sortedPositions.map((p) => {
                   // Performance color based on actual/estimated APR
-                  const perfColor = p.status === "Closed" ? "text-gray-600"
-                    : p.displayAPR >= 20 ? "text-emerald-400"
+                  const perfColor = p.displayAPR >= 20 ? "text-emerald-400"
                     : p.displayAPR >= 5 ? "text-amber-400"
                     : p.displayAPR > 0 ? "text-red-400"
                     : "text-gray-600";
@@ -724,16 +789,12 @@ export default function Analytics() {
                         <span className="text-xs text-gray-400">{p.chain}</span>
                       </td>
                       <td className="py-2.5 px-2 text-right font-mono text-xs text-white">
-                        {p.status === "Closed" ? <span className="text-gray-600">$0</span> : fmt$(p.value)}
+                        {fmt$(p.value)}
                       </td>
                       <td className={`py-2.5 px-2 text-right font-mono text-xs ${perfColor}`}>
-                        {p.status === "Closed" ? "--" : (
-                          <>
-                            {p.displayAPR > 0 ? `${p.displayAPR.toFixed(1)}%` : "--"}
-                            {p.isEstimated && p.displayAPR > 0 && (
-                              <span className="text-[9px] text-gray-600 ml-0.5">est.</span>
-                            )}
-                          </>
+                        {p.displayAPR > 0 ? `${p.displayAPR.toFixed(1)}%` : "--"}
+                        {p.isEstimated && p.displayAPR > 0 && (
+                          <span className="text-[9px] text-gray-600 ml-0.5">est.</span>
                         )}
                       </td>
                       <td className="py-2.5 px-2 text-right font-mono text-xs text-gray-400 hidden sm:table-cell">
