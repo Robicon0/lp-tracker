@@ -50,12 +50,13 @@ export default function Navbar() {
   const awaitingSolanaConnect = useRef(false);
 
   // Persist solanaAddress to localStorage so it survives page refresh.
+  // Only SAVE here — never clear. localStorage is cleared in handleSolanaDisconnect.
+  // Reason: on page refresh solanaAddress initializes as null, which would delete
+  // the saved address before the restoration effect has a chance to read it.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (solanaAddress) {
       localStorage.setItem('defidesh-solana-addr', solanaAddress);
-    } else {
-      localStorage.removeItem('defidesh-solana-addr');
     }
   }, [solanaAddress]);
 
@@ -83,6 +84,7 @@ export default function Navbar() {
   useEffect(() => {
     if (!adapterSolanaConnected && solanaAddress) {
       setSolanaAddress(null);
+      localStorage.removeItem('defidesh-solana-addr');
     }
   }, [adapterSolanaConnected, solanaAddress, setSolanaAddress]);
 
@@ -90,12 +92,11 @@ export default function Navbar() {
   const awaitingSuiConnect = useRef(false);
 
   // Persist suiAddress to localStorage so it survives page refresh.
+  // Only SAVE here — never clear. localStorage is cleared in handleSuiDisconnect.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (suiAddress) {
       localStorage.setItem('defidesh-sui-addr', suiAddress);
-    } else {
-      localStorage.removeItem('defidesh-sui-addr');
     }
   }, [suiAddress]);
 
@@ -121,6 +122,7 @@ export default function Navbar() {
   useEffect(() => {
     if (!adapterSuiAccount && suiAddress) {
       setSuiAddress(null);
+      localStorage.removeItem('defidesh-sui-addr');
     }
   }, [adapterSuiAccount, suiAddress, setSuiAddress]);
 
@@ -161,6 +163,7 @@ export default function Navbar() {
 
   const handleSolanaDisconnect = () => {
     setSolanaAddress(null);
+    localStorage.removeItem('defidesh-solana-addr');
     disconnectSolana();
   };
 
@@ -178,6 +181,7 @@ export default function Navbar() {
 
   const handleSuiDisconnect = () => {
     setSuiAddress(null);
+    localStorage.removeItem('defidesh-sui-addr');
     disconnectSui();
   };
 
