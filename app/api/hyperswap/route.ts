@@ -140,10 +140,10 @@ function decodeHexStringUtf8(hex: string, strLen: number): string {
   return new TextDecoder('utf-8').decode(bytes).replace(/\0/g, '');
 }
 
-// Strip non-printable and non-ASCII characters from token symbols
+// Strip non-printable, non-ASCII, and stray control/arrow characters from token symbols.
+// Only keep alphanumeric, dots, hyphens, underscores, and spaces (common in token symbols).
 function cleanSymbol(s: string): string {
-  // Keep only printable ASCII (0x20-0x7E)
-  return s.replace(/[^\x20-\x7E]/g, '').trim();
+  return s.replace(/[^a-zA-Z0-9.\-_ ]/g, '').trim();
 }
 
 async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
