@@ -5,6 +5,7 @@ import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions } from "../hooks/useLendingPositions";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import {
@@ -134,6 +135,9 @@ export default function Analytics() {
   useEffect(() => setMounted(true), []);
   const hasWallet = mounted && !!(address || solanaAddress || suiAddress);
 
+  // ── Actual performance data from on-chain activity ────────────────────────
+  const { perfMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
+
   // ── Sort state ─────────────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -261,13 +265,16 @@ export default function Analytics() {
       .sort((a, b) => b.daily - a.daily);
   }, [positions, lendingPositions]);
 
-  // ── Sorted position table ──────────────────────────────────────────────────
+  // ── Sorted position table (uses actual APR when available) ─────────────────
   const sortedPositions = useMemo(() => {
     const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1, Closed: 2 };
-    const items = positions.map((p) => ({
-      ...p,
-      daily: p.apy > 0 && p.value > 0 ? (p.value * p.apy) / 100 / 365 : 0,
-    }));
+    const items = positions.map((p) => {
+      const perf = perfMap.get(p.id);
+      const displayAPR = perf?.actualAPR ?? p.apy;
+      const displayDaily = perf?.actualDaily ?? (p.apy > 0 && p.value > 0 ? (p.value * p.apy) / 100 / 365 : 0);
+      const isEstimated = !perf || perf.isEstimated;
+      return { ...p, displayAPR, displayDaily, isEstimated };
+    });
     return [...items].sort((a, b) => {
       // Status primary
       const sa = STATUS_ORDER[a.status] ?? 1;
@@ -277,25 +284,30 @@ export default function Analytics() {
       let cmp = 0;
       switch (sortKey) {
         case "value":    cmp = a.value - b.value; break;
-        case "apy":      cmp = a.apy - b.apy; break;
-        case "daily":    cmp = a.daily - b.daily; break;
+        case "apy":      cmp = a.displayAPR - b.displayAPR; break;
+        case "daily":    cmp = a.displayDaily - b.displayDaily; break;
         case "fees":     cmp = a.fees - b.fees; break;
         case "protocol": cmp = a.protocol.localeCompare(b.protocol); break;
         case "chain":    cmp = a.chain.localeCompare(b.chain); break;
       }
       return sortDir === "desc" ? -cmp : cmp;
     });
-  }, [positions, sortKey, sortDir]);
+  }, [positions, sortKey, sortDir, perfMap]);
 
-  // ── Top/bottom performers ──────────────────────────────────────────────────
+  // ── Top/bottom performers (by actual APR when available) ──────────────────
   const { topPerformers, bottomPerformers } = useMemo(() => {
-    const active = positions.filter((p) => p.apy > 0 && p.value > 0);
-    const sorted = [...active].sort((a, b) => b.apy - a.apy);
+    const active = positions.filter((p) => p.value > 0).map((p) => {
+      const perf = perfMap.get(p.id);
+      const displayAPR = perf?.actualAPR ?? p.apy;
+      const isEstimated = !perf || perf.isEstimated;
+      return { ...p, displayAPR, isEstimated };
+    }).filter((p) => p.displayAPR > 0);
+    const sorted = [...active].sort((a, b) => b.displayAPR - a.displayAPR);
     return {
       topPerformers: sorted.slice(0, 3),
       bottomPerformers: sorted.slice(-3).reverse(),
     };
-  }, [positions]);
+  }, [positions, perfMap]);
 
   // ── Concentration warnings ─────────────────────────────────────────────────
   const chainWarning = useMemo(() => {
@@ -605,7 +617,7 @@ export default function Analytics() {
                   <th
                     className="text-right py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300"
                     onClick={() => handleSort("apy")}
-                  >APY<SortIcon col="apy" /></th>
+                  >APR<SortIcon col="apy" /></th>
                   <th
                     className="text-right py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300 hidden sm:table-cell"
                     onClick={() => handleSort("daily")}
@@ -619,12 +631,12 @@ export default function Analytics() {
               </thead>
               <tbody>
                 {sortedPositions.map((p) => {
-                  const daily = p.daily;
-                  // Performance color
+                  // Performance color based on actual/estimated APR
                   const perfColor = p.status === "Closed" ? "text-gray-600"
-                    : p.apy >= 20 ? "text-emerald-400"
-                    : p.apy >= 5 ? "text-amber-400"
-                    : "text-red-400";
+                    : p.displayAPR >= 20 ? "text-emerald-400"
+                    : p.displayAPR >= 5 ? "text-amber-400"
+                    : p.displayAPR > 0 ? "text-red-400"
+                    : "text-gray-600";
 
                   return (
                     <tr key={p.id} className="border-b border-emerald-400/5 hover:bg-emerald-950/20 transition-colors">
@@ -649,10 +661,22 @@ export default function Analytics() {
                         {p.status === "Closed" ? <span className="text-gray-600">$0</span> : fmt$(p.value)}
                       </td>
                       <td className={`py-2.5 px-2 text-right font-mono text-xs ${perfColor}`}>
-                        {p.status === "Closed" ? "--" : `${p.apy.toFixed(1)}%`}
+                        {p.status === "Closed" ? "--" : (
+                          <>
+                            {p.displayAPR > 0 ? `${p.displayAPR.toFixed(1)}%` : "--"}
+                            {p.isEstimated && p.displayAPR > 0 && (
+                              <span className="text-[9px] text-gray-600 ml-0.5">est.</span>
+                            )}
+                          </>
+                        )}
                       </td>
                       <td className="py-2.5 px-2 text-right font-mono text-xs text-gray-400 hidden sm:table-cell">
-                        {daily > 0 ? fmt$(daily) : "--"}
+                        {p.displayDaily > 0 ? (
+                          <>
+                            {fmt$(p.displayDaily)}
+                            {p.isEstimated && <span className="text-[9px] text-gray-600 ml-0.5">est.</span>}
+                          </>
+                        ) : "--"}
                       </td>
                       <td className="py-2.5 px-2 text-right font-mono text-xs text-gray-400 hidden sm:table-cell">
                         {p.fees > 0 ? fmt$(p.fees) : "--"}
@@ -794,7 +818,8 @@ export default function Analytics() {
         {/* ── SECTION 6: Top & Bottom Performers ───────────────────────────── */}
         {(topPerformers.length > 0 || bottomPerformers.length > 0) && (
           <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-12">
-            <h2 className="text-lg font-bold mb-4">Performance Rankings</h2>
+            <h2 className="text-lg font-bold mb-1">Performance Rankings</h2>
+            <p className="text-[10px] text-gray-600 mb-4">Ranked by actual APR from claimed fees{activityLoading ? " (loading...)" : ""}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {/* Top Performers */}
               <div>
@@ -810,7 +835,10 @@ export default function Analytics() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-bold text-emerald-400">{p.apy.toFixed(1)}%</p>
+                        <p className="text-sm font-bold text-emerald-400">
+                          {p.displayAPR.toFixed(1)}%
+                          {p.isEstimated && <span className="text-[9px] text-gray-600 ml-0.5 font-normal">est.</span>}
+                        </p>
                         <p className="text-[10px] text-gray-500">{fmt$(p.value)}</p>
                       </div>
                     </div>
@@ -835,7 +863,10 @@ export default function Analytics() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-bold text-red-400">{p.apy.toFixed(1)}%</p>
+                        <p className="text-sm font-bold text-red-400">
+                          {p.displayAPR.toFixed(1)}%
+                          {p.isEstimated && <span className="text-[9px] text-gray-600 ml-0.5 font-normal">est.</span>}
+                        </p>
                         <p className="text-[10px] text-gray-500">{fmt$(p.value)}</p>
                       </div>
                     </div>
