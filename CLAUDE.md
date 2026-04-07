@@ -67,7 +67,7 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 4. Raydium CLMM (Solana) — Helius RPC, program `CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK` ✅
 5. Orca Whirlpools (Solana) — Helius RPC, Token2022 NFTs ✅
 6. Cetus CLMM (Sui) — Sui public RPC, position type `::position::Position` ✅
-7. Bluefin (Sui) — Sui public RPC, Q64 fee math ✅
+7. Bluefin (Sui) — Sui public RPC, Q64 fee math, APY from Bluefin's own API ✅
 8. Momentum (Sui) — Sui public RPC, package `0x70285592...`, Q64 fee math ✅
 9. HyperSwap V3 (HyperEVM) — public RPC `https://rpc.hyperliquid.xyz/evm`, NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8` ✅
 10. KittenSwap (HyperEVM) — same RPC, NFT manager `0xb9201e89f94a01ff13ad4caecf43a2e232513754` ✅
@@ -131,6 +131,7 @@ CRITICAL: Wallets must ONLY show as connected when the user has actively unlocke
 - HyperEVM V3 forks use `positions(uint256)` selector `0x99fbab88` (NOT standard Uniswap V3's `0x99fd0e82`). Verified across HyperSwap, KittenSwap, and ProjectX.
 - HyperEVM int24 tick decoding: ABI encodes int24 sign-extended to 32 bytes (e.g. tick -244010 = `0xffff...fffc46d6`). Decode by reading last 3 bytes and checking >= 0x800000 to sign-extend to int24. Using the full 256-bit value with 0x1000000 subtraction gives wrong results.
 - HyperEVM native HYPE is represented as `0x5555555555555555555555555555555555555555` in V3 pool token slots (not WHYPE which is `0xadcb2f...`).
+- Bluefin APY: DefiLlama's `bluefin-spot` pools on Sui have `apyBase=0` for most entries and aggregating by pair mixes multiple fee tiers, which produced 0% for SUI/USDC. Switched to Bluefin's own API: `https://swap.api.sui-prod.bluefin.io/api/v1/pools/info` — returns full per-pool array with `address`, `day.apr.feeApr`, `tvl`. Key the result by exact `pool.address.toLowerCase()` and look up by the position's `pool_id` so each position gets its specific fee-tier APR. Pool-level APR is used directly (no liquidity-share scaling) to match what Bluefin's UI displays.
 - HyperEVM token symbol decoding: `fetchTokenInfo` in `app/api/hyperswap/route.ts` uses `TextDecoder('utf-8')` for proper multi-byte char handling + `cleanSymbol()` to strip anything except `[a-zA-Z0-9.\-_ ]`. This is more aggressive than just stripping non-ASCII — it also removes arrow chars, control chars, and other stray symbols that can appear in ABI-decoded token names (e.g. "USDa→0" → "USDa0").
 - HyperEVM pending fees: `tokensOwed0/1` in `positions()` only holds settled fees. Pending fees require feeGrowthInside math: fetch pool via `factory()→getPool()`, then `slot0()`, `feeGrowthGlobal0/1X128()`, and `ticks(tickLower/Upper)`. Pool-level selectors are standard Uniswap V3 (no custom selectors needed for pool contracts): `factory()=0xc45a0155`, `getPool(addr,addr,uint24)=0x1698ee82`, `slot0()=0x3850c7bd`, `feeGrowthGlobal0X128()=0xf3058399`, `feeGrowthGlobal1X128()=0x46141319`, `ticks(int24)=0xf30dba93`. feeGrowthOutside is at word[2]/word[3] of the ticks() response. Pending = `liquidity * ((fgInside - checkpoint) & U256_MASK) >> 128`. Always use U256_MASK = (1n<<256n)-1n for wrapping arithmetic.
 - PRJX factory: `0xff7b3e8c00e57ea31477c32a5b52a58eea47b072`. Hardcode known factory addresses in POSITION_MANAGERS to skip the factory() RPC call.

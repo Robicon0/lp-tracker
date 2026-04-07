@@ -225,43 +225,42 @@ async function fetchTick(
 }
 
 interface BluefinPoolStats {
-  apyBase: number; // annual fee APY % (e.g. 21.36)
+  apyBase: number; // annual fee APR % (day.apr.feeApr)
   tvlUsd: number;  // USD
 }
 
+// Fetch APR/TVL from Bluefin's own API, keyed by exact pool address.
+// This is more accurate than DefiLlama's pair-based aggregation because
+// multiple fee-tier pools share the same pair but have very different APRs.
 async function fetchBluefinAPYs(): Promise<Record<string, BluefinPoolStats>> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
-    const data = await res.json();
-    const pools = data.data?.filter(
-      (p: { project: string; chain: string }) => p.project === 'bluefin-spot' && p.chain === 'Sui',
-    ) || [];
-
-    const statsByPair: Record<string, { apys: number[]; tvls: number[] }> = {};
-    for (const pool of pools) {
-      if (pool.underlyingTokens?.length >= 2) {
-        const key = pool.underlyingTokens
-          .map((t: string) => normalizeCoinType(t).toLowerCase())
-          .sort()
-          .join('-');
-        if (!statsByPair[key]) statsByPair[key] = { apys: [], tvls: [] };
-        statsByPair[key].apys.push(pool.apyBase || pool.apy || 0);
-        statsByPair[key].tvls.push(pool.tvlUsd || 0);
-      }
+    const res = await fetch('https://swap.api.sui-prod.bluefin.io/api/v1/pools/info', {
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) {
+      console.error('[bluefin] pools/info fetch failed:', res.status);
+      return {};
     }
+    const data = await res.json() as Array<{
+      address: string;
+      tvl?: string | number;
+      day?: { apr?: { feeApr?: string | number } };
+    }>;
 
     const result: Record<string, BluefinPoolStats> = {};
-    for (const [key, { apys, tvls }] of Object.entries(statsByPair)) {
-      const sorted = apys.sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const medianApy = Math.round(
-        (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100,
-      ) / 100;
-      const totalTvl = tvls.reduce((s, v) => s + v, 0);
-      result[key] = { apyBase: medianApy, tvlUsd: totalTvl };
+    for (const pool of data) {
+      if (!pool.address) continue;
+      const feeApr = Number(pool.day?.apr?.feeApr ?? 0);
+      const tvl = Number(pool.tvl ?? 0);
+      // Key by exact pool address (lowercased for case-insensitive matching)
+      result[pool.address.toLowerCase()] = {
+        apyBase: Math.round(feeApr * 100) / 100,
+        tvlUsd: tvl,
+      };
     }
     return result;
-  } catch {
+  } catch (e) {
+    console.error('[bluefin] fetchBluefinAPYs error:', e);
     return {};
   }
 }
@@ -393,17 +392,10 @@ export async function GET(request: Request) {
 
       const inRange = liquidity > 0n && tickCurrent >= tickLower && tickCurrent < tickUpper;
 
-      // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
-      const apyKey = [coinTypeA, coinTypeB].map((t) => t.toLowerCase()).sort().join('-');
-      const apyInfo = apyData[apyKey];
-      const poolLiquidity = pool ? BigInt((pool.liquidity as string) || '0') : 0n;
-      let apy = 0;
-      if (apyInfo && value > 0 && poolLiquidity > 0n && liquidity > 0n) {
-        const posLiqShare = Number(liquidity) / Number(poolLiquidity);
-        apy = Math.round(apyInfo.apyBase * (apyInfo.tvlUsd / value) * posLiqShare * 100) / 100;
-      } else if (apyInfo) {
-        apy = apyInfo.apyBase;
-      }
+      // Pool APY: look up by exact pool_id (Bluefin API returns per-pool feeApr).
+      // Use pool-level APR directly — this matches what Bluefin's own UI shows.
+      const apyInfo = apyData[poolId.toLowerCase()];
+      const apy = apyInfo ? apyInfo.apyBase : 0;
 
       return {
         id: `bluefin-${pos.objectId as string}`,
