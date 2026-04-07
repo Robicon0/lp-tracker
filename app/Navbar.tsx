@@ -258,7 +258,6 @@ export default function Navbar() {
               <Link href="/dashboard" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Dashboard</Link>
               <Link href="/analytics" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Analytics</Link>
               <Link href="/about" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">About</Link>
-              <Link href="/wallet" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Wallet</Link>
 
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (

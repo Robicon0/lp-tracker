@@ -7,6 +7,7 @@ import { useAccount } from "wagmi";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
 import { getTokenLogo, TOKEN_COLORS } from "../../lib/tokenLogos";
+import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
 // EVM chain set — any chain added here automatically groups under the EVM section
 const EVM_CHAINS = new Set([
@@ -67,46 +68,88 @@ function fmtBalance(n: number) {
 interface ChainGroup { chain: string; toks: TokenItem[]; total: number }
 interface Section { section: string; chains: ChainGroup[]; total: number; isEvm: boolean }
 
+// Token row — animates a subtle hover background lift on entry/exit.
+function TokenRow({ token }: { token: TokenItem }) {
+  const [hover, setHover] = useState(false);
+  const change = token.change24h;
+  const showChange = change !== null && Number.isFinite(change);
+  const changeColor = !showChange ? "rgba(255,255,255,0.3)" : change! >= 0 ? "#34d399" : "#f87171";
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 14,
+        padding: "12px 14px", borderRadius: 12,
+        background: hover ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.025)",
+        border: `1px solid ${hover ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)"}`,
+        opacity: token.price === 0 ? 0.5 : 1,
+        transition: "background-color 0.15s, border-color 0.15s, transform 0.15s",
+        transform: hover ? "translateY(-1px)" : "none",
+      }}
+    >
+      <TokenIcon symbol={token.symbol} size={38} logo={token.logo} />
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: "white", margin: 0,
+          letterSpacing: 0.1 }}>
+          {token.symbol}
+        </p>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: 0,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {token.name}
+        </p>
+      </div>
+      {showChange && (
+        <div style={{
+          fontSize: 12, fontWeight: 600, color: changeColor,
+          padding: "3px 8px", borderRadius: 6,
+          background: change! >= 0 ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)",
+          flexShrink: 0, fontVariantNumeric: "tabular-nums",
+        }}>
+          {change! >= 0 ? "+" : ""}{change!.toFixed(2)}%
+        </div>
+      )}
+      <div style={{ textAlign: "right", flexShrink: 0, minWidth: 110 }}>
+        <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
+          {token.price > 0 ? fmt$(token.usdValue) : "—"}
+        </p>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+          {fmtBalance(token.balance)} {token.symbol}
+          {token.price > 0 && (
+            <span style={{ marginLeft: 4, color: "rgba(255,255,255,0.2)" }}>
+              @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
+            </span>
+          )}
+          {token.price === 0 && (
+            <span style={{ marginLeft: 4, color: "rgba(255,100,100,0.5)" }}>no price data</span>
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // Token rows — shared between EVM sub-chains and non-EVM sections
 function TokenRows({ toks }: { toks: TokenItem[] }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {toks.map((token) => (
-        <div key={`${token.chain}-${token.contractAddress}`}
-          style={{ display: "flex", alignItems: "center", gap: 12,
-            padding: "10px 12px", borderRadius: 10,
-            background: "rgba(255,255,255,0.02)",
-            border: "1px solid rgba(255,255,255,0.04)",
-            opacity: token.price === 0 ? 0.5 : 1 }}>
-          <TokenIcon symbol={token.symbol} size={32} logo={token.logo} />
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-              {token.symbol}
-            </p>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0,
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {token.name}
-            </p>
-          </div>
-          <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-              {token.price > 0 ? fmt$(token.usdValue) : "—"}
-            </p>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-              {fmtBalance(token.balance)} {token.symbol}
-              {token.price > 0 && (
-                <span style={{ marginLeft: 4, color: "rgba(255,255,255,0.2)" }}>
-                  @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
-                </span>
-              )}
-              {token.price === 0 && (
-                <span style={{ marginLeft: 4, color: "rgba(255,100,100,0.5)" }}>no price data</span>
-              )}
-            </p>
-          </div>
-        </div>
+        <TokenRow key={`${token.chain}-${token.contractAddress}`} token={token} />
       ))}
     </div>
+  );
+}
+
+// Chain icon (small dot for now, color from CHAIN_COLORS)
+function ChainIcon({ chain, size = 14 }: { chain: string; size?: number }) {
+  const color = CHAIN_COLORS[chain] ?? "#6b7280";
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: color,
+      boxShadow: `0 0 0 2px ${color}25`,
+      flexShrink: 0,
+    }} />
   );
 }
 
@@ -117,7 +160,7 @@ export default function TokensPage() {
   const { tokens, totalTokenValue, tokenCount, isLoading } = useWalletTokens();
 
   const [search, setSearch] = useState("");
-  const [hideDust, setHideDust] = useState(false);
+  const [hideDust, setHideDust] = useState(true);
   const [hideUnknown, setHideUnknown] = useState(true);
 
   // Only regular (non-lending, non-debt) tokens
@@ -186,6 +229,19 @@ export default function TokensPage() {
 
   const uniqueChains = new Set(regularTokens.map((t) => t.chain)).size;
 
+  // Chain breakdown for donut: aggregate USD value per chain across all regular tokens
+  // (not filtered list — donut should reflect the full picture)
+  const chainBreakdown = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of regularTokens) {
+      if (t.usdValue <= 0) continue;
+      map.set(t.chain, (map.get(t.chain) ?? 0) + t.usdValue);
+    }
+    return Array.from(map.entries())
+      .map(([chain, value]) => ({ chain, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [regularTokens]);
+
   return (
     <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
       <Navbar />
@@ -196,29 +252,81 @@ export default function TokensPage() {
           fontSize: 13, color: "rgba(255,255,255,0.4)", textDecoration: "none", marginBottom: 24 }}>
           ← Back to Dashboard
         </Link>
-        <h1 style={{ fontSize: 30, fontWeight: 700, margin: "0 0 6px" }}>Token Holdings</h1>
+        <h1 style={{ fontSize: 30, fontWeight: 700, margin: "0 0 6px" }}>Wallet Balances</h1>
         <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", margin: "0 0 28px" }}>
-          Token balances across all connected wallets
+          Idle tokens across all connected wallets
         </p>
 
-        {/* Total value card */}
-        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
-          borderRadius: 14, padding: "20px 24px", marginBottom: 24,
-          display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
-              color: "rgba(255,255,255,0.35)", margin: "0 0 6px" }}>Total Token Value</p>
-            {isLoading ? (
-              <p style={{ fontSize: 32, fontWeight: 700, color: "rgba(255,255,255,0.3)", margin: 0 }}>Loading…</p>
-            ) : (
-              <p style={{ fontSize: 32, fontWeight: 700, color: "white", margin: 0, letterSpacing: -1 }}>
-                {fmt$(totalTokenValue)}
-              </p>
-            )}
+        {/* Total balance + chain breakdown donut */}
+        <div style={{ display: "grid",
+          gridTemplateColumns: chainBreakdown.length > 0 ? "1fr 240px" : "1fr",
+          gap: 16, marginBottom: 24 }}>
+          {/* Total value card */}
+          <div style={{ background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: 14, padding: "20px 24px",
+            display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
+                color: "rgba(255,255,255,0.35)", margin: "0 0 6px" }}>Total Wallet Balance</p>
+              {isLoading ? (
+                <p style={{ fontSize: 32, fontWeight: 700, color: "rgba(255,255,255,0.3)", margin: 0 }}>Loading…</p>
+              ) : (
+                <p style={{ fontSize: 32, fontWeight: 700, color: "white", margin: 0, letterSpacing: -1 }}>
+                  {fmt$(totalTokenValue)}
+                </p>
+              )}
+            </div>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+              {isLoading ? "Fetching balances…" : `${tokenCount} token${tokenCount === 1 ? "" : "s"} across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}`}
+            </p>
           </div>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-            {isLoading ? "Fetching balances…" : `${tokenCount} token${tokenCount === 1 ? "" : "s"} across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}`}
-          </p>
+
+          {/* Chain breakdown donut */}
+          {chainBreakdown.length > 0 && (
+            <div style={{ background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 14, padding: "16px 18px",
+              display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 80, height: 80, flexShrink: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={chainBreakdown}
+                      dataKey="value"
+                      nameKey="chain"
+                      innerRadius={26}
+                      outerRadius={38}
+                      paddingAngle={2}
+                      stroke="none"
+                    >
+                      {chainBreakdown.map((d) => (
+                        <Cell key={d.chain} fill={CHAIN_COLORS[d.chain] ?? "#6b7280"} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
+                  color: "rgba(255,255,255,0.35)", margin: 0 }}>By Chain</p>
+                {chainBreakdown.slice(0, 4).map((d) => {
+                  const pct = totalTokenValue > 0 ? (d.value / totalTokenValue) * 100 : 0;
+                  return (
+                    <div key={d.chain} style={{ display: "flex", alignItems: "center", gap: 6,
+                      fontSize: 11 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: "50%",
+                        background: CHAIN_COLORS[d.chain] ?? "#6b7280", flexShrink: 0 }} />
+                      <span style={{ color: "rgba(255,255,255,0.65)", flex: 1, overflow: "hidden",
+                        textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.chain}</span>
+                      <span style={{ color: "rgba(255,255,255,0.45)",
+                        fontVariantNumeric: "tabular-nums" }}>{pct.toFixed(0)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* No wallet */}
@@ -286,13 +394,12 @@ export default function TokensPage() {
                       // EVM: show a small multi-dot cluster
                       <div style={{ display: "flex", gap: 3 }}>
                         {sec.chains.slice(0, 4).map((cg) => (
-                          <div key={cg.chain} style={{ width: 7, height: 7, borderRadius: "50%",
+                          <div key={cg.chain} style={{ width: 9, height: 9, borderRadius: "50%",
                             background: CHAIN_COLORS[cg.chain] ?? "#6b7280" }} />
                         ))}
                       </div>
                     ) : (
-                      <div style={{ width: 8, height: 8, borderRadius: "50%",
-                        background: CHAIN_COLORS[sec.section] ?? "#6b7280" }} />
+                      <ChainIcon chain={sec.section} size={14} />
                     )}
                     <span style={{ fontSize: 16, fontWeight: 700, color: "white" }}>{sec.section}</span>
                     {sec.isEvm && (
@@ -319,9 +426,8 @@ export default function TokensPage() {
                         {/* Chain sub-header */}
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                           marginBottom: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                            <div style={{ width: 7, height: 7, borderRadius: "50%",
-                              background: CHAIN_COLORS[cg.chain] ?? "#6b7280" }} />
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <ChainIcon chain={cg.chain} size={11} />
                             <span style={{ fontSize: 13, fontWeight: 600,
                               color: "rgba(255,255,255,0.7)" }}>{cg.chain}</span>
                             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>

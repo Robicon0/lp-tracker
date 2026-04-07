@@ -708,7 +708,7 @@ export default function Dashboard() {
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
                     <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                      color:"#FBBF24", margin:0, fontWeight:600 }}>Tokens</h3>
+                      color:"#FBBF24", margin:0, fontWeight:600 }}>Wallet Balances</h3>
                     <span style={{ fontSize:11, color:"rgba(255,255,255,0.25)" }}>View →</span>
                   </div>
                   {!hasWallet ? (

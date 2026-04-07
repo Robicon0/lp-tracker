@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
     if (endpoint === "simple/price") {
       const ids = searchParams.get("ids") || "";
       const vs = searchParams.get("vs_currencies") || "usd";
-      url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=${vs}`;
+      const include24h = searchParams.get("include_24hr_change") === "true";
+      url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=${vs}${include24h ? "&include_24hr_change=true" : ""}`;
     } else if (endpoint === "coins/markets") {
       const ids = searchParams.get("ids") || "";
       const vs = searchParams.get("vs_currencies") || "usd";

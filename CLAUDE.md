@@ -44,7 +44,8 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 - `/dashboard` — Portfolio overview with filters, search, sort, CSV export, portfolio history chart + P&L (client component)
 - `/dashboard/[id]` — Position detail (client component). Tick range displayed as USD price range using `1.0001^tick * 10^(d0-d1)`. Est. Daily/Monthly Fees are pool-APY × value projections, not position-specific.
 - `/analytics` — Portfolio analytics with 6 sections: overview cards, performance chart, income breakdown, position performance table (actual APR from claims), risk analysis, top/bottom performers. Uses `useAllPositionsActivity` hook to fetch activity for all positions in parallel and compute actual APR from fee claims.
-- `/wallet` — Shows ETH + ERC-20 balances via Alchemy RPC
+- `/wallet` — Legacy ETH + ERC-20 balances via Alchemy RPC. **No longer linked from the main navbar** (removed); the Dashboard "Wallet Balances" card → `/dashboard/tokens` is the canonical entry point.
+- `/dashboard/tokens` — "Wallet Balances" page. Shows idle tokens across all connected wallets (EVM grouped under one section, non-EVM as their own sections). Includes a chain breakdown donut next to the total card. Each row shows 24h price change (green/red badge); 24h change comes from CoinGecko `simple/price?include_24hr_change=true` via the existing `/api/prices` proxy and is mapped via the same major-asset symbol map as `priceOf` (only well-known symbols get a change badge — no per-contract CoinGecko lookups). `hideDust < $1` defaults to ON.
 
 ## Environment
 

@@ -43,6 +43,8 @@ export interface TokenItem {
   balance: number;
   usdValue: number;
   price: number;
+  /** 24h price change percentage (signed). null when unknown. */
+  change24h: number | null;
   chain: string;
   logo: string;
   isLending: boolean;
@@ -97,11 +99,12 @@ export function useWalletTokens(): WalletTokensData {
 
     (async () => {
       try {
-        // Fetch prices for common tokens across all chains
+        // Fetch prices for common tokens across all chains (with 24h change)
         const prices: Record<string, number> = {};
+        const changes: Record<string, number> = {};
         try {
           const res = await fetch(
-            "/api/prices?endpoint=simple/price&ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd",
+            "/api/prices?endpoint=simple/price&ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd&include_24hr_change=true",
           ).then((r) => r.json());
           prices.ethereum   = res?.ethereum?.usd   ?? 0;
           prices.bitcoin    = res?.bitcoin?.usd    ?? 0;
@@ -112,7 +115,33 @@ export function useWalletTokens(): WalletTokensData {
           prices.optimism   = res?.optimism?.usd   ?? 0;
           prices.bnb        = res?.binancecoin?.usd ?? 0;
           prices.avax       = res?.["avalanche-2"]?.usd ?? 0;
+          changes.ethereum  = res?.ethereum?.usd_24h_change   ?? 0;
+          changes.bitcoin   = res?.bitcoin?.usd_24h_change    ?? 0;
+          changes.solana    = res?.solana?.usd_24h_change     ?? 0;
+          changes.sui       = res?.sui?.usd_24h_change        ?? 0;
+          changes.matic     = res?.["matic-network"]?.usd_24h_change ?? 0;
+          changes.arbitrum  = res?.arbitrum?.usd_24h_change   ?? 0;
+          changes.optimism  = res?.optimism?.usd_24h_change   ?? 0;
+          changes.bnb       = res?.binancecoin?.usd_24h_change ?? 0;
+          changes.avax      = res?.["avalanche-2"]?.usd_24h_change ?? 0;
         } catch (err) { console.error("[useWalletTokens] price fetch failed:", err); }
+
+        function changeOf(symbol: string): number | null {
+          const s = symbol.toUpperCase();
+          if (STABLE_SYMBOLS.has(s)) return 0;
+          if (s === "ETH" || s === "WETH" || s === "STETH" || s === "WSTETH") return changes.ethereum ?? null;
+          if (s === "BTC" || s === "WBTC" || s === "CBBTC" || s === "TBTC") return changes.bitcoin ?? null;
+          if (s === "SOL" || s === "WSOL") return changes.solana ?? null;
+          if (s === "SUI") return changes.sui ?? null;
+          if (s === "MATIC" || s === "POL") return changes.matic ?? null;
+          if (s === "ARB") return changes.arbitrum ?? null;
+          if (s === "OP") return changes.optimism ?? null;
+          if (s === "BNB" || s === "WBNB") return changes.bnb ?? null;
+          if (s === "AVAX") return changes.avax ?? null;
+          const underlying = getATokenUnderlying(symbol);
+          if (underlying) return changeOf(underlying);
+          return null;
+        }
 
         function priceOf(symbol: string): number {
           const s = symbol.toUpperCase();
@@ -185,6 +214,7 @@ export function useWalletTokens(): WalletTokensData {
                           balance,
                           usdValue,
                           price,
+                          change24h: changeOf(m.symbol),
                           chain: chain.name,
                           logo: m.logo || getTokenLogo(m.symbol) || "",
                           isLending: lending,
@@ -220,6 +250,7 @@ export function useWalletTokens(): WalletTokensData {
                   balance: solBal,
                   usdValue: solBal * (prices.solana ?? 0),
                   price: prices.solana ?? 0,
+                  change24h: changes.solana ?? null,
                   chain: "Solana",
                   logo: getTokenLogo("SOL") || "",
                   isLending: false,
@@ -240,6 +271,7 @@ export function useWalletTokens(): WalletTokensData {
                   balance,
                   usdValue: balance * price,
                   price,
+                  change24h: changeOf(t.symbol),
                   chain: "Solana",
                   logo: getTokenLogo(t.symbol) || "",
                   isLending: false,
@@ -269,6 +301,7 @@ export function useWalletTokens(): WalletTokensData {
                   balance: suiBal,
                   usdValue: suiBal * (prices.sui ?? 0),
                   price: prices.sui ?? 0,
+                  change24h: changes.sui ?? null,
                   chain: "Sui",
                   logo: getTokenLogo("SUI") || "",
                   isLending: false,
@@ -289,6 +322,7 @@ export function useWalletTokens(): WalletTokensData {
                   balance,
                   usdValue: balance * price,
                   price,
+                  change24h: changeOf(t.symbol),
                   chain: "Sui",
                   logo: getTokenLogo(t.symbol) || "",
                   isLending: false,
