@@ -724,6 +724,96 @@ export default function PositionDetail() {
           </div>
         )}
 
+        {/* Row 3a: Impermanent Loss vs HODL — uses actual on-chain deposits */}
+        {(() => {
+          const supportsIL = isActivityProtocol;
+          if (!supportsIL) return null;
+          // Sum all deposit events (multiple add-liquidity tx allowed)
+          const deposits = activity?.events.filter((e) => e.type === 'deposit') ?? [];
+          const hasDepositData = deposits.length > 0 && (pos.price0 != null || pos.price1 != null);
+
+          let body;
+          if (activityLoading) {
+            body = (
+              <p className="text-xs text-gray-500">Loading deposit history…</p>
+            );
+          } else if (!hasDepositData) {
+            body = (
+              <p className="text-xs text-gray-500">
+                Deposit data unavailable — cannot compute IL without an on-chain deposit event.
+              </p>
+            );
+          } else {
+            const orig0 = deposits.reduce((s, e) => s + e.amount0, 0);
+            const orig1 = deposits.reduce((s, e) => s + e.amount1, 0);
+            const p0 = pos.price0 ?? 0;
+            const p1 = pos.price1 ?? 0;
+            const hodlValue = orig0 * p0 + orig1 * p1;
+            const lpValue = pos.value;
+            const il = lpValue - hodlValue;
+            const ilPct = hodlValue > 0 ? (il / hodlValue) * 100 : 0;
+            const feesEarned = totalClaimedUSD + (pos.fees || 0);
+            const netVsHodl = il + feesEarned;
+            const netVsHodlPct = hodlValue > 0 ? (netVsHodl / hodlValue) * 100 : 0;
+            const netPositive = netVsHodl >= 0;
+            body = (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1">
+                  <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                    <p className="text-xs text-gray-400 mb-1">HODL Value</p>
+                    <p className="text-base font-extrabold text-white">
+                      ${hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">if you just held</p>
+                  </div>
+                  <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                    <p className="text-xs text-gray-400 mb-1">LP Value</p>
+                    <p className="text-base font-extrabold text-white">
+                      ${lpValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">current position</p>
+                  </div>
+                  <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                    <p className="text-xs text-gray-400 mb-1">Impermanent Loss</p>
+                    <p className={`text-base font-extrabold ${il < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      {il < 0 ? "−" : "+"}${Math.abs(il).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className={`text-[10px] mt-0.5 ${il < 0 ? "text-red-400/70" : "text-emerald-400/70"}`}>
+                      {il >= 0 ? "+" : ""}{ilPct.toFixed(2)}%
+                    </p>
+                  </div>
+                  <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                    <p className="text-xs text-gray-400 mb-1">Fees Earned</p>
+                    <p className="text-base font-extrabold text-emerald-400">
+                      +${feesEarned.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">claimed + uncollected</p>
+                  </div>
+                  <div className={`rounded-lg p-3 text-center ${netPositive ? "bg-emerald-500/20" : "bg-red-500/20"}`}>
+                    <p className="text-xs text-gray-400 mb-1">Net vs HODL</p>
+                    <p className={`text-base font-extrabold ${netPositive ? "text-emerald-300" : "text-red-300"}`}>
+                      {netPositive ? "+" : "−"}${Math.abs(netVsHodl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className={`text-[10px] mt-0.5 ${netPositive ? "text-emerald-300/70" : "text-red-300/70"}`}>
+                      {netPositive ? "+" : ""}{netVsHodlPct.toFixed(2)}%
+                    </p>
+                  </div>
+                </div>
+                <p className="text-gray-400/40 text-xs mt-3">
+                  Based on {deposits.length} on-chain deposit{deposits.length === 1 ? "" : "s"} ({orig0.toLocaleString("en-US", { maximumFractionDigits: 4 })} {pos.token0Symbol} + {orig1.toLocaleString("en-US", { maximumFractionDigits: 4 })} {pos.token1Symbol}) valued at current prices.
+                </p>
+              </>
+            );
+          }
+
+          return (
+            <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">
+              <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Impermanent Loss</h2>
+              {body}
+            </div>
+          );
+        })()}
+
         {/* Row 3b: Pool Statistics — shown when pool TVL/volume data is available */}
         {(pos.poolTvl != null || pos.pool24hVolume != null) && (
           <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">

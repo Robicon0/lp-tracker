@@ -258,8 +258,12 @@ export default function Analytics() {
   const [snapBusy, setSnapBusy] = useState(false);
   const [snapMsg, setSnapMsg] = useState<string | null>(null);
   const takeSnapshot = async () => {
-    if (!address) {
-      setSnapMsg("Connect an EVM wallet first");
+    const wallets: Array<{ address: string; chain: "evm" | "solana" | "sui" }> = [];
+    if (address) wallets.push({ address, chain: "evm" });
+    if (solanaAddress) wallets.push({ address: solanaAddress, chain: "solana" });
+    if (suiAddress) wallets.push({ address: suiAddress, chain: "sui" });
+    if (wallets.length === 0) {
+      setSnapMsg("Connect a wallet first");
       return;
     }
     setSnapBusy(true);
@@ -268,13 +272,13 @@ export default function Analytics() {
       const r = await fetch(`/api/snapshot/manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, chain: "evm" }),
+        body: JSON.stringify({ wallets }),
       });
       const data = await r.json();
       if (!r.ok || !data.ok) {
         setSnapMsg(data?.error || "Snapshot failed");
       } else {
-        setSnapMsg(`Snapshot saved (${data.snapshotted}/${data.total})`);
+        setSnapMsg(`Snapshot saved (${data.snapshotted}/${data.total} wallets, ${data.positionCount} positions)`);
         await refetchDbHistory();
       }
     } catch (e) {
