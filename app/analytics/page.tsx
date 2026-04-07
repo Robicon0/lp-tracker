@@ -5,6 +5,7 @@ import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import { useDbPortfolioHistory, type HistoryRange } from "../hooks/useDbPortfolioHistory";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAccount } from "wagmi";
@@ -246,6 +247,47 @@ export default function Analytics() {
   })();
   const chartData = effectiveHistory.map((s) => ({
     label: activeRange.xFmt(new Date(s.timestamp)),
+    value: s.totalValue,
+    ts: s.timestamp,
+  }));
+
+  // ── Database-backed historical P&L (every-4h snapshots) ────────────────────
+  const [pnlRange, setPnlRange] = useState<HistoryRange>("30d");
+  const { snapshots: dbSnapshots, configured: dbConfigured, refetch: refetchDbHistory } =
+    useDbPortfolioHistory(address, pnlRange);
+  const [snapBusy, setSnapBusy] = useState(false);
+  const [snapMsg, setSnapMsg] = useState<string | null>(null);
+  const takeSnapshot = async () => {
+    if (!address) {
+      setSnapMsg("Connect an EVM wallet first");
+      return;
+    }
+    setSnapBusy(true);
+    setSnapMsg(null);
+    try {
+      const r = await fetch(`/api/cron/snapshot?wallet=${address}&chain=evm`, { method: "POST" });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        setSnapMsg(data?.error || "Snapshot failed");
+      } else {
+        setSnapMsg(`Snapshot saved (${data.snapshotted}/${data.total})`);
+        await refetchDbHistory();
+      }
+    } catch (e) {
+      setSnapMsg(String(e));
+    } finally {
+      setSnapBusy(false);
+      setTimeout(() => setSnapMsg(null), 4000);
+    }
+  };
+
+  const dbInitialValue = dbSnapshots.length > 0 ? dbSnapshots[0].totalValue : 0;
+  const dbCurrentValue = dbSnapshots.length > 0 ? dbSnapshots[dbSnapshots.length - 1].totalValue : totalPortfolioValue;
+  const dbCurrentFees  = dbSnapshots.length > 0 ? dbSnapshots[dbSnapshots.length - 1].fees : totalLpFees;
+  const dbNetPnl = dbCurrentValue + dbCurrentFees - dbInitialValue;
+  const dbNetPnlPct = dbInitialValue > 0 ? (dbNetPnl / dbInitialValue) * 100 : 0;
+  const dbChartData = dbSnapshots.map((s) => ({
+    label: new Date(s.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     value: s.totalValue,
     ts: s.timestamp,
   }));
@@ -630,6 +672,121 @@ export default function Analytics() {
           ) : (
             <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm">
               Collecting data points... chart appears after ~1 minute
+            </div>
+          )}
+        </div>
+
+        {/* ── SECTION 2.5: Profit & Loss (DB-backed) ────────────────────────── */}
+        <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-lg font-bold">Profit &amp; Loss</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Historical snapshots taken every 4 hours</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex gap-1">
+                {(["7d", "30d", "90d", "all"] as HistoryRange[]).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setPnlRange(r)}
+                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                      pnlRange === r
+                        ? "bg-emerald-600 text-white"
+                        : "bg-emerald-950/40 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {r.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={takeSnapshot}
+                aria-disabled={snapBusy}
+                className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                  snapBusy
+                    ? "border-emerald-700/40 text-emerald-400/50 cursor-not-allowed"
+                    : "border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/30"
+                }`}
+              >
+                {snapBusy ? "Saving…" : "Take Snapshot"}
+              </button>
+            </div>
+          </div>
+
+          {snapMsg && (
+            <div className="mb-3 text-xs text-emerald-300">{snapMsg}</div>
+          )}
+
+          {/* P&L summary cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
+              <p className="text-xs text-gray-500 mb-1">Initial Value</p>
+              <p className="text-lg font-bold text-white">{fmt$(dbInitialValue)}</p>
+              <p className="text-[10px] text-gray-600 mt-0.5">first snapshot in range</p>
+            </div>
+            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
+              <p className="text-xs text-gray-500 mb-1">Current Value</p>
+              <p className="text-lg font-bold text-white">{fmt$(totalPortfolioValue)}</p>
+              <p className="text-[10px] text-gray-600 mt-0.5">live</p>
+            </div>
+            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
+              <p className="text-xs text-gray-500 mb-1">Total Fees Earned</p>
+              <p className="text-lg font-bold text-emerald-300">{fmt$(totalLpFees)}</p>
+              <p className="text-[10px] text-gray-600 mt-0.5">uncollected lifetime</p>
+            </div>
+            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
+              <p className="text-xs text-gray-500 mb-1">Net P&amp;L</p>
+              <p className={`text-lg font-bold ${dbNetPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {dbNetPnl >= 0 ? "+" : ""}{fmt$(dbNetPnl)}
+              </p>
+              <p className={`text-[10px] mt-0.5 ${dbNetPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                {dbNetPnlPct >= 0 ? "+" : ""}{dbNetPnlPct.toFixed(2)}%
+              </p>
+            </div>
+          </div>
+
+          {/* P&L chart */}
+          {!dbConfigured ? (
+            <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm text-center px-4">
+              Database not configured. Provision Vercel Postgres and set <code className="text-emerald-400">POSTGRES_URL</code> to enable historical P&amp;L tracking.
+            </div>
+          ) : dbChartData.length >= 2 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart data={dbChartData}>
+                <defs>
+                  <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#0f2e1f" />
+                <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis
+                  tick={{ fill: "#6b7280", fontSize: 10 }}
+                  tickFormatter={(v) => fmtCompact(v)}
+                  axisLine={false}
+                  tickLine={false}
+                  width={55}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value: number | undefined) => [fmt$(value ?? 0), "Portfolio"]}
+                  labelStyle={{ color: "#9ca3af" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  fill="url(#pnlGrad)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: "#10b981" }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm text-center px-4">
+              Historical data collection started. Charts will populate over the coming days — or click <span className="text-emerald-400">Take Snapshot</span> to seed a data point now.
             </div>
           )}
         </div>

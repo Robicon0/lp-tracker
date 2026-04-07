@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useRef } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
@@ -43,6 +43,30 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const { watchedWallets } = useWatchedWallets();
 
   const hasWallet = !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0;
+
+  // Auto-register connected wallets with the snapshot DB so the cron job
+  // knows which addresses to track historically. Fire-and-forget; silently
+  // no-ops if the DB isn't configured (returns 503).
+  const registeredRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const toRegister: Array<{ address: string; chain: "evm" | "solana" | "sui" }> = [];
+    if (address) toRegister.push({ address, chain: "evm" });
+    if (solanaAddress) toRegister.push({ address: solanaAddress, chain: "solana" });
+    if (suiAddress) toRegister.push({ address: suiAddress, chain: "sui" });
+    for (const w of toRegister) {
+      const key = `${w.chain}:${w.address}`;
+      if (registeredRef.current.has(key)) continue;
+      registeredRef.current.add(key);
+      fetch("/api/wallets/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(w),
+      }).catch(() => {
+        // Best-effort: don't surface DB errors to the user.
+        registeredRef.current.delete(key);
+      });
+    }
+  }, [address, solanaAddress, suiAddress]);
 
   // Stable queryKey: stringify watched wallets so React Query refetches when they change
   const watchedKey = watchedWallets.map((w) => `${w.chain}:${w.address}`).join(",");

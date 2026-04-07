@@ -50,6 +50,21 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 ## Environment
 
 Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet balance fetching.
+Optional (for historical P&L tracking): `POSTGRES_URL` (Vercel Postgres) + `CRON_SECRET`.
+
+## Historical P&L (Vercel Postgres)
+
+- **Schema**: `scripts/setup-db.sql` — three tables: `wallets`, `portfolio_snapshots`, `position_snapshots`. Run via Vercel Postgres dashboard query editor or `psql $POSTGRES_URL -f scripts/setup-db.sql`.
+- **DB helper**: `app/lib/db.ts` — re-exports `sql` from `@vercel/postgres` and exposes `isDbConfigured()` so routes degrade gracefully (503 with "DB not configured") when `POSTGRES_URL` is unset.
+- **Cron route**: `app/api/cron/snapshot/route.ts` — auth via `Authorization: Bearer ${CRON_SECRET}` (Vercel cron sends this automatically). Iterates rows in `wallets`, fetches positions for each via the existing `/api/{aerodrome,uniswap/v3,velodrome,hyperswap,pancakeswap,raydium,orca,cetus,bluefin,momentum}` routes (built absolute via `x-forwarded-host`/`x-forwarded-proto`), then writes one `portfolio_snapshots` row + one `position_snapshots` row per position. Supports `?wallet=0x...&chain=evm` for manual single-wallet snapshot. Both GET and POST accepted.
+- **History reads**: `app/api/history/portfolio?wallet=...&range=7d|30d|90d|all`; `app/api/history/position?id=aero-50093212&range=...`. Both return `{ ok, snapshots: [...] }` with timestamps in epoch ms.
+- **Wallet auto-registration**: `app/api/wallets/register/route.ts` — `POST {address, chain}` with `chain in {evm,solana,sui}`. Called automatically from `PositionsContext.tsx` on every wallet connect via a `useRef` dedupe set; failures silently re-allow retry on next mount.
+- **Hooks**: `app/hooks/useDbPortfolioHistory.ts` — `useDbPortfolioHistory(wallet, range)` and `useDbPositionHistory(positionId, range)`. Both expose `{snapshots, isLoading, configured}` so UI can show a "DB not configured" message instead of crashing.
+- **Analytics page P&L section** (`app/analytics/page.tsx`): inserted as Section 2.5, between Portfolio Performance Chart and Income Breakdown. 4 summary cards (Initial / Current / Total Fees Earned / Net P&L), 7D/30D/90D/ALL range toggle, and a "Take Snapshot" button that POSTs to `/api/cron/snapshot?wallet=${address}&chain=evm` for instant manual snapshots.
+- **Position detail P&L section** (`app/dashboard/[id]/page.tsx`): inserted as Row 3.5, immediately before "Actual Performance". 5 cards (Initial / Current / Claimed / Net P&L / P&L %) + AreaChart of position value over time, same range toggles. Net P&L formula: `current_value + claimed_fees - initial_value`.
+- **Cron config**: `vercel.json` — `{ "crons": [{ "path": "/api/cron/snapshot", "schedule": "0 */4 * * *" }] }`.
+- **Existing localStorage history fallback**: `usePortfolioHistory.ts` is unchanged — the original "Portfolio Value" chart on the analytics page still uses it. The new DB-backed P&L section is additive.
+- **Setup steps** (one-time): (1) provision Vercel Postgres in Vercel dashboard → Storage tab; (2) Vercel auto-injects `POSTGRES_URL` etc. when linked to the project; (3) add `CRON_SECRET` env var (any random string); (4) run `scripts/setup-db.sql` via the Vercel Postgres query editor; (5) connect a wallet — it auto-registers and the next cron run (every 4 hours) writes the first snapshot. Or click "Take Snapshot" for an immediate seed.
 
 ---
 

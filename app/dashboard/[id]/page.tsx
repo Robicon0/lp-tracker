@@ -13,6 +13,16 @@ import { useRaydiumActivity } from "../../hooks/useRaydiumActivity";
 import { useHyperSwapActivity } from "../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../hooks/useVelodromeActivity";
+import { useDbPositionHistory, type HistoryRange } from "../../hooks/useDbPortfolioHistory";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 function TokenCircle({ symbol, size = 32, overlap = false }: { symbol: string; size?: number; overlap?: boolean }) {
   const [imgError, setImgError] = useState(false);
@@ -140,6 +150,8 @@ export default function PositionDetail() {
   const { positions, isLoading } = usePositions();
   const [mounted, setMounted] = useState(false);
   const [aprExpanded, setAprExpanded] = useState(false);
+  const [pnlRange, setPnlRange] = useState<HistoryRange>("30d");
+  const { snapshots: dbPosSnaps, configured: dbPosConfigured } = useDbPositionHistory(id, pnlRange);
   useEffect(() => setMounted(true), []);
 
   // Find position — may be undefined until data loads; derive params for hook below
@@ -755,6 +767,126 @@ export default function PositionDetail() {
             </div>
           </div>
         )}
+
+        {/* Row 3.5: Position P&L (DB-backed) ───────────────────────────── */}
+        {(() => {
+          const initial = dbPosSnaps.length > 0 ? dbPosSnaps[0].value : 0;
+          const current = pos.value;
+          const claimed = totalClaimedUSD;
+          const netPnl = current + claimed - initial;
+          const netPnlPct = initial > 0 ? (netPnl / initial) * 100 : 0;
+          const chart = dbPosSnaps.map((s) => ({
+            label: new Date(s.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            value: s.value,
+          }));
+          return (
+            <div className="bg-[#0a2e1a]/60 p-4 mb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                <h2 className="text-sm font-extrabold text-emerald-300">Position P&amp;L</h2>
+                <div className="flex gap-1">
+                  {(["7d", "30d", "90d", "all"] as HistoryRange[]).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setPnlRange(r)}
+                      className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                        pnlRange === r
+                          ? "bg-emerald-600 text-white"
+                          : "bg-emerald-950/40 text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {r.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
+                <div className="bg-[#0a1a12] rounded p-2">
+                  <p className="text-[10px] text-gray-500">Initial Value</p>
+                  <p className="text-sm font-bold text-white">
+                    ${initial.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="bg-[#0a1a12] rounded p-2">
+                  <p className="text-[10px] text-gray-500">Current Value</p>
+                  <p className="text-sm font-bold text-white">
+                    ${current.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="bg-[#0a1a12] rounded p-2">
+                  <p className="text-[10px] text-gray-500">Total Fees Claimed</p>
+                  <p className="text-sm font-bold text-emerald-300">
+                    ${claimed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="bg-[#0a1a12] rounded p-2">
+                  <p className="text-[10px] text-gray-500">Net P&amp;L</p>
+                  <p className={`text-sm font-bold ${netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {netPnl >= 0 ? "+" : ""}${netPnl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="bg-[#0a1a12] rounded p-2">
+                  <p className="text-[10px] text-gray-500">P&amp;L %</p>
+                  <p className={`text-sm font-bold ${netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {netPnlPct >= 0 ? "+" : ""}{netPnlPct.toFixed(2)}%
+                  </p>
+                </div>
+              </div>
+              {!dbPosConfigured ? (
+                <div className="flex items-center justify-center h-[140px] text-gray-600 text-xs text-center px-4">
+                  Database not configured. Set <code className="text-emerald-400">POSTGRES_URL</code> in env to enable position-level P&amp;L tracking.
+                </div>
+              ) : chart.length >= 2 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={chart}>
+                    <defs>
+                      <linearGradient id={`posPnlGrad-${pos.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#0f2e1f" />
+                    <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      tick={{ fill: "#6b7280", fontSize: 10 }}
+                      tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
+                      axisLine={false}
+                      tickLine={false}
+                      width={55}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#0a1f17",
+                        border: "1px solid rgba(16,185,129,0.2)",
+                        borderRadius: "8px",
+                        padding: "8px 12px",
+                        color: "#FFFFFF",
+                        fontSize: "12px",
+                      }}
+                      formatter={(v: number | undefined) => [
+                        `$${Number(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                        "Value",
+                      ]}
+                      labelStyle={{ color: "#9ca3af" }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      fill={`url(#posPnlGrad-${pos.id})`}
+                      dot={false}
+                      activeDot={{ r: 4, fill: "#10b981" }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[140px] text-gray-600 text-xs text-center px-4">
+                  Tracking started. P&amp;L data will appear after the next snapshot.
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
