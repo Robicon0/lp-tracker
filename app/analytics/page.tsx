@@ -265,7 +265,11 @@ export default function Analytics() {
     setSnapBusy(true);
     setSnapMsg(null);
     try {
-      const r = await fetch(`/api/cron/snapshot?wallet=${address}&chain=evm`, { method: "POST" });
+      const r = await fetch(`/api/snapshot/manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, chain: "evm" }),
+      });
       const data = await r.json();
       if (!r.ok || !data.ok) {
         setSnapMsg(data?.error || "Snapshot failed");
