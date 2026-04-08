@@ -23,6 +23,9 @@ export interface ActivityEvent {
   amount0: number;          // coin_a_amount (human-readable)
   amount1: number;          // coin_b_amount
   usdAtTime: number | null; // null if historical price fetch failed
+  // Per-event historical prices — not yet populated for Sui (always null this phase).
+  price0AtTime: number | null;
+  price1AtTime: number | null;
   cumulativeFeeUSD: number; // running total of fee+reward USD; 0 for non-fee events
   rewardSymbol?: string;    // set for reward_claim events
 }
@@ -287,6 +290,8 @@ export async function GET(request: Request) {
         amount0,
         amount1,
         usdAtTime,
+        price0AtTime: null,
+        price1AtTime: null,
         cumulativeFeeUSD,
         ...(ev.rewardSymbol ? { rewardSymbol: ev.rewardSymbol } : {}),
       };

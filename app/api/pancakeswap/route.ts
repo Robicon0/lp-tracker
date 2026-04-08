@@ -263,6 +263,8 @@ export async function GET(request: Request) {
           tickUpper:      pos.tickUpper,
           token0Decimals: t0Info.decimals,
           token1Decimals: t1Info.decimals,
+          token0Address:  pos.token0,
+          token1Address:  pos.token1,
           liquidity: pos.liquidity.toString(),
           price0,
           price1,

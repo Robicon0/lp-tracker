@@ -13,7 +13,9 @@ import { useRaydiumActivity } from "../../hooks/useRaydiumActivity";
 import { useHyperSwapActivity } from "../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../hooks/useVelodromeActivity";
+import { usePancakeSwapActivity } from "../../hooks/usePancakeSwapActivity";
 import { useDbPositionHistory, type HistoryRange } from "../../hooks/useDbPortfolioHistory";
+import { computePositionPnL } from "../../lib/positionPnl";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -244,6 +246,18 @@ export default function PositionDetail() {
     pos?.price1,
   );
 
+  // PancakeSwap V3 (BNB Chain) — id format: cake3-bsc-{tokenId}
+  const pancakeTokenId = pos?.protocol === 'PancakeSwap V3' ? pos.id.replace('cake3-bsc-', '') : null;
+  const { data: pancakeActivity, isLoading: pancakeActivityLoading } = usePancakeSwapActivity(
+    pancakeTokenId,
+    pos?.token0Decimals ?? 18,
+    pos?.token1Decimals ?? 18,
+    pos?.token0Address,
+    pos?.token1Address,
+    pos?.price0,
+    pos?.price1,
+  );
+
   // Unified activity data — pick source based on protocol
   const isHyperEVM = pos ? HYPEREVM_PROTOCOLS.has(pos.protocol) : false;
   const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
@@ -253,6 +267,7 @@ export default function PositionDetail() {
     : isHyperEVM ? hyperswapActivity
     : pos?.protocol === 'Uniswap V3' ? uniswapActivity
     : pos?.protocol === 'Velodrome' ? velodromeActivity
+    : pos?.protocol === 'PancakeSwap V3' ? pancakeActivity
     : null;
   const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
     : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
@@ -261,10 +276,16 @@ export default function PositionDetail() {
     : isHyperEVM ? hyperswapActivityLoading
     : pos?.protocol === 'Uniswap V3' ? uniswapActivityLoading
     : pos?.protocol === 'Velodrome' ? velodromeActivityLoading
+    : pos?.protocol === 'PancakeSwap V3' ? pancakeActivityLoading
     : false;
   const isActivityProtocol = pos?.protocol === 'Aerodrome' || pos?.protocol === 'Bluefin'
     || pos?.protocol === 'Orca' || pos?.protocol === 'Raydium' || isHyperEVM
-    || pos?.protocol === 'Uniswap V3' || pos?.protocol === 'Velodrome';
+    || pos?.protocol === 'Uniswap V3' || pos?.protocol === 'Velodrome'
+    || pos?.protocol === 'PancakeSwap V3';
+  // EVM-only protocols where on-chain entry-price P&L + IL is supported this phase.
+  // Solana (Orca/Raydium) and Sui (Bluefin) are out of scope and keep the legacy IL section.
+  const isEvmActivityProtocol = pos?.protocol === 'Aerodrome' || pos?.protocol === 'Velodrome'
+    || pos?.protocol === 'Uniswap V3' || isHyperEVM || pos?.protocol === 'PancakeSwap V3';
 
   // localStorage fee snapshot — saves current uncollected fees so we can detect
   // future claims on chains where tx scanning isn't available (Solana/Sui).
@@ -724,9 +745,130 @@ export default function PositionDetail() {
           </div>
         )}
 
-        {/* Row 3a: Impermanent Loss vs HODL — uses actual on-chain deposits */}
+        {/* Row 3a-NEW (EVM only): On-chain P&L + Impermanent Loss using ENTRY prices.
+            Built from deposit events with per-event historical prices. The
+            non-EVM legacy section below stays untouched for Solana/Sui this phase. */}
+        {isEvmActivityProtocol && (() => {
+          const cardWrap = (body: React.ReactNode) => (
+            <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">
+              <h2 className="text-sm font-extrabold text-emerald-300 mb-3">On-Chain P&amp;L &amp; Impermanent Loss</h2>
+              {body}
+            </div>
+          );
+
+          if (activityLoading) {
+            return cardWrap(
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
+                Reconstructing position from on-chain history…
+              </div>
+            );
+          }
+
+          if (!activity) {
+            return cardWrap(
+              <p className="text-xs text-gray-500">
+                Entry data unavailable — P&amp;L cannot be computed.
+              </p>
+            );
+          }
+
+          const result = computePositionPnL({
+            currentValue: pos.value,
+            unclaimedFeesUSD: pos.fees ?? 0,
+            price0: pos.price0 ?? 0,
+            price1: pos.price1 ?? 0,
+            events: activity.events,
+          });
+
+          if (!result.ok) {
+            const message = result.reason === 'no_deposits'
+              ? 'Entry data unavailable — no on-chain deposit event found for this position. P&L cannot be computed.'
+              : 'Entry data unavailable — historical token prices missing for the deposit date(s). P&L cannot be computed.';
+            return cardWrap(<p className="text-xs text-gray-500">{message}</p>);
+          }
+
+          const d = result.data;
+          const pnlPositive = d.netPnlUSD >= 0;
+          const ilNegative = d.ilUSD < 0;
+          const fmtUSD = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+          return cardWrap(
+            <>
+              {/* Row 1: 5 P&L cards (Initial / Current / Fees Collected / Fees Unclaimed / Net P&L) */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 mb-2">
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Initial Value</p>
+                  <p className="text-base font-extrabold text-white">${fmtUSD(d.initialValue)}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">at deposit time</p>
+                </div>
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Current Value</p>
+                  <p className="text-base font-extrabold text-white">${fmtUSD(d.currentValue)}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">live</p>
+                </div>
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Fees Collected</p>
+                  <p className="text-base font-extrabold text-emerald-400">${fmtUSD(d.feesCollected)}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">claimed on-chain</p>
+                </div>
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Fees Unclaimed</p>
+                  <p className="text-base font-extrabold text-emerald-300">${fmtUSD(d.feesUnclaimed)}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">ready to claim</p>
+                </div>
+                <div className={`rounded-lg p-3 text-center ${pnlPositive ? "bg-emerald-500/20" : "bg-red-500/20"}`}>
+                  <p className="text-xs text-gray-400 mb-1">Net P&amp;L</p>
+                  <p className={`text-base font-extrabold ${pnlPositive ? "text-emerald-300" : "text-red-300"}`}>
+                    {pnlPositive ? "+" : "−"}${fmtUSD(Math.abs(d.netPnlUSD))}
+                  </p>
+                  <p className={`text-[10px] mt-0.5 ${pnlPositive ? "text-emerald-300/70" : "text-red-300/70"}`}>
+                    {pnlPositive ? "+" : ""}{d.netPnlPct.toFixed(2)}%
+                  </p>
+                </div>
+              </div>
+
+              {/* Row 2: Impermanent Loss — HODL value, IL ($/%), fees offset */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">HODL Value</p>
+                  <p className="text-base font-extrabold text-white">${fmtUSD(d.hodlValue)}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">if you just held</p>
+                </div>
+                <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-400 mb-1">Impermanent Loss</p>
+                  <p className={`text-base font-extrabold ${ilNegative ? "text-red-400" : "text-emerald-400"}`}>
+                    {ilNegative ? "−" : "+"}${fmtUSD(Math.abs(d.ilUSD))}
+                  </p>
+                  <p className={`text-[10px] mt-0.5 ${ilNegative ? "text-red-400/70" : "text-emerald-400/70"}`}>
+                    {d.ilPct.toFixed(2)}%
+                  </p>
+                </div>
+                <div className={`rounded-lg p-3 text-center ${d.feesOffsetIL ? "bg-emerald-500/20" : "bg-red-500/20"}`}>
+                  <p className="text-xs text-gray-400 mb-1">Fees vs IL</p>
+                  <p className={`text-base font-extrabold ${d.feesOffsetIL ? "text-emerald-300" : "text-red-300"}`}>
+                    {d.feesOffsetIL ? "Offset ✓" : "Not yet"}
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    ${fmtUSD(d.feesCollected + d.feesUnclaimed)} fees vs ${fmtUSD(Math.abs(d.ilUSD))} IL
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-gray-400/40 text-xs mt-3">
+                Based on {d.depositCount} on-chain deposit{d.depositCount === 1 ? "" : "s"}.
+                Entry price ratio {pos.token0Symbol}/{pos.token1Symbol}: {(d.entryPrice0 / (d.entryPrice1 || 1)).toFixed(6)} →
+                current ratio: {((pos.price0 ?? 0) / (pos.price1 || 1)).toFixed(6)}.
+                IL formula: 2√r/(1+r) − 1 where r = current÷entry price ratio.
+              </p>
+            </>
+          );
+        })()}
+
+        {/* Row 3a (legacy, non-EVM only): Impermanent Loss vs HODL using current prices.
+            Phase 1 leaves Solana/Sui untouched — they keep this section. */}
         {(() => {
-          const supportsIL = isActivityProtocol;
+          const supportsIL = isActivityProtocol && !isEvmActivityProtocol;
           if (!supportsIL) return null;
           // Sum all deposit events (multiple add-liquidity tx allowed)
           const deposits = activity?.events.filter((e) => e.type === 'deposit') ?? [];

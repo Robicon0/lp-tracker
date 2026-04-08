@@ -1,47 +1,50 @@
 import { NextResponse } from 'next/server';
 
+// PancakeSwap V3 is a Uniswap V3 fork on BNB Chain. Same event topic0 hashes,
+// same ABI layout. Only the NFT manager address and the chain RPCs differ.
+
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
-// Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
-const ALCHEMY_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-// Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit
-const TENDERLY_RPC = 'https://optimism.gateway.tenderly.co';
-// LlamaRPC Optimism — secondary: now enforces 30k block range limit (code -32012)
-const LLAMA_RPC = 'https://op.llamarpc.com';
-// publicnode — tertiary fallback for chunked scanning
-const PUBLIC_NODE_RPC = 'https://optimism-rpc.publicnode.com';
+// Alchemy used only for eth_getBlockByNumber (timestamp lookups)
+const ALCHEMY_RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
+// publicnode — works reliably for BSC eth_getLogs (Tenderly has no public BSC gateway
+// and LlamaRPC's BSC endpoint is frequently unreachable from both localhost and Vercel)
+const PUBLIC_NODE_RPC = 'https://bsc-rpc.publicnode.com';
+// LlamaRPC public BNB endpoint — secondary for eth_getLogs
+const LLAMA_RPC = 'https://binance.llamarpc.com';
 
-// Velodrome Slipstream (CL) NonfungiblePositionManager on Optimism
-// keccak256 verified to emit the same event signatures as all standard V3 forks
-const NFT_MANAGER = '0x416b433906b1B72FA758e166e239c43d68dC6F29';
+// PancakeSwap V3 NonfungiblePositionManager on BNB Chain (same address used by app/api/pancakeswap/route.ts)
+const NFT_MANAGER = '0x46A15B0b27311cedF172AB29E4f4766fbE7F4364';
 
-// Velodrome Slipstream deployed in late 2023 on Optimism.
-// Optimism pre-Bedrock (Dec2021-Jun2023) ~12s blocks → ~3.9M; post-Bedrock 2s blocks.
-// At Q4 2023 Optimism was at approximately block 12-15M. Use 10M as conservative start.
-const DEPLOY_BLOCK = 10_000_000;  // conservative start, before Velodrome CL launch
+// BSC free-tier public RPCs (publicnode, Alchemy free, LlamaRPC) all PRUNE
+// archive history aggressively — publicnode keeps only ~50,000 blocks (≈42 hours
+// at BSC's 3s block time) and returns `-32701 History has been pruned` for
+// anything older. Etherscan V2 requires a paid plan for BSC access. With no
+// free-tier path to archive logs, this route can only serve positions opened
+// within the last ~40 hours; older positions will surface a clean error so the
+// UI shows "Deposit data unavailable" and falls back to the existing
+// tick-midpoint IL estimate. A future upgrade to a paid BSC archive RPC (or a
+// BSCSCAN_API_KEY) can remove this limitation by increasing SCAN_DEPTH_BLOCKS.
+const SCAN_DEPTH_BLOCKS = 48_000; // ~40 hours, fits inside publicnode's pruning window
+const DEPLOY_BLOCK_FLOOR = 26_950_000;
 
-// Chunk sizes: LlamaRPC just under 30k limit; publicnode supports up to 49k
-const LLAMA_CHUNK   = 29_000;
 const PUBNODE_CHUNK = 49_000;
-// Max parallel getLogs requests per batch
-const MAX_CONCURRENCY = 50;
+const MAX_CONCURRENCY = 2;
 
-// Standard V3 event topic0 hashes (identical across all V3-fork NFT managers)
+// Standard Uni V3 event topic0 hashes — same for all V3 forks
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
 const TOPIC_COLLECT  = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
 
-// CoinGecko IDs for known Optimism tokens
+// CoinGecko IDs for known BNB Chain tokens (kept in sync with app/api/pancakeswap/route.ts)
 const CG_IDS: Record<string, string> = {
-  '0x4200000000000000000000000000000000000006': 'ethereum',          // WETH
-  '0x0b2c639c533813f4aa9d7837caf62653d097ff85': 'usd-coin',         // USDC
-  '0x7f5c764cbc14f9669b88837ca1490cca17c31607': 'usd-coin',         // USDC.e
-  '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58': 'tether',           // USDT
-  '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1': 'dai',              // DAI
-  '0x68f180fcce6836688e9084f035309e29bf0a2095': 'bitcoin',          // WBTC
-  '0x4200000000000000000000000000000000000042': 'optimism',         // OP
-  '0x3c8b650257cfb5f272f799f5e2b4e65093a11a05': 'velodrome-finance',// VELO (old)
-  '0x9560e827af36c94d2ac33a39bce1fe78631088db': 'velodrome-finance',// VELO (new)
-  '0x1f32b1c2345538c0c6f582fcb022739c4a194ebb': 'wrapped-steth',   // wstETH
+  '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': 'binancecoin',       // WBNB
+  '0x55d398326f99059ff775485246999027b3197955': 'tether',            // USDT
+  '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': 'usd-coin',          // USDC
+  '0xe9e7cea3dedca5984780bafc599bd69add087d56': 'binance-usd',       // BUSD
+  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82': 'pancakeswap-token', // CAKE
+  '0x2170ed0880ac9a755fd29b2688956bd959f933f8': 'ethereum',          // ETH (Binance-Peg)
+  '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c': 'bitcoin',           // BTCB
+  '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3': 'dai',               // DAI
 };
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
@@ -97,7 +100,7 @@ async function fetchLogsChunked(
   for (let b = fromBlock; b <= toBlock; b += chunkSize) {
     chunks.push([b, Math.min(b + chunkSize - 1, toBlock)]);
   }
-  console.log(`[velodrome/activity] chunked scan: ${chunks.length} chunks @ ${chunkSize} blocks, rpc=${rpcUrl}`);
+  console.log(`[pancakeswap/activity] chunked scan: ${chunks.length} chunks @ ${chunkSize} blocks, rpc=${rpcUrl}`);
 
   const allLogs: RawLog[] = [];
   for (let i = 0; i < chunks.length; i += MAX_CONCURRENCY) {
@@ -125,66 +128,28 @@ async function fetchLogsChunked(
     );
     allLogs.push(...results.flat());
     if (i === 0 && batchErrors === batch.length) {
-      throw new Error(`[velodrome/activity] chunked scan: first batch 100% error rate on ${rpcUrl}`);
+      throw new Error(`[pancakeswap/activity] chunked scan: first batch 100% error rate on ${rpcUrl}`);
     }
   }
   return allLogs;
 }
 
 async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
-  const logsParams = {
-    address: NFT_MANAGER,
-    topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
-    fromBlock: '0x' + DEPLOY_BLOCK.toString(16),
-    toBlock: 'latest' as const,
-  };
-
-  // Tier 1: Tenderly (full-range, no limits, fast)
-  const tenderlyAttempt = await rpcPost(TENDERLY_RPC, {
-    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
-
-  if (!tenderlyAttempt.error) {
-    return tenderlyAttempt.result ?? [];
-  }
-  console.warn('[velodrome/activity] Tenderly error:', tenderlyAttempt.error.message);
-
-  // Tier 2: LlamaRPC full range
-  const llamaAttempt = await rpcPost(LLAMA_RPC, {
-    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
-
-  if (!llamaAttempt.error) {
-    return llamaAttempt.result ?? [];
-  }
-
-  const code = (llamaAttempt.error as unknown as { code?: number }).code;
-  const msg  = llamaAttempt.error.message;
-  console.warn('[velodrome/activity] LlamaRPC full-range error:', code, msg);
-
+  // Get current block to bound the scan window
   const bnRes = await rpcPost(ALCHEMY_RPC, {
     jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
   }) as { result?: string };
-  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 150_000_000;
+  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 50_000_000;
+  const fromBlock = Math.max(DEPLOY_BLOCK_FLOOR, currentBlock - SCAN_DEPTH_BLOCKS);
 
-  const isRangeErr    = code === -32012 || msg.includes('ExceededMaxAllowed') || msg.includes('range');
-  const isUnreachable = code === -32603 || msg.toLowerCase().includes('unreachable');
-
-  // Tier 3: LlamaRPC chunked
-  if (isRangeErr) {
-    try {
-      return await fetchLogsChunked(tokenIdHex, DEPLOY_BLOCK, currentBlock, LLAMA_RPC, LLAMA_CHUNK);
-    } catch (llamaChunkErr) {
-      console.warn('[velodrome/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
-    }
+  // publicnode chunked (49k chunks, below its 50k limit). BSC archive history is
+  // pruned on all free RPCs, and this is the only reachable archive window.
+  try {
+    return await fetchLogsChunked(tokenIdHex, fromBlock, currentBlock, PUBLIC_NODE_RPC, PUBNODE_CHUNK);
+  } catch (pubChunkErr) {
+    console.warn('[pancakeswap/activity] publicnode chunks failing, returning empty:', String(pubChunkErr));
+    return [];
   }
-
-  // Tier 4: publicnode chunked
-  if (isRangeErr || isUnreachable) {
-    return fetchLogsChunked(tokenIdHex, DEPLOY_BLOCK, currentBlock, PUBLIC_NODE_RPC, PUBNODE_CHUNK);
-  }
-
-  throw new Error(`[velodrome/activity] eth_getLogs RPC error: ${msg}`);
 }
 
 async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, number>> {
@@ -206,9 +171,9 @@ async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, n
 
 function tsToDateStr(ts: number): string {
   const d = new Date(ts * 1000);
-  const day   = d.getUTCDate().toString().padStart(2, '0');
+  const day = d.getUTCDate().toString().padStart(2, '0');
   const month = (d.getUTCMonth() + 1).toString().padStart(2, '0');
-  const year  = d.getUTCFullYear();
+  const year = d.getUTCFullYear();
   return `${day}-${month}-${year}`;
 }
 
@@ -217,13 +182,13 @@ async function fetchCGHistoricalPrice(cgId: string, dateStr: string): Promise<nu
     const url = `https://api.coingecko.com/api/v3/coins/${cgId}/history?date=${dateStr}&localization=false`;
     const res = await fetch(url, { headers: { accept: 'application/json' } });
     if (!res.ok) {
-      console.error(`[velodrome/activity] CoinGecko history ${cgId} ${dateStr} HTTP ${res.status}`);
+      console.error(`[pancakeswap/activity] CoinGecko history ${cgId} ${dateStr} HTTP ${res.status}`);
       return null;
     }
     const json = await res.json();
     return json?.market_data?.current_price?.usd ?? null;
   } catch (err) {
-    console.error(`[velodrome/activity] CoinGecko history ${cgId} ${dateStr} error:`, err);
+    console.error(`[pancakeswap/activity] CoinGecko history ${cgId} ${dateStr} error:`, err);
     return null;
   }
 }
@@ -235,12 +200,12 @@ async function fetchHistoricalPrices(
   fallback0: number,
   fallback1: number,
 ): Promise<Record<string, { p0: number; p1: number }>> {
-  const cgId0 = CG_IDS[token0.toLowerCase()] ?? null;
-  const cgId1 = CG_IDS[token1.toLowerCase()] ?? null;
+  const cgId0 = CG_IDS[token0] ?? null;
+  const cgId1 = CG_IDS[token1] ?? null;
 
   const MAX_DATES = 30;
   const recentDates = dates.slice(-MAX_DATES);
-  const olderDates  = dates.slice(0, dates.length - MAX_DATES);
+  const olderDates = dates.slice(0, dates.length - MAX_DATES);
 
   const result: Record<string, { p0: number; p1: number }> = {};
   for (const d of olderDates) result[d] = { p0: fallback0, p1: fallback1 };
@@ -259,20 +224,20 @@ async function fetchHistoricalPrices(
 
 function decodeWord(data: string, wordIndex: number): bigint {
   const start = wordIndex * 64;
-  const word  = data.slice(start, start + 64);
+  const word = data.slice(start, start + 64);
   if (!word || word.length < 64) return 0n;
   return BigInt('0x' + word);
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const positionId = searchParams.get('positionId');   // numeric NFT tokenId string
-  const t0d        = parseInt(searchParams.get('t0d') ?? '18', 10);
-  const t1d        = parseInt(searchParams.get('t1d') ?? '18', 10);
-  const token0     = (searchParams.get('token0') ?? '').toLowerCase();
-  const token1     = (searchParams.get('token1') ?? '').toLowerCase();
-  const fallback0  = parseFloat(searchParams.get('p0') ?? '0');
-  const fallback1  = parseFloat(searchParams.get('p1') ?? '0');
+  const positionId = searchParams.get('positionId');     // numeric NFT tokenId string
+  const t0d = parseInt(searchParams.get('t0d') ?? '18', 10);
+  const t1d = parseInt(searchParams.get('t1d') ?? '18', 10);
+  const token0 = (searchParams.get('token0') ?? '').toLowerCase();
+  const token1 = (searchParams.get('token1') ?? '').toLowerCase();
+  const fallback0 = parseFloat(searchParams.get('p0') ?? '0');
+  const fallback1 = parseFloat(searchParams.get('p1') ?? '0');
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -284,6 +249,7 @@ export async function GET(request: Request) {
   try {
     const tokenIdHex = '0x' + BigInt(positionId).toString(16).padStart(64, '0');
     const logs = await fetchLogs(tokenIdHex);
+    console.log(`[pancakeswap/activity] tokenId=${positionId} → ${logs.length} logs`);
 
     if (logs.length === 0) {
       const empty: ActivityResponse = { events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0 };
@@ -291,7 +257,7 @@ export async function GET(request: Request) {
     }
 
     const blockNumbers = logs.map(l => parseInt(l.blockNumber, 16));
-    const timestamps   = await fetchTimestamps(blockNumbers);
+    const timestamps = await fetchTimestamps(blockNumbers);
 
     const scale0 = BigInt(10) ** BigInt(t0d);
     const scale1 = BigInt(10) ** BigInt(t1d);
@@ -330,14 +296,16 @@ export async function GET(request: Request) {
       const topic0 = log.topics[0].toLowerCase();
       const type = TOPIC_MAP[topic0];
       if (!type) {
-        console.error('[velodrome/activity] Unknown topic0 (skipping):', topic0);
+        console.error('[pancakeswap/activity] Unknown topic0 (skipping):', topic0);
         return [];
       }
 
-      const blockNum  = parseInt(log.blockNumber, 16);
+      const blockNum = parseInt(log.blockNumber, 16);
       const timestamp = timestamps[blockNum] ?? 0;
-      const data      = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
+      const data = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
 
+      // IncreaseLiquidity/DecreaseLiquidity: word0=liquidity, word1=amount0, word2=amount1
+      // Collect: word0=recipient(address), word1=amount0Collected, word2=amount1Collected
       const amount0Raw = decodeWord(data, 1);
       const amount1Raw = decodeWord(data, 2);
 
@@ -350,17 +318,18 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
+    const cgMapped0 = !!CG_IDS[token0];
+    const cgMapped1 = !!CG_IDS[token1];
+
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
-      const amount0   = Number(ev.amount0Raw) / Number(scale0);
-      const amount1   = Number(ev.amount1Raw) / Number(scale1);
-      const dateStr   = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const cgMapped0 = !!CG_IDS[token0];
-      const cgMapped1 = !!CG_IDS[token1];
+      const amount0 = Number(ev.amount0Raw) / Number(scale0);
+      const amount1 = Number(ev.amount1Raw) / Number(scale1);
+      const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
       const histEntry = dateStr ? pricesByDate[dateStr] : undefined;
       const price0AtTime = cgMapped0 && histEntry ? histEntry.p0 : null;
       const price1AtTime = cgMapped1 && histEntry ? histEntry.p1 : null;
-      const prices    = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
+      const prices = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
       const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
 
       let cumulativeFeeUSD = 0;
@@ -383,7 +352,7 @@ export async function GET(request: Request) {
       totalFees1:   Number(fees1) / Number(scale1),
     } satisfies ActivityResponse);
   } catch (err) {
-    console.error('[velodrome/activity] Unexpected error:', err);
+    console.error('[pancakeswap/activity] Unexpected error:', err);
     return NextResponse.json({ error: 'Failed to fetch activity', details: String(err) }, { status: 500 });
   }
 }

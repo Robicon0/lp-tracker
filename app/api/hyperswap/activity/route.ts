@@ -37,6 +37,9 @@ export interface ActivityEvent {
   amount0: number;
   amount1: number;
   usdAtTime: number | null;
+  // Per-event historical prices (null when no CoinGecko mapping for the token).
+  price0AtTime: number | null;
+  price1AtTime: number | null;
   cumulativeFeeUSD: number;
 }
 
@@ -324,12 +327,18 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
+    const cgMapped0 = !!CG_IDS[token0];
+    const cgMapped1 = !!CG_IDS[token1];
+
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
       const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const prices = dateStr ? (pricesByDate[dateStr] ?? { p0: fallback0, p1: fallback1 }) : null;
+      const histEntry = dateStr ? pricesByDate[dateStr] : undefined;
+      const price0AtTime = cgMapped0 && histEntry ? histEntry.p0 : null;
+      const price1AtTime = cgMapped1 && histEntry ? histEntry.p1 : null;
+      const prices = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
       const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
 
       let cumulativeFeeUSD = 0;
@@ -347,6 +356,8 @@ export async function GET(request: Request) {
         amount0,
         amount1,
         usdAtTime,
+        price0AtTime,
+        price1AtTime,
         cumulativeFeeUSD,
       };
     });

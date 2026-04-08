@@ -223,6 +223,9 @@ export interface ActivityEvent {
   amount0: number;
   amount1: number;
   usdAtTime: number | null;
+  // Per-event historical prices — not yet populated for Solana (always null this phase).
+  price0AtTime: number | null;
+  price1AtTime: number | null;
   cumulativeFeeUSD: number;
 }
 
@@ -358,7 +361,7 @@ export async function GET(request: Request) {
         cumulativeFeeUSD = runningFeeUSD;
       }
 
-      return { type: ev.type, txHash: ev.txHash, timestamp: ev.timestamp, amount0, amount1, usdAtTime, cumulativeFeeUSD };
+      return { type: ev.type, txHash: ev.txHash, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime: null, price1AtTime: null, cumulativeFeeUSD };
     });
 
     // Reverse to newest-first for display

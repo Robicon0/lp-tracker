@@ -71,6 +71,10 @@ export interface ActivityEvent {
   amount0: number;        // human-readable (decimal-adjusted)
   amount1: number;
   usdAtTime: number | null;   // null if historical price fetch failed
+  // Per-event historical prices used to derive usdAtTime. Null when no CG mapping
+  // exists for the token (caller should treat as "no entry-price data" for IL).
+  price0AtTime: number | null;
+  price1AtTime: number | null;
   cumulativeFeeUSD: number;   // running total of fee_claim USD; 0 for non-fee events
 }
 
@@ -410,7 +414,14 @@ export async function GET(request: Request) {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
       const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const prices = dateStr ? (pricesByDate[dateStr] ?? { p0: fallback0, p1: fallback1 }) : null;
+      // Only treat as "real" historical prices when both tokens have a CG mapping
+      // and a fetch returned a value — never silently fall back to current price for IL math.
+      const cgMapped0 = !!CG_IDS[token0];
+      const cgMapped1 = !!CG_IDS[token1];
+      const histEntry = dateStr ? pricesByDate[dateStr] : undefined;
+      const price0AtTime = cgMapped0 && histEntry ? histEntry.p0 : null;
+      const price1AtTime = cgMapped1 && histEntry ? histEntry.p1 : null;
+      const prices = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
       const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
 
       let cumulativeFeeUSD = 0;
@@ -432,6 +443,8 @@ export async function GET(request: Request) {
         amount0,
         amount1,
         usdAtTime,
+        price0AtTime,
+        price1AtTime,
         cumulativeFeeUSD,
       };
     });
