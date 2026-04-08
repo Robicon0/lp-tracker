@@ -5,12 +5,15 @@ import type { AerodromePosition } from "../lib/aerodrome";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface ActivityEvent {
+export interface ActivityEvent {
   type: string;
   timestamp: number; // unix seconds
   amount0: number;
   amount1: number;
   usdAtTime: number | null;
+  // EVM routes populate these; Solana/Sui routes leave them null.
+  price0AtTime?: number | null;
+  price1AtTime?: number | null;
 }
 
 interface ActivityResponse {
@@ -40,7 +43,7 @@ const HYPEREVM_PROTOCOLS = new Set(["HyperSwap", "KittenSwap", "ProjectX"]);
 const ACTIVITY_PROTOCOLS = new Set([
   "Aerodrome", "Bluefin", "Orca", "Raydium",
   "HyperSwap", "KittenSwap", "ProjectX",
-  "Uniswap V3", "Velodrome",
+  "Uniswap V3", "Velodrome", "PancakeSwap V3",
 ]);
 
 // ── Cache (localStorage, 5 min TTL) ────────────────────────────────────────
@@ -162,6 +165,18 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     return `/api/velodrome/activity?${params}`;
   }
 
+  if (pos.protocol === "PancakeSwap V3") {
+    const tokenId = pos.id.replace("cake3-bsc-", "");
+    params.set("positionId", tokenId);
+    params.set("t0d", String(pos.token0Decimals ?? 18));
+    params.set("t1d", String(pos.token1Decimals ?? 18));
+    if (pos.token0Address) params.set("token0", pos.token0Address);
+    if (pos.token1Address) params.set("token1", pos.token1Address);
+    if (pos.price0 != null) params.set("p0", String(pos.price0));
+    if (pos.price1 != null) params.set("p1", String(pos.price1));
+    return `/api/pancakeswap/activity?${params}`;
+  }
+
   return null;
 }
 
@@ -205,20 +220,24 @@ function computePerformance(
 
 export function useAllPositionsActivity(
   positions: AerodromePosition[],
-): { perfMap: Map<string, PositionPerformance>; isLoading: boolean } {
+): {
+  perfMap: Map<string, PositionPerformance>;
+  eventsMap: Map<string, ActivityEvent[]>;
+  isLoading: boolean;
+} {
   const [perfMap, setPerfMap] = useState<Map<string, PositionPerformance>>(new Map());
+  const [eventsMap, setEventsMap] = useState<Map<string, ActivityEvent[]>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   // Track which set of position IDs we've already fetched for
   const fetchedForRef = useRef<string>("");
 
   useEffect(() => {
-    // Only fetch for active positions with supported protocols
-    const eligible = positions.filter(
-      (p) => ACTIVITY_PROTOCOLS.has(p.protocol) && p.status !== "Closed",
-    );
+    // Fetch for ALL positions with supported activity protocols (including closed)
+    const eligible = positions.filter((p) => ACTIVITY_PROTOCOLS.has(p.protocol));
 
     if (eligible.length === 0) {
       setPerfMap(new Map());
+      setEventsMap(new Map());
       return;
     }
 
@@ -230,39 +249,45 @@ export function useAllPositionsActivity(
     let cancelled = false;
     setIsLoading(true);
 
-    const fetches = eligible.map(async (pos): Promise<[string, PositionPerformance]> => {
+    type FetchResult = [string, PositionPerformance, ActivityEvent[]];
+    const emptyPerf: PositionPerformance = {
+      actualAPR: null, actualDaily: null, claimedUSD: 0, daysActive: 0, isEstimated: true,
+    };
+
+    const fetches = eligible.map(async (pos): Promise<FetchResult> => {
       // Check cache first
       const cached = readCache(pos.id);
       if (cached) {
-        return [pos.id, computePerformance(cached.events, pos)];
+        return [pos.id, computePerformance(cached.events, pos), cached.events];
       }
 
       const url = buildActivityUrl(pos);
       if (!url) {
-        return [pos.id, { actualAPR: null, actualDaily: null, claimedUSD: 0, daysActive: 0, isEstimated: true }];
+        return [pos.id, emptyPerf, []];
       }
 
       try {
         const res = await fetch(url);
         const json = await res.json();
         if (json.error || !json.events) {
-          return [pos.id, { actualAPR: null, actualDaily: null, claimedUSD: 0, daysActive: 0, isEstimated: true }];
+          return [pos.id, emptyPerf, []];
         }
         writeCache(pos.id, json);
-        return [pos.id, computePerformance(json.events, pos)];
+        return [pos.id, computePerformance(json.events, pos), json.events];
       } catch {
-        return [pos.id, { actualAPR: null, actualDaily: null, claimedUSD: 0, daysActive: 0, isEstimated: true }];
+        return [pos.id, emptyPerf, []];
       }
     });
 
     Promise.all(fetches).then((results) => {
       if (cancelled) return;
-      setPerfMap(new Map(results));
+      setPerfMap(new Map(results.map(([id, perf]) => [id, perf])));
+      setEventsMap(new Map(results.map(([id, , events]) => [id, events])));
       setIsLoading(false);
     });
 
     return () => { cancelled = true; };
   }, [positions]);
 
-  return { perfMap, isLoading };
+  return { perfMap, eventsMap, isLoading };
 }
