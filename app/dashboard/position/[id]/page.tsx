@@ -17,6 +17,8 @@ import { useRaydiumActivity } from "../../../hooks/useRaydiumActivity";
 import { useHyperSwapActivity } from "../../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
+import { usePancakeSwapActivity } from "../../../hooks/usePancakeSwapActivity";
+import { computePositionPnL } from "../../../lib/positionPnl";
 
 // ── Token logo circle ─────────────────────────────────────────────────────────
 function TokenCircle({ symbol, size = 32, style }: {
@@ -359,6 +361,12 @@ export default function PositionDetail() {
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
   );
 
+  const pancakeTokenId = pos?.protocol === 'PancakeSwap V3' ? pos.id.replace('cake3-bsc-', '') : null;
+  const { data: pancakeActivity, isLoading: pancakeActivityLoading } = usePancakeSwapActivity(
+    pancakeTokenId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
+    pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+  );
+
   const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
     : pos?.protocol === 'Bluefin' ? bluefinActivity
     : pos?.protocol === 'Orca' ? orcaActivity
@@ -366,6 +374,7 @@ export default function PositionDetail() {
     : isHyperEVM ? hyperswapActivity
     : pos?.protocol === 'Uniswap V3' ? uniswapActivity
     : pos?.protocol === 'Velodrome' ? velodromeActivity
+    : pos?.protocol === 'PancakeSwap V3' ? pancakeActivity
     : null;
   const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
     : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
@@ -374,6 +383,7 @@ export default function PositionDetail() {
     : isHyperEVM ? hyperswapActivityLoading
     : pos?.protocol === 'Uniswap V3' ? uniswapActivityLoading
     : pos?.protocol === 'Velodrome' ? velodromeActivityLoading
+    : pos?.protocol === 'PancakeSwap V3' ? pancakeActivityLoading
     : false;
   const activityError = pos?.protocol === 'Aerodrome' ? aeroActivityError
     : pos?.protocol === 'Bluefin' ? bluefinActivityError
@@ -383,7 +393,9 @@ export default function PositionDetail() {
     : pos?.protocol === 'Uniswap V3' ? uniswapActivityError
     : pos?.protocol === 'Velodrome' ? velodromeActivityError
     : null;
-  const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome'].includes(pos?.protocol ?? '') || isHyperEVM;
+  const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
+  // EVM-only protocols where on-chain entry-price P&L + IL is supported. Solana/Sui are out of scope.
+  const isEvmActivityProtocol = ['Aerodrome', 'Velodrome', 'Uniswap V3', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
   // True when we expect data but it hasn't arrived yet (initial render before effect fires)
   const activityPending = isActivityProtocol && !activity && !activityError;
 
@@ -1020,6 +1032,144 @@ export default function PositionDetail() {
             ))}
           </div>
         </Card>
+
+        {/* ── 2F.5: On-Chain P&L + Impermanent Loss (EVM only) ──────────────── */}
+        {isEvmActivityProtocol && (
+          <Card style={{ marginBottom: 20 }}>
+            <SectionHeader icon="📊" label="On-Chain P&L & Impermanent Loss" />
+            {(() => {
+              if (activityLoading) {
+                return (
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                    Reconstructing position from on-chain history…
+                  </p>
+                );
+              }
+              if (!activity) {
+                return (
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                    Entry data unavailable — P&amp;L cannot be computed.
+                  </p>
+                );
+              }
+              const result = computePositionPnL({
+                currentValue: pos.value,
+                unclaimedFeesUSD: pos.fees ?? 0,
+                price0: pos.price0 ?? 0,
+                price1: pos.price1 ?? 0,
+                events: activity.events,
+              });
+              if (!result.ok) {
+                const message = result.reason === 'no_deposits'
+                  ? 'Entry data unavailable — no on-chain deposit event found for this position. P&L cannot be computed.'
+                  : 'Entry data unavailable — historical token prices missing for the deposit date(s). P&L cannot be computed.';
+                return (
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>{message}</p>
+                );
+              }
+              const d = result.data;
+              const pnlPositive = d.netPnlUSD >= 0;
+              const ilNegative  = d.ilUSD < 0;
+              const cardStyle: React.CSSProperties = {
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 10,
+                padding: 14,
+                textAlign: "center",
+              };
+              const labelStyle: React.CSSProperties = {
+                fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
+                textTransform: "uppercase", letterSpacing: 1,
+              };
+              const valueStyle = (color: string): React.CSSProperties => ({
+                fontSize: 18, fontWeight: 700, color, margin: "0 0 2px",
+              });
+              const subStyle: React.CSSProperties = {
+                fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0,
+              };
+              return (
+                <>
+                  <div className="detail-5col"
+                    style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 12 }}>
+                    <div style={cardStyle}>
+                      <p style={labelStyle}>Initial Value</p>
+                      <p style={valueStyle("white")}>{fmt$(d.initialValue)}</p>
+                      <p style={subStyle}>at deposit time</p>
+                    </div>
+                    <div style={cardStyle}>
+                      <p style={labelStyle}>Current Value</p>
+                      <p style={valueStyle("white")}>{fmt$(d.currentValue)}</p>
+                      <p style={subStyle}>live</p>
+                    </div>
+                    <div style={cardStyle}>
+                      <p style={labelStyle}>Fees Collected</p>
+                      <p style={valueStyle("#34d399")}>{fmt$(d.feesCollected)}</p>
+                      <p style={subStyle}>claimed on-chain</p>
+                    </div>
+                    <div style={cardStyle}>
+                      <p style={labelStyle}>Fees Unclaimed</p>
+                      <p style={valueStyle("#6ee7b7")}>{fmt$(d.feesUnclaimed)}</p>
+                      <p style={subStyle}>ready to claim</p>
+                    </div>
+                    <div style={{
+                      ...cardStyle,
+                      background: pnlPositive ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
+                      borderColor: pnlPositive ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
+                    }}>
+                      <p style={labelStyle}>Net P&amp;L</p>
+                      <p style={valueStyle(pnlPositive ? "#34d399" : "#f87171")}>
+                        {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
+                      </p>
+                      <p style={{
+                        ...subStyle,
+                        color: pnlPositive ? "rgba(52,211,153,0.7)" : "rgba(248,113,113,0.7)",
+                      }}>
+                        {pnlPositive ? "+" : ""}{d.netPnlPct.toFixed(2)}%
+                      </p>
+                    </div>
+                  </div>
+                  <div className="detail-3col"
+                    style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    <div style={cardStyle}>
+                      <p style={labelStyle}>HODL Value</p>
+                      <p style={valueStyle("white")}>{fmt$(d.hodlValue)}</p>
+                      <p style={subStyle}>if you just held</p>
+                    </div>
+                    <div style={cardStyle}>
+                      <p style={labelStyle}>Impermanent Loss</p>
+                      <p style={valueStyle(ilNegative ? "#f87171" : "#34d399")}>
+                        {ilNegative ? "−" : "+"}{fmt$(Math.abs(d.ilUSD))}
+                      </p>
+                      <p style={{
+                        ...subStyle,
+                        color: ilNegative ? "rgba(248,113,113,0.7)" : "rgba(52,211,153,0.7)",
+                      }}>
+                        {d.ilPct.toFixed(2)}%
+                      </p>
+                    </div>
+                    <div style={{
+                      ...cardStyle,
+                      background: d.feesOffsetIL ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
+                      borderColor: d.feesOffsetIL ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
+                    }}>
+                      <p style={labelStyle}>Fees vs IL</p>
+                      <p style={valueStyle(d.feesOffsetIL ? "#34d399" : "#f87171")}>
+                        {d.feesOffsetIL ? "Offset ✓" : "Not yet"}
+                      </p>
+                      <p style={subStyle}>
+                        {fmt$(d.feesCollected + d.feesUnclaimed)} fees vs {fmt$(Math.abs(d.ilUSD))} IL
+                      </p>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", margin: "12px 0 0", lineHeight: 1.5 }}>
+                    Based on {d.depositCount} on-chain deposit{d.depositCount === 1 ? "" : "s"}.
+                    IL formula: 2√r/(1+r) − 1 where r = current÷entry price ratio.
+                  </p>
+                </>
+              );
+            })()}
+          </Card>
+        )}
 
         {/* ── 2G: Pool Statistics ───────────────────────────────────────────── */}
         <Card style={{ marginBottom: 20 }}>
