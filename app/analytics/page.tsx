@@ -254,7 +254,7 @@ export default function Analytics() {
   // ── Database-backed historical P&L (every-4h snapshots) ────────────────────
   const [pnlRange, setPnlRange] = useState<HistoryRange>("30d");
   const { snapshots: dbSnapshots, configured: dbConfigured, refetch: refetchDbHistory } =
-    useDbPortfolioHistory(address, pnlRange);
+    useDbPortfolioHistory([address, solanaAddress, suiAddress], pnlRange);
   const [snapBusy, setSnapBusy] = useState(false);
   const [snapMsg, setSnapMsg] = useState<string | null>(null);
   const takeSnapshot = async () => {
@@ -284,7 +284,11 @@ export default function Analytics() {
     } catch (e) {
       setSnapMsg(String(e));
     } finally {
-      setSnapBusy(false);
+      // Keep button disabled for 5s after click to prevent duplicate batches
+      // (the analytics aggregator collapses rows within a 5s window into one
+      // batch, so a double-click would otherwise just produce extra wasted DB
+      // rows). Status message clears after 4s as before.
+      setTimeout(() => setSnapBusy(false), 5000);
       setTimeout(() => setSnapMsg(null), 4000);
     }
   };
@@ -689,7 +693,7 @@ export default function Analytics() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
               <h2 className="text-lg font-bold">Profit &amp; Loss</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Historical snapshots taken every 4 hours</p>
+              <p className="text-xs text-gray-500 mt-0.5">Historical snapshots taken daily</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex gap-1">
