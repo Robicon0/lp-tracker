@@ -232,8 +232,17 @@ export function useAllPositionsActivity(
   const fetchedForRef = useRef<string>("");
 
   useEffect(() => {
-    // Fetch for ALL positions with supported activity protocols (including closed)
-    const eligible = positions.filter((p) => ACTIVITY_PROTOCOLS.has(p.protocol));
+    // Fetch for ALL positions with supported activity protocols (including closed).
+    // Deduplicate by pos.id so a position that appears twice in the input array
+    // (e.g. returned from multiple concurrent wallet sources) is only fetched
+    // and counted once.
+    const seen = new Set<string>();
+    const eligible = positions.filter((p) => {
+      if (!ACTIVITY_PROTOCOLS.has(p.protocol)) return false;
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
 
     if (eligible.length === 0) {
       setPerfMap(new Map());

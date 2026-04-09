@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useState, useRef } from "react";
 import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
@@ -254,7 +254,8 @@ export default function Analytics() {
   // ── On-chain aggregated P&L across all LP positions ──────────────────────
   // Uses computePositionPnL per position (driven by ActivityEvent[] from
   // useAllPositionsActivity). Closed positions and positions with no deposit
-  // events in the scan window are excluded.
+  // events in the scan window are excluded. Each position is counted exactly
+  // once — positions are deduplicated by pos.id via a seen-set.
   const lpPnl = useMemo(() => {
     let initialValue = 0;
     let currentValue = 0;
@@ -263,18 +264,26 @@ export default function Analytics() {
     let ilUSD = 0;
     let excluded = 0;
     let included = 0;
+    // Per-position log lines — built here, emitted from a useEffect below so
+    // they only fire when the resolved result changes, not on every re-render.
+    const logLines: string[] = [];
 
-    // Explicitly exclude closed positions from all LP P&L math.
-    const activePositions = positions.filter(
-      (p) => p.status !== "Closed" && p.value > 0,
-    );
+    // Explicitly exclude closed positions AND deduplicate by pos.id so a
+    // position returned from two wallets/sources is only counted once.
+    const seenIds = new Set<string>();
+    const activePositions = positions.filter((p) => {
+      if (p.status === "Closed" || p.value <= 0) return false;
+      if (seenIds.has(p.id)) return false;
+      seenIds.add(p.id);
+      return true;
+    });
 
     for (const pos of activePositions) {
       const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
       const events = eventsMap.get(pos.id);
       if (!events) {
         if (!activityLoading) {
-          console.warn(`${tag} no activity events in eventsMap (still loading or unsupported protocol) — excluded`);
+          logLines.push(`warn|${tag} no activity events in eventsMap — excluded`);
           excluded += 1;
         }
         continue;
@@ -282,7 +291,7 @@ export default function Analytics() {
       const price0 = pos.price0 ?? 0;
       const price1 = pos.price1 ?? 0;
       if (price0 <= 0 || price1 <= 0) {
-        console.warn(`${tag} missing current prices (price0=${price0}, price1=${price1}) — excluded`);
+        logLines.push(`warn|${tag} missing current prices (price0=${price0}, price1=${price1}) — excluded`);
         excluded += 1;
         continue;
       }
@@ -302,12 +311,12 @@ export default function Analytics() {
         })),
       });
       if (!result.ok) {
-        console.warn(`${tag} computePositionPnL failed: ${result.reason} — excluded`);
+        logLines.push(`warn|${tag} computePositionPnL failed: ${result.reason} — excluded`);
         excluded += 1;
         continue;
       }
-      console.log(
-        `${tag} initial=$${result.data.initialValue.toFixed(2)} ` +
+      logLines.push(
+        `log|${tag} initial=$${result.data.initialValue.toFixed(2)} ` +
         `current=$${result.data.currentValue.toFixed(2)} ` +
         `feesClaimed=$${result.data.feesCollected.toFixed(2)} ` +
         `feesUnclaimed=$${result.data.feesUnclaimed.toFixed(2)} ` +
@@ -336,8 +345,25 @@ export default function Analytics() {
       netPnlPct,
       excluded,
       included,
+      logLines,
     };
   }, [positions, eventsMap, activityLoading]);
+
+  // Emit per-position logs exactly once per distinct result set — `logLines`
+  // is a string[] stable across identical memos, so serialize to a key and
+  // gate on that so React StrictMode double-renders don't duplicate logs.
+  const lastLogKeyRef = useRef<string>("");
+  useEffect(() => {
+    const key = lpPnl.logLines.join("\n");
+    if (key === lastLogKeyRef.current) return;
+    lastLogKeyRef.current = key;
+    for (const line of lpPnl.logLines) {
+      const [level, ...rest] = line.split("|");
+      const msg = rest.join("|");
+      if (level === "warn") console.warn(msg);
+      else console.log(msg);
+    }
+  }, [lpPnl.logLines]);
 
   // ── Daily income calc ──────────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
