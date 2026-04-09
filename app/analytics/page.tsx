@@ -253,8 +253,8 @@ export default function Analytics() {
 
   // ── On-chain aggregated P&L across all LP positions ──────────────────────
   // Uses computePositionPnL per position (driven by ActivityEvent[] from
-  // useAllPositionsActivity). Positions whose entry data is unavailable are
-  // excluded from the totals and counted for the "excluded" note.
+  // useAllPositionsActivity). Closed positions and positions with no deposit
+  // events in the scan window are excluded.
   const lpPnl = useMemo(() => {
     let initialValue = 0;
     let currentValue = 0;
@@ -264,18 +264,26 @@ export default function Analytics() {
     let excluded = 0;
     let included = 0;
 
-    for (const pos of positions) {
+    // Explicitly exclude closed positions from all LP P&L math.
+    const activePositions = positions.filter(
+      (p) => p.status !== "Closed" && p.value > 0,
+    );
+
+    for (const pos of activePositions) {
+      const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
       const events = eventsMap.get(pos.id);
       if (!events) {
-        // Still loading or unsupported protocol — don't count as excluded yet
-        // while activity is loading, but do count if loading finished.
-        if (!activityLoading) excluded += 1;
+        if (!activityLoading) {
+          console.warn(`${tag} no activity events in eventsMap (still loading or unsupported protocol) — excluded`);
+          excluded += 1;
+        }
         continue;
       }
       const price0 = pos.price0 ?? 0;
       const price1 = pos.price1 ?? 0;
       if (price0 <= 0 || price1 <= 0) {
-        if (!activityLoading) excluded += 1;
+        console.warn(`${tag} missing current prices (price0=${price0}, price1=${price1}) — excluded`);
+        excluded += 1;
         continue;
       }
       const result = computePositionPnL({
@@ -294,9 +302,19 @@ export default function Analytics() {
         })),
       });
       if (!result.ok) {
+        console.warn(`${tag} computePositionPnL failed: ${result.reason} — excluded`);
         excluded += 1;
         continue;
       }
+      console.log(
+        `${tag} initial=$${result.data.initialValue.toFixed(2)} ` +
+        `current=$${result.data.currentValue.toFixed(2)} ` +
+        `feesClaimed=$${result.data.feesCollected.toFixed(2)} ` +
+        `feesUnclaimed=$${result.data.feesUnclaimed.toFixed(2)} ` +
+        `IL=${result.data.ilAvailable ? "$" + result.data.ilUSD.toFixed(2) : "n/a"} ` +
+        `netPnl=$${result.data.netPnlUSD.toFixed(2)} ` +
+        `(${result.data.depositCount} deposits)`,
+      );
       initialValue += result.data.initialValue;
       currentValue += result.data.currentValue;
       feesCollected += result.data.feesCollected;

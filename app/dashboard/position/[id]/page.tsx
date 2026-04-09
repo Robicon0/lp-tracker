@@ -1060,11 +1060,10 @@ export default function PositionDetail() {
                 events: activity.events,
               });
               if (!result.ok) {
-                const message = result.reason === 'no_deposits'
-                  ? 'Entry data unavailable — no on-chain deposit event found for this position. P&L cannot be computed.'
-                  : 'Entry data unavailable — historical token prices missing for the deposit date(s). P&L cannot be computed.';
                 return (
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>{message}</p>
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                    Entry data unavailable — no on-chain deposit event found for this position. P&amp;L cannot be computed.
+                  </p>
                 );
               }
               const d = result.data;

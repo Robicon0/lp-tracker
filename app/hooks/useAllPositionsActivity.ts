@@ -255,6 +255,7 @@ export function useAllPositionsActivity(
     };
 
     const fetches = eligible.map(async (pos): Promise<FetchResult> => {
+      const tag = `[activity] ${pos.protocol} ${pos.chain} ${pos.id}`;
       // Check cache first
       const cached = readCache(pos.id);
       if (cached) {
@@ -263,18 +264,36 @@ export function useAllPositionsActivity(
 
       const url = buildActivityUrl(pos);
       if (!url) {
+        console.error(`${tag} no activity URL — protocol not wired into buildActivityUrl or missing required fields`);
         return [pos.id, emptyPerf, []];
       }
 
       try {
         const res = await fetch(url);
-        const json = await res.json();
-        if (json.error || !json.events) {
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          console.error(`${tag} HTTP ${res.status} ${res.statusText} — ${body.slice(0, 300)}`);
           return [pos.id, emptyPerf, []];
+        }
+        const json = await res.json();
+        if (json.error) {
+          console.error(`${tag} route returned error: ${json.error}`, json.details ?? "");
+          return [pos.id, emptyPerf, []];
+        }
+        if (!json.events) {
+          console.error(`${tag} route returned no events field`, json);
+          return [pos.id, emptyPerf, []];
+        }
+        if (json.events.length === 0) {
+          console.warn(`${tag} 0 events from activity route — no on-chain deposits found in scan window`);
+        } else {
+          const depositCount = json.events.filter((e: ActivityEvent) => e.type === "deposit").length;
+          console.log(`${tag} ${json.events.length} events (${depositCount} deposits)`);
         }
         writeCache(pos.id, json);
         return [pos.id, computePerformance(json.events, pos), json.events];
-      } catch {
+      } catch (err) {
+        console.error(`${tag} fetch threw:`, err);
         return [pos.id, emptyPerf, []];
       }
     });

@@ -782,10 +782,11 @@ export default function PositionDetail() {
           });
 
           if (!result.ok) {
-            const message = result.reason === 'no_deposits'
-              ? 'Entry data unavailable — no on-chain deposit event found for this position. P&L cannot be computed.'
-              : 'Entry data unavailable — historical token prices missing for the deposit date(s). P&L cannot be computed.';
-            return cardWrap(<p className="text-xs text-gray-500">{message}</p>);
+            return cardWrap(
+              <p className="text-xs text-gray-500">
+                Entry data unavailable — no on-chain deposit event found for this position. P&amp;L cannot be computed.
+              </p>
+            );
           }
 
           const d = result.data;

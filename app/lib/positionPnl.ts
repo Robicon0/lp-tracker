@@ -31,7 +31,7 @@ export interface PositionPnLInput {
 
 export type PositionPnLStatus =
   | { ok: true; data: PositionPnLData }
-  | { ok: false; reason: 'no_deposits' | 'no_entry_prices' };
+  | { ok: false; reason: 'no_deposits' };
 
 export interface PositionPnLData {
   /** USD value of all on-chain deposits at the time they were made. */
@@ -54,6 +54,8 @@ export interface PositionPnLData {
   hodlValue: number;
   /** True when (feesCollected + feesUnclaimed) ≥ |ilUSD|. Only meaningful when IL is negative. */
   feesOffsetIL: boolean;
+  /** True when at least one deposit had real historical entry prices (non-fallback). */
+  ilAvailable: boolean;
   /** Number of deposit events used to compute the entry. */
   depositCount: number;
   /** USD-weighted entry price for token0. */
@@ -80,36 +82,39 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     return { ok: false, reason: 'no_deposits' };
   }
 
-  // 2. Need per-event historical prices on the deposits to compute initialValue
-  //    AND IL. If a deposit has no per-event prices, skip it for the entry-price
-  //    average but still count its amounts for HODL.
+  // 2. Split deposits by whether they have historical entry prices.
+  //    Deposits with prices → used for entry-price weighted average + IL
+  //    Deposits without prices → counted for HODL amounts and fall back to current prices for initialValue
   const depositsWithPrices = deposits.filter(
     (e) => e.price0AtTime != null && e.price1AtTime != null,
   );
+  const ilAvailable = depositsWithPrices.length > 0;
 
-  if (depositsWithPrices.length === 0) {
-    return { ok: false, reason: 'no_entry_prices' };
-  }
-
-  // 3. initialValue = sum of usdAtTime across deposits where it's available;
-  //    fall back to amount × historical-price if usdAtTime missing for some reason.
+  // 3. initialValue — sum across ALL deposits, using whatever value is available:
+  //    priority 1: usdAtTime (route already picked best price for the event)
+  //    priority 2: historical per-event prices
+  //    priority 3: current prices × amounts (so initialValue is always computable)
   let initialValue = 0;
-  for (const d of depositsWithPrices) {
-    if (d.usdAtTime != null) {
+  for (const d of deposits) {
+    if (d.usdAtTime != null && d.usdAtTime > 0) {
       initialValue += d.usdAtTime;
     } else if (d.price0AtTime != null && d.price1AtTime != null) {
       initialValue += d.amount0 * d.price0AtTime + d.amount1 * d.price1AtTime;
+    } else {
+      // Fallback: value at current prices. This gives initialValue ≈ hodlValue,
+      // meaning netPnl will only reflect (currentValue + fees) − hodlValue ≈
+      // (currentValue − hodlValue) + fees — i.e. IL + fees, which is the best
+      // we can do without historical prices.
+      initialValue += d.amount0 * price0 + d.amount1 * price1;
     }
   }
 
-  // 4. Total deposited amounts (HODL basis) — sum across ALL deposits, not just
-  //    the priced ones, because amounts are always known even if prices weren't.
+  // 4. Total deposited amounts (HODL basis) — sum across ALL deposits.
   const totalAmount0 = deposits.reduce((s, e) => s + e.amount0, 0);
   const totalAmount1 = deposits.reduce((s, e) => s + e.amount1, 0);
 
-  // 5. Entry prices: USD-weighted average across priced deposits.
-  //    weight_i = usdAtTime_i (proxy for "how much of the entry this deposit was")
-  //    entryP_i = sum(price_i * weight_i) / sum(weight_i)
+  // 5. Entry prices: USD-weighted average across priced deposits ONLY.
+  //    When no priced deposits exist, entry prices stay 0 and IL is skipped.
   let weightSum = 0;
   let weightedP0 = 0;
   let weightedP1 = 0;
@@ -121,12 +126,8 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     weightedP1 += (d.price1AtTime as number) * w;
   }
 
-  if (weightSum <= 0) {
-    return { ok: false, reason: 'no_entry_prices' };
-  }
-
-  const entryPrice0 = weightedP0 / weightSum;
-  const entryPrice1 = weightedP1 / weightSum;
+  const entryPrice0 = weightSum > 0 ? weightedP0 / weightSum : 0;
+  const entryPrice1 = weightSum > 0 ? weightedP1 / weightSum : 0;
 
   // 6. HODL value at current prices
   const hodlValue = totalAmount0 * price0 + totalAmount1 * price1;
@@ -136,7 +137,6 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     .filter((e) => e.type === 'fee_claim' || e.type === 'reward_claim')
     .reduce((sum, e) => {
       if (e.usdAtTime != null) return sum + e.usdAtTime;
-      // Fallback: value claim at current prices when historical USD missing
       return sum + e.amount0 * price0 + e.amount1 * price1;
     }, 0);
 
@@ -144,18 +144,16 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const netPnlUSD = currentValue + feesCollected + unclaimedFeesUSD - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
 
-  // 9. Impermanent Loss via the canonical V2 formula:
-  //    r = (P0_now / P1_now) / (P0_entry / P1_entry)
-  //    IL = 2√r / (1 + r) − 1
+  // 9. Impermanent Loss — only when we have real historical entry prices.
+  //    Otherwise IL is 0 (unknown) rather than a fabricated number.
   let ilPct = 0;
   let ilUSD = 0;
-  if (entryPrice0 > 0 && entryPrice1 > 0 && price0 > 0 && price1 > 0) {
+  if (ilAvailable && entryPrice0 > 0 && entryPrice1 > 0 && price0 > 0 && price1 > 0) {
     const entryRatio   = entryPrice0 / entryPrice1;
     const currentRatio = price0       / price1;
     const r = currentRatio / entryRatio;
     if (r > 0 && Number.isFinite(r)) {
       const ilRaw = (2 * Math.sqrt(r)) / (1 + r) - 1;
-      // ilRaw is always ≤ 0 by construction (Jensen's inequality on √)
       ilPct = ilRaw * 100;
       ilUSD = hodlValue * ilRaw;
     }
@@ -177,6 +175,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       ilUSD,
       hodlValue,
       feesOffsetIL,
+      ilAvailable,
       depositCount: deposits.length,
       entryPrice0,
       entryPrice1,
