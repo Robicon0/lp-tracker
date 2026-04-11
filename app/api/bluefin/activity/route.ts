@@ -76,29 +76,19 @@ async function fetchHistoricalPrices(
   coinTypeA: string,
   coinTypeB: string,
   dates: string[],
-  fallbackA: number,
-  fallbackB: number,
-): Promise<Record<string, { p0: number; p1: number }>> {
+): Promise<Record<string, { p0: number | null; p1: number | null }>> {
   const cgIdA = CG_IDS[coinTypeA] ?? null;
   const cgIdB = CG_IDS[coinTypeB] ?? null;
 
-  const MAX_DATES = 30;
-  const recentDates = dates.slice(-MAX_DATES);
-  const olderDates = dates.slice(0, dates.length - MAX_DATES);
-
-  const result: Record<string, { p0: number; p1: number }> = {};
-
-  for (const d of olderDates) {
-    result[d] = { p0: fallbackA, p1: fallbackB };
-  }
+  const result: Record<string, { p0: number | null; p1: number | null }> = {};
 
   await Promise.all(
-    recentDates.map(async (dateStr) => {
+    dates.map(async (dateStr) => {
       const [p0, p1] = await Promise.all([
         cgIdA ? fetchCGHistoricalPrice(cgIdA, dateStr) : Promise.resolve(null),
         cgIdB ? fetchCGHistoricalPrice(cgIdB, dateStr) : Promise.resolve(null),
       ]);
-      result[dateStr] = { p0: p0 ?? fallbackA, p1: p1 ?? fallbackB };
+      result[dateStr] = { p0, p1 };
     }),
   );
 
@@ -255,7 +245,7 @@ export async function GET(request: Request) {
     const uniqueDates = [...uniqueDatesSet].sort();
 
     const pricesByDate = coinTypeA && coinTypeB
-      ? await fetchHistoricalPrices(coinTypeA, coinTypeB, uniqueDates, fallbackA, fallbackB)
+      ? await fetchHistoricalPrices(coinTypeA, coinTypeB, uniqueDates)
       : {};
 
     let runningFeeUSD = 0;
@@ -273,8 +263,10 @@ export async function GET(request: Request) {
       }
 
       const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const prices = dateStr ? (pricesByDate[dateStr] ?? { p0: fallbackA, p1: fallbackB }) : null;
-      const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
+      const prices = dateStr ? pricesByDate[dateStr] : null;
+      const p0 = prices?.p0 ?? null;
+      const p1 = prices?.p1 ?? null;
+      const usdAtTime = (p0 != null && p1 != null) ? amount0 * p0 + amount1 * p1 : null;
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
@@ -290,8 +282,8 @@ export async function GET(request: Request) {
         amount0,
         amount1,
         usdAtTime,
-        price0AtTime: null,
-        price1AtTime: null,
+        price0AtTime: p0,
+        price1AtTime: p1,
         cumulativeFeeUSD,
         ...(ev.rewardSymbol ? { rewardSymbol: ev.rewardSymbol } : {}),
       };

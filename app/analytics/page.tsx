@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useEffect, useState, useRef } from "react";
+import { useMemo, useEffect, useState } from "react";
 import Navbar from "../Navbar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
-import { computePositionPnL } from "../lib/positionPnl";
+import { useLpPnl } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
@@ -203,7 +203,8 @@ export default function Analytics() {
   }, [walletTokens, externalLendingPositions]);
 
   // ── Actual performance data from on-chain activity ────────────────────────
-  const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
+  const { perfMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
+  const lpPnl = useLpPnl(positions);
 
   // ── Sort state ─────────────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -250,120 +251,6 @@ export default function Analytics() {
     value: s.totalValue,
     ts: s.timestamp,
   }));
-
-  // ── On-chain aggregated P&L across all LP positions ──────────────────────
-  // Uses computePositionPnL per position (driven by ActivityEvent[] from
-  // useAllPositionsActivity). Closed positions and positions with no deposit
-  // events in the scan window are excluded. Each position is counted exactly
-  // once — positions are deduplicated by pos.id via a seen-set.
-  const lpPnl = useMemo(() => {
-    let initialValue = 0;
-    let currentValue = 0;
-    let feesCollected = 0;
-    let feesUnclaimed = 0;
-    let ilUSD = 0;
-    let excluded = 0;
-    let included = 0;
-    // Per-position log lines — built here, emitted from a useEffect below so
-    // they only fire when the resolved result changes, not on every re-render.
-    const logLines: string[] = [];
-
-    // Explicitly exclude closed positions AND deduplicate by pos.id so a
-    // position returned from two wallets/sources is only counted once.
-    const seenIds = new Set<string>();
-    const activePositions = positions.filter((p) => {
-      if (p.status === "Closed" || p.value <= 0) return false;
-      if (seenIds.has(p.id)) return false;
-      seenIds.add(p.id);
-      return true;
-    });
-
-    for (const pos of activePositions) {
-      const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
-      const events = eventsMap.get(pos.id);
-      if (!events) {
-        if (!activityLoading) {
-          logLines.push(`warn|${tag} no activity events in eventsMap — excluded`);
-          excluded += 1;
-        }
-        continue;
-      }
-      const price0 = pos.price0 ?? 0;
-      const price1 = pos.price1 ?? 0;
-      if (price0 <= 0 || price1 <= 0) {
-        logLines.push(`warn|${tag} missing current prices (price0=${price0}, price1=${price1}) — excluded`);
-        excluded += 1;
-        continue;
-      }
-      const result = computePositionPnL({
-        currentValue: pos.value,
-        unclaimedFeesUSD: pos.fees,
-        price0,
-        price1,
-        events: events.map((e) => ({
-          type: e.type as "deposit" | "withdrawal" | "fee_claim" | "reward_claim",
-          timestamp: e.timestamp,
-          amount0: e.amount0,
-          amount1: e.amount1,
-          usdAtTime: e.usdAtTime,
-          price0AtTime: e.price0AtTime ?? null,
-          price1AtTime: e.price1AtTime ?? null,
-        })),
-      });
-      if (!result.ok) {
-        logLines.push(`warn|${tag} computePositionPnL failed: ${result.reason} — excluded`);
-        excluded += 1;
-        continue;
-      }
-      logLines.push(
-        `log|${tag} initial=$${result.data.initialValue.toFixed(2)} ` +
-        `current=$${result.data.currentValue.toFixed(2)} ` +
-        `feesClaimed=$${result.data.feesCollected.toFixed(2)} ` +
-        `feesUnclaimed=$${result.data.feesUnclaimed.toFixed(2)} ` +
-        `IL=${result.data.ilAvailable ? "$" + result.data.ilUSD.toFixed(2) : "n/a"} ` +
-        `netPnl=$${result.data.netPnlUSD.toFixed(2)} ` +
-        `(${result.data.depositCount} deposits)`,
-      );
-      initialValue += result.data.initialValue;
-      currentValue += result.data.currentValue;
-      feesCollected += result.data.feesCollected;
-      feesUnclaimed += result.data.feesUnclaimed;
-      ilUSD += result.data.ilUSD;
-      included += 1;
-    }
-
-    const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
-    const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
-
-    return {
-      initialValue,
-      currentValue,
-      feesCollected,
-      feesUnclaimed,
-      ilUSD,
-      netPnl,
-      netPnlPct,
-      excluded,
-      included,
-      logLines,
-    };
-  }, [positions, eventsMap, activityLoading]);
-
-  // Emit per-position logs exactly once per distinct result set — `logLines`
-  // is a string[] stable across identical memos, so serialize to a key and
-  // gate on that so React StrictMode double-renders don't duplicate logs.
-  const lastLogKeyRef = useRef<string>("");
-  useEffect(() => {
-    const key = lpPnl.logLines.join("\n");
-    if (key === lastLogKeyRef.current) return;
-    lastLogKeyRef.current = key;
-    for (const line of lpPnl.logLines) {
-      const [level, ...rest] = line.split("|");
-      const msg = rest.join("|");
-      if (level === "warn") console.warn(msg);
-      else console.log(msg);
-    }
-  }, [lpPnl.logLines]);
 
   // ── Daily income calc ──────────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
@@ -802,7 +689,7 @@ export default function Analytics() {
               {lpPnl.excluded} position{lpPnl.excluded === 1 ? "" : "s"} excluded — entry data unavailable.
             </p>
           )}
-          {activityLoading && lpPnl.included === 0 && (
+          {lpPnl.isLoading && lpPnl.included === 0 && (
             <p className="text-[11px] text-gray-600 mt-3">Loading on-chain history…</p>
           )}
         </div>
