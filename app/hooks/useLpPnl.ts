@@ -204,11 +204,59 @@ async function fetchAndCompute(
   return { ok: true, data: d };
 }
 
+// ── Aggregate per-position results into totals ─────────────────────────────
+
+type PosResult =
+  | { ok: true; data: PositionPnLData }
+  | { ok: false; reason: string };
+
+function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlResult {
+  let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
+  let included = 0, excluded = 0;
+
+  for (const r of resultsMap.values()) {
+    if (r.ok) {
+      initialValue += r.data.initialValue;
+      currentValue += r.data.currentValue;
+      feesCollected += r.data.feesCollected;
+      feesUnclaimed += r.data.feesUnclaimed;
+      ilUSD += r.data.ilUSD;
+      included += 1;
+    } else {
+      excluded += 1;
+    }
+  }
+
+  const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
+  const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
+
+  return {
+    initialValue, currentValue, feesCollected, feesUnclaimed,
+    ilUSD, netPnl, netPnlPct, included, excluded,
+    isLoading: inflight > 0,
+  };
+}
+
 // ── Hook ────────────────────────────────────────────────────────────────────
+// Positions arrive in waves as different chains load. Instead of cancelling
+// and restarting all fetches on every wave, we accumulate per-position results
+// incrementally. Already-fetched positions keep their result; only new
+// positions trigger fetches. This prevents the race condition where late-
+// arriving chains cancel in-flight fetches from earlier chains.
 
 export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
-  const [result, setResult] = useState<LpPnlResult>({ ...EMPTY, isLoading: false });
-  const fetchedForRef = useRef<string>("");
+  const [result, setResult] = useState<LpPnlResult>({ ...EMPTY });
+  // Per-position results map — persists across renders, never reset.
+  const resultsRef = useRef<Map<string, PosResult>>(new Map());
+  // IDs currently being fetched — prevents duplicate fetches.
+  const inflightRef = useRef<Set<string>>(new Set());
+  // Stale-detection: track the generation so unmount can stop state updates.
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     // Deduplicate, filter active + supported
@@ -226,42 +274,31 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
       return;
     }
 
-    const key = eligible.map((p) => p.id).sort().join("|");
-    if (key === fetchedForRef.current) return;
-    fetchedForRef.current = key;
+    // Find positions we haven't fetched or started fetching yet.
+    const toFetch = eligible.filter(
+      (p) => !resultsRef.current.has(p.id) && !inflightRef.current.has(p.id),
+    );
 
-    let cancelled = false;
-    setResult((prev) => ({ ...prev, isLoading: true }));
+    if (toFetch.length === 0) {
+      // All positions already fetched — just recompute totals (in case
+      // positions array changed order but same IDs).
+      setResult(aggregate(resultsRef.current, inflightRef.current.size));
+      return;
+    }
 
-    Promise.all(eligible.map((pos) => fetchAndCompute(pos))).then((results) => {
-      if (cancelled) return;
+    // Mark as inflight and update loading state.
+    for (const p of toFetch) inflightRef.current.add(p.id);
+    setResult(aggregate(resultsRef.current, inflightRef.current.size));
 
-      let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
-      let included = 0, excluded = 0;
-
-      for (const r of results) {
-        if (r.ok) {
-          initialValue += r.data.initialValue;
-          currentValue += r.data.currentValue;
-          feesCollected += r.data.feesCollected;
-          feesUnclaimed += r.data.feesUnclaimed;
-          ilUSD += r.data.ilUSD;
-          included += 1;
-        } else {
-          excluded += 1;
-        }
-      }
-
-      const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
-      const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
-
-      setResult({
-        initialValue, currentValue, feesCollected, feesUnclaimed,
-        ilUSD, netPnl, netPnlPct, included, excluded, isLoading: false,
+    // Fire fetches — each one lands independently.
+    for (const pos of toFetch) {
+      fetchAndCompute(pos).then((r) => {
+        if (!mountedRef.current) return;
+        inflightRef.current.delete(pos.id);
+        resultsRef.current.set(pos.id, r);
+        setResult(aggregate(resultsRef.current, inflightRef.current.size));
       });
-    });
-
-    return () => { cancelled = true; };
+    }
   }, [positions]);
 
   return result;

@@ -259,36 +259,20 @@ async function fetchCGHistoricalPrice(cgId: string, dateStr: string): Promise<nu
 async function fetchHistoricalPrices(
   token0: string,
   token1: string,
-  dates: string[],         // unique DD-MM-YYYY strings, sorted chronologically
-  fallback0: number,
-  fallback1: number,
-): Promise<Record<string, { p0: number; p1: number }>> {
+  dates: string[],
+): Promise<Record<string, { p0: number | null; p1: number | null }>> {
   const cgId0 = CG_IDS[token0.toLowerCase()] ?? null;
   const cgId1 = CG_IDS[token1.toLowerCase()] ?? null;
 
-  // Cap at 30 most recent unique dates — use current price for older ones
-  const MAX_DATES = 30;
-  const recentDates = dates.slice(-MAX_DATES);
-  const olderDates = dates.slice(0, dates.length - MAX_DATES);
+  const result: Record<string, { p0: number | null; p1: number | null }> = {};
 
-  const result: Record<string, { p0: number; p1: number }> = {};
-
-  // Fill older dates with fallback prices immediately
-  for (const d of olderDates) {
-    result[d] = { p0: fallback0, p1: fallback1 };
-  }
-
-  // Fetch historical prices for recent dates in parallel (batched per date)
   await Promise.all(
-    recentDates.map(async (dateStr) => {
+    dates.map(async (dateStr) => {
       const [p0, p1] = await Promise.all([
         cgId0 ? fetchCGHistoricalPrice(cgId0, dateStr) : Promise.resolve(null),
         cgId1 ? fetchCGHistoricalPrice(cgId1, dateStr) : Promise.resolve(null),
       ]);
-      result[dateStr] = {
-        p0: p0 ?? fallback0,
-        p1: p1 ?? fallback1,
-      };
+      result[dateStr] = { p0, p1 };
     })
   );
 
@@ -357,7 +341,7 @@ export async function GET(request: Request) {
 
     // Fetch historical prices (or fall back to current prices)
     const pricesByDate = token0 && token1
-      ? await fetchHistoricalPrices(token0, token1, uniqueDates, fallback0, fallback1)
+      ? await fetchHistoricalPrices(token0, token1, uniqueDates)
       : {};
 
     let deposited0 = 0n, deposited1 = 0n;
@@ -414,15 +398,12 @@ export async function GET(request: Request) {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
       const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      // Only treat as "real" historical prices when both tokens have a CG mapping
-      // and a fetch returned a value — never silently fall back to current price for IL math.
-      const cgMapped0 = !!CG_IDS[token0];
-      const cgMapped1 = !!CG_IDS[token1];
       const histEntry = dateStr ? pricesByDate[dateStr] : undefined;
-      const price0AtTime = cgMapped0 && histEntry ? histEntry.p0 : null;
-      const price1AtTime = cgMapped1 && histEntry ? histEntry.p1 : null;
-      const prices = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
-      const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
+      const price0AtTime = histEntry?.p0 ?? null;
+      const price1AtTime = histEntry?.p1 ?? null;
+      const usdAtTime = (price0AtTime != null && price1AtTime != null)
+        ? amount0 * price0AtTime + amount1 * price1AtTime
+        : null;
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim' && usdAtTime != null) {
