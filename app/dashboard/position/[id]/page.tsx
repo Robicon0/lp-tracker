@@ -394,8 +394,6 @@ export default function PositionDetail() {
     : pos?.protocol === 'Velodrome' ? velodromeActivityError
     : null;
   const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
-  // EVM-only protocols where on-chain entry-price P&L + IL is supported. Solana/Sui are out of scope.
-  const isEvmActivityProtocol = ['Aerodrome', 'Velodrome', 'Uniswap V3', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
   // True when we expect data but it hasn't arrived yet (initial render before effect fires)
   const activityPending = isActivityProtocol && !activity && !activityError;
 
@@ -1033,8 +1031,8 @@ export default function PositionDetail() {
           </div>
         </Card>
 
-        {/* ── 2F.5: On-Chain P&L + Impermanent Loss (EVM only) ──────────────── */}
-        {isEvmActivityProtocol && (
+        {/* ── 2F.5: On-Chain P&L + Impermanent Loss ──────────────────────── */}
+        {isActivityProtocol && (
           <Card style={{ marginBottom: 20 }}>
             <SectionHeader icon="📊" label="On-Chain P&L & Impermanent Loss" />
             {(() => {

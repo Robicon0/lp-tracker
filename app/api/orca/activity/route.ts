@@ -6,10 +6,11 @@ const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
 const WHIRLPOOL_PROGRAM = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
 
-// Known Solana stablecoins (mint addresses — base58 is case-sensitive)
+// Known Solana stablecoins (mint addresses, lowercased for comparison via .toLowerCase())
+// Base58 is case-sensitive — these MUST be the result of actual_address.toLowerCase()
 const STABLECOINS = new Set([
-  'epjfwdd5aufqssqem2qn1xzybapC8g4weggkzwytdt1v', // USDC (lowercased for comparison)
-  'es9vmfrzacermjfrf4h2fyd4kconky11mcce8benwnYb', // USDT (lowercased for comparison)
+  'epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v', // USDC (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)
+  'es9vmfrzacermjfrf4h2fyd4kconky11mcce8benwnyb', // USDT (Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB)
 ]);
 
 // ── Anchor discriminator helpers ──────────────────────────────────────────────
@@ -19,15 +20,18 @@ function anchorDisc(name: string): Buffer {
 }
 
 const DISC = {
-  open_position:               anchorDisc('open_position'),
-  open_position_with_metadata: anchorDisc('open_position_with_metadata'),
-  increase_liquidity:          anchorDisc('increase_liquidity'),
-  increase_liquidity_v2:       anchorDisc('increase_liquidity_v2'),
-  decrease_liquidity:          anchorDisc('decrease_liquidity'),
-  decrease_liquidity_v2:       anchorDisc('decrease_liquidity_v2'),
-  collect_fees:                anchorDisc('collect_fees'),
-  collect_fees_v2:             anchorDisc('collect_fees_v2'),
-  close_position:              anchorDisc('close_position'),
+  open_position:                        anchorDisc('open_position'),
+  open_position_with_metadata:          anchorDisc('open_position_with_metadata'),
+  open_position_with_token_extensions:  anchorDisc('open_position_with_token_extensions'),
+  increase_liquidity:                   anchorDisc('increase_liquidity'),
+  increase_liquidity_v2:                anchorDisc('increase_liquidity_v2'),
+  decrease_liquidity:                   anchorDisc('decrease_liquidity'),
+  decrease_liquidity_v2:                anchorDisc('decrease_liquidity_v2'),
+  collect_fees:                         anchorDisc('collect_fees'),
+  collect_fees_v2:                      anchorDisc('collect_fees_v2'),
+  collect_reward:                       anchorDisc('collect_reward'),
+  collect_reward_v2:                    anchorDisc('collect_reward_v2'),
+  close_position:                       anchorDisc('close_position'),
 };
 
 // Minimal base58 → Buffer decoder (no external deps)
@@ -61,14 +65,16 @@ function classifyInstruction(b58Data: string): ActivityEventType | null {
   if (bytes.length < 8) return null;
 
   if (matchDisc(bytes, DISC.increase_liquidity) || matchDisc(bytes, DISC.increase_liquidity_v2) ||
-      matchDisc(bytes, DISC.open_position) || matchDisc(bytes, DISC.open_position_with_metadata)) {
+      matchDisc(bytes, DISC.open_position) || matchDisc(bytes, DISC.open_position_with_metadata) ||
+      matchDisc(bytes, DISC.open_position_with_token_extensions)) {
     return 'deposit';
   }
   if (matchDisc(bytes, DISC.decrease_liquidity) || matchDisc(bytes, DISC.decrease_liquidity_v2) ||
       matchDisc(bytes, DISC.close_position)) {
     return 'withdrawal';
   }
-  if (matchDisc(bytes, DISC.collect_fees) || matchDisc(bytes, DISC.collect_fees_v2)) {
+  if (matchDisc(bytes, DISC.collect_fees) || matchDisc(bytes, DISC.collect_fees_v2) ||
+      matchDisc(bytes, DISC.collect_reward) || matchDisc(bytes, DISC.collect_reward_v2)) {
     return 'fee_claim';
   }
   return null;
@@ -125,11 +131,14 @@ interface SolTransaction {
   transaction: {
     message: {
       instructions: ParsedInstruction[];
+      accountKeys: Array<{ pubkey: string } | string>;
     };
   };
   meta: {
     preTokenBalances: TokenBalance[];
     postTokenBalances: TokenBalance[];
+    preBalances: number[];
+    postBalances: number[];
     err: unknown;
   } | null;
   blockTime: number | null;
@@ -154,12 +163,31 @@ async function fetchTransactions(signatures: string[]): Promise<(SolTransaction 
   return results;
 }
 
+// Wrapped SOL mint — when this is one of the pool tokens, native SOL lamport
+// changes must be checked as fallback (WSOL ATAs are often created+closed in
+// the same transaction, making pre/postTokenBalances show delta = 0).
+const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+
 // Sum raw token amounts (in lamports / smallest unit) for a given owner+mint across all accounts
 function getTokenDeltaRaw(pre: TokenBalance[], post: TokenBalance[], owner: string, mint: string): bigint {
   const sum = (arr: TokenBalance[]) =>
     arr.filter(b => b.owner === owner && b.mint === mint)
        .reduce((s, b) => s + BigInt(b.uiTokenAmount.amount), 0n);
   return sum(post) - sum(pre);
+}
+
+// Get native SOL (lamport) balance change for a specific account address.
+// accountKeys in jsonParsed can be {pubkey:string} objects or plain strings.
+function getNativeSolDelta(
+  tx: SolTransaction,
+  owner: string,
+): bigint {
+  const keys = tx.transaction.message.accountKeys;
+  const idx = keys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === owner);
+  if (idx < 0 || !tx.meta) return 0n;
+  const pre = BigInt(tx.meta.preBalances[idx] ?? 0);
+  const post = BigInt(tx.meta.postBalances[idx] ?? 0);
+  return post - pre;
 }
 
 
@@ -257,8 +285,16 @@ export async function GET(request: Request) {
       if (!evType) continue;
 
       // Amount = absolute delta in wallet's token accounts for mintA / mintB
-      const deltaA = getTokenDeltaRaw(pre, post, account, mintA);
-      const deltaB = getTokenDeltaRaw(pre, post, account, mintB);
+      // For WSOL: if token delta is 0 (WSOL ATA created+closed in same tx),
+      // fall back to native SOL lamport change.
+      let deltaA = getTokenDeltaRaw(pre, post, account, mintA);
+      if (deltaA === 0n && mintA === WSOL_MINT) {
+        deltaA = getNativeSolDelta(tx, account);
+      }
+      let deltaB = getTokenDeltaRaw(pre, post, account, mintB);
+      if (deltaB === 0n && mintB === WSOL_MINT) {
+        deltaB = getNativeSolDelta(tx, account);
+      }
 
       // For deposits, wallet sends tokens OUT (delta < 0 → use abs)
       // For withdrawals/fee_claims, wallet receives tokens IN (delta > 0)

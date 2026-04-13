@@ -6,10 +6,11 @@ const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
 const RAYDIUM_CLMM_PROGRAM = 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK';
 
-// Known Solana stablecoins (mint addresses, lowercased for comparison)
+// Known Solana stablecoins (mint addresses, lowercased for comparison via .toLowerCase())
+// Base58 is case-sensitive — these MUST be the result of actual_address.toLowerCase()
 const STABLECOINS = new Set([
-  'epjfwdd5aufqssqem2qn1xzybapC8g4weggkzwytdt1v', // USDC
-  'es9vmfrzacermjfrf4h2fyd4kconky11mcce8benwnYb', // USDT
+  'epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v', // USDC (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)
+  'es9vmfrzacermjfrf4h2fyd4kconky11mcce8benwnyb', // USDT (Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB)
 ]);
 
 // ── Anchor discriminator helpers ──────────────────────────────────────────────
@@ -134,11 +135,14 @@ interface SolTransaction {
   transaction: {
     message: {
       instructions: ParsedInstruction[];
+      accountKeys: Array<{ pubkey: string } | string>;
     };
   };
   meta: {
     preTokenBalances: TokenBalance[];
     postTokenBalances: TokenBalance[];
+    preBalances: number[];
+    postBalances: number[];
     err: unknown;
   } | null;
   blockTime: number | null;
@@ -163,11 +167,25 @@ async function fetchTransactions(signatures: string[]): Promise<(SolTransaction 
   return results;
 }
 
+// Wrapped SOL mint — when this is one of the pool tokens, native SOL lamport
+// changes must be checked as fallback (WSOL ATAs are often created+closed in
+// the same transaction, making pre/postTokenBalances show delta = 0).
+const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+
 function getTokenDeltaRaw(pre: TokenBalance[], post: TokenBalance[], owner: string, mint: string): bigint {
   const sum = (arr: TokenBalance[]) =>
     arr.filter(b => b.owner === owner && b.mint === mint)
        .reduce((s, b) => s + BigInt(b.uiTokenAmount.amount), 0n);
   return sum(post) - sum(pre);
+}
+
+function getNativeSolDelta(tx: SolTransaction, owner: string): bigint {
+  const keys = tx.transaction.message.accountKeys;
+  const idx = keys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === owner);
+  if (idx < 0 || !tx.meta) return 0n;
+  const pre = BigInt(tx.meta.preBalances[idx] ?? 0);
+  const post = BigInt(tx.meta.postBalances[idx] ?? 0);
+  return post - pre;
 }
 
 
@@ -264,8 +282,14 @@ export async function GET(request: Request) {
       }
       if (!evType) continue;
 
-      const deltaA = getTokenDeltaRaw(pre, post, account, mintA);
-      const deltaB = getTokenDeltaRaw(pre, post, account, mintB);
+      let deltaA = getTokenDeltaRaw(pre, post, account, mintA);
+      if (deltaA === 0n && mintA === WSOL_MINT) {
+        deltaA = getNativeSolDelta(tx, account);
+      }
+      let deltaB = getTokenDeltaRaw(pre, post, account, mintB);
+      if (deltaB === 0n && mintB === WSOL_MINT) {
+        deltaB = getNativeSolDelta(tx, account);
+      }
 
       const rawA = evType === 'deposit' ? -deltaA : deltaA;
       const rawB = evType === 'deposit' ? -deltaB : deltaB;
