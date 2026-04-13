@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 
 // Public HyperEVM RPC: used only for eth_getBlockByNumber (timestamps) — limits to 1000 blocks for eth_getLogs
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
@@ -12,20 +13,15 @@ const LOG_CHUNK = 10_000;
 const LOG_CONCURRENCY = 20;
 
 // Standard Uni V3 event topic0 hashes — same for all V3 forks
-// IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
-// DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
-// Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collected, uint256 amount1Collected)
 const TOPIC_COLLECT = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
 
-// CoinGecko IDs for known HyperEVM tokens
-const CG_IDS: Record<string, string> = {
-  '0x5555555555555555555555555555555555555555': 'hyperliquid', // native HYPE
-  '0xadcb2f358eae6492f61a5f87eb8893d09391d160': 'hyperliquid', // WHYPE
-  '0xb88339cb7199b77e23db6e890353e22632ba630f': 'usd-coin',    // USDC
-  '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca': 'usd-coin',    // USDC (alternate)
-};
+// Known HyperEVM stablecoins (lowercase)
+const STABLECOINS = new Set([
+  '0xb88339cb7199b77e23db6e890353e22632ba630f', // USDC
+  '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca', // USDC (alternate)
+]);
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
 
@@ -151,65 +147,6 @@ async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, n
   return Object.fromEntries(results);
 }
 
-function tsToDateStr(ts: number): string {
-  const d = new Date(ts * 1000);
-  const day = d.getUTCDate().toString().padStart(2, '0');
-  const month = (d.getUTCMonth() + 1).toString().padStart(2, '0');
-  const year = d.getUTCFullYear();
-  return `${day}-${month}-${year}`;
-}
-
-async function fetchCGHistoricalPrice(cgId: string, dateStr: string): Promise<number | null> {
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/${cgId}/history?date=${dateStr}&localization=false`;
-    const res = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!res.ok) {
-      console.error(`[hyperswap/activity] CoinGecko history ${cgId} ${dateStr} HTTP ${res.status}`);
-      return null;
-    }
-    const json = await res.json();
-    return json?.market_data?.current_price?.usd ?? null;
-  } catch (err) {
-    console.error(`[hyperswap/activity] CoinGecko history ${cgId} ${dateStr} error:`, err);
-    return null;
-  }
-}
-
-async function fetchHistoricalPrices(
-  token0: string,
-  token1: string,
-  dates: string[],
-  fallback0: number,
-  fallback1: number,
-): Promise<Record<string, { p0: number; p1: number }>> {
-  const cgId0 = CG_IDS[token0.toLowerCase()] ?? null;
-  const cgId1 = CG_IDS[token1.toLowerCase()] ?? null;
-
-  const MAX_DATES = 30;
-  const recentDates = dates.slice(-MAX_DATES);
-  const olderDates = dates.slice(0, dates.length - MAX_DATES);
-
-  const result: Record<string, { p0: number; p1: number }> = {};
-
-  for (const d of olderDates) {
-    result[d] = { p0: fallback0, p1: fallback1 };
-  }
-
-  await Promise.all(
-    recentDates.map(async (dateStr) => {
-      const [p0, p1] = await Promise.all([
-        cgId0 ? fetchCGHistoricalPrice(cgId0, dateStr) : Promise.resolve(null),
-        cgId1 ? fetchCGHistoricalPrice(cgId1, dateStr) : Promise.resolve(null),
-      ]);
-      result[dateStr] = {
-        p0: p0 ?? fallback0,
-        p1: p1 ?? fallback1,
-      };
-    })
-  );
-
-  return result;
-}
 
 function decodeWord(data: string, wordIndex: number): bigint {
   const start = wordIndex * 64;
@@ -228,6 +165,8 @@ export async function GET(request: Request) {
   const token1 = (searchParams.get('token1') ?? '').toLowerCase();
   const fallback0 = parseFloat(searchParams.get('p0') ?? '0');
   const fallback1 = parseFloat(searchParams.get('p1') ?? '0');
+  const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
+  const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
 
   if (!positionId || !nftManager) {
     return NextResponse.json({ error: 'positionId and nftManager required' }, { status: 400 });
@@ -255,18 +194,6 @@ export async function GET(request: Request) {
 
     const scale0 = BigInt(10) ** BigInt(t0d);
     const scale1 = BigInt(10) ** BigInt(t1d);
-
-    const uniqueDatesSet = new Set<string>();
-    for (const log of logs) {
-      const bn = parseInt(log.blockNumber, 16);
-      const ts = timestamps[bn] ?? 0;
-      if (ts > 0) uniqueDatesSet.add(tsToDateStr(ts));
-    }
-    const uniqueDates = [...uniqueDatesSet].sort();
-
-    const pricesByDate = token0 && token1
-      ? await fetchHistoricalPrices(token0, token1, uniqueDates, fallback0, fallback1)
-      : {};
 
     let deposited0 = 0n, deposited1 = 0n;
     let withdrawn0 = 0n, withdrawn1 = 0n;
@@ -327,24 +254,39 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
-    const cgMapped0 = !!CG_IDS[token0];
-    const cgMapped1 = !!CG_IDS[token1];
-
+    const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
-      const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const histEntry = dateStr ? pricesByDate[dateStr] : undefined;
-      const price0AtTime = cgMapped0 && histEntry ? histEntry.p0 : null;
-      const price1AtTime = cgMapped1 && histEntry ? histEntry.p1 : null;
-      const prices = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
-      const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
+
+      let price0AtTime: number | null = null;
+      let price1AtTime: number | null = null;
+      let usdAtTime: number | null = null;
+
+      if (ev.type === 'deposit' && hasTicks) {
+        const derived = deriveDepositPrices(
+          amount0, amount1, tickLower!, tickUpper!, t0d, t1d,
+          token0, token1, STABLECOINS,
+        );
+        if (derived) {
+          price0AtTime = derived.price0;
+          price1AtTime = derived.price1;
+          usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+        }
+      }
+
+      if (usdAtTime == null) {
+        price0AtTime = fallback0 || null;
+        price1AtTime = fallback1 || null;
+        if (fallback0 > 0 || fallback1 > 0) {
+          usdAtTime = amount0 * fallback0 + amount1 * fallback1;
+        }
+      }
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim') {
-        const feeUSD = usdAtTime ?? (amount0 * fallback0 + amount1 * fallback1);
-        runningFeeUSD += feeUSD;
+        runningFeeUSD += usdAtTime ?? 0;
         cumulativeFeeUSD = runningFeeUSD;
       }
 

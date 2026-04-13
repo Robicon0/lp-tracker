@@ -45,6 +45,12 @@ const ACTIVITY_PROTOCOLS = new Set([
 function buildActivityUrl(pos: AerodromePosition): string | null {
   const p = new URLSearchParams();
 
+  // Helper: append tick params if available (used by V3 price derivation)
+  const appendTicks = () => {
+    if (pos.tickLower != null) p.set("tickLower", String(pos.tickLower));
+    if (pos.tickUpper != null) p.set("tickUpper", String(pos.tickUpper));
+  };
+
   if (pos.protocol === "Aerodrome") {
     p.set("positionId", pos.id.replace("aero-", ""));
     p.set("t0d", String(pos.token0Decimals ?? 18));
@@ -53,6 +59,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    appendTicks();
     return `/api/aerodrome/activity?${p}`;
   }
   if (pos.protocol === "Bluefin") {
@@ -64,6 +71,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) p.set("priceA", String(pos.price0));
     if (pos.price1 != null) p.set("priceB", String(pos.price1));
     if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
     return `/api/bluefin/activity?${p}`;
   }
   if (pos.protocol === "Orca") {
@@ -75,6 +83,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) p.set("priceA", String(pos.price0));
     if (pos.price1 != null) p.set("priceB", String(pos.price1));
     if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
     return `/api/orca/activity?${p}`;
   }
   if (pos.protocol === "Raydium") {
@@ -86,6 +95,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) p.set("priceA", String(pos.price0));
     if (pos.price1 != null) p.set("priceB", String(pos.price1));
     if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
     return `/api/raydium/activity?${p}`;
   }
   if (HYPEREVM_NFT_MANAGERS[pos.protocol]) {
@@ -97,6 +107,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    appendTicks();
     return `/api/hyperswap/activity?${p}`;
   }
   if (pos.protocol === "Uniswap V3") {
@@ -110,6 +121,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    appendTicks();
     return `/api/uniswap/activity?${p}`;
   }
   if (pos.protocol === "Velodrome") {
@@ -120,6 +132,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    appendTicks();
     return `/api/velodrome/activity?${p}`;
   }
   if (pos.protocol === "PancakeSwap V3") {
@@ -130,6 +143,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    appendTicks();
     return `/api/pancakeswap/activity?${p}`;
   }
   return null;

@@ -1,18 +1,16 @@
 import { NextResponse } from 'next/server';
+import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 const BLUEFIN_PKG = '0x3492c874c1e3b3e2984e8c41b589e642d4d0a5d6459e5a9cfc2d52fd7c89c267';
 
-// CoinGecko IDs keyed by normalized Sui coin type
-const CG_IDS: Record<string, string> = {
-  '0x2::sui::SUI': 'sui',
-  '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC': 'usd-coin',
-  '0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::COIN': 'tether',
-  '0xaf8cd5edc19c4512f4259f0bee101a40d41ebed738ade5874359610ef8eeced5::coin::COIN': 'ethereum',
-  '0x027792d9fed7f9844eb4839566001bb6f6cb4804f66aa2da6fe1ee242d896881::coin::COIN': 'bitcoin',
-  '0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::COIN': 'usd-coin',
-};
+// Known Sui stablecoins (lowercase for comparison)
+const STABLECOINS = new Set([
+  '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::usdc',
+  '0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::coin', // USDT
+  '0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::coin', // wUSDC
+]);
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim';
 
@@ -48,52 +46,6 @@ async function suiRpc(method: string, params: unknown[]) {
   return json.result;
 }
 
-function tsToDateStr(ts: number): string {
-  const d = new Date(ts * 1000);
-  const day = d.getUTCDate().toString().padStart(2, '0');
-  const month = (d.getUTCMonth() + 1).toString().padStart(2, '0');
-  const year = d.getUTCFullYear();
-  return `${day}-${month}-${year}`;
-}
-
-async function fetchCGHistoricalPrice(cgId: string, dateStr: string): Promise<number | null> {
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/${cgId}/history?date=${dateStr}&localization=false`;
-    const res = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!res.ok) {
-      console.error(`[bluefin/activity] CoinGecko history ${cgId} ${dateStr} HTTP ${res.status}`);
-      return null;
-    }
-    const json = await res.json();
-    return json?.market_data?.current_price?.usd ?? null;
-  } catch (err) {
-    console.error(`[bluefin/activity] CoinGecko history ${cgId} ${dateStr} error:`, err);
-    return null;
-  }
-}
-
-async function fetchHistoricalPrices(
-  coinTypeA: string,
-  coinTypeB: string,
-  dates: string[],
-): Promise<Record<string, { p0: number | null; p1: number | null }>> {
-  const cgIdA = CG_IDS[coinTypeA] ?? null;
-  const cgIdB = CG_IDS[coinTypeB] ?? null;
-
-  const result: Record<string, { p0: number | null; p1: number | null }> = {};
-
-  await Promise.all(
-    dates.map(async (dateStr) => {
-      const [p0, p1] = await Promise.all([
-        cgIdA ? fetchCGHistoricalPrice(cgIdA, dateStr) : Promise.resolve(null),
-        cgIdB ? fetchCGHistoricalPrice(cgIdB, dateStr) : Promise.resolve(null),
-      ]);
-      result[dateStr] = { p0, p1 };
-    }),
-  );
-
-  return result;
-}
 
 // Fetch all wallet transaction digests, paginating through all pages
 async function fetchAllDigests(account: string): Promise<string[]> {
@@ -150,6 +102,8 @@ export async function GET(request: Request) {
   const coinTypeB = searchParams.get('coinTypeB') ?? '';
   const fallbackA = parseFloat(searchParams.get('priceA') ?? '0');
   const fallbackB = parseFloat(searchParams.get('priceB') ?? '0');
+  const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
+  const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
 
   if (!positionId || !account) {
     return NextResponse.json({ error: 'positionId and account required' }, { status: 400 });
@@ -237,17 +191,7 @@ export async function GET(request: Request) {
     // Sort chronologically (oldest first) to compute cumulative fees correctly
     rawEvents.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Collect unique dates for historical price lookups
-    const uniqueDatesSet = new Set<string>();
-    for (const ev of rawEvents) {
-      if (ev.timestamp > 0) uniqueDatesSet.add(tsToDateStr(ev.timestamp));
-    }
-    const uniqueDates = [...uniqueDatesSet].sort();
-
-    const pricesByDate = coinTypeA && coinTypeB
-      ? await fetchHistoricalPrices(coinTypeA, coinTypeB, uniqueDates)
-      : {};
-
+    const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       let amount0: number;
@@ -262,16 +206,34 @@ export async function GET(request: Request) {
         amount1 = Number(ev.amount1Raw) / Number(scaleB);
       }
 
-      const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const prices = dateStr ? pricesByDate[dateStr] : null;
-      const p0 = prices?.p0 ?? null;
-      const p1 = prices?.p1 ?? null;
-      const usdAtTime = (p0 != null && p1 != null) ? amount0 * p0 + amount1 * p1 : null;
+      let price0AtTime: number | null = null;
+      let price1AtTime: number | null = null;
+      let usdAtTime: number | null = null;
+
+      if (ev.type === 'deposit' && hasTicks) {
+        const derived = deriveDepositPrices(
+          amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
+          coinTypeA, coinTypeB, STABLECOINS,
+        );
+        if (derived) {
+          price0AtTime = derived.price0;
+          price1AtTime = derived.price1;
+          usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+        }
+      }
+
+      // For fee claims, withdrawals, rewards, or when derivation unavailable: use current prices
+      if (usdAtTime == null) {
+        price0AtTime = fallbackA || null;
+        price1AtTime = fallbackB || null;
+        if (fallbackA > 0 || fallbackB > 0) {
+          usdAtTime = amount0 * fallbackA + amount1 * fallbackB;
+        }
+      }
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
-        const feeUSD = usdAtTime != null ? usdAtTime : amount0 * fallbackA + amount1 * fallbackB;
-        runningFeeUSD += feeUSD;
+        runningFeeUSD += usdAtTime ?? 0;
         cumulativeFeeUSD = runningFeeUSD;
       }
 
@@ -282,8 +244,8 @@ export async function GET(request: Request) {
         amount0,
         amount1,
         usdAtTime,
-        price0AtTime: p0,
-        price1AtTime: p1,
+        price0AtTime,
+        price1AtTime,
         cumulativeFeeUSD,
         ...(ev.rewardSymbol ? { rewardSymbol: ev.rewardSymbol } : {}),
       };

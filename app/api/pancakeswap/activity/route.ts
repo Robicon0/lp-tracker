@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 
 // PancakeSwap V3 is a Uniswap V3 fork on BNB Chain. Same event topic0 hashes,
 // same ABI layout. Only the NFT manager address and the chain RPCs differ.
@@ -35,17 +36,13 @@ const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf747
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
 const TOPIC_COLLECT  = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
 
-// CoinGecko IDs for known BNB Chain tokens (kept in sync with app/api/pancakeswap/route.ts)
-const CG_IDS: Record<string, string> = {
-  '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': 'binancecoin',       // WBNB
-  '0x55d398326f99059ff775485246999027b3197955': 'tether',            // USDT
-  '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': 'usd-coin',          // USDC
-  '0xe9e7cea3dedca5984780bafc599bd69add087d56': 'binance-usd',       // BUSD
-  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82': 'pancakeswap-token', // CAKE
-  '0x2170ed0880ac9a755fd29b2688956bd959f933f8': 'ethereum',          // ETH (Binance-Peg)
-  '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c': 'bitcoin',           // BTCB
-  '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3': 'dai',               // DAI
-};
+// Known BNB Chain stablecoins (lowercase)
+const STABLECOINS = new Set([
+  '0x55d398326f99059ff775485246999027b3197955', // USDT
+  '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', // USDC
+  '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
+  '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3', // DAI
+]);
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
 
@@ -169,59 +166,6 @@ async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, n
   return Object.fromEntries(results);
 }
 
-function tsToDateStr(ts: number): string {
-  const d = new Date(ts * 1000);
-  const day = d.getUTCDate().toString().padStart(2, '0');
-  const month = (d.getUTCMonth() + 1).toString().padStart(2, '0');
-  const year = d.getUTCFullYear();
-  return `${day}-${month}-${year}`;
-}
-
-async function fetchCGHistoricalPrice(cgId: string, dateStr: string): Promise<number | null> {
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/${cgId}/history?date=${dateStr}&localization=false`;
-    const res = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!res.ok) {
-      console.error(`[pancakeswap/activity] CoinGecko history ${cgId} ${dateStr} HTTP ${res.status}`);
-      return null;
-    }
-    const json = await res.json();
-    return json?.market_data?.current_price?.usd ?? null;
-  } catch (err) {
-    console.error(`[pancakeswap/activity] CoinGecko history ${cgId} ${dateStr} error:`, err);
-    return null;
-  }
-}
-
-async function fetchHistoricalPrices(
-  token0: string,
-  token1: string,
-  dates: string[],
-  fallback0: number,
-  fallback1: number,
-): Promise<Record<string, { p0: number; p1: number }>> {
-  const cgId0 = CG_IDS[token0] ?? null;
-  const cgId1 = CG_IDS[token1] ?? null;
-
-  const MAX_DATES = 30;
-  const recentDates = dates.slice(-MAX_DATES);
-  const olderDates = dates.slice(0, dates.length - MAX_DATES);
-
-  const result: Record<string, { p0: number; p1: number }> = {};
-  for (const d of olderDates) result[d] = { p0: fallback0, p1: fallback1 };
-
-  await Promise.all(
-    recentDates.map(async (dateStr) => {
-      const [p0, p1] = await Promise.all([
-        cgId0 ? fetchCGHistoricalPrice(cgId0, dateStr) : Promise.resolve(null),
-        cgId1 ? fetchCGHistoricalPrice(cgId1, dateStr) : Promise.resolve(null),
-      ]);
-      result[dateStr] = { p0: p0 ?? fallback0, p1: p1 ?? fallback1 };
-    })
-  );
-  return result;
-}
-
 function decodeWord(data: string, wordIndex: number): bigint {
   const start = wordIndex * 64;
   const word = data.slice(start, start + 64);
@@ -238,6 +182,8 @@ export async function GET(request: Request) {
   const token1 = (searchParams.get('token1') ?? '').toLowerCase();
   const fallback0 = parseFloat(searchParams.get('p0') ?? '0');
   const fallback1 = parseFloat(searchParams.get('p1') ?? '0');
+  const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
+  const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -261,17 +207,6 @@ export async function GET(request: Request) {
 
     const scale0 = BigInt(10) ** BigInt(t0d);
     const scale1 = BigInt(10) ** BigInt(t1d);
-
-    const uniqueDatesSet = new Set<string>();
-    for (const log of logs) {
-      const ts = timestamps[parseInt(log.blockNumber, 16)] ?? 0;
-      if (ts > 0) uniqueDatesSet.add(tsToDateStr(ts));
-    }
-    const uniqueDates = [...uniqueDatesSet].sort();
-
-    const pricesByDate = (token0 && token1)
-      ? await fetchHistoricalPrices(token0, token1, uniqueDates, fallback0, fallback1)
-      : {};
 
     let deposited0 = 0n, deposited1 = 0n;
     let withdrawn0 = 0n, withdrawn1 = 0n;
@@ -318,24 +253,39 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
-    const cgMapped0 = !!CG_IDS[token0];
-    const cgMapped1 = !!CG_IDS[token1];
-
+    const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
-      const dateStr = ev.timestamp > 0 ? tsToDateStr(ev.timestamp) : null;
-      const histEntry = dateStr ? pricesByDate[dateStr] : undefined;
-      const price0AtTime = cgMapped0 && histEntry ? histEntry.p0 : null;
-      const price1AtTime = cgMapped1 && histEntry ? histEntry.p1 : null;
-      const prices = dateStr ? (histEntry ?? { p0: fallback0, p1: fallback1 }) : null;
-      const usdAtTime = prices ? amount0 * prices.p0 + amount1 * prices.p1 : null;
+
+      let price0AtTime: number | null = null;
+      let price1AtTime: number | null = null;
+      let usdAtTime: number | null = null;
+
+      if (ev.type === 'deposit' && hasTicks) {
+        const derived = deriveDepositPrices(
+          amount0, amount1, tickLower!, tickUpper!, t0d, t1d,
+          token0, token1, STABLECOINS,
+        );
+        if (derived) {
+          price0AtTime = derived.price0;
+          price1AtTime = derived.price1;
+          usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+        }
+      }
+
+      if (usdAtTime == null) {
+        price0AtTime = fallback0 || null;
+        price1AtTime = fallback1 || null;
+        if (fallback0 > 0 || fallback1 > 0) {
+          usdAtTime = amount0 * fallback0 + amount1 * fallback1;
+        }
+      }
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim') {
-        const feeUSD = usdAtTime ?? (amount0 * fallback0 + amount1 * fallback1);
-        runningFeeUSD += feeUSD;
+        runningFeeUSD += usdAtTime ?? 0;
         cumulativeFeeUSD = runningFeeUSD;
       }
 
