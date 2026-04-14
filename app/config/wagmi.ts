@@ -1,6 +1,6 @@
 import { http, createConfig } from "wagmi";
 import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
-import { injected } from "wagmi/connectors";
+import { injected, metaMask, coinbaseWallet, walletConnect } from "wagmi/connectors";
 
 const hyperEvm = {
   id: 999,
@@ -14,11 +14,21 @@ const hyperEvm = {
   },
 } as const;
 
+const wcProjectId = process.env.NEXT_PUBLIC_WC_PROJECT_ID || "";
+
+const connectors = [
+  metaMask(),
+  injected({ target: "rabby" }),
+  coinbaseWallet({ appName: "DefiDesh" }),
+  ...(wcProjectId
+    ? [walletConnect({ projectId: wcProjectId, showQrModal: true })]
+    : []),
+  injected({ target: "phantom" }),
+];
+
 export const config = createConfig({
   chains: [mainnet, base, arbitrum, optimism, polygon, avalanche, hyperEvm],
-  connectors: [
-    injected(), // MetaMask and other browser wallets
-  ],
+  connectors,
   transports: {
     [mainnet.id]: http(),
     [base.id]: http(),

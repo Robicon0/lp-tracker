@@ -86,6 +86,8 @@ const tooltipStyle = {
   color: "#FFFFFF",
   fontSize: "12px",
 };
+const tooltipLabelStyle = { color: "#FFFFFF" };
+const tooltipItemStyle = { color: "#FFFFFF" };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -292,24 +294,44 @@ export default function Analytics() {
   }, [positions, perfMap]);
 
   // ── Portfolio health score ─────────────────────────────────────────────────
+  // Weighted composite (out of 100):
+  //   40% positions in range | 25% fee performance vs 20% APR benchmark
+  //   20% chain diversification | 15% IL level (lower = better)
   const healthScore = useMemo(() => {
-    const activePositions = positions.filter((p) => p.value > 0);
+    const activePositions = positions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activePositions.length === 0) return null;
 
-    // % in range (0-50 points)
+    // (1) In-range — 40%
     const inRangeCount = activePositions.filter((p) => p.status === "In Range").length;
-    const inRangeScore = (inRangeCount / activePositions.length) * 50;
+    const inRangePct = inRangeCount / activePositions.length;
+    const inRangeScore = inRangePct * 40;
 
-    // Chain diversification (0-25 points)
+    // (2) Fee performance — 25%. Value-weighted actual APR vs 20% benchmark.
+    let aprWeightedSum = 0;
+    let aprTotalVal = 0;
+    for (const p of activePositions) {
+      const perf = perfMap.get(p.id);
+      const apr = perf?.actualAPR ?? p.apy ?? 0;
+      if (apr > 0) {
+        aprWeightedSum += apr * p.value;
+        aprTotalVal += p.value;
+      }
+    }
+    const avgAPR = aprTotalVal > 0 ? aprWeightedSum / aprTotalVal : 0;
+    const feeScore = Math.max(0, Math.min(1, avgAPR / 20)) * 25;
+
+    // (3) Chain diversification — 20%. 1 chain ≈ 60%, 2 ≈ 85%, 3+ = 100%.
     const chains = new Set(activePositions.map((p) => p.chain));
-    const chainScore = Math.min(chains.size / 3, 1) * 25;
+    const chainFraction = chains.size >= 3 ? 1 : chains.size === 2 ? 0.85 : 0.6;
+    const chainScore = chainFraction * 20;
 
-    // Protocol diversification (0-25 points)
-    const protocols = new Set(activePositions.map((p) => p.protocol));
-    const protocolScore = Math.min(protocols.size / 3, 1) * 25;
+    // (4) IL level — 15%. 0% IL = full 15; -5% = 0.
+    const ilPct = lpPnl.initialValue > 0 ? (lpPnl.ilUSD / lpPnl.initialValue) * 100 : 0;
+    const ilMagnitude = Math.abs(Math.min(0, ilPct));
+    const ilScore = Math.max(0, 1 - ilMagnitude / 5) * 15;
 
-    return Math.round(inRangeScore + chainScore + protocolScore);
-  }, [positions]);
+    return Math.round(inRangeScore + feeScore + chainScore + ilScore);
+  }, [positions, perfMap, lpPnl.initialValue, lpPnl.ilUSD]);
 
   // ── Chain breakdown (LP + lending combined) ────────────────────────────────
   const chainExposure = useMemo(() => {
@@ -488,9 +510,9 @@ export default function Analytics() {
             </p>
           </div>
 
-          {/* Total Fees Earned */}
+          {/* Unclaimed Fees */}
           <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
-            <p className="text-gray-500 text-xs font-medium mb-1">Fees Earned</p>
+            <p className="text-gray-500 text-xs font-medium mb-1">Unclaimed Fees</p>
             <p className="text-xl sm:text-2xl font-bold text-white">{fmt$(totalLpFees)}</p>
             <p className="text-[10px] text-gray-600 mt-1.5">
               {positions.filter((p) => p.fees > 0).length} positions with fees
@@ -617,8 +639,9 @@ export default function Analytics() {
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
+                  itemStyle={tooltipItemStyle}
+                  labelStyle={tooltipLabelStyle}
                   formatter={(value: number | undefined) => [fmt$(value ?? 0), "Portfolio"]}
-                  labelStyle={{ color: "#9ca3af" }}
                 />
                 <Area
                   type="monotone"
@@ -722,7 +745,7 @@ export default function Analytics() {
                       <Cell fill="#10b981" />
                       {dailyLendingIncome > 0 && <Cell fill="#3b82f6" />}
                     </Pie>
-                    <Tooltip contentStyle={tooltipStyle} formatter={dollarFormatter} />
+                    <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="flex justify-center gap-6 mt-2">
@@ -771,6 +794,8 @@ export default function Analytics() {
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
+                    itemStyle={tooltipItemStyle}
+                    labelStyle={tooltipLabelStyle}
                     formatter={(value: number | undefined) => [fmt$(value ?? 0) + "/day", "Income"]}
                   />
                   <Bar dataKey="daily" radius={[0, 4, 4, 0]} maxBarSize={24}>
@@ -959,7 +984,7 @@ export default function Analytics() {
                       <Cell key={i} fill={CHAIN_COLORS[entry.name] ?? PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={tooltipStyle} formatter={dollarFormatter} />
+                  <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
                   <Legend content={PieLegend} />
                 </PieChart>
               </ResponsiveContainer>
@@ -994,7 +1019,7 @@ export default function Analytics() {
                       <Cell key={i} fill={PROTOCOL_COLORS[entry.name] ?? PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={tooltipStyle} formatter={dollarFormatter} />
+                  <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
                   <Legend content={PieLegend} />
                 </PieChart>
               </ResponsiveContainer>

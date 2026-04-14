@@ -9,6 +9,22 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "./contexts/WalletAuthContext";
 import Link from "next/link";
 
+// EVM wallet display metadata (order and logos). connectorId matches the id
+// assigned by each wagmi connector in app/config/wagmi.ts. Unmatched entries
+// (e.g. WalletConnect when NEXT_PUBLIC_WC_PROJECT_ID is unset) are skipped.
+const EVM_WALLET_DISPLAY: {
+  connectorId: string;
+  name: string;
+  description: string;
+  logo: string;
+}[] = [
+  { connectorId: "metaMaskSDK", name: "MetaMask", description: "Connect with the MetaMask browser extension", logo: "/wallet-logos/metamask.svg" },
+  { connectorId: "rabby", name: "Rabby Wallet", description: "Connect with the Rabby browser extension", logo: "/wallet-logos/rabby.svg" },
+  { connectorId: "coinbaseWalletSDK", name: "Coinbase Wallet", description: "Connect with Coinbase Wallet extension or mobile app", logo: "/wallet-logos/coinbase.svg" },
+  { connectorId: "walletConnect", name: "WalletConnect", description: "Scan a QR code with any mobile EVM wallet (Trust, Rainbow, Zerion, …)", logo: "/wallet-logos/walletconnect.svg" },
+  { connectorId: "phantom", name: "Phantom", description: "Connect with the Phantom browser extension", logo: "/wallet-logos/phantom.svg" },
+];
+
 export default function Navbar() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
@@ -396,19 +412,24 @@ export default function Navbar() {
               <button onClick={() => setShowEvmModal(false)} className="text-emerald-300/70 hover:text-white">✕</button>
             </div>
             <div className="space-y-3">
-              {connectors.map((connector, index) => (
-                <button
-                  key={connector.id}
-                  onClick={() => handleEvmConnect(index)}
-                  className="w-full flex items-center space-x-4 bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-400/10 hover:border-emerald-400/30 rounded-xl p-4 transition-colors"
-                >
-                  <span className="text-2xl">{connector.name === "MetaMask" ? "🦊" : "🔗"}</span>
-                  <div className="text-left">
-                    <p className="text-white font-medium">{connector.name}</p>
-                    <p className="text-emerald-300/70 text-xs">Connect with browser extension</p>
-                  </div>
-                </button>
-              ))}
+              {EVM_WALLET_DISPLAY.map((meta) => {
+                const idx = connectors.findIndex((c) => c.id === meta.connectorId);
+                if (idx === -1) return null;
+                return (
+                  <button
+                    key={meta.connectorId}
+                    onClick={() => handleEvmConnect(idx)}
+                    className="w-full flex items-center space-x-4 bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-400/10 hover:border-emerald-400/30 rounded-xl p-4 transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={meta.logo} alt={meta.name} className="w-8 h-8 rounded-lg shrink-0" />
+                    <div className="text-left">
+                      <p className="text-white font-medium">{meta.name}</p>
+                      <p className="text-emerald-300/70 text-xs">{meta.description}</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
