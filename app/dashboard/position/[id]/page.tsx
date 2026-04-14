@@ -320,24 +320,28 @@ export default function PositionDetail() {
   const { data: aeroActivity, isLoading: aeroActivityLoading, error: aeroActivityError } = usePositionActivity(
     aeroTokenId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const bluefinObjId = pos?.protocol === 'Bluefin' ? pos.id.replace('bluefin-', '') : null;
   const { data: bluefinActivity, isLoading: bluefinActivityLoading, error: bluefinActivityError } = useBluefinActivity(
     bluefinObjId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
     pos?.coinTypeA, pos?.coinTypeB, pos?.price0, pos?.price1, pos?.walletAddress,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const orcaPosId = pos?.protocol === 'Orca' ? pos.id.replace('orca-', '') : null;
   const { data: orcaActivity, isLoading: orcaActivityLoading, error: orcaActivityError } = useOrcaActivity(
     orcaPosId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1, pos?.walletAddress,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const raydiumPosId = pos?.protocol === 'Raydium' ? pos.id.replace('ray-', '') : null;
   const { data: raydiumActivity, isLoading: raydiumActivityLoading, error: raydiumActivityError } = useRaydiumActivity(
     raydiumPosId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1, pos?.walletAddress,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const hyperswapTokenId = pos && HYPEREVM_PROTOCOLS.has(pos.protocol)
@@ -354,18 +358,21 @@ export default function PositionDetail() {
   const { data: uniswapActivity, isLoading: uniswapActivityLoading, error: uniswapActivityError } = useUniswapActivity(
     uniswapPosId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const velodromePosId = pos?.protocol === 'Velodrome' ? pos.id.replace('velo-', '') : null;
   const { data: velodromeActivity, isLoading: velodromeActivityLoading, error: velodromeActivityError } = useVelodromeActivity(
     velodromePosId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const pancakeTokenId = pos?.protocol === 'PancakeSwap V3' ? pos.id.replace('cake3-bsc-', '') : null;
   const { data: pancakeActivity, isLoading: pancakeActivityLoading } = usePancakeSwapActivity(
     pancakeTokenId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const activity = pos?.protocol === 'Aerodrome' ? aeroActivity

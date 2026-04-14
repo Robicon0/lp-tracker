@@ -21,7 +21,7 @@ interface CacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function cacheKey(chain: string, tokenId: string) {
-  return `uni-activity-${chain}-${tokenId}`;
+  return `uni-activity-v2-${chain}-${tokenId}`;
 }
 
 function readCache(chain: string, tokenId: string): UniswapActivityData | null {
@@ -55,6 +55,8 @@ export function useUniswapActivity(
   token1Address?: string,
   price0?: number,
   price1?: number,
+  tickLower?: number | null,
+  tickUpper?: number | null,
 ) {
   const [data, setData] = useState<UniswapActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -90,6 +92,8 @@ export function useUniswapActivity(
     if (token1Address) params.set('token1', token1Address);
     if (price0 != null) params.set('p0', String(price0));
     if (price1 != null) params.set('p1', String(price1));
+    if (tickLower != null) params.set('tickLower', String(tickLower));
+    if (tickUpper != null) params.set('tickUpper', String(tickUpper));
 
     fetch(`/api/uniswap/activity?${params.toString()}`)
       .then((r) => r.json())
@@ -104,7 +108,7 @@ export function useUniswapActivity(
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [positionId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1]);
+  }, [positionId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1, tickLower, tickUpper]);
 
   return { data, isLoading, error };
 }

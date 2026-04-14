@@ -21,7 +21,7 @@ interface CacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function cacheKey(tokenId: string) {
-  return `cake-activity-${tokenId}`;
+  return `cake-activity-v2-${tokenId}`;
 }
 
 function readCache(tokenId: string): PancakeSwapActivityData | null {
@@ -54,6 +54,8 @@ export function usePancakeSwapActivity(
   token1Address?: string,
   price0?: number,
   price1?: number,
+  tickLower?: number | null,
+  tickUpper?: number | null,
 ) {
   const [data, setData] = useState<PancakeSwapActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -81,6 +83,8 @@ export function usePancakeSwapActivity(
     if (token1Address) params.set('token1', token1Address);
     if (price0 != null) params.set('p0', String(price0));
     if (price1 != null) params.set('p1', String(price1));
+    if (tickLower != null) params.set('tickLower', String(tickLower));
+    if (tickUpper != null) params.set('tickUpper', String(tickUpper));
 
     fetch(`/api/pancakeswap/activity?${params.toString()}`)
       .then((r) => r.json())
@@ -95,7 +99,7 @@ export function usePancakeSwapActivity(
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [tokenId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1]);
+  }, [tokenId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1, tickLower, tickUpper]);
 
   return { data, isLoading, error };
 }

@@ -21,7 +21,7 @@ interface CacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function cacheKey(positionId: string) {
-  return `raydium-activity-${positionId}`;
+  return `raydium-activity-v2-${positionId}`;
 }
 
 function readCache(positionId: string): RaydiumActivityData | null {
@@ -53,6 +53,8 @@ export function useRaydiumActivity(
   priceA?: number,
   priceB?: number,
   account?: string,
+  tickLower?: number | null,
+  tickUpper?: number | null,
 ) {
   const [data, setData] = useState<RaydiumActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -81,6 +83,8 @@ export function useRaydiumActivity(
     if (mintB) params.set('mintB', mintB);
     if (priceA != null) params.set('priceA', String(priceA));
     if (priceB != null) params.set('priceB', String(priceB));
+    if (tickLower != null) params.set('tickLower', String(tickLower));
+    if (tickUpper != null) params.set('tickUpper', String(tickUpper));
 
     fetch(`/api/raydium/activity?${params.toString()}`)
       .then((r) => r.json())
@@ -95,7 +99,7 @@ export function useRaydiumActivity(
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [positionId, decimalsA, decimalsB, mintA, mintB, priceA, priceB, account]);
+  }, [positionId, decimalsA, decimalsB, mintA, mintB, priceA, priceB, account, tickLower, tickUpper]);
 
   return { data, isLoading, error };
 }

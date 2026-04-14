@@ -21,7 +21,7 @@ interface CacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function cacheKey(positionId: string) {
-  return `bluefin-activity-${positionId}`;
+  return `bluefin-activity-v2-${positionId}`;
 }
 
 function readCache(positionId: string): BluefinActivityData | null {
@@ -53,6 +53,8 @@ export function useBluefinActivity(
   priceA?: number,
   priceB?: number,
   account?: string,
+  tickLower?: number | null,
+  tickUpper?: number | null,
 ) {
   const [data, setData] = useState<BluefinActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -81,6 +83,8 @@ export function useBluefinActivity(
     if (coinTypeB) params.set('coinTypeB', coinTypeB);
     if (priceA != null) params.set('priceA', String(priceA));
     if (priceB != null) params.set('priceB', String(priceB));
+    if (tickLower != null) params.set('tickLower', String(tickLower));
+    if (tickUpper != null) params.set('tickUpper', String(tickUpper));
 
     fetch(`/api/bluefin/activity?${params.toString()}`)
       .then((r) => r.json())
@@ -103,7 +107,7 @@ export function useBluefinActivity(
       });
 
     return () => { cancelled = true; };
-  }, [positionId, decimalsA, decimalsB, coinTypeA, coinTypeB, priceA, priceB, account]);
+  }, [positionId, decimalsA, decimalsB, coinTypeA, coinTypeB, priceA, priceB, account, tickLower, tickUpper]);
 
   return { data, isLoading, error };
 }
