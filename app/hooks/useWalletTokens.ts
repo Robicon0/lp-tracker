@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import { getTokenLogo } from "../lib/tokenLogos";
 
 const CHAINS = [
@@ -65,6 +66,23 @@ export interface WalletTokensData {
 export function useWalletTokens(): WalletTokensData {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
+  const { watchedWallets } = useWatchedWallets();
+
+  // Combine connected + watched wallets per chain (dedup, lowercase for EVM).
+  const evmAddresses = Array.from(new Set(
+    [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+      .map((a) => a.toLowerCase())
+  ));
+  const solanaAddresses = Array.from(new Set(
+    [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+  ));
+  const suiAddresses = Array.from(new Set(
+    [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+  ));
+
   const fetchedForRef = useRef<string | null>(null);
 
   const [data, setData] = useState<WalletTokensData>({
@@ -77,13 +95,17 @@ export function useWalletTokens(): WalletTokensData {
     isLoading: false,
   });
 
+  const evmKey = evmAddresses.join(",");
+  const solKey = solanaAddresses.join(",");
+  const suiKey = suiAddresses.join(",");
+
   useEffect(() => {
-    // Composite key — refetch whenever any wallet address changes
-    const fetchKey = [address, solanaAddress, suiAddress].filter(Boolean).join("|") || null;
+    // Composite key — refetch whenever any wallet (connected or watched) changes
+    const fetchKey = [evmKey, solKey, suiKey].filter(Boolean).join("|") || null;
 
     if (!fetchKey || fetchedForRef.current === fetchKey) return;
 
-    console.log("[useWalletTokens] Starting fetch for wallets:", { evm: address, solana: solanaAddress, sui: suiAddress });
+    console.log("[useWalletTokens] Starting fetch for wallets:", { evm: evmAddresses, solana: solanaAddresses, sui: suiAddresses });
     fetchedForRef.current = fetchKey;
     let cancelled = false;
     let fetchCompleted = false;
@@ -167,7 +189,8 @@ export function useWalletTokens(): WalletTokensData {
         const scanTasks: Promise<void>[] = [];
 
         // ── EVM chains via Alchemy ────────────────────────────────────────────
-        if (address && process.env.NEXT_PUBLIC_ALCHEMY_KEY) {
+        if (evmAddresses.length > 0 && process.env.NEXT_PUBLIC_ALCHEMY_KEY) {
+          for (const evmAddr of evmAddresses) {
           scanTasks.push(
             ...CHAINS.map(async (chain) => {
               const post = (body: object) =>
@@ -178,11 +201,11 @@ export function useWalletTokens(): WalletTokensData {
                 }).then((r) => r.json());
 
               try {
-                console.log(`[useWalletTokens] Scanning ${chain.name}...`);
+                console.log(`[useWalletTokens] Scanning ${chain.name} for ${evmAddr}...`);
                 const balRes = await post({
                   jsonrpc: "2.0", id: 1,
                   method: "alchemy_getTokenBalances",
-                  params: [address, "erc20"],
+                  params: [evmAddr, "erc20"],
                 });
                 const nonZero = (balRes.result?.tokenBalances ?? []).filter(
                   (t: { tokenBalance: string }) => t.tokenBalance && t.tokenBalance !== ZERO_HEX,
@@ -225,20 +248,21 @@ export function useWalletTokens(): WalletTokensData {
                     } catch (err) { console.error(`[useWalletTokens] ${chain.name} token metadata failed for ${token.contractAddress}:`, err); }
                   }),
                 );
-                console.log(`[useWalletTokens] ${chain.name} done`);
+                console.log(`[useWalletTokens] ${chain.name} done for ${evmAddr}`);
               } catch (err) { console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
             }),
           );
-        } else if (address) {
+          }
+        } else if (evmAddresses.length > 0) {
           console.warn("[useWalletTokens] NEXT_PUBLIC_ALCHEMY_KEY missing — skipping EVM token scan");
         }
 
         // ── Solana via /api/solana/balances (Helius server-side) ─────────────
-        if (solanaAddress) {
+        for (const solAddr of solanaAddresses) {
           scanTasks.push((async () => {
             try {
-              console.log("[useWalletTokens] Scanning Solana...");
-              const res = await fetch(`/api/solana/balances?account=${solanaAddress}`).then((r) => r.json());
+              console.log(`[useWalletTokens] Scanning Solana for ${solAddr}...`);
+              const res = await fetch(`/api/solana/balances?account=${solAddr}`).then((r) => r.json());
               if (cancelled) return;
 
               // Native SOL
@@ -285,11 +309,11 @@ export function useWalletTokens(): WalletTokensData {
         }
 
         // ── Sui via /api/sui/balances ─────────────────────────────────────────
-        if (suiAddress) {
+        for (const suiAddr of suiAddresses) {
           scanTasks.push((async () => {
             try {
-              console.log("[useWalletTokens] Scanning Sui...");
-              const res = await fetch(`/api/sui/balances?account=${suiAddress}`).then((r) => r.json());
+              console.log(`[useWalletTokens] Scanning Sui for ${suiAddr}...`);
+              const res = await fetch(`/api/sui/balances?account=${suiAddr}`).then((r) => r.json());
               if (cancelled) return;
 
               // Native SUI
@@ -377,7 +401,7 @@ export function useWalletTokens(): WalletTokensData {
         fetchedForRef.current = null;
       }
     };
-  }, [address, solanaAddress, suiAddress]);
+  }, [evmKey, solKey, suiKey]);
 
   return data;
 }

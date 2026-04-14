@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 
 // AlphaFi/AlphaLend (Sui) — implemented via raw Sui RPC in /api/lending/alphafi/route.ts
 // Uses suix_getOwnedObjects to find PositionCap objects, then reads position details.
@@ -77,6 +78,24 @@ function buildPosition(
 export function useLendingPositions(): UseLendingPositionsData {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
+  const { watchedWallets } = useWatchedWallets();
+
+  const evmAddresses = Array.from(new Set(
+    [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+      .map((a) => a.toLowerCase())
+  ));
+  const solanaAddresses = Array.from(new Set(
+    [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+  ));
+  const suiAddresses = Array.from(new Set(
+    [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+  ));
+  const evmKey = evmAddresses.join(",");
+  const solKey = solanaAddresses.join(",");
+  const suiKey = suiAddresses.join(",");
 
   const fetchedForRef = useRef<string | null>(null);
 
@@ -87,7 +106,7 @@ export function useLendingPositions(): UseLendingPositionsData {
 
   useEffect(() => {
     // Composite key — same pattern as useWalletTokens
-    const fetchKey = [address, solanaAddress, suiAddress].filter(Boolean).join("|") || null;
+    const fetchKey = [evmKey, solKey, suiKey].filter(Boolean).join("|") || null;
     if (!fetchKey || fetchedForRef.current === fetchKey) return;
 
     fetchedForRef.current = fetchKey;
@@ -107,109 +126,44 @@ export function useLendingPositions(): UseLendingPositionsData {
       try {
         const tasks: Promise<ExternalLendingPosition | null>[] = [];
 
+        async function fetchMerged(
+          addrs: string[],
+          endpoint: string,
+          protocol: string,
+          chain: string,
+        ): Promise<ExternalLendingPosition | null> {
+          if (addrs.length === 0) return null;
+          try {
+            console.log(`[useLendingPositions] Fetching ${protocol} for ${addrs.length} address(es)...`);
+            const results = await Promise.allSettled(
+              addrs.map((a) => fetch(`${endpoint}?account=${a}`).then((r) => r.json())),
+            );
+            if (cancelled) return null;
+            const supplies: ExternalLendingAsset[] = [];
+            const borrows: ExternalLendingAsset[] = [];
+            for (const r of results) {
+              if (r.status !== "fulfilled") continue;
+              if (r.value?.note) console.info(`[useLendingPositions] ${protocol}:`, r.value.note);
+              for (const s of (r.value?.supplies ?? []) as ExternalLendingAsset[]) supplies.push(s);
+              for (const b of (r.value?.borrows  ?? []) as ExternalLendingAsset[]) borrows.push(b);
+            }
+            return buildPosition({ supplies, borrows, protocol, chain });
+          } catch (err) {
+            console.error(`[useLendingPositions] ${protocol} fetch failed:`, err);
+            return null;
+          }
+        }
+
         // ── Dolomite (Arbitrum) ───────────────────────────────────────────────
-        if (address) {
-          tasks.push((async () => {
-            try {
-              console.log("[useLendingPositions] Fetching Dolomite...");
-              const res = await fetch(`/api/lending/dolomite?account=${address}`).then((r) => r.json());
-              if (cancelled) return null;
-              return buildPosition({
-                supplies: res.supplies ?? [],
-                borrows:  res.borrows  ?? [],
-                protocol: "Dolomite",
-                chain:    "Arbitrum",
-              });
-            } catch (err) {
-              console.error("[useLendingPositions] Dolomite fetch failed:", err);
-              return null;
-            }
-          })());
-        }
-
+        tasks.push(fetchMerged(evmAddresses, "/api/lending/dolomite", "Dolomite", "Arbitrum"));
         // ── Jupiter Lend (Solana) ─────────────────────────────────────────────
-        if (solanaAddress) {
-          tasks.push((async () => {
-            try {
-              console.log("[useLendingPositions] Fetching Jupiter Lend...");
-              const res = await fetch(`/api/lending/jupiter?account=${solanaAddress}`).then((r) => r.json());
-              if (cancelled) return null;
-              if (res.note) {
-                // API key not configured — log once, return null silently
-                console.info("[useLendingPositions] Jupiter Lend:", res.note);
-              }
-              return buildPosition({
-                supplies: res.supplies ?? [],
-                borrows:  res.borrows  ?? [],
-                protocol: "Jupiter Lend",
-                chain:    "Solana",
-              });
-            } catch (err) {
-              console.error("[useLendingPositions] Jupiter Lend fetch failed:", err);
-              return null;
-            }
-          })());
-        }
-
+        tasks.push(fetchMerged(solanaAddresses, "/api/lending/jupiter", "Jupiter Lend", "Solana"));
         // ── Suilend (Sui) ────────────────────────────────────────────────────
-        if (suiAddress) {
-          tasks.push((async () => {
-            try {
-              console.log("[useLendingPositions] Fetching Suilend...");
-              const res = await fetch(`/api/lending/suilend?account=${suiAddress}`).then((r) => r.json());
-              if (cancelled) return null;
-              return buildPosition({
-                supplies: res.supplies ?? [],
-                borrows:  res.borrows  ?? [],
-                protocol: "Suilend",
-                chain:    "Sui",
-              });
-            } catch (err) {
-              console.error("[useLendingPositions] Suilend fetch failed:", err);
-              return null;
-            }
-          })());
-        }
-
+        tasks.push(fetchMerged(suiAddresses, "/api/lending/suilend", "Suilend", "Sui"));
         // ── AlphaFi / AlphaLend (Sui) ─────────────────────────────────────────
-        if (suiAddress) {
-          tasks.push((async () => {
-            try {
-              console.log("[useLendingPositions] Fetching AlphaFi...");
-              const res = await fetch(`/api/lending/alphafi?account=${suiAddress}`).then((r) => r.json());
-              if (cancelled) return null;
-              return buildPosition({
-                supplies: res.supplies ?? [],
-                borrows:  res.borrows  ?? [],
-                protocol: "AlphaFi",
-                chain:    "Sui",
-              });
-            } catch (err) {
-              console.error("[useLendingPositions] AlphaFi fetch failed:", err);
-              return null;
-            }
-          })());
-        }
-
-        // ── HyperLend (HyperEVM) — same EVM wallet address ────────────────────
-        if (address) {
-          tasks.push((async () => {
-            try {
-              console.log("[useLendingPositions] Fetching HyperLend...");
-              const res = await fetch(`/api/lending/hyperlend?account=${address}`).then((r) => r.json());
-              if (cancelled) return null;
-              return buildPosition({
-                supplies: res.supplies ?? [],
-                borrows:  res.borrows  ?? [],
-                protocol: "HyperLend",
-                chain:    "HyperEVM",
-              });
-            } catch (err) {
-              console.error("[useLendingPositions] HyperLend fetch failed:", err);
-              return null;
-            }
-          })());
-        }
+        tasks.push(fetchMerged(suiAddresses, "/api/lending/alphafi", "AlphaFi", "Sui"));
+        // ── HyperLend (HyperEVM) ─────────────────────────────────────────────
+        tasks.push(fetchMerged(evmAddresses, "/api/lending/hyperlend", "HyperLend", "HyperEVM"));
 
         const results = await Promise.allSettled(tasks);
         if (cancelled) return;
@@ -235,7 +189,7 @@ export function useLendingPositions(): UseLendingPositionsData {
       clearTimeout(timeoutId);
       if (!fetchCompleted) fetchedForRef.current = null;
     };
-  }, [address, solanaAddress, suiAddress]);
+  }, [evmKey, solKey, suiKey]);
 
   return data;
 }
