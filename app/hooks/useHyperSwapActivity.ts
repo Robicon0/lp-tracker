@@ -27,8 +27,10 @@ const PROTOCOL_NFT_MANAGERS: Record<string, string> = {
   'ProjectX': '0xead19ae861c29bbb2101e834922b2feee69b9091',
 };
 
+// v2 key: invalidates entries cached before tickLower/tickUpper were passed
+// through for V3 price derivation.
 function cacheKey(positionId: string) {
-  return `hyperswap-activity-${positionId}`;
+  return `hyperswap-activity-v2-${positionId}`;
 }
 
 function readCache(positionId: string): HyperSwapActivityData | null {
@@ -61,6 +63,8 @@ export function useHyperSwapActivity(
   token1Address?: string,
   price0?: number,
   price1?: number,
+  tickLower?: number | null,
+  tickUpper?: number | null,
 ) {
   const [data, setData] = useState<HyperSwapActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -91,6 +95,8 @@ export function useHyperSwapActivity(
     if (token1Address) params.set('token1', token1Address);
     if (price0 != null) params.set('p0', String(price0));
     if (price1 != null) params.set('p1', String(price1));
+    if (tickLower != null) params.set('tickLower', String(tickLower));
+    if (tickUpper != null) params.set('tickUpper', String(tickUpper));
 
     fetch(`/api/hyperswap/activity?${params.toString()}`)
       .then((r) => r.json())
@@ -113,7 +119,7 @@ export function useHyperSwapActivity(
       });
 
     return () => { cancelled = true; };
-  }, [positionId, protocol, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1]);
+  }, [positionId, protocol, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1, tickLower, tickUpper]);
 
   return { data, isLoading, error };
 }

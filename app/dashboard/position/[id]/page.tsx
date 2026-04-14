@@ -347,6 +347,7 @@ export default function PositionDetail() {
     hyperswapTokenId, pos && HYPEREVM_PROTOCOLS.has(pos.protocol) ? pos.protocol : null,
     pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 6,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
+    pos?.tickLower, pos?.tickUpper,
   );
 
   const uniswapPosId = pos?.protocol === 'Uniswap V3' ? pos.id : null;
