@@ -10,6 +10,7 @@ import { useLpPnl } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import {
   BarChart,
   Bar,
@@ -162,9 +163,10 @@ export default function Analytics() {
   const { tokens: walletTokens } = useWalletTokens();
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
+  const { watchedWallets } = useWatchedWallets();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const hasWallet = mounted && !!(address || solanaAddress || suiAddress);
+  const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
 
   // ── Build AAVE lending positions from wallet tokens ─────────────────────────
   const lendingPositions: ExternalLendingPosition[] = useMemo(() => {
