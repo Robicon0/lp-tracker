@@ -273,16 +273,24 @@ export async function GET(request: Request) {
       const pre  = tx.meta.preTokenBalances ?? [];
       const post = tx.meta.postTokenBalances ?? [];
 
-      // Find the Whirlpool instruction type
+      // Scan ALL Whirlpool instructions to determine event type.
+      // If a tx has both decrease_liquidity AND collect_fees (common when
+      // closing a position), classify as withdrawal — the token delta includes
+      // both and we must not double-count the withdrawal as fees.
       const instructions = tx.transaction?.message?.instructions ?? [];
+      let hasWithdrawal = false;
+      let hasFeeClaim = false;
       let evType: ActivityEventType | null = null;
       for (const instr of instructions) {
         if (instr.programId !== WHIRLPOOL_PROGRAM) continue;
         if (!instr.data) continue;
         const t = classifyInstruction(instr.data);
-        if (t) { evType = t; break; }
+        if (t === 'withdrawal') hasWithdrawal = true;
+        if (t === 'fee_claim') hasFeeClaim = true;
+        if (t && !evType) evType = t;
       }
       if (!evType) continue;
+      if (hasWithdrawal && hasFeeClaim) evType = 'withdrawal';
 
       // Amount = absolute delta in wallet's token accounts for mintA / mintB
       // For WSOL: if token delta is 0 (WSOL ATA created+closed in same tx),

@@ -37,7 +37,7 @@ const TIME_RANGES = [
   { key: "1Y",  ms: 365 * 24 * 3_600_000, label: "in last year",    xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }) },
 ] as const;
 
-const STATUS_FILTERS = ["All", "In Range", "Out of Range", "Closed"];
+const STATUS_FILTERS = ["In Range", "Out of Range", "Closed", "All"];
 
 const PROTOCOL_COLORS: Record<string, string> = {
   Aerodrome:    "#22c55e",

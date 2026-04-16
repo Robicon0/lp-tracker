@@ -271,16 +271,24 @@ export async function GET(request: Request) {
       const pre  = tx.meta.preTokenBalances ?? [];
       const post = tx.meta.postTokenBalances ?? [];
 
-      // Find the Raydium CLMM instruction type
+      // Scan ALL Raydium CLMM instructions to determine event type.
+      // If a tx has both decrease_liquidity AND collect_fees (common when
+      // closing a position), classify as withdrawal — the token delta includes
+      // both and we must not double-count the withdrawal as fees.
       const instructions = tx.transaction?.message?.instructions ?? [];
+      let hasWithdrawal = false;
+      let hasFeeClaim = false;
       let evType: ActivityEventType | null = null;
       for (const instr of instructions) {
         if (instr.programId !== RAYDIUM_CLMM_PROGRAM) continue;
         if (!instr.data) continue;
         const t = classifyInstruction(instr.data);
-        if (t) { evType = t; break; }
+        if (t === 'withdrawal') hasWithdrawal = true;
+        if (t === 'fee_claim') hasFeeClaim = true;
+        if (t && !evType) evType = t;
       }
       if (!evType) continue;
+      if (hasWithdrawal && hasFeeClaim) evType = 'withdrawal';
 
       let deltaA = getTokenDeltaRaw(pre, post, account, mintA);
       if (deltaA === 0n && mintA === WSOL_MINT) {

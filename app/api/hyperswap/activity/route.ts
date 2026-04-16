@@ -229,28 +229,37 @@ export async function GET(request: Request) {
 
       let amount0Raw = 0n, amount1Raw = 0n;
 
-      if (type === 'deposit') {
-        // IncreaseLiquidity data: word0=liquidity, word1=amount0, word2=amount1
-        amount0Raw = decodeWord(data, 1);
-        amount1Raw = decodeWord(data, 2);
-        deposited0 += amount0Raw;
-        deposited1 += amount1Raw;
-      } else if (type === 'withdrawal') {
-        // DecreaseLiquidity data: word0=liquidity, word1=amount0, word2=amount1
-        amount0Raw = decodeWord(data, 1);
-        amount1Raw = decodeWord(data, 2);
-        withdrawn0 += amount0Raw;
-        withdrawn1 += amount1Raw;
-      } else {
-        // Collect data: word0=recipient(address), word1=amount0Collected, word2=amount1Collected
-        amount0Raw = decodeWord(data, 1);
-        amount1Raw = decodeWord(data, 2);
-        fees0 += amount0Raw;
-        fees1 += amount1Raw;
-      }
+      // All three event types: word1=amount0, word2=amount1
+      amount0Raw = decodeWord(data, 1);
+      amount1Raw = decodeWord(data, 2);
 
       return [{ type, txHash: log.transactionHash, blockNumber: blockNum, timestamp, amount0Raw, amount1Raw }];
     });
+
+    // When Collect and DecreaseLiquidity share a tx, Collect includes the
+    // withdrawn amounts. Subtract so only actual fees remain.
+    const decreaseByTx = new Map<string, { a0: bigint; a1: bigint }>();
+    for (const ev of rawEvents) {
+      if (ev.type === 'withdrawal') {
+        const prev = decreaseByTx.get(ev.txHash);
+        decreaseByTx.set(ev.txHash, { a0: (prev?.a0 ?? 0n) + ev.amount0Raw, a1: (prev?.a1 ?? 0n) + ev.amount1Raw });
+      }
+    }
+    for (const ev of rawEvents) {
+      if (ev.type === 'fee_claim') {
+        const dec = decreaseByTx.get(ev.txHash);
+        if (dec) {
+          ev.amount0Raw = ev.amount0Raw > dec.a0 ? ev.amount0Raw - dec.a0 : 0n;
+          ev.amount1Raw = ev.amount1Raw > dec.a1 ? ev.amount1Raw - dec.a1 : 0n;
+        }
+      }
+    }
+
+    for (const ev of rawEvents) {
+      if (ev.type === 'deposit')    { deposited0 += ev.amount0Raw; deposited1 += ev.amount1Raw; }
+      if (ev.type === 'withdrawal') { withdrawn0 += ev.amount0Raw; withdrawn1 += ev.amount1Raw; }
+      if (ev.type === 'fee_claim')  { fees0 += ev.amount0Raw;      fees1 += ev.amount1Raw;      }
+    }
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 

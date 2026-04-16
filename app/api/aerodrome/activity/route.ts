@@ -310,24 +310,46 @@ export async function GET(request: Request) {
         type = 'deposit';
         amount0Raw = decodeWord(data, 1);
         amount1Raw = decodeWord(data, 2);
-        deposited0 += amount0Raw;
-        deposited1 += amount1Raw;
       } else if (topic0 === TOPIC_DECREASE) {
         type = 'withdrawal';
         amount0Raw = decodeWord(data, 1);
         amount1Raw = decodeWord(data, 2);
-        withdrawn0 += amount0Raw;
-        withdrawn1 += amount1Raw;
       } else {
         type = 'fee_claim';
         amount0Raw = decodeWord(data, 1);
         amount1Raw = decodeWord(data, 2);
-        fees0 += amount0Raw;
-        fees1 += amount1Raw;
       }
 
       return { type, txHash: log.transactionHash, blockNumber: blockNum, timestamp, amount0Raw, amount1Raw };
     });
+
+    // When a Collect (fee_claim) and DecreaseLiquidity (withdrawal) share the
+    // same transaction, the Collect amounts include the withdrawn liquidity.
+    // Subtract the withdrawal amounts so only actual fees remain.
+    const decreaseByTx = new Map<string, { a0: bigint; a1: bigint }>();
+    for (const ev of rawEvents) {
+      if (ev.type === 'withdrawal') {
+        const prev = decreaseByTx.get(ev.txHash);
+        const a0 = (prev?.a0 ?? 0n) + ev.amount0Raw;
+        const a1 = (prev?.a1 ?? 0n) + ev.amount1Raw;
+        decreaseByTx.set(ev.txHash, { a0, a1 });
+      }
+    }
+    for (const ev of rawEvents) {
+      if (ev.type === 'fee_claim') {
+        const dec = decreaseByTx.get(ev.txHash);
+        if (dec) {
+          ev.amount0Raw = ev.amount0Raw > dec.a0 ? ev.amount0Raw - dec.a0 : 0n;
+          ev.amount1Raw = ev.amount1Raw > dec.a1 ? ev.amount1Raw - dec.a1 : 0n;
+        }
+      }
+    }
+
+    for (const ev of rawEvents) {
+      if (ev.type === 'deposit')    { deposited0 += ev.amount0Raw; deposited1 += ev.amount1Raw; }
+      if (ev.type === 'withdrawal') { withdrawn0 += ev.amount0Raw; withdrawn1 += ev.amount1Raw; }
+      if (ev.type === 'fee_claim')  { fees0 += ev.amount0Raw;      fees1 += ev.amount1Raw;      }
+    }
 
     // Sort chronologically to compute cumulative fees (oldest first)
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);

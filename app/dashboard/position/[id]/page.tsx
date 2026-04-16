@@ -278,40 +278,6 @@ export default function PositionDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pos?.id, pos?.fees]);
 
-  const feeMetrics = useMemo(() => {
-    if (!pos || snapshots.length === 0) return null;
-
-    // Estimated claimed = sum of fee drops between consecutive snapshots
-    let estimatedClaimed = 0;
-    for (let i = 1; i < snapshots.length; i++) {
-      const drop = snapshots[i - 1].feesUSD - snapshots[i].feesUSD;
-      if (drop > 0.005) estimatedClaimed += drop;
-    }
-
-    const totalEarned  = estimatedClaimed + pos.fees;
-    const feeVsHoldPct = pos.value > 0 ? (totalEarned / pos.value) * 100 : 0;
-    const firstSnap    = snapshots[0];
-    const ageDays      = (Date.now() - firstSnap.timestamp) / 86_400_000;
-
-    // Build cumulative chart data
-    let claimed = 0;
-    const chartData = snapshots.map((s, i) => {
-      if (i > 0) {
-        const drop = snapshots[i - 1].feesUSD - s.feesUSD;
-        if (drop > 0.005) claimed += drop;
-      }
-      return {
-        label: new Date(s.timestamp).toLocaleDateString("en-US", {
-          month: "short", day: "numeric",
-          hour: snapshots.length <= 48 ? "numeric" : undefined,
-        }),
-        value: claimed + s.feesUSD,
-      };
-    });
-
-    return { estimatedClaimed, totalEarned, feeVsHoldPct, ageDays, firstSnap, chartData };
-  }, [snapshots, pos]);
-
   // ── Activity data (on-chain fee claim history) ───────────────────────────
   const HYPEREVM_PROTOCOLS = new Set(['HyperSwap', 'KittenSwap', 'ProjectX']);
   const isHyperEVM = pos ? HYPEREVM_PROTOCOLS.has(pos.protocol) : false;
@@ -404,6 +370,39 @@ export default function PositionDetail() {
   const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
   // True when we expect data but it hasn't arrived yet (initial render before effect fires)
   const activityPending = isActivityProtocol && !activity && !activityError;
+
+  // Build fee accumulation chart from on-chain activity fee_claim events.
+  const feeChartData = useMemo(() => {
+    if (!activity?.events || activity.events.length === 0) return null;
+
+    const chronological = [...activity.events].reverse();
+    const feeClaims = chronological.filter(
+      (e) => (e.type === 'fee_claim' || e.type === 'reward_claim') && e.timestamp > 0,
+    );
+
+    if (feeClaims.length === 0) return { chartData: [] as { label: string; value: number }[], noClaimsYet: true, openTs: 0 };
+
+    const firstDeposit = chronological.find((e) => e.type === 'deposit');
+    const openTs = firstDeposit ? firstDeposit.timestamp * 1000 : feeClaims[0].timestamp * 1000;
+
+    let cumulative = 0;
+    const chartData: { label: string; value: number }[] = [
+      { label: new Date(openTs).toLocaleDateString("en-US", { month: "short", day: "numeric" }), value: 0 },
+    ];
+
+    for (const ev of feeClaims) {
+      cumulative += ev.usdAtTime ?? 0;
+      chartData.push({
+        label: new Date(ev.timestamp * 1000).toLocaleDateString("en-US", {
+          month: "short", day: "numeric",
+          ...(feeClaims.length <= 20 ? { hour: "numeric" as const } : {}),
+        }),
+        value: cumulative,
+      });
+    }
+
+    return { chartData, noClaimsYet: false, openTs };
+  }, [activity]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -678,7 +677,7 @@ export default function PositionDetail() {
             const uncollectedUSD = pos.fees;
             const lifetimeUSD = claimedUSD + uncollectedUSD;
             const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
-            const firstTs = firstDeposit?.timestamp ?? (feeMetrics?.firstSnap.timestamp ? feeMetrics.firstSnap.timestamp / 1000 : 0);
+            const firstTs = firstDeposit?.timestamp ?? 0;
             const nowTs = Math.floor(Date.now() / 1000);
             const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
             const actualAPR = daysActive >= 1 && pos.value > 0 && claimedUSD > 0
@@ -767,36 +766,45 @@ export default function PositionDetail() {
         </Card>
 
         {/* ── 2D.6: Fee Accumulation Chart ──────────────────────────────────── */}
-        {feeMetrics && feeMetrics.chartData.length >= 2 && (
+        {isActivityProtocol && feeChartData && (
           <Card style={{ marginBottom: 20 }}>
             <SectionHeader icon="📈" label="Fee Accumulation" />
-            <div style={{ height: 160 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={feeMetrics.chartData}
-                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
-                    tickLine={false} axisLine={false}
-                    interval={Math.max(0, Math.floor(feeMetrics.chartData.length / 5) - 1)} />
-                  <YAxis tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
-                    tickLine={false} axisLine={false}
-                    tickFormatter={(v: number) => `$${v.toFixed(2)}`} width={52} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#0a1410",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      borderRadius: 8, color: "#fff", fontSize: 12 }}
-                    formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(4)}`, "Cumulative Fees"]}
-                  />
-                  <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
-                    dot={false} activeDot={{ r: 4, fill: "#34d399" }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: "10px 0 0", textAlign: "center" }}>
-              Fee tracking started{" "}
-              {new Date(feeMetrics.firstSnap.timestamp).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.
-              {" "}Data before this date is not available.
-            </p>
+            {feeChartData.noClaimsYet || feeChartData.chartData.length < 2 ? (
+              <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No fee claims yet</p>
+              </div>
+            ) : (
+              <>
+                <div style={{ height: 160 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={feeChartData.chartData}
+                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
+                        tickLine={false} axisLine={false}
+                        interval={Math.max(0, Math.floor(feeChartData.chartData.length / 5) - 1)} />
+                      <YAxis tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
+                        tickLine={false} axisLine={false}
+                        tickFormatter={(v: number) => `$${v.toFixed(2)}`} width={52} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "#0a1410",
+                          border: "1px solid rgba(255,255,255,0.06)",
+                          borderRadius: 8, color: "#fff", fontSize: 12 }}
+                        itemStyle={{ color: "#fff" }}
+                        labelStyle={{ color: "#fff" }}
+                        formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(4)}`, "Cumulative Fees"]}
+                      />
+                      <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
+                        dot={{ r: 3, fill: "#34d399" }} activeDot={{ r: 5, fill: "#34d399" }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: "10px 0 0", textAlign: "center" }}>
+                  {feeChartData.chartData.length - 1} fee claim{feeChartData.chartData.length - 1 !== 1 ? "s" : ""} since{" "}
+                  {new Date(feeChartData.openTs ?? Date.now()).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                </p>
+              </>
+            )}
           </Card>
         )}
 
