@@ -834,7 +834,7 @@ export default function PositionDetail() {
             const txUrl = (hash: string): string => {
               if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
               if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
-              if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
+              if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
               if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
               if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
               if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
@@ -1072,6 +1072,7 @@ export default function PositionDetail() {
                 price0: pos.price0 ?? 0,
                 price1: pos.price1 ?? 0,
                 events: activity.events,
+                isClosed: pos.status === "Closed",
               });
               if (!result.ok) {
                 return (
@@ -1100,30 +1101,33 @@ export default function PositionDetail() {
               const subStyle: React.CSSProperties = {
                 fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0,
               };
+              const closed = d.isClosed;
               return (
                 <>
                   <div className="detail-5col"
-                    style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 12 }}>
+                    style={{ display: "grid", gridTemplateColumns: closed ? "repeat(4, 1fr)" : "repeat(5, 1fr)", gap: 10, marginBottom: 12 }}>
                     <div style={cardStyle}>
                       <p style={labelStyle}>Initial Value</p>
                       <p style={valueStyle("white")}>{fmt$(d.initialValue)}</p>
                       <p style={subStyle}>at deposit time</p>
                     </div>
                     <div style={cardStyle}>
-                      <p style={labelStyle}>Current Value</p>
-                      <p style={valueStyle("white")}>{fmt$(d.currentValue)}</p>
-                      <p style={subStyle}>live</p>
+                      <p style={labelStyle}>{closed ? "Closing Value" : "Current Value"}</p>
+                      <p style={valueStyle("white")}>{fmt$(closed ? d.closingValue : d.currentValue)}</p>
+                      <p style={subStyle}>{closed ? "at close time" : "live"}</p>
                     </div>
                     <div style={cardStyle}>
                       <p style={labelStyle}>Fees Collected</p>
                       <p style={valueStyle("#34d399")}>{fmt$(d.feesCollected)}</p>
                       <p style={subStyle}>claimed on-chain</p>
                     </div>
-                    <div style={cardStyle}>
-                      <p style={labelStyle}>Fees Unclaimed</p>
-                      <p style={valueStyle("#6ee7b7")}>{fmt$(d.feesUnclaimed)}</p>
-                      <p style={subStyle}>ready to claim</p>
-                    </div>
+                    {!closed && (
+                      <div style={cardStyle}>
+                        <p style={labelStyle}>Fees Unclaimed</p>
+                        <p style={valueStyle("#6ee7b7")}>{fmt$(d.feesUnclaimed)}</p>
+                        <p style={subStyle}>ready to claim</p>
+                      </div>
+                    )}
                     <div style={{
                       ...cardStyle,
                       background: pnlPositive ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
@@ -1146,7 +1150,7 @@ export default function PositionDetail() {
                     <div style={cardStyle}>
                       <p style={labelStyle}>HODL Value</p>
                       <p style={valueStyle("white")}>{fmt$(d.hodlValue)}</p>
-                      <p style={subStyle}>if you just held</p>
+                      <p style={subStyle}>{closed ? "if you held until today" : "if you just held"}</p>
                     </div>
                     <div style={cardStyle}>
                       <p style={labelStyle}>Impermanent Loss</p>
@@ -1176,7 +1180,9 @@ export default function PositionDetail() {
                   </div>
                   <p style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", margin: "12px 0 0", lineHeight: 1.5 }}>
                     Based on {d.depositCount} on-chain deposit{d.depositCount === 1 ? "" : "s"}.
-                    IL formula: 2√r/(1+r) − 1 where r = current÷entry price ratio.
+                    {closed
+                      ? " Closed position — IL = HODL Value − Closing Value."
+                      : " IL formula: 2√r/(1+r) − 1 where r = current÷entry price ratio."}
                   </p>
                 </>
               );

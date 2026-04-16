@@ -22,6 +22,7 @@ export interface PositionPnLInput {
   price0: number;
   price1: number;
   events: ActivityEventForPnL[];
+  isClosed?: boolean;
 }
 
 export type PositionPnLStatus =
@@ -31,6 +32,7 @@ export type PositionPnLStatus =
 export interface PositionPnLData {
   initialValue: number;
   currentValue: number;
+  closingValue: number;
   feesCollected: number;
   feesUnclaimed: number;
   netPnlUSD: number;
@@ -43,10 +45,11 @@ export interface PositionPnLData {
   entryPrice1: number;
   depositCount: number;
   firstDepositTs: number;
+  isClosed: boolean;
 }
 
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
-  const { currentValue, unclaimedFeesUSD, price0, price1, events } = input;
+  const { currentValue, unclaimedFeesUSD, price0, price1, events, isClosed } = input;
 
   if (price0 <= 0 || price1 <= 0) {
     return { ok: false, reason: 'missing_current_prices' };
@@ -84,10 +87,6 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const totalAmount1 = deposits.reduce((s, e) => s + e.amount1, 0);
 
   // Entry prices — USD-weighted across deposits that have per-token prices.
-  // For deposits that only have usdAtTime (no per-token breakdown) we back
-  // the per-token entry price out by solving usd = a0*p0 + a1*p1 against a
-  // same-day historical ratio — but the simpler path is to skip them for the
-  // weighted average. We still include them in initialValue above.
   let weightSum = 0;
   let weightedP0 = 0;
   let weightedP1 = 0;
@@ -103,6 +102,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const entryPrice0 = weightSum > 0 ? weightedP0 / weightSum : 0;
   const entryPrice1 = weightSum > 0 ? weightedP1 / weightSum : 0;
 
+  // HODL value — what original deposit tokens would be worth at today's prices.
   const hodlValue = totalAmount0 * price0 + totalAmount1 * price1;
 
   // Fees collected — strict: every claim must have a historical valuation.
@@ -114,12 +114,58 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     } else if (e.price0AtTime != null && e.price1AtTime != null) {
       feesCollected += e.amount0 * e.price0AtTime + e.amount1 * e.price1AtTime;
     }
-    // Claims with no historical data are silently dropped from collected
-    // fees (we can't value them honestly) — they still exist on-chain, they
-    // just won't contribute. This is an extreme edge case for very old
-    // claims pre-CG indexing.
   }
 
+  // ── Closed position path ─────────────────────────────────────────────
+  // Closing Value = USD value of tokens received in closing withdrawal(s)
+  // at the time of withdrawal (from on-chain V3 price derivation).
+  // Net P&L = (Closing Value + Fees Collected) − Initial Value
+  // IL = HODL Value − Closing Value (absolute loss from LP vs hold)
+  if (isClosed) {
+    const withdrawals = sorted.filter((e) => e.type === 'withdrawal');
+    let closingValue = 0;
+    for (const w of withdrawals) {
+      if (w.usdAtTime != null && w.usdAtTime > 0) {
+        closingValue += w.usdAtTime;
+      } else if (w.price0AtTime != null && w.price1AtTime != null) {
+        closingValue += w.amount0 * w.price0AtTime + w.amount1 * w.price1AtTime;
+      } else {
+        // Fallback: value withdrawal at current prices when no historical data
+        closingValue += w.amount0 * price0 + w.amount1 * price1;
+      }
+    }
+
+    const netPnlUSD = closingValue + feesCollected - initialValue;
+    const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
+
+    // IL for closed = HODL Value − Closing Value (positive = LP underperformed holding)
+    const ilUSD = hodlValue - closingValue;
+    const ilPct = hodlValue > 0 ? (ilUSD / hodlValue) * -100 : 0;
+
+    return {
+      ok: true,
+      data: {
+        initialValue,
+        currentValue: 0,
+        closingValue,
+        feesCollected,
+        feesUnclaimed: 0,
+        netPnlUSD,
+        netPnlPct,
+        ilPct,
+        ilUSD: -ilUSD, // negative = loss (consistent with open position sign convention)
+        hodlValue,
+        feesOffsetIL: feesCollected >= ilUSD,
+        entryPrice0,
+        entryPrice1,
+        depositCount: deposits.length,
+        firstDepositTs: deposits[0].timestamp,
+        isClosed: true,
+      },
+    };
+  }
+
+  // ── Open position path (unchanged) ───────────────────────────────────
   const netPnlUSD = currentValue + feesCollected + unclaimedFeesUSD - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
 
@@ -142,6 +188,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     data: {
       initialValue,
       currentValue,
+      closingValue: 0,
       feesCollected,
       feesUnclaimed: unclaimedFeesUSD,
       netPnlUSD,
@@ -154,6 +201,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       entryPrice1,
       depositCount: deposits.length,
       firstDepositTs: deposits[0].timestamp,
+      isClosed: false,
     },
   };
 }

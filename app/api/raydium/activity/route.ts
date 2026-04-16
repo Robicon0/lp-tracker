@@ -330,7 +330,7 @@ export async function GET(request: Request) {
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
 
-      if (ev.type === 'deposit' && hasTicks) {
+      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
         const derived = deriveDepositPrices(
           amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
           mintA, mintB, STABLECOINS,

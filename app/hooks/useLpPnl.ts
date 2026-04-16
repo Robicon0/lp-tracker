@@ -201,6 +201,7 @@ async function fetchAndCompute(
     price0: pos.price0 ?? 0,
     price1: pos.price1 ?? 0,
     events,
+    isClosed: pos.status === "Closed",
   });
 
   if (!result.ok) {
@@ -273,11 +274,11 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
   }, []);
 
   useEffect(() => {
-    // Deduplicate, filter active + supported
+    // Deduplicate, filter supported protocols (include closed positions)
     const seen = new Set<string>();
     const eligible = positions.filter((p) => {
-      if (p.status === "Closed" || p.value <= 0) return false;
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) return false;
+      if (p.status !== "Closed" && p.value <= 0) return false;
       if (seen.has(p.id)) return false;
       seen.add(p.id);
       return true;

@@ -1267,7 +1267,7 @@ export default function PositionDetail() {
               const txUrl = (hash: string) => {
                 if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
                 if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
-                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
+                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
                 if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
                 if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
                 if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
@@ -1398,7 +1398,7 @@ export default function PositionDetail() {
               const txUrl = (hash: string) => {
                 if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
                 if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
-                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hypurrscan.io/tx/${hash}`;
+                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
                 if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
                 if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
                 if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
