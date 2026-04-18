@@ -38,6 +38,8 @@ export interface PositionPnLData {
   feesUnclaimed: number;
   netPnlUSD: number;
   netPnlPct: number;
+  // Sign convention: ilUSD < 0 = loss (LP underperformed HODL), ilPct < 0 = loss.
+  // Identity: hodlValue + ilUSD === currentValue (or closingValue when closed) — exact, no approximation.
   ilPct: number;
   ilUSD: number;
   hodlValue: number;
@@ -49,11 +51,14 @@ export interface PositionPnLData {
   depositCount: number;
   firstDepositTs: number;
   isClosed: boolean;
+  // Original deposited amounts (sum across all deposits) — used to display HODL formula.
+  totalAmount0: number;
+  totalAmount1: number;
   // Calculation detail fields for "How this was calculated" section
-  entryRatio: number;    // entryPrice0 / entryPrice1
-  currentRatio: number;  // price0 / price1
-  priceRatioR: number;   // currentRatio / entryRatio
-  ilAvailable: boolean;  // whether IL formula was computable
+  entryRatio: number;    // entryPrice0 / entryPrice1 (kept for back-compat / display only)
+  currentRatio: number;  // price0 / price1 (kept for back-compat / display only)
+  priceRatioR: number;   // currentRatio / entryRatio (kept for back-compat / display only)
+  ilAvailable: boolean;  // whether IL is computable (true iff hodlValue > 0)
   depositTxHashes: string[];
 }
 
@@ -129,12 +134,12 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const depositTxHashes = deposits.map((d) => d.txHash).filter((h): h is string => !!h);
   const entryRatio = entryPrice1 > 0 ? entryPrice0 / entryPrice1 : 0;
   const currentRatio = price1 > 0 ? price0 / price1 : 0;
-  let priceRatioR = 0;
-  let ilAvailable = false;
-  if (entryRatio > 0 && currentRatio > 0) {
-    priceRatioR = currentRatio / entryRatio;
-    ilAvailable = Number.isFinite(priceRatioR) && priceRatioR > 0;
-  }
+  const priceRatioR =
+    entryRatio > 0 && currentRatio > 0 && Number.isFinite(currentRatio / entryRatio)
+      ? currentRatio / entryRatio
+      : 0;
+  // IL is computable iff we have a positive HODL value to compare against.
+  const ilAvailable = hodlValue > 0;
 
   const sharedFields = {
     entryPrice0,
@@ -143,6 +148,8 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     currentPrice1: price1,
     depositCount: deposits.length,
     firstDepositTs: deposits[0].timestamp,
+    totalAmount0,
+    totalAmount1,
     entryRatio,
     currentRatio,
     priceRatioR,
@@ -150,11 +157,21 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     depositTxHashes,
   };
 
+  // ── IL formula (concentrated liquidity, exact) ────────────────────────
+  // For BOTH open and closed positions IL is computed by directly comparing
+  // the LP's realized USD value against what the original deposit tokens
+  // would be worth today (HODL):
+  //
+  //   ilUSD = liveValue - hodlValue              (negative = loss vs HODL)
+  //   ilPct = (liveValue / hodlValue - 1) * 100
+  //
+  // where liveValue = currentValue (open) or closingValue (closed).
+  // This satisfies the identity exactly:
+  //   hodlValue + ilUSD === liveValue
+  // No square-root approximation, no V2-pool assumption — works for every
+  // protocol that emits deposit + (withdrawal) events with usable USD values.
+
   // ── Closed position path ─────────────────────────────────────────────
-  // Closing Value = USD value of tokens received in closing withdrawal(s)
-  // at the time of withdrawal (from on-chain V3 price derivation).
-  // Net P&L = (Closing Value + Fees Collected) − Initial Value
-  // IL = HODL Value − Closing Value (absolute loss from LP vs hold)
   if (isClosed) {
     const withdrawals = sorted.filter((e) => e.type === 'withdrawal');
     let closingValue = 0;
@@ -171,9 +188,8 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     const netPnlUSD = closingValue + feesCollected - initialValue;
     const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
 
-    // IL for closed = HODL Value − Closing Value (positive = LP underperformed holding)
-    const ilUSD = hodlValue - closingValue;
-    const ilPct = hodlValue > 0 ? (ilUSD / hodlValue) * -100 : 0;
+    const ilUSD = ilAvailable ? closingValue - hodlValue : 0;
+    const ilPct = ilAvailable ? (closingValue / hodlValue - 1) * 100 : 0;
 
     return {
       ok: true,
@@ -187,9 +203,9 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
         netPnlUSD,
         netPnlPct,
         ilPct,
-        ilUSD: -ilUSD,
+        ilUSD,
         hodlValue,
-        feesOffsetIL: feesCollected >= ilUSD,
+        feesOffsetIL: feesCollected >= Math.abs(ilUSD),
         isClosed: true,
       },
     };
@@ -199,13 +215,8 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const netPnlUSD = currentValue + feesCollected + unclaimedFeesUSD - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
 
-  let ilPct = 0;
-  let ilUSD = 0;
-  if (ilAvailable) {
-    const ilRaw = (2 * Math.sqrt(priceRatioR)) / (1 + priceRatioR) - 1;
-    ilPct = ilRaw * 100;
-    ilUSD = hodlValue * ilRaw;
-  }
+  const ilUSD = ilAvailable ? currentValue - hodlValue : 0;
+  const ilPct = ilAvailable ? (currentValue / hodlValue - 1) * 100 : 0;
 
   return {
     ok: true,

@@ -363,36 +363,39 @@ function PnLCardContent({ d, closed, pnlPositive, ilNegative, totalFees, sym0, s
             {sym1} entry: {fmtP(d.entryPrice1)} &rarr; current: {fmtP(d.currentPrice1)}
           </p>
 
-          {d.ilAvailable && !closed && (
+          {d.ilAvailable && (
             <>
               <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-                IL Formula
+                Original Deposits
               </p>
               <p style={{ margin: 0 }}>
-                r = ({fmtP(d.currentPrice0)} / {fmtP(d.currentPrice1)}) / ({fmtP(d.entryPrice0)} / {fmtP(d.entryPrice1)})
-              </p>
-              <p style={{ margin: 0 }}>
-                r = {d.currentRatio.toFixed(6)} / {d.entryRatio.toFixed(6)} = {d.priceRatioR.toFixed(6)}
-              </p>
-              <p style={{ margin: 0 }}>
-                IL = 2 &times; &radic;{d.priceRatioR.toFixed(6)} / (1 + {d.priceRatioR.toFixed(6)}) &minus; 1 = {d.ilPct.toFixed(4)}%
+                {sym0}: {d.totalAmount0.toLocaleString(undefined, { maximumFractionDigits: 6 })} (entry {fmtP(d.entryPrice0)} &rarr; current {fmtP(d.currentPrice0)})
               </p>
               <p style={{ margin: "0 0 12px" }}>
-                IL USD = {d.ilPct.toFixed(4)}% &times; {fmt$(d.hodlValue)} HODL = {d.ilUSD < 0 ? "−" : ""}{fmt$(Math.abs(d.ilUSD))}
+                {sym1}: {d.totalAmount1.toLocaleString(undefined, { maximumFractionDigits: 6 })} (entry {fmtP(d.entryPrice1)} &rarr; current {fmtP(d.currentPrice1)})
               </p>
-            </>
-          )}
 
-          {closed && (
-            <>
               <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-                Closed Position IL
-              </p>
-              <p style={{ margin: 0 }}>
-                IL = HODL Value &minus; Closing Value
+                HODL Value (deposits at today&apos;s prices)
               </p>
               <p style={{ margin: "0 0 12px" }}>
-                IL = {fmt$(d.hodlValue)} &minus; {fmt$(d.closingValue)} = {d.ilUSD < 0 ? "−" : ""}{fmt$(Math.abs(d.ilUSD))}
+                HODL = ({d.totalAmount0.toLocaleString(undefined, { maximumFractionDigits: 6 })} &times; {fmtP(d.currentPrice0)}) + ({d.totalAmount1.toLocaleString(undefined, { maximumFractionDigits: 6 })} &times; {fmtP(d.currentPrice1)}) = {fmt$(d.hodlValue)}
+              </p>
+
+              <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
+                Impermanent Loss (concentrated liquidity)
+              </p>
+              <p style={{ margin: 0 }}>
+                {closed ? "Closing" : "Current"} LP Value = {fmt$(closed ? d.closingValue : d.currentValue)}
+              </p>
+              <p style={{ margin: 0 }}>
+                IL % = ({fmt$(closed ? d.closingValue : d.currentValue)} / {fmt$(d.hodlValue)}) &minus; 1 = {d.ilPct.toFixed(4)}%
+              </p>
+              <p style={{ margin: 0 }}>
+                IL USD = {fmt$(d.hodlValue)} HODL &minus; {fmt$(closed ? d.closingValue : d.currentValue)} {closed ? "Closing" : "Current"} = {d.ilUSD < 0 ? "−" : "+"}{fmt$(Math.abs(d.ilUSD))}
+              </p>
+              <p style={{ margin: "0 0 12px", color: "rgba(255,255,255,0.4)", fontSize: 11 }}>
+                Identity: HODL + IL USD = {fmt$(d.hodlValue + d.ilUSD)} (matches LP Value exactly)
               </p>
             </>
           )}
