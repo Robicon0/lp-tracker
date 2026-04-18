@@ -18,7 +18,7 @@ import { useHyperSwapActivity } from "../../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
 import { usePancakeSwapActivity } from "../../../hooks/usePancakeSwapActivity";
-import { computePositionPnL } from "../../../lib/positionPnl";
+import { computePositionPnL, type PositionPnLData } from "../../../lib/positionPnl";
 
 // ── Token logo circle ─────────────────────────────────────────────────────────
 function TokenCircle({ symbol, size = 32, style }: {
@@ -198,6 +198,225 @@ function StatCard({
         <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "4px 0 0" }}>{sub}</p>
       )}
     </Card>
+  );
+}
+
+// ── P&L Card Content ─────────────────────────────────────────────────────────
+function PnLCardContent({ d, closed, pnlPositive, ilNegative, totalFees, sym0, sym1, txUrl, cellStyle, lbl, val, sub }: {
+  d: PositionPnLData; closed: boolean; pnlPositive: boolean; ilNegative: boolean;
+  totalFees: number; sym0: string; sym1: string;
+  txUrl: (hash: string) => string;
+  cellStyle: React.CSSProperties; lbl: React.CSSProperties;
+  val: (c: string) => React.CSSProperties; sub: React.CSSProperties;
+}) {
+  const [showCalc, setShowCalc] = useState(false);
+
+  const fmtP = (n: number): string => {
+    if (n >= 1_000) return `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+    if (n >= 1)     return `$${n.toFixed(2)}`;
+    if (n >= 0.0001) return `$${n.toFixed(6)}`;
+    return `$${n.toExponential(2)}`;
+  };
+
+  const bannerGreen = d.feesOffsetIL;
+  const bannerBg = bannerGreen ? "rgba(16,185,129,0.10)" : "rgba(239,68,68,0.10)";
+  const bannerBorder = bannerGreen ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)";
+
+  return (
+    <>
+      {/* Row 1: 5 metric cards */}
+      <div className="detail-5col"
+        style={{ display: "grid", gridTemplateColumns: closed ? "repeat(4, 1fr)" : "repeat(5, 1fr)", gap: 10, marginBottom: 12 }}>
+        <div style={cellStyle}>
+          <p style={lbl}>Initial Value</p>
+          <p style={val("white")}>{fmt$(d.initialValue)}</p>
+          <p style={sub}>at deposit time</p>
+        </div>
+        <div style={cellStyle}>
+          <p style={lbl}>{closed ? "Closing Value" : "Current Value"}</p>
+          <p style={val("white")}>{fmt$(closed ? d.closingValue : d.currentValue)}</p>
+          <p style={sub}>{closed ? "at close time" : "live"}</p>
+        </div>
+        <div style={cellStyle}>
+          <p style={lbl}>Fees Collected</p>
+          <p style={val("#34d399")}>{fmt$(d.feesCollected)}</p>
+          <p style={sub}>claimed on-chain</p>
+        </div>
+        {!closed && (
+          <div style={cellStyle}>
+            <p style={lbl}>Fees Unclaimed</p>
+            <p style={val("#6ee7b7")}>{fmt$(d.feesUnclaimed)}</p>
+            <p style={sub}>ready to claim</p>
+          </div>
+        )}
+        <div style={cellStyle}>
+          <p style={lbl}>Impermanent Loss</p>
+          <p style={val(ilNegative ? "#f87171" : "#34d399")}>
+            {ilNegative ? "−" : "+"}{fmt$(Math.abs(d.ilUSD))}
+          </p>
+          <p style={{ ...sub, color: ilNegative ? "rgba(248,113,113,0.7)" : "rgba(52,211,153,0.7)" }}>
+            {d.ilPct.toFixed(2)}%
+          </p>
+        </div>
+      </div>
+
+      {/* Row 2: Net P&L + Fees vs IL banner */}
+      <div style={{
+        background: bannerBg,
+        border: `1px solid ${bannerBorder}`,
+        borderRadius: 10,
+        padding: "16px 20px",
+        display: "flex",
+        alignItems: "center",
+        gap: 0,
+        marginBottom: 8,
+      }}>
+        {/* Left: Net P&L */}
+        <div style={{ flex: 1 }}>
+          <p style={{ ...lbl, textAlign: "left" }}>Net P&L</p>
+          <p style={{
+            fontSize: 26, fontWeight: 700, margin: "0 0 2px",
+            color: pnlPositive ? "#34d399" : "#f87171",
+          }}>
+            {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
+            <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 8, opacity: 0.8 }}>
+              {pnlPositive ? "+" : ""}{d.netPnlPct.toFixed(2)}%
+            </span>
+          </p>
+          <p style={{ ...sub, textAlign: "left" }}>
+            {closed
+              ? `(${fmt$(d.closingValue)} closing + ${fmt$(d.feesCollected)} fees) − ${fmt$(d.initialValue)} initial`
+              : `(${fmt$(d.currentValue)} current + ${fmt$(d.feesCollected)} fees + ${fmt$(d.feesUnclaimed)} unclaimed) − ${fmt$(d.initialValue)} initial`}
+          </p>
+        </div>
+
+        {/* Divider */}
+        <div style={{
+          width: 1, alignSelf: "stretch",
+          background: bannerGreen ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
+          margin: "0 20px",
+        }} />
+
+        {/* Right: Fees vs IL */}
+        <div style={{ flex: 0, minWidth: 160, textAlign: "center" }}>
+          <p style={lbl}>Fees vs IL</p>
+          <p style={{
+            fontSize: 20, fontWeight: 700, margin: "0 0 4px",
+            color: bannerGreen ? "#34d399" : "#f87171",
+          }}>
+            {bannerGreen ? "Offset \u2713" : "Not offset \u2717"}
+          </p>
+          <p style={sub}>
+            {fmt$(totalFees)} fees vs {fmt$(Math.abs(d.ilUSD))} IL
+          </p>
+        </div>
+      </div>
+
+      {/* Collapsible: How this was calculated */}
+      <button
+        onClick={() => setShowCalc(!showCalc)}
+        style={{
+          background: "none", border: "none", cursor: "pointer",
+          fontSize: 11, color: "rgba(255,255,255,0.4)", padding: "6px 0",
+          display: "flex", alignItems: "center", gap: 4,
+        }}
+      >
+        <span style={{ transform: showCalc ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s", display: "inline-block" }}>
+          &#9656;
+        </span>
+        How this was calculated
+      </button>
+
+      {showCalc && (
+        <div style={{
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: 8, padding: 16, marginTop: 4,
+          fontSize: 12, lineHeight: 1.8, color: "rgba(255,255,255,0.55)",
+          fontFamily: "monospace",
+        }}>
+          <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
+            Entry &amp; Current Prices
+          </p>
+          <p style={{ margin: 0 }}>
+            {sym0} entry: {fmtP(d.entryPrice0)} &rarr; current: {fmtP(d.currentPrice0)}
+          </p>
+          <p style={{ margin: "0 0 12px" }}>
+            {sym1} entry: {fmtP(d.entryPrice1)} &rarr; current: {fmtP(d.currentPrice1)}
+          </p>
+
+          {d.ilAvailable && !closed && (
+            <>
+              <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
+                IL Formula
+              </p>
+              <p style={{ margin: 0 }}>
+                r = ({fmtP(d.currentPrice0)} / {fmtP(d.currentPrice1)}) / ({fmtP(d.entryPrice0)} / {fmtP(d.entryPrice1)})
+              </p>
+              <p style={{ margin: 0 }}>
+                r = {d.currentRatio.toFixed(6)} / {d.entryRatio.toFixed(6)} = {d.priceRatioR.toFixed(6)}
+              </p>
+              <p style={{ margin: 0 }}>
+                IL = 2 &times; &radic;{d.priceRatioR.toFixed(6)} / (1 + {d.priceRatioR.toFixed(6)}) &minus; 1 = {d.ilPct.toFixed(4)}%
+              </p>
+              <p style={{ margin: "0 0 12px" }}>
+                IL USD = {d.ilPct.toFixed(4)}% &times; {fmt$(d.hodlValue)} HODL = {d.ilUSD < 0 ? "−" : ""}{fmt$(Math.abs(d.ilUSD))}
+              </p>
+            </>
+          )}
+
+          {closed && (
+            <>
+              <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
+                Closed Position IL
+              </p>
+              <p style={{ margin: 0 }}>
+                IL = HODL Value &minus; Closing Value
+              </p>
+              <p style={{ margin: "0 0 12px" }}>
+                IL = {fmt$(d.hodlValue)} &minus; {fmt$(d.closingValue)} = {d.ilUSD < 0 ? "−" : ""}{fmt$(Math.abs(d.ilUSD))}
+              </p>
+            </>
+          )}
+
+          <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
+            Net P&amp;L
+          </p>
+          {closed ? (
+            <p style={{ margin: "0 0 12px" }}>
+              ({fmt$(d.closingValue)} closing + {fmt$(d.feesCollected)} fees) &minus; {fmt$(d.initialValue)} initial = {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
+            </p>
+          ) : (
+            <p style={{ margin: "0 0 12px" }}>
+              ({fmt$(d.currentValue)} current + {fmt$(d.feesCollected)} fees + {fmt$(d.feesUnclaimed)} unclaimed) &minus; {fmt$(d.initialValue)} initial = {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
+            </p>
+          )}
+
+          <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
+            On-Chain Deposits ({d.depositCount})
+          </p>
+          {d.depositTxHashes.length > 0 ? (
+            d.depositTxHashes.map((hash, i) => (
+              <p key={hash} style={{ margin: 0 }}>
+                #{i + 1}{" "}
+                <a
+                  href={txUrl(hash)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "#6ee7b7", textDecoration: "none" }}
+                >
+                  {hash.slice(0, 10)}...{hash.slice(-8)}
+                </a>
+              </p>
+            ))
+          ) : (
+            <p style={{ margin: 0 }}>
+              {d.depositCount} deposit{d.depositCount === 1 ? "" : "s"} found on-chain (tx hashes unavailable)
+            </p>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1066,12 +1285,23 @@ export default function PositionDetail() {
                   </p>
                 );
               }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const pnlEvents = activity.events.map((e: any) => ({
+                type: e.type as 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim',
+                timestamp: e.timestamp as number,
+                amount0: e.amount0 as number,
+                amount1: e.amount1 as number,
+                usdAtTime: (e.usdAtTime as number | null) ?? null,
+                price0AtTime: (e.price0AtTime as number | null) ?? null,
+                price1AtTime: (e.price1AtTime as number | null) ?? null,
+                txHash: (e.txHash as string | undefined) ?? undefined,
+              }));
               const result = computePositionPnL({
                 currentValue: pos.value,
                 unclaimedFeesUSD: pos.fees ?? 0,
                 price0: pos.price0 ?? 0,
                 price1: pos.price1 ?? 0,
-                events: activity.events,
+                events: pnlEvents,
                 isClosed: pos.status === "Closed",
               });
               if (!result.ok) {
@@ -1084,107 +1314,46 @@ export default function PositionDetail() {
               const d = result.data;
               const pnlPositive = d.netPnlUSD >= 0;
               const ilNegative  = d.ilUSD < 0;
-              const cardStyle: React.CSSProperties = {
+              const closed = d.isClosed;
+              const totalFees = d.feesCollected + d.feesUnclaimed;
+
+              const cellStyle: React.CSSProperties = {
                 background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.06)",
-                borderRadius: 10,
-                padding: 14,
-                textAlign: "center",
+                borderRadius: 10, padding: 14, textAlign: "center",
               };
-              const labelStyle: React.CSSProperties = {
+              const lbl: React.CSSProperties = {
                 fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
                 textTransform: "uppercase", letterSpacing: 1,
               };
-              const valueStyle = (color: string): React.CSSProperties => ({
-                fontSize: 18, fontWeight: 700, color, margin: "0 0 2px",
+              const val = (c: string): React.CSSProperties => ({
+                fontSize: 18, fontWeight: 700, color: c, margin: "0 0 2px",
               });
-              const subStyle: React.CSSProperties = {
-                fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0,
+              const sub: React.CSSProperties = { fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0 };
+
+              // Token symbols for display
+              const sym0 = pos.token0Symbol || pos.pair.split(" / ")[0] || "Token A";
+              const sym1 = pos.token1Symbol || pos.pair.split(" / ")[1] || "Token B";
+
+              // Explorer URL builder (same logic as fee claims table)
+              const txUrl = (hash: string): string => {
+                if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
+                if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
+                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
+                if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
+                if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
+                if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
+                if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
+                if (pos.chain === 'BNB Chain') return `https://bscscan.com/tx/${hash}`;
+                return `https://basescan.org/tx/${hash}`;
               };
-              const closed = d.isClosed;
+
               return (
-                <>
-                  <div className="detail-5col"
-                    style={{ display: "grid", gridTemplateColumns: closed ? "repeat(4, 1fr)" : "repeat(5, 1fr)", gap: 10, marginBottom: 12 }}>
-                    <div style={cardStyle}>
-                      <p style={labelStyle}>Initial Value</p>
-                      <p style={valueStyle("white")}>{fmt$(d.initialValue)}</p>
-                      <p style={subStyle}>at deposit time</p>
-                    </div>
-                    <div style={cardStyle}>
-                      <p style={labelStyle}>{closed ? "Closing Value" : "Current Value"}</p>
-                      <p style={valueStyle("white")}>{fmt$(closed ? d.closingValue : d.currentValue)}</p>
-                      <p style={subStyle}>{closed ? "at close time" : "live"}</p>
-                    </div>
-                    <div style={cardStyle}>
-                      <p style={labelStyle}>Fees Collected</p>
-                      <p style={valueStyle("#34d399")}>{fmt$(d.feesCollected)}</p>
-                      <p style={subStyle}>claimed on-chain</p>
-                    </div>
-                    {!closed && (
-                      <div style={cardStyle}>
-                        <p style={labelStyle}>Fees Unclaimed</p>
-                        <p style={valueStyle("#6ee7b7")}>{fmt$(d.feesUnclaimed)}</p>
-                        <p style={subStyle}>ready to claim</p>
-                      </div>
-                    )}
-                    <div style={{
-                      ...cardStyle,
-                      background: pnlPositive ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
-                      borderColor: pnlPositive ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
-                    }}>
-                      <p style={labelStyle}>Net P&amp;L</p>
-                      <p style={valueStyle(pnlPositive ? "#34d399" : "#f87171")}>
-                        {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
-                      </p>
-                      <p style={{
-                        ...subStyle,
-                        color: pnlPositive ? "rgba(52,211,153,0.7)" : "rgba(248,113,113,0.7)",
-                      }}>
-                        {pnlPositive ? "+" : ""}{d.netPnlPct.toFixed(2)}%
-                      </p>
-                    </div>
-                  </div>
-                  <div className="detail-3col"
-                    style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                    <div style={cardStyle}>
-                      <p style={labelStyle}>HODL Value</p>
-                      <p style={valueStyle("white")}>{fmt$(d.hodlValue)}</p>
-                      <p style={subStyle}>{closed ? "if you held until today" : "if you just held"}</p>
-                    </div>
-                    <div style={cardStyle}>
-                      <p style={labelStyle}>Impermanent Loss</p>
-                      <p style={valueStyle(ilNegative ? "#f87171" : "#34d399")}>
-                        {ilNegative ? "−" : "+"}{fmt$(Math.abs(d.ilUSD))}
-                      </p>
-                      <p style={{
-                        ...subStyle,
-                        color: ilNegative ? "rgba(248,113,113,0.7)" : "rgba(52,211,153,0.7)",
-                      }}>
-                        {d.ilPct.toFixed(2)}%
-                      </p>
-                    </div>
-                    <div style={{
-                      ...cardStyle,
-                      background: d.feesOffsetIL ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
-                      borderColor: d.feesOffsetIL ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
-                    }}>
-                      <p style={labelStyle}>Fees vs IL</p>
-                      <p style={valueStyle(d.feesOffsetIL ? "#34d399" : "#f87171")}>
-                        {d.feesOffsetIL ? "Offset ✓" : "Not yet"}
-                      </p>
-                      <p style={subStyle}>
-                        {fmt$(d.feesCollected + d.feesUnclaimed)} fees vs {fmt$(Math.abs(d.ilUSD))} IL
-                      </p>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", margin: "12px 0 0", lineHeight: 1.5 }}>
-                    Based on {d.depositCount} on-chain deposit{d.depositCount === 1 ? "" : "s"}.
-                    {closed
-                      ? " Closed position — IL = HODL Value − Closing Value."
-                      : " IL formula: 2√r/(1+r) − 1 where r = current÷entry price ratio."}
-                  </p>
-                </>
+                <PnLCardContent
+                  d={d} closed={closed} pnlPositive={pnlPositive} ilNegative={ilNegative}
+                  totalFees={totalFees} sym0={sym0} sym1={sym1} txUrl={txUrl}
+                  cellStyle={cellStyle} lbl={lbl} val={val} sub={sub}
+                />
               );
             })()}
           </Card>

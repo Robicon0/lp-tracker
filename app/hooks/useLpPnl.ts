@@ -193,6 +193,7 @@ async function fetchAndCompute(
     usdAtTime: (e.usdAtTime as number | null) ?? null,
     price0AtTime: (e.price0AtTime as number | null) ?? null,
     price1AtTime: (e.price1AtTime as number | null) ?? null,
+    txHash: (e.txHash as string | undefined) ?? undefined,
   }));
 
   const result = computePositionPnL({

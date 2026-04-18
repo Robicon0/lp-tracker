@@ -14,6 +14,7 @@ export interface ActivityEventForPnL {
   usdAtTime: number | null;
   price0AtTime: number | null;
   price1AtTime: number | null;
+  txHash?: string;
 }
 
 export interface PositionPnLInput {
@@ -43,9 +44,17 @@ export interface PositionPnLData {
   feesOffsetIL: boolean;
   entryPrice0: number;
   entryPrice1: number;
+  currentPrice0: number;
+  currentPrice1: number;
   depositCount: number;
   firstDepositTs: number;
   isClosed: boolean;
+  // Calculation detail fields for "How this was calculated" section
+  entryRatio: number;    // entryPrice0 / entryPrice1
+  currentRatio: number;  // price0 / price1
+  priceRatioR: number;   // currentRatio / entryRatio
+  ilAvailable: boolean;  // whether IL formula was computable
+  depositTxHashes: string[];
 }
 
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
@@ -116,6 +125,31 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     }
   }
 
+  // Calculation detail fields
+  const depositTxHashes = deposits.map((d) => d.txHash).filter((h): h is string => !!h);
+  const entryRatio = entryPrice1 > 0 ? entryPrice0 / entryPrice1 : 0;
+  const currentRatio = price1 > 0 ? price0 / price1 : 0;
+  let priceRatioR = 0;
+  let ilAvailable = false;
+  if (entryRatio > 0 && currentRatio > 0) {
+    priceRatioR = currentRatio / entryRatio;
+    ilAvailable = Number.isFinite(priceRatioR) && priceRatioR > 0;
+  }
+
+  const sharedFields = {
+    entryPrice0,
+    entryPrice1,
+    currentPrice0: price0,
+    currentPrice1: price1,
+    depositCount: deposits.length,
+    firstDepositTs: deposits[0].timestamp,
+    entryRatio,
+    currentRatio,
+    priceRatioR,
+    ilAvailable,
+    depositTxHashes,
+  };
+
   // ── Closed position path ─────────────────────────────────────────────
   // Closing Value = USD value of tokens received in closing withdrawal(s)
   // at the time of withdrawal (from on-chain V3 price derivation).
@@ -130,7 +164,6 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       } else if (w.price0AtTime != null && w.price1AtTime != null) {
         closingValue += w.amount0 * w.price0AtTime + w.amount1 * w.price1AtTime;
       } else {
-        // Fallback: value withdrawal at current prices when no historical data
         closingValue += w.amount0 * price0 + w.amount1 * price1;
       }
     }
@@ -145,6 +178,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     return {
       ok: true,
       data: {
+        ...sharedFields,
         initialValue,
         currentValue: 0,
         closingValue,
@@ -153,39 +187,30 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
         netPnlUSD,
         netPnlPct,
         ilPct,
-        ilUSD: -ilUSD, // negative = loss (consistent with open position sign convention)
+        ilUSD: -ilUSD,
         hodlValue,
         feesOffsetIL: feesCollected >= ilUSD,
-        entryPrice0,
-        entryPrice1,
-        depositCount: deposits.length,
-        firstDepositTs: deposits[0].timestamp,
         isClosed: true,
       },
     };
   }
 
-  // ── Open position path (unchanged) ───────────────────────────────────
+  // ── Open position path ───────────────────────────────────────────────
   const netPnlUSD = currentValue + feesCollected + unclaimedFeesUSD - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
 
-  // Impermanent Loss — standard formula 2√r/(1+r) − 1 where r = currentRatio / entryRatio.
   let ilPct = 0;
   let ilUSD = 0;
-  if (entryPrice0 > 0 && entryPrice1 > 0) {
-    const entryRatio = entryPrice0 / entryPrice1;
-    const currentRatio = price0 / price1;
-    const r = currentRatio / entryRatio;
-    if (r > 0 && Number.isFinite(r)) {
-      const ilRaw = (2 * Math.sqrt(r)) / (1 + r) - 1;
-      ilPct = ilRaw * 100;
-      ilUSD = hodlValue * ilRaw;
-    }
+  if (ilAvailable) {
+    const ilRaw = (2 * Math.sqrt(priceRatioR)) / (1 + priceRatioR) - 1;
+    ilPct = ilRaw * 100;
+    ilUSD = hodlValue * ilRaw;
   }
 
   return {
     ok: true,
     data: {
+      ...sharedFields,
       initialValue,
       currentValue,
       closingValue: 0,
@@ -197,10 +222,6 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       ilUSD,
       hodlValue,
       feesOffsetIL: (feesCollected + unclaimedFeesUSD) >= Math.abs(ilUSD),
-      entryPrice0,
-      entryPrice1,
-      depositCount: deposits.length,
-      firstDepositTs: deposits[0].timestamp,
       isClosed: false,
     },
   };
