@@ -260,7 +260,7 @@ function PnLCardContent({ d, closed, pnlPositive, ilNegative, totalFees, sym0, s
         </div>
       </div>
 
-      {/* Row 2: Net P&L + Fees vs IL banner */}
+      {/* Row 2: Net P&L + HODL Value + Fees vs IL banner */}
       <div style={{
         background: bannerBg,
         border: `1px solid ${bannerBorder}`,
@@ -271,8 +271,8 @@ function PnLCardContent({ d, closed, pnlPositive, ilNegative, totalFees, sym0, s
         gap: 0,
         marginBottom: 8,
       }}>
-        {/* Left: Net P&L */}
-        <div style={{ flex: 1 }}>
+        {/* Section 1: Net P&L */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ ...lbl, textAlign: "left" }}>Net P&L</p>
           <p style={{
             fontSize: 26, fontWeight: 700, margin: "0 0 2px",
@@ -294,11 +294,29 @@ function PnLCardContent({ d, closed, pnlPositive, ilNegative, totalFees, sym0, s
         <div style={{
           width: 1, alignSelf: "stretch",
           background: bannerGreen ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
-          margin: "0 20px",
+          margin: "0 16px",
         }} />
 
-        {/* Right: Fees vs IL */}
-        <div style={{ flex: 0, minWidth: 160, textAlign: "center" }}>
+        {/* Section 2: HODL Value */}
+        <div style={{ flex: 0, minWidth: 140, textAlign: "center" }}>
+          <p style={lbl}>HODL Value</p>
+          <p style={{
+            fontSize: 20, fontWeight: 700, margin: "0 0 4px", color: "white",
+          }}>
+            {fmt$(d.hodlValue)}
+          </p>
+          <p style={sub}>{closed ? "if you held until today" : "if you just held"}</p>
+        </div>
+
+        {/* Divider */}
+        <div style={{
+          width: 1, alignSelf: "stretch",
+          background: bannerGreen ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
+          margin: "0 16px",
+        }} />
+
+        {/* Section 3: Fees vs IL */}
+        <div style={{ flex: 0, minWidth: 140, textAlign: "center" }}>
           <p style={lbl}>Fees vs IL</p>
           <p style={{
             fontSize: 20, fontWeight: 700, margin: "0 0 4px",
