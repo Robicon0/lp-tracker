@@ -149,6 +149,42 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
   return null;
 }
 
+// ── localStorage cache for on-chain events (5 min TTL) ──────────────────────
+// We only cache the slow part — the on-chain fetch result (events array).
+// Live values (pos.value, pos.price0/1, pos.fees) are always taken from the
+// latest positions snapshot, so prices stay fresh while history loads instantly.
+
+const CACHE_KEY_PREFIX = "lp-pnl-events-v1-";
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CachedEntry {
+  ts: number;
+  events: Array<Record<string, unknown>> | null; // null = previous fetch returned no events
+  reason?: string; // populated when events is null and we want to remember why
+}
+
+function cacheGet(posId: string): CachedEntry | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_PREFIX + posId);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as CachedEntry;
+    if (Date.now() - entry.ts > CACHE_TTL_MS) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+function cacheSet(posId: string, entry: CachedEntry): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CACHE_KEY_PREFIX + posId, JSON.stringify(entry));
+  } catch {
+    // Quota or serialization failure — silently skip caching.
+  }
+}
+
 // ── Fetch one position's activity and compute P&L ───────────────────────────
 
 async function fetchAndCompute(
@@ -162,30 +198,45 @@ async function fetchAndCompute(
     return { ok: false, reason: "no activity URL" };
   }
 
-  let json: { events?: Array<Record<string, unknown>>; error?: string };
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      console.error(`${tag} HTTP ${res.status} ${body.slice(0, 300)}`);
-      return { ok: false, reason: `HTTP ${res.status}` };
+  // Try cache first.
+  let rawEvents: Array<Record<string, unknown>> | null = null;
+  const cached = cacheGet(pos.id);
+  if (cached) {
+    if (cached.events === null) {
+      console.log(`${tag} cache hit — empty (${cached.reason ?? "no events"})`);
+      return { ok: false, reason: cached.reason ?? "no events" };
     }
-    json = await res.json();
-  } catch (err) {
-    console.error(`${tag} fetch threw:`, err);
-    return { ok: false, reason: "fetch error" };
+    rawEvents = cached.events;
+    console.log(`${tag} cache hit — ${rawEvents.length} events`);
+  } else {
+    let json: { events?: Array<Record<string, unknown>>; error?: string };
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error(`${tag} HTTP ${res.status} ${body.slice(0, 300)}`);
+        return { ok: false, reason: `HTTP ${res.status}` };
+      }
+      json = await res.json();
+    } catch (err) {
+      console.error(`${tag} fetch threw:`, err);
+      return { ok: false, reason: "fetch error" };
+    }
+
+    if (json.error) {
+      console.error(`${tag} route error: ${json.error}`);
+      return { ok: false, reason: json.error };
+    }
+    if (!json.events || json.events.length === 0) {
+      console.warn(`${tag} 0 events — no on-chain history found`);
+      cacheSet(pos.id, { ts: Date.now(), events: null, reason: "no events" });
+      return { ok: false, reason: "no events" };
+    }
+    rawEvents = json.events;
+    cacheSet(pos.id, { ts: Date.now(), events: rawEvents });
   }
 
-  if (json.error) {
-    console.error(`${tag} route error: ${json.error}`);
-    return { ok: false, reason: json.error };
-  }
-  if (!json.events || json.events.length === 0) {
-    console.warn(`${tag} 0 events — no on-chain history found`);
-    return { ok: false, reason: "no events" };
-  }
-
-  const events: ActivityEventForPnL[] = json.events.map((e) => ({
+  const events: ActivityEventForPnL[] = rawEvents.map((e) => ({
     type: e.type as ActivityEventForPnL["type"],
     timestamp: e.timestamp as number,
     amount0: e.amount0 as number,
@@ -275,15 +326,29 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
   }, []);
 
   useEffect(() => {
-    // Deduplicate, filter supported protocols (include closed positions)
+    // Analytics shows the CURRENT state of the portfolio — closed positions
+    // contribute nothing to today's totals (Initial / Current / Fees / IL / Net P&L).
+    // Filter them out before any aggregation. Closed = status "Closed" OR value === 0.
     const seen = new Set<string>();
     const eligible = positions.filter((p) => {
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) return false;
-      if (p.status !== "Closed" && p.value <= 0) return false;
+      if (p.status === "Closed") return false;
+      if (p.value <= 0) return false;
       if (seen.has(p.id)) return false;
       seen.add(p.id);
       return true;
     });
+
+    // Evict any prior results / inflight markers for positions that are no
+    // longer eligible (e.g. one transitioned to Closed). Without this, their
+    // stale initialValue / currentValue / IL would keep contributing to totals.
+    const eligibleIds = new Set(eligible.map((p) => p.id));
+    for (const id of Array.from(resultsRef.current.keys())) {
+      if (!eligibleIds.has(id)) resultsRef.current.delete(id);
+    }
+    for (const id of Array.from(inflightRef.current)) {
+      if (!eligibleIds.has(id)) inflightRef.current.delete(id);
+    }
 
     if (eligible.length === 0) {
       setResult({ ...EMPTY });
