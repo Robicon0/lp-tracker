@@ -17,6 +17,17 @@ const STABLE_SYMBOLS = new Set([
   "USDC", "USDT", "DAI", "USDbC", "USDC.E", "USDS", "FRAX", "LUSD", "BUSD", "GUSD",
 ]);
 
+// AAVE V3 uses the "n" suffix on aTokens / variableDebt tokens for native USDC
+// (e.g. aArbUSDCn, variableDebtArbUSDCn, aPolUSDCn) to differentiate from the
+// bridged USDC.e market. The underlying is plain USDC — normalize the trailing
+// "n" off so display everywhere (lending page, wallet balances, analytics) just
+// shows "USDC". Does not affect the contract address / amounts / rates.
+function normalizeTokenSymbol(symbol: string): string {
+  if (!symbol) return symbol;
+  if (symbol.endsWith("USDCn")) return symbol.slice(0, -1);
+  return symbol;
+}
+
 // aToken detection: AAVE V3 uses chain-prefix patterns; AAVE V2 uses direct names
 function getATokenUnderlying(symbol: string): string | null {
   if (symbol.length < 3) return null;
@@ -222,18 +233,21 @@ export function useWalletTokens(): WalletTokensData {
                       });
                       const m = meta.result;
                       if (!m?.symbol || m.symbol.length >= 20) return;
+                      // Detect lending/debt against the raw on-chain symbol BEFORE
+                      // normalization (prefix rules rely on full symbol).
+                      const lending = isLendingToken(m.symbol);
+                      const debt = isDebtToken(m.symbol);
+                      const displaySymbol = normalizeTokenSymbol(m.symbol);
                       const decimals = m.decimals || 18;
                       const rawBal = BigInt(token.tokenBalance);
                       const balance = Number(rawBal) / Math.pow(10, decimals);
                       if (balance < 0.0001) return;
-                      const price = priceOf(m.symbol);
+                      const price = priceOf(displaySymbol);
                       const usdValue = balance * price;
-                      const lending = isLendingToken(m.symbol);
-                      const debt = isDebtToken(m.symbol);
                       if (!cancelled) {
                         tokens.push({
-                          symbol: m.symbol,
-                          name: m.name && m.name.length < 40 ? m.name : m.symbol,
+                          symbol: displaySymbol,
+                          name: m.name && m.name.length < 40 ? normalizeTokenSymbol(m.name) : displaySymbol,
                           balance,
                           usdValue,
                           price,

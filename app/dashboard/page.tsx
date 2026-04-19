@@ -538,6 +538,29 @@ export default function Dashboard() {
                 </span>
               )}
             </div>
+            {mounted && (
+              <div style={{ display:"flex", gap:4, marginTop:10 }}>
+                {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => {
+                  const hasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
+                  const active = rangeKey === r.key;
+                  return (
+                    <button
+                      key={r.key}
+                      onClick={() => setRangeKey(r.key)}
+                      style={{
+                        padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:500,
+                        cursor:"pointer",
+                        background: active ? "rgba(16,185,129,0.25)" : "rgba(255,255,255,0.04)",
+                        color: active ? "#6ee7b7"
+                          : hasData ? "rgba(255,255,255,0.5)"
+                          : "rgba(255,255,255,0.2)",
+                        border: active ? "1px solid rgba(16,185,129,0.3)" : "1px solid transparent",
+                      }}
+                    >{r.key}</button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Quick stats + buttons */}

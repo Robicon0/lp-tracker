@@ -44,6 +44,23 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
 
   const hasWallet = !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0;
 
+  // Deduplicate connected + watched wallet addresses per chain. EVM is
+  // case-insensitive (checksum differences must not count as two wallets);
+  // Solana base58 and Sui hex are case-sensitive-equal after lowercasing hex.
+  const evmAddresses = Array.from(new Set(
+    [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
+      .filter((a): a is string => !!a)
+      .map((a) => a.toLowerCase()),
+  ));
+  const solanaAddresses = Array.from(new Set(
+    [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
+      .filter((a): a is string => !!a),
+  ));
+  const suiAddresses = Array.from(new Set(
+    [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address.toLowerCase())]
+      .filter((a): a is string => !!a),
+  ));
+
   // Auto-register connected wallets with the snapshot DB so the cron job
   // knows which addresses to track historically. Fire-and-forget; silently
   // no-ops if the DB isn't configured (returns 503).
@@ -68,63 +85,38 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [address, solanaAddress, suiAddress]);
 
-  // Stable queryKey: stringify watched wallets so React Query refetches when they change
-  const watchedKey = watchedWallets.map((w) => `${w.chain}:${w.address}`).join(",");
+  const evmKey = evmAddresses.join(",");
+  const solKey = solanaAddresses.join(",");
+  const suiKey = suiAddresses.join(",");
 
   const { data: walletPositions, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
-    queryKey: ["positions", address, solanaAddress, suiAddress, watchedKey],
+    queryKey: ["positions", evmKey, solKey, suiKey],
     queryFn: async () => {
       const promises: Promise<AerodromePosition[]>[] = [];
 
-      // Connected wallets
-      if (address) {
+      for (const a of evmAddresses) {
         promises.push(
-          fetchAerodromePositions(address),
-          fetchUniswapV3Positions(address),
-          fetchVelodromePositions(address),
-          fetchHyperSwapPositions(address),
-          fetchPancakeSwapPositions(address),
+          fetchAerodromePositions(a),
+          fetchUniswapV3Positions(a),
+          fetchVelodromePositions(a),
+          fetchHyperSwapPositions(a),
+          fetchPancakeSwapPositions(a),
         );
       }
 
-      if (solanaAddress) {
+      for (const a of solanaAddresses) {
         promises.push(
-          fetchRaydiumPositions(solanaAddress),
-          fetchOrcaPositions(solanaAddress),
+          fetchRaydiumPositions(a),
+          fetchOrcaPositions(a),
         );
       }
 
-      if (suiAddress) {
+      for (const a of suiAddresses) {
         promises.push(
-          fetchCetusPositions(suiAddress),
-          fetchBluefinPositions(suiAddress),
-          fetchMomentumPositions(suiAddress),
+          fetchCetusPositions(a),
+          fetchBluefinPositions(a),
+          fetchMomentumPositions(a),
         );
-      }
-
-      // Watched wallets
-      for (const w of watchedWallets) {
-        if (w.chain === "evm") {
-          promises.push(
-            fetchAerodromePositions(w.address),
-            fetchUniswapV3Positions(w.address),
-            fetchVelodromePositions(w.address),
-            fetchHyperSwapPositions(w.address),
-            fetchPancakeSwapPositions(w.address),
-          );
-        } else if (w.chain === "solana") {
-          promises.push(
-            fetchRaydiumPositions(w.address),
-            fetchOrcaPositions(w.address),
-          );
-        } else if (w.chain === "sui") {
-          promises.push(
-            fetchCetusPositions(w.address),
-            fetchBluefinPositions(w.address),
-            fetchMomentumPositions(w.address),
-          );
-        }
-        // aptos: not yet implemented — skip silently
       }
 
       const results = await Promise.all(promises);

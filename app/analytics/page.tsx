@@ -8,6 +8,7 @@ import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import { useLpPnl } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
+import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
@@ -132,8 +133,8 @@ type SortDir = "asc" | "desc";
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-// Approximate AAVE V3 supply APYs (same as lending page)
-const AAVE_SUPPLY_APY: Record<string, number> = {
+// Fallback AAVE V3 supply APYs (used only when live rate fetch fails)
+const FALLBACK_AAVE_SUPPLY_APY: Record<string, number> = {
   USDC: 2.86, USDbC: 2.86, "USDC.e": 2.86,
   USDT: 3.50, DAI: 2.20,
   WETH: 1.80, ETH: 1.80,
@@ -163,6 +164,7 @@ export default function Analytics() {
   const { positions, isLoading, dataUpdatedAt } = usePositions();
   const { positions: externalLendingPositions } = useLendingPositions();
   const { tokens: walletTokens } = useWalletTokens();
+  const { rates: aaveRates } = useAaveV3Rates(walletTokens);
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets } = useWatchedWallets();
@@ -172,39 +174,55 @@ export default function Analytics() {
 
   // ── Build AAVE lending positions from wallet tokens ─────────────────────────
   const lendingPositions: ExternalLendingPosition[] = useMemo(() => {
-    // AAVE aTokens grouped by chain
-    const aaveByChain = new Map<string, { supplied: number; apy: number }>();
+    // AAVE aTokens (supply) + debt tokens (borrow) grouped by chain
+    const aaveByChain = new Map<string, {
+      supplied: number; supplyApy: number;
+      borrowed: number; borrowApy: number;
+    }>();
     for (const t of walletTokens) {
-      if (!t.isLending) continue;
+      if (!t.isLending && !t.isDebt) continue;
       const chain = getATokenChain(t.symbol) ?? t.chain;
-      const prev = aaveByChain.get(chain) ?? { supplied: 0, apy: 0 };
-      const underlying = getAaveUnderlying(t.symbol);
-      const tokenApy = AAVE_SUPPLY_APY[underlying] ?? 0;
-      const newSupplied = prev.supplied + t.usdValue;
-      // Weighted average APY
-      prev.apy = newSupplied > 0
-        ? (prev.apy * prev.supplied + tokenApy * t.usdValue) / newSupplied
-        : 0;
-      prev.supplied = newSupplied;
+      const prev = aaveByChain.get(chain) ?? { supplied: 0, supplyApy: 0, borrowed: 0, borrowApy: 0 };
+
+      const addr = t.contractAddress?.toLowerCase();
+      const live = addr ? aaveRates[addr] : undefined;
+      const fallbackSupply = FALLBACK_AAVE_SUPPLY_APY[getAaveUnderlying(t.symbol)] ?? 0;
+
+      if (t.isLending) {
+        const tokenApy = live?.supplyApy ?? fallbackSupply;
+        const newSupplied = prev.supplied + t.usdValue;
+        prev.supplyApy = newSupplied > 0
+          ? (prev.supplyApy * prev.supplied + tokenApy * t.usdValue) / newSupplied
+          : 0;
+        prev.supplied = newSupplied;
+      } else if (t.isDebt) {
+        const tokenApy = live?.borrowApy ?? 0;
+        const newBorrowed = prev.borrowed + t.usdValue;
+        prev.borrowApy = newBorrowed > 0
+          ? (prev.borrowApy * prev.borrowed + tokenApy * t.usdValue) / newBorrowed
+          : 0;
+        prev.borrowed = newBorrowed;
+      }
+
       aaveByChain.set(chain, prev);
     }
 
     const aavePositions: ExternalLendingPosition[] = [...aaveByChain.entries()]
-      .filter(([, v]) => v.supplied > 0)
+      .filter(([, v]) => v.supplied > 0 || v.borrowed > 0)
       .map(([chain, v]) => ({
         protocol: "AAVE V3",
         chain,
         totalSupplied: v.supplied,
-        totalBorrowed: 0,
-        supplyApy: v.apy,
-        borrowApy: 0,
+        totalBorrowed: v.borrowed,
+        supplyApy: v.supplyApy,
+        borrowApy: v.borrowApy,
         suppliedAssets: [],
         borrowedAssets: [],
         manageUrl: "https://app.aave.com",
       }));
 
     return [...aavePositions, ...externalLendingPositions];
-  }, [walletTokens, externalLendingPositions]);
+  }, [walletTokens, aaveRates, externalLendingPositions]);
 
   // ── Actual performance data from on-chain activity ────────────────────────
   const { perfMap, isLoading: activityLoading } = useAllPositionsActivity(positions);

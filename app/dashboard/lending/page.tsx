@@ -7,6 +7,7 @@ import { useAccount } from "wagmi";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
 import { useLendingPositions, type ExternalLendingPosition } from "../../hooks/useLendingPositions";
+import { useAaveV3Rates, type AaveV3RatesMap } from "../../hooks/useAaveV3Rates";
 import { getTokenLogo, TOKEN_COLORS } from "../../lib/tokenLogos";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -28,8 +29,9 @@ const AAVE_URL: Record<string, string> = {
   Polygon:   "https://app.aave.com/?marketName=proto_polygon_v3",
 };
 
-// Approximate AAVE V3 supply APYs (shown with disclaimer — users see exact rates on AAVE)
-const AAVE_SUPPLY_APY: Record<string, number> = {
+// Fallback supply APYs — used only if the live on-chain rate fetch fails.
+// Real rates come from /api/aave-v3/rates via the useAaveV3Rates hook.
+const FALLBACK_AAVE_SUPPLY_APY: Record<string, number> = {
   USDC: 2.86, USDbC: 2.86, "USDC.e": 2.86,
   USDT: 3.50,
   DAI:  2.20,
@@ -37,8 +39,8 @@ const AAVE_SUPPLY_APY: Record<string, number> = {
   WBTC: 0.80, cbBTC: 0.80,
 };
 
-function getAaveSupplyApy(underlying: string): number {
-  return AAVE_SUPPLY_APY[underlying] ?? 0;
+function getFallbackSupplyApy(underlying: string): number {
+  return FALLBACK_AAVE_SUPPLY_APY[underlying] ?? 0;
 }
 
 // aToken → underlying symbol (duplicated from hook, used for display labels)
@@ -102,7 +104,15 @@ interface LendingPosition {
   healthFactor: number | null; // null = ∞
 }
 
-function buildPositions(tokens: TokenItem[]): LendingPosition[] {
+function rateForToken(t: TokenItem, liveRates: AaveV3RatesMap): { supplyApy: number; borrowApy: number } {
+  const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
+  if (live) return live;
+  const underlying = getUnderlying(t.symbol);
+  const supplyApy = getFallbackSupplyApy(underlying);
+  return { supplyApy, borrowApy: 0 };
+}
+
+function buildPositions(tokens: TokenItem[], liveRates: AaveV3RatesMap): LendingPosition[] {
   const lendingTokens = tokens.filter((t) => t.isLending);
   const debtTokens    = tokens.filter((t) => t.isDebt);
 
@@ -120,14 +130,17 @@ function buildPositions(tokens: TokenItem[]): LendingPosition[] {
     const totalCollateral = supplied.reduce((s, t) => s + t.usdValue, 0);
     const totalDebt = chainDebt.reduce((s, t) => s + t.usdValue, 0);
 
-    // Weighted avg supply APY
+    // Value-weighted live rates
     const supplyApy = totalCollateral > 0
-      ? supplied.reduce((s, t) => s + getAaveSupplyApy(getUnderlying(t.symbol)) * t.usdValue, 0) / totalCollateral
+      ? supplied.reduce((s, t) => s + rateForToken(t, liveRates).supplyApy * t.usdValue, 0) / totalCollateral
+      : 0;
+    const borrowApy = totalDebt > 0
+      ? chainDebt.reduce((s, t) => s + rateForToken(t, liveRates).borrowApy * t.usdValue, 0) / totalDebt
       : 0;
 
-    const borrowApy = 0; // simplified: show 0 if no debt detected
     const netApy = supplyApy - borrowApy;
-    const dailyCashflow = (totalCollateral * supplyApy) / 100 / 365;
+    const dailyCashflow = (totalCollateral * supplyApy) / 100 / 365
+      - (totalDebt * borrowApy) / 100 / 365;
     const ltvPct = totalCollateral > 0 ? (totalDebt / totalCollateral) * 100 : 0;
     const liquidationThreshold = 78; // Standard AAVE V3 USDC LT
     const availableToBorrow = Math.max(0, totalCollateral * liquidationThreshold / 100 - totalDebt);
@@ -159,6 +172,7 @@ export default function LendingPage() {
   const hasWallet = !!(address || solanaAddress || suiAddress);
   const { tokens, isLoading } = useWalletTokens();
   const { positions: externalPositions, isLoading: externalLoading } = useLendingPositions();
+  const { rates: aaveRates } = useAaveV3Rates(tokens);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
 
   const combinedLoading = isLoading || externalLoading;
@@ -169,7 +183,7 @@ export default function LendingPage() {
     return () => clearTimeout(t);
   }, [combinedLoading]);
 
-  const positions = useMemo(() => buildPositions(tokens), [tokens]);
+  const positions = useMemo(() => buildPositions(tokens, aaveRates), [tokens, aaveRates]);
 
   // Combined totals across AAVE + external protocols
   const totalCollateral = positions.reduce((s, p) => s + p.totalCollateral, 0)
@@ -286,7 +300,7 @@ export default function LendingPage() {
 
             {/* AAVE position cards */}
             {positions.map((pos) => (
-              <PositionCard key={pos.chain} pos={pos} />
+              <PositionCard key={pos.chain} pos={pos} liveRates={aaveRates} />
             ))}
 
             {/* External protocol cards (Dolomite, Jupiter Lend, etc.) */}
@@ -325,7 +339,7 @@ export default function LendingPage() {
 }
 
 // ── Position Card ──────────────────────────────────────────────────────────────
-function PositionCard({ pos }: { pos: LendingPosition }) {
+function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: AaveV3RatesMap }) {
   const fmt$ = (n: number, dec = 2) =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 
@@ -424,7 +438,9 @@ function PositionCard({ pos }: { pos: LendingPosition }) {
             </p>
             {pos.suppliedTokens.map((t) => {
               const underlying = getUnderlying(t.symbol);
-              const apy = getAaveSupplyApy(underlying);
+              const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
+              const apy = live?.supplyApy ?? getFallbackSupplyApy(underlying);
+              const isLive = !!live;
               return (
                 <div key={t.contractAddress}
                   style={{ display: "flex", alignItems: "center", gap: 12,
@@ -435,8 +451,10 @@ function PositionCard({ pos }: { pos: LendingPosition }) {
                   <div style={{ flex: 1 }}>
                     <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{underlying || t.symbol}</p>
                     <p style={{ fontSize: 11, color: "#34d399", margin: 0 }}>
-                      APY: ~{apy.toFixed(2)}%
-                      <span style={{ color: "rgba(255,255,255,0.25)", marginLeft: 6, fontSize: 10 }}>approx.</span>
+                      APY: {apy.toFixed(2)}%
+                      {!isLive && (
+                        <span style={{ color: "rgba(255,255,255,0.25)", marginLeft: 6, fontSize: 10 }}>approx.</span>
+                      )}
                     </p>
                   </div>
                   <div style={{ textAlign: "right" }}>
@@ -460,16 +478,22 @@ function PositionCard({ pos }: { pos: LendingPosition }) {
               margin: "0 0 10px", textTransform: "uppercase", letterSpacing: 0.5 }}>
               ↓ Borrowed Assets
             </p>
-            {pos.debtTokens.map((t) => (
+            {pos.debtTokens.map((t) => {
+              const underlying = getUnderlying(t.symbol);
+              const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
+              const borrowApy = live?.borrowApy;
+              return (
               <div key={t.contractAddress}
                 style={{ display: "flex", alignItems: "center", gap: 12,
                   padding: "10px 14px", borderRadius: 10,
                   background: "rgba(239,68,68,0.04)",
                   border: "1px solid rgba(239,68,68,0.15)", marginBottom: 6 }}>
-                <TokenIcon symbol={t.symbol} size={32} logo={t.logo} />
+                <TokenIcon symbol={underlying || t.symbol} size={32} logo={t.logo} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{t.symbol}</p>
-                  <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>Borrowed</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{underlying || t.symbol}</p>
+                  <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>
+                    Borrow APY: {borrowApy !== undefined ? `${borrowApy.toFixed(2)}%` : "—"}
+                  </p>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <p style={{ fontSize: 14, fontWeight: 600, color: "#ef4444", margin: 0 }}>
@@ -480,7 +504,8 @@ function PositionCard({ pos }: { pos: LendingPosition }) {
                   </p>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
