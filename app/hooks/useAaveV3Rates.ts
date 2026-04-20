@@ -13,11 +13,17 @@ export interface AaveRate {
 }
 
 export type AaveV3RatesMap = Record<string, AaveRate>;
+export type AaveV3PricesMap = Record<string, number>;
 
 const SUPPORTED_CHAINS = new Set(["Ethereum", "Arbitrum", "Optimism", "Polygon", "Base"]);
 
-export function useAaveV3Rates(tokens: TokenItem[]): { rates: AaveV3RatesMap; isLoading: boolean } {
+export function useAaveV3Rates(tokens: TokenItem[]): {
+  rates: AaveV3RatesMap;
+  prices: AaveV3PricesMap;
+  isLoading: boolean;
+} {
   const [rates, setRates] = useState<AaveV3RatesMap>({});
+  const [prices, setPrices] = useState<AaveV3PricesMap>({});
   const [isLoading, setIsLoading] = useState(false);
   const fetchedKeyRef = useRef<string | null>(null);
 
@@ -56,19 +62,26 @@ export function useAaveV3Rates(tokens: TokenItem[]): { rates: AaveV3RatesMap; is
         const results = await Promise.allSettled(
           entries.map(async ([chain, addrs]) => {
             const url = `/api/aave-v3/rates?chain=${encodeURIComponent(chain)}&tokens=${addrs.join(",")}`;
-            const res = await fetch(url).then((r) => r.json() as Promise<{ rates?: AaveV3RatesMap }>);
-            return res.rates ?? {};
+            const res = await fetch(url).then(
+              (r) => r.json() as Promise<{ rates?: AaveV3RatesMap; prices?: AaveV3PricesMap }>,
+            );
+            return { rates: res.rates ?? {}, prices: res.prices ?? {} };
           }),
         );
         if (cancelled) return;
-        const merged: AaveV3RatesMap = {};
+        const mergedRates: AaveV3RatesMap = {};
+        const mergedPrices: AaveV3PricesMap = {};
         for (const r of results) {
           if (r.status !== "fulfilled") continue;
-          for (const [addr, rate] of Object.entries(r.value)) {
-            merged[addr.toLowerCase()] = rate;
+          for (const [addr, rate] of Object.entries(r.value.rates)) {
+            mergedRates[addr.toLowerCase()] = rate;
+          }
+          for (const [addr, usd] of Object.entries(r.value.prices)) {
+            if (typeof usd === "number" && usd > 0) mergedPrices[addr.toLowerCase()] = usd;
           }
         }
-        setRates(merged);
+        setRates(mergedRates);
+        setPrices(mergedPrices);
       } catch (err) {
         console.error("[useAaveV3Rates] fetch failed:", err);
       } finally {
@@ -82,5 +95,5 @@ export function useAaveV3Rates(tokens: TokenItem[]): { rates: AaveV3RatesMap; is
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchKey]);
 
-  return { rates, isLoading };
+  return { rates, prices, isLoading };
 }

@@ -51,6 +51,22 @@ All three routes share a common output shape (`AerodromePosition` interface in `
 
 Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet balance fetching.
 
+Optional:
+- `NEXT_PUBLIC_FORMSPREE_ID` — Formspree form id for the in-app Feedback button. To receive feedback emails: sign up at https://formspree.io (free tier), create a form, copy the form id (last segment of `https://formspree.io/f/<id>`), set it in `.env.local` and in Vercel Project Settings → Environment Variables for both Preview and Production, then redeploy. Until set, the Feedback button still renders but submissions hit the placeholder endpoint `/f/YOUR_FORM_ID` and return a friendly error.
+- `POSTGRES_URL` / `POSTGRES_URL_NON_POOLING` — Vercel Postgres / Neon connection strings for the daily portfolio snapshot system. When absent, `/api/snapshots/save`, `/api/snapshots/range`, and `/api/cron/daily-snapshot` gracefully return `db_not_configured` and the hero portfolio toggle shows "Tracking started — 0 days of data collected".
+- `CRON_SECRET` — Vercel auto-injects this as `Authorization: Bearer <CRON_SECRET>` for `/api/cron/daily-snapshot`. When set, unauthenticated requests to the cron endpoint return 401.
+
+## Portfolio snapshots (daily Neon + client-push hybrid)
+
+`vercel.json` registers a single cron: `/api/cron/daily-snapshot` at `0 0 * * *` (midnight UTC). The system is protocol-agnostic and works for any wallet on any chain that flows through the dashboard.
+
+- **Tables** (schema lives in `scripts/setup-db.sql`): `wallets` (id, wallet_address, created_at) and `portfolio_snapshots` (wallet_address, total_value, lp_value, lending_value, token_value, position_count, timestamp). "One snapshot per (wallet, UTC day)" is enforced at the save layer — the save route deletes any prior row for today's UTC date before inserting.
+- **Client push** (`app/hooks/useSnapshotPortfolio.ts`): on every positions refresh, the dashboard POSTs the current per-wallet totals to `/api/snapshots/save`. A `lastSavedRef` signature (`addrs|value*100`) dedupes identical values so we don't spam the endpoint. When multiple wallets are connected/watched, the full totals are attributed to the first address and zeros to the rest — the range endpoint sums across wallets, so aggregated history remains correct.
+- **Range read** (`app/api/snapshots/range/route.ts`): `GET ?address=addr1,addr2,…&days=365` returns snapshots summed per timestamp bucket for multi-wallet aggregation, plus `trackingSince` (earliest row anywhere for those addresses) and `daysTracked`. The client fetches once at 1Y and derives 1D / 7D / 30D in memory.
+- **Cron** (`app/api/cron/daily-snapshot/route.ts`): for every wallet with at least one prior snapshot, carries forward the most recent value into a fresh row stamped at `NOW()` unless a row already exists for that wallet today (UTC). The cron never refetches on-chain state server-side — that would require reimplementing every protocol pipeline in a serverless function. Its job is purely continuity for days when the user doesn't open the app.
+- **Hero toggle UI** (`app/dashboard/page.tsx`): `useSnapshotPortfolio` returns `byRange[key]` with `{value, oldestValue, oldestTimestamp, pnlDollar, pnlPct, available}` for each key in `"1D" | "7D" | "30D" | "1Y"`. When `available` is false (range covers a period the user wasn't tracking yet), the hero shows `"Tracking started {date} — {N} days of data collected"` instead of a wrong P&L number. The localStorage-based `usePortfolioHistory` hook is still wired for the Portfolio Performance *chart* only; all P&L numbers on the hero now come from Postgres.
+- **Address normalization**: EVM and Sui addresses are lowercased before building the snapshot `addrKey`; Solana base58 is kept case-sensitive. The dashboard builds `snapshotAddresses` from connected + watched wallets (deduped) so the snapshot stream aligns with the PositionsContext fetch set.
+
 ## LP P&L (on-chain, aggregated)
 
 The analytics page computes portfolio-wide LP P&L entirely on-chain — there is **no snapshot cron, no database read, no "Take Snapshot" button, no historical chart, no localStorage cache**. The DB-backed snapshot system was removed; the `wallets` / `portfolio_snapshots` / `position_snapshots` tables and `scripts/setup-db.sql` are intentionally left in place in the repo but no code reads from or writes to them anymore. The orphaned `useDbPortfolioHistory` / `useDbPositionHistory` hooks are stubbed no-ops so the legacy `/dashboard/[id]` route still compiles.

@@ -7,6 +7,7 @@ import type { WalletName } from "@solana/wallet-adapter-base";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "./contexts/WalletAuthContext";
+import FeedbackButton from "./components/FeedbackButton";
 import Link from "next/link";
 
 // EVM wallet display metadata (order and logos). connectorId matches the id
@@ -275,6 +276,8 @@ export default function Navbar() {
               <Link href="/analytics" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Analytics</Link>
               <Link href="/about" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">About</Link>
 
+              <FeedbackButton />
+
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (
                 <div className="flex items-center space-x-2">
@@ -352,6 +355,8 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Analytics</Link>
               <Link href="/about" className="block text-emerald-300/80 hover:text-emerald-300 py-2">About</Link>
+
+              <div className="py-2"><FeedbackButton /></div>
 
               {/* EVM — mobile */}
               {isConnected && address ? (

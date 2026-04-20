@@ -95,17 +95,25 @@ async function getReservesList(): Promise<string[]> {
 
 const STABLE_SYMBOLS = new Set([
   'USDC', 'USDT', 'USDT0', 'USDHL', 'USR', 'USDH', 'USDXL', 'DAI', 'FDUSD',
+  'USDA', 'USDN', 'USDS', 'USDE', 'PYUSD', 'FRAX', 'LUSD', 'GHO', 'CRVUSD',
 ]);
 
 const CG_IDS: Record<string, string> = {
   HYPE: 'hyperliquid', WHYPE: 'hyperliquid',
   WSTHYPE: 'hyperliquid', KHYPE: 'hyperliquid',
   BEHYPE: 'hyperliquid', LHYPE: 'hyperliquid',
-  UBTC: 'bitcoin', WBTC: 'bitcoin',
+  UBTC: 'bitcoin', WBTC: 'bitcoin', BTC: 'bitcoin', CBBTC: 'bitcoin', TBTC: 'bitcoin',
   UETH: 'ethereum', WETH: 'ethereum', ETH: 'ethereum',
-  USDE: 'ethena-usd',
-  SUSDE: 'ethena-staked-usd',
-  USOL: 'solana', SOL: 'solana',
+  STETH: 'staked-ether', WSTETH: 'wrapped-steth',
+  CBETH: 'coinbase-wrapped-staked-eth', RETH: 'rocket-pool-eth',
+  WEETH: 'wrapped-eeth', EZETH: 'renzo-restaked-eth', RSETH: 'kelp-dao-restaked-eth',
+  SUSDE: 'ethena-staked-usde',
+  USOL: 'solana', SOL: 'solana', WSOL: 'solana',
+  SUI: 'sui',
+  AAVE: 'aave', LINK: 'chainlink', UNI: 'uniswap', CRV: 'curve-dao-token',
+  MKR: 'maker', LDO: 'lido-dao', ARB: 'arbitrum', OP: 'optimism',
+  MATIC: 'matic-network', POL: 'matic-network',
+  BNB: 'binancecoin', AVAX: 'avalanche-2',
 };
 
 const _priceCache: Record<string, { price: number; ts: number }> = {};
@@ -210,19 +218,19 @@ export async function GET(request: Request) {
 
       if (currentATokenBalance > 0n) {
         const amount = Number(currentATokenBalance) / scale;
+        if (amount < 1e-9) continue;
         const usdValue = amount * price;
-        if (usdValue < 0.001) continue;
         const apy = Number(liquidityRate) / RAY * 100;
-        console.log(`[hyperlend/route] Supply: ${symbol} amount=${amount.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
+        console.log(`[hyperlend/route] Supply: ${symbol} amount=${amount.toFixed(6)} usd=$${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
         supplies.push({ symbol, amount, usdValue, apy });
       }
 
       if (currentVariableDebt > 0n) {
         const amount = Number(currentVariableDebt) / scale;
+        if (amount < 1e-9) continue;
         const usdValue = amount * price;
-        if (usdValue < 0.001) continue;
         const apy = Number(variableBorrowRate) / RAY * 100;
-        console.log(`[hyperlend/route] Borrow: ${symbol} amount=${amount.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
+        console.log(`[hyperlend/route] Borrow: ${symbol} amount=${amount.toFixed(6)} usd=$${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
         borrows.push({ symbol, amount, usdValue, apy });
       }
     }

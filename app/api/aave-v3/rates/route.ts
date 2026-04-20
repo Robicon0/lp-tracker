@@ -10,26 +10,31 @@ import { NextResponse } from "next/server";
 // Returns { rates: { [lowercase token contract addr]: { supplyApy, borrowApy } } }
 // — keyed by the *input* token address so the client can look up directly.
 
-const AAVE_V3_CHAINS: Record<string, { rpc: string; poolAddressesProvider: string }> = {
+const AAVE_V3_CHAINS: Record<string, { rpc: string; poolAddressesProvider: string; cgPlatform: string }> = {
   Ethereum: {
     rpc: `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
     poolAddressesProvider: "0x2f39d218133AFaB8F2B819B1066c7E434Ad94E9e",
+    cgPlatform: "ethereum",
   },
   Arbitrum: {
     rpc: `https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
     poolAddressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
+    cgPlatform: "arbitrum-one",
   },
   Optimism: {
     rpc: `https://opt-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
     poolAddressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
+    cgPlatform: "optimistic-ethereum",
   },
   Polygon: {
     rpc: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
     poolAddressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
+    cgPlatform: "polygon-pos",
   },
   Base: {
     rpc: `https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
     poolAddressesProvider: "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",
+    cgPlatform: "base",
   },
 };
 
@@ -63,9 +68,44 @@ const pdpCache: Record<string, { addr: string; ts: number }> = {};
 const underlyingCache: Record<string, { underlying: string; ts: number }> = {};
 // In-memory cache for reserve rates (keyed by chain + underlying, 60s TTL so APYs stay fresh)
 const rateCache: Record<string, { supplyApy: number; borrowApy: number; ts: number }> = {};
+// In-memory cache for underlying USD prices via CoinGecko contract lookup (5 min TTL)
+const priceCache: Record<string, { usd: number; ts: number }> = {};
 
 const HOUR_MS = 60 * 60 * 1000;
 const RATE_TTL_MS = 60 * 1000;
+const PRICE_TTL_MS = 5 * 60 * 1000;
+
+async function fetchUnderlyingPrices(
+  cgPlatform: string,
+  underlyings: string[],
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  const fresh: string[] = [];
+  for (const u of underlyings) {
+    const key = `${cgPlatform}:${u.toLowerCase()}`;
+    const c = priceCache[key];
+    if (c && Date.now() - c.ts < PRICE_TTL_MS) out[u.toLowerCase()] = c.usd;
+    else fresh.push(u);
+  }
+  if (fresh.length === 0) return out;
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/token_price/${cgPlatform}?contract_addresses=${fresh.join(",")}&vs_currencies=usd`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      console.error(`[aave-v3/rates] CoinGecko token_price ${cgPlatform} returned ${res.status}`);
+      return out;
+    }
+    const json = (await res.json()) as Record<string, { usd?: number }>;
+    for (const u of fresh) {
+      const usd = json[u.toLowerCase()]?.usd ?? 0;
+      out[u.toLowerCase()] = usd;
+      priceCache[`${cgPlatform}:${u.toLowerCase()}`] = { usd, ts: Date.now() };
+    }
+  } catch (err) {
+    console.error(`[aave-v3/rates] CoinGecko token_price fetch failed for ${cgPlatform}:`, err);
+  }
+  return out;
+}
 
 async function ethCall(rpc: string, to: string, data: string): Promise<string> {
   const res = await fetch(rpc, {
@@ -173,15 +213,32 @@ export async function GET(request: Request) {
   }
 
   const rates: Record<string, { supplyApy: number; borrowApy: number }> = {};
+  const tokenToUnderlying: Record<string, string> = {};
   await Promise.allSettled(
     tokens.map(async (tokenAddr) => {
       const underlying = await getUnderlyingAsset(chain, tokenAddr);
       if (!underlying) return;
+      tokenToUnderlying[tokenAddr.toLowerCase()] = underlying.toLowerCase();
       const r = await getRates(chain, pdp, underlying);
       if (!r) return;
       rates[tokenAddr.toLowerCase()] = r;
     }),
   );
 
-  return NextResponse.json({ rates, chain });
+  // Batch CoinGecko contract-address price lookup for every underlying we
+  // resolved — guarantees correct USD pricing for any AAVE reserve, even
+  // ones whose symbol we don't know ahead of time.
+  const chainConf = AAVE_V3_CHAINS[chain];
+  const uniqueUnderlyings = Array.from(new Set(Object.values(tokenToUnderlying)));
+  const underlyingPrices = uniqueUnderlyings.length > 0
+    ? await fetchUnderlyingPrices(chainConf.cgPlatform, uniqueUnderlyings)
+    : {};
+
+  const prices: Record<string, number> = {};
+  for (const [tok, und] of Object.entries(tokenToUnderlying)) {
+    const p = underlyingPrices[und];
+    if (typeof p === "number" && p > 0) prices[tok] = p;
+  }
+
+  return NextResponse.json({ rates, prices, chain });
 }

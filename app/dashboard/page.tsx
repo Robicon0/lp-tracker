@@ -14,7 +14,7 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
-import { useHistoricalPortfolio, type HistRangeKey } from "../hooks/useHistoricalPortfolio";
+import { useSnapshotPortfolio, type SnapshotRangeKey } from "../hooks/useSnapshotPortfolio";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -286,7 +286,7 @@ export default function Dashboard() {
   const [editLabelValue, setEditLabelValue] = useState("");
 
   // Status filter
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("In Range");
 
   // "Updated X ago" ticker
   const [secondsAgo, setSecondsAgo] = useState(0);
@@ -370,14 +370,36 @@ export default function Dashboard() {
     value: s.totalValue,
   }));
 
-  // Hero P&L — historical approach (works for any wallet on first load)
-  const heroRangeKey: HistRangeKey = rangeKey === "90D" ? "30D" : (rangeKey as HistRangeKey);
-  const histPortfolio = useHistoricalPortfolio(allPositions, walletTokensList, totalValue);
+  // Hero P&L — driven by daily Postgres snapshots written server-side every
+  // UTC midnight plus an immediate client-side save on every positions load,
+  // so a user gets their first data point the moment they connect.
+  const heroRangeKey: SnapshotRangeKey = rangeKey === "90D" ? "30D" : (rangeKey as SnapshotRangeKey);
+  const snapshotAddresses = useMemo(() => {
+    const list: string[] = [];
+    if (address) list.push(address.toLowerCase());
+    if (solanaAddress) list.push(solanaAddress);
+    if (suiAddress) list.push(suiAddress.toLowerCase());
+    for (const w of watchedWallets) {
+      const a = w.chain === "evm" || w.chain === "sui" ? w.address.toLowerCase() : w.address;
+      if (!list.includes(a)) list.push(a);
+    }
+    return list;
+  }, [address, solanaAddress, suiAddress, watchedWallets]);
+  const histPortfolio = useSnapshotPortfolio(
+    snapshotAddresses,
+    totalValue + combinedLendingValue + totalTokenValue,
+    totalValue,
+    combinedLendingValue,
+    totalTokenValue,
+    allPositions.length,
+  );
   const heroRangeData = histPortfolio.byRange[heroRangeKey];
-  const pnlDollar = heroRangeData.available ? heroRangeData.pnlDollar : 0;
-  const pnlPct    = heroRangeData.available ? heroRangeData.pnlPct : 0;
+  const pnlDollar = heroRangeData.available ? (heroRangeData.pnlDollar ?? 0) : 0;
+  const pnlPct    = heroRangeData.available ? (heroRangeData.pnlPct ?? 0) : 0;
   const pnlAvailable = heroRangeData.available;
   const pnlLabel = activeRange.label;
+  const trackingSince = histPortfolio.trackingSince;
+  const daysTracked = histPortfolio.daysTracked;
 
   // Hero price pills — separate light fetch for BTC/ETH/SOL
   const [heroPrices, setHeroPrices] = useState<Record<string, number>>({});
@@ -545,14 +567,16 @@ export default function Dashboard() {
               )}
               {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (
                 <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
-                  Data unavailable {pnlLabel}
+                  {trackingSince
+                    ? `Tracking started ${new Date(trackingSince).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — ${daysTracked} day${daysTracked === 1 ? "" : "s"} of data collected`
+                    : `Tracking started today — building your history`}
                 </span>
               )}
             </div>
             {mounted && (
               <div style={{ display:"flex", gap:4, marginTop:10 }}>
                 {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => {
-                  const rangeKeyTyped = r.key as HistRangeKey;
+                  const rangeKeyTyped = r.key as SnapshotRangeKey;
                   const hasData = histPortfolio.byRange[rangeKeyTyped]?.available ?? false;
                   const active = rangeKey === r.key;
                   return (

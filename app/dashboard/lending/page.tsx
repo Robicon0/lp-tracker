@@ -149,9 +149,21 @@ export default function LendingPage() {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
   const hasWallet = !!(address || solanaAddress || suiAddress);
-  const { tokens, isLoading } = useWalletTokens();
+  const { tokens: rawTokens, isLoading } = useWalletTokens();
   const { positions: externalPositions, isLoading: externalLoading } = useLendingPositions();
-  const { rates: aaveRates } = useAaveV3Rates(tokens);
+  const { rates: aaveRates, prices: aavePrices } = useAaveV3Rates(rawTokens);
+
+  // Enrich AAVE aTokens / debt tokens that had price=0 from the symbol map
+  // (exotic reserves like sUSDe, osETH, etc.) with CoinGecko contract-address
+  // prices resolved server-side via the AAVE rates endpoint.
+  const tokens: TokenItem[] = useMemo(() => {
+    return rawTokens.map((t) => {
+      if ((!t.isLending && !t.isDebt) || t.price > 0) return t;
+      const live = aavePrices[t.contractAddress?.toLowerCase() ?? ""];
+      if (!live || live <= 0) return t;
+      return { ...t, price: live, usdValue: t.balance * live };
+    });
+  }, [rawTokens, aavePrices]);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
 
   const combinedLoading = isLoading || externalLoading;

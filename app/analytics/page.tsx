@@ -163,8 +163,16 @@ function getATokenChain(symbol: string): string | null {
 export default function Analytics() {
   const { positions, isLoading, dataUpdatedAt } = usePositions();
   const { positions: externalLendingPositions } = useLendingPositions();
-  const { tokens: walletTokens } = useWalletTokens();
-  const { rates: aaveRates } = useAaveV3Rates(walletTokens);
+  const { tokens: rawWalletTokens } = useWalletTokens();
+  const { rates: aaveRates, prices: aavePrices } = useAaveV3Rates(rawWalletTokens);
+  const walletTokens = useMemo(() => {
+    return rawWalletTokens.map((t) => {
+      if ((!t.isLending && !t.isDebt) || t.price > 0) return t;
+      const live = aavePrices[t.contractAddress?.toLowerCase() ?? ""];
+      if (!live || live <= 0) return t;
+      return { ...t, price: live, usdValue: t.balance * live };
+    });
+  }, [rawWalletTokens, aavePrices]);
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets } = useWatchedWallets();

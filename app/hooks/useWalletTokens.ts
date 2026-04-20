@@ -14,8 +14,50 @@ const CHAINS = [
 
 const ZERO_HEX = "0x" + "0".repeat(64);
 const STABLE_SYMBOLS = new Set([
-  "USDC", "USDT", "DAI", "USDbC", "USDC.E", "USDS", "FRAX", "LUSD", "BUSD", "GUSD",
+  "USDC", "USDT", "DAI", "USDBC", "USDC.E", "USDS", "FRAX", "LUSD", "BUSD", "GUSD",
+  "PYUSD", "CRVUSD", "GHO", "FDUSD", "TUSD", "USDP", "SUSD", "USDD", "USD0", "USDE",
+  "USDT0", "USDHL", "USDA", "USDN", "FEI", "SDAI", "SUSDS", "DOLA", "MIM",
 ]);
+
+// Broad symbol → CoinGecko ID map used to look up USD prices for any
+// supplied / borrowed asset the user holds across AAVE V3, HyperLend, etc.
+// Adding a symbol here immediately enriches it everywhere (Wallet Balances,
+// Lending page, Analytics) — no per-protocol code change required.
+const SYMBOL_TO_CG_ID: Record<string, string> = {
+  // Majors
+  ETH: "ethereum", WETH: "ethereum",
+  BTC: "bitcoin", WBTC: "bitcoin", CBBTC: "bitcoin", TBTC: "bitcoin", UBTC: "bitcoin",
+  SOL: "solana", WSOL: "solana", USOL: "solana",
+  SUI: "sui",
+  HYPE: "hyperliquid", WHYPE: "hyperliquid", KHYPE: "hyperliquid", BEHYPE: "hyperliquid",
+  MATIC: "matic-network", POL: "matic-network",
+  ARB: "arbitrum", OP: "optimism",
+  BNB: "binancecoin", WBNB: "binancecoin",
+  AVAX: "avalanche-2", WAVAX: "avalanche-2",
+  // LSTs / LRTs
+  STETH: "staked-ether", WSTETH: "wrapped-steth",
+  CBETH: "coinbase-wrapped-staked-eth", RETH: "rocket-pool-eth",
+  WEETH: "wrapped-eeth", EZETH: "renzo-restaked-eth", RSETH: "kelp-dao-restaked-eth",
+  OSETH: "stakewise-v3-oseth", ETHX: "stader-ethx", METH: "mantle-staked-ether",
+  UETH: "ethereum", WSTHYPE: "hyperliquid",
+  SUSDE: "ethena-staked-usde",
+  // DeFi blue chips
+  AAVE: "aave", LINK: "chainlink", UNI: "uniswap", CRV: "curve-dao-token",
+  MKR: "maker", LDO: "lido-dao", COMP: "compound-governance-token",
+  SNX: "havven", BAL: "balancer", RPL: "rocket-pool", FXS: "frax-share",
+  CVX: "convex-finance", "1INCH": "1inch", SUSHI: "sushi", GMX: "gmx",
+  // Memes & alts
+  PEPE: "pepe", SHIB: "shiba-inu", DOGE: "dogecoin", WIF: "dogwifcoin",
+};
+
+// CoinGecko platform IDs for contract-address price lookups per chain.
+const CG_PLATFORM: Record<string, string> = {
+  Ethereum: "ethereum",
+  Base: "base",
+  Arbitrum: "arbitrum-one",
+  Optimism: "optimistic-ethereum",
+  Polygon: "polygon-pos",
+};
 
 // AAVE V3 wraps every reserve as a prefixed token:
 //   aToken:         aBasUSDC, aArbUSDT, aPolUSDCn, aEthWETH, ...
@@ -144,61 +186,41 @@ export function useWalletTokens(): WalletTokensData {
 
     (async () => {
       try {
-        // Fetch prices for common tokens across all chains (with 24h change)
-        const prices: Record<string, number> = {};
-        const changes: Record<string, number> = {};
+        // Fetch prices for every token we know a CoinGecko ID for, in one call.
+        // Covers majors, LSTs/LRTs, DeFi blue chips, and a handful of memes — so
+        // AAVE reserves like wstETH, LINK, AAVE, LDO all render with correct USD.
+        const priceById: Record<string, number> = {};
+        const changeById: Record<string, number> = {};
         try {
+          const uniqueIds = Array.from(new Set(Object.values(SYMBOL_TO_CG_ID)));
           const res = await fetch(
-            "/api/prices?endpoint=simple/price&ids=ethereum,bitcoin,solana,sui,matic-network,arbitrum,optimism,binancecoin,avalanche-2&vs_currencies=usd&include_24hr_change=true",
+            `/api/prices?endpoint=simple/price&ids=${uniqueIds.join(",")}&vs_currencies=usd&include_24hr_change=true`,
           ).then((r) => r.json());
-          prices.ethereum   = res?.ethereum?.usd   ?? 0;
-          prices.bitcoin    = res?.bitcoin?.usd    ?? 0;
-          prices.solana     = res?.solana?.usd     ?? 0;
-          prices.sui        = res?.sui?.usd        ?? 0;
-          prices.matic      = res?.["matic-network"]?.usd ?? 0;
-          prices.arbitrum   = res?.arbitrum?.usd   ?? 0;
-          prices.optimism   = res?.optimism?.usd   ?? 0;
-          prices.bnb        = res?.binancecoin?.usd ?? 0;
-          prices.avax       = res?.["avalanche-2"]?.usd ?? 0;
-          changes.ethereum  = res?.ethereum?.usd_24h_change   ?? 0;
-          changes.bitcoin   = res?.bitcoin?.usd_24h_change    ?? 0;
-          changes.solana    = res?.solana?.usd_24h_change     ?? 0;
-          changes.sui       = res?.sui?.usd_24h_change        ?? 0;
-          changes.matic     = res?.["matic-network"]?.usd_24h_change ?? 0;
-          changes.arbitrum  = res?.arbitrum?.usd_24h_change   ?? 0;
-          changes.optimism  = res?.optimism?.usd_24h_change   ?? 0;
-          changes.bnb       = res?.binancecoin?.usd_24h_change ?? 0;
-          changes.avax      = res?.["avalanche-2"]?.usd_24h_change ?? 0;
+          for (const id of uniqueIds) {
+            priceById[id]  = res?.[id]?.usd ?? 0;
+            changeById[id] = res?.[id]?.usd_24h_change ?? 0;
+          }
         } catch (err) { console.error("[useWalletTokens] price fetch failed:", err); }
+
+        function cgIdFor(symbol: string): string | null {
+          return SYMBOL_TO_CG_ID[symbol.toUpperCase()] ?? null;
+        }
 
         function changeOf(symbol: string): number | null {
           const s = symbol.toUpperCase();
           if (STABLE_SYMBOLS.has(s)) return 0;
-          if (s === "ETH" || s === "WETH" || s === "STETH" || s === "WSTETH") return changes.ethereum ?? null;
-          if (s === "BTC" || s === "WBTC" || s === "CBBTC" || s === "TBTC") return changes.bitcoin ?? null;
-          if (s === "SOL" || s === "WSOL") return changes.solana ?? null;
-          if (s === "SUI") return changes.sui ?? null;
-          if (s === "MATIC" || s === "POL") return changes.matic ?? null;
-          if (s === "ARB") return changes.arbitrum ?? null;
-          if (s === "OP") return changes.optimism ?? null;
-          if (s === "BNB" || s === "WBNB") return changes.bnb ?? null;
-          if (s === "AVAX") return changes.avax ?? null;
-          return null;
+          const id = cgIdFor(s);
+          if (!id) return null;
+          const v = changeById[id];
+          return typeof v === "number" ? v : null;
         }
 
         function priceOf(symbol: string): number {
           const s = symbol.toUpperCase();
           if (STABLE_SYMBOLS.has(s)) return 1;
-          if (s === "ETH" || s === "WETH" || s === "STETH" || s === "WSTETH") return prices.ethereum;
-          if (s === "BTC" || s === "WBTC" || s === "CBBTC" || s === "TBTC") return prices.bitcoin;
-          if (s === "SOL" || s === "WSOL") return prices.solana;
-          if (s === "SUI") return prices.sui;
-          if (s === "MATIC" || s === "POL") return prices.matic;
-          if (s === "ARB") return prices.arbitrum;
-          if (s === "OP") return prices.optimism;
-          if (s === "BNB" || s === "WBNB") return prices.bnb;
-          if (s === "AVAX") return prices.avax;
-          return 0;
+          const id = cgIdFor(s);
+          if (!id) return 0;
+          return priceById[id] ?? 0;
         }
 
         const tokens: TokenItem[] = [];
@@ -298,9 +320,9 @@ export function useWalletTokens(): WalletTokensData {
                   symbol: "SOL",
                   name: "Solana",
                   balance: solBal,
-                  usdValue: solBal * (prices.solana ?? 0),
-                  price: prices.solana ?? 0,
-                  change24h: changes.solana ?? null,
+                  usdValue: solBal * priceOf("SOL"),
+                  price: priceOf("SOL"),
+                  change24h: changeOf("SOL"),
                   chain: "Solana",
                   logo: getTokenLogo("SOL") || "",
                   isLending: false,
@@ -349,9 +371,9 @@ export function useWalletTokens(): WalletTokensData {
                   symbol: "SUI",
                   name: "Sui",
                   balance: suiBal,
-                  usdValue: suiBal * (prices.sui ?? 0),
-                  price: prices.sui ?? 0,
-                  change24h: changes.sui ?? null,
+                  usdValue: suiBal * priceOf("SUI"),
+                  price: priceOf("SUI"),
+                  change24h: changeOf("SUI"),
                   chain: "Sui",
                   logo: getTokenLogo("SUI") || "",
                   isLending: false,

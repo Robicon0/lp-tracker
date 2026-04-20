@@ -285,7 +285,6 @@ export async function GET(request: Request) {
             // Fall back to on-chain Pyth oracle price if CoinGecko is unavailable
             const price = cgPrice > 0 ? cgPrice : reserve.oraclePriceUsd;
             const usdValue = underlying * price;
-            if (usdValue < 0.001) continue;
 
             const apy = reserve.supplyAprPct;
             console.log(`[suilend/route] Deposit: ${symbol} amount=${underlying.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy?.toFixed(4) ?? 'null'}%`);
@@ -319,7 +318,6 @@ export async function GET(request: Request) {
             const cgPrice = await getPriceUsd(symbol);
             const price = cgPrice > 0 ? cgPrice : reserve.oraclePriceUsd;
             const usdValue = amount * price;
-            if (usdValue < 0.001) continue;
 
             console.log(`[suilend/route] Borrow: ${symbol} amount=${amount.toFixed(4)} usd=$${usdValue.toFixed(2)}`);
             borrows.push({ symbol, amount, usdValue, apy: 0 });
