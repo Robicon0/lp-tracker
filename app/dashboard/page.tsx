@@ -14,6 +14,7 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import { useHistoricalPortfolio, type HistRangeKey } from "../hooks/useHistoricalPortfolio";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -260,6 +261,7 @@ export default function Dashboard() {
 
   // Wallet token balances (for Tokens + Lending summary cards)
   const {
+    tokens: walletTokensList,
     totalTokenValue, totalLendingValue,
     tokenCount, lendingCount,
     isLoading: walletTokensLoading,
@@ -349,29 +351,33 @@ export default function Dashboard() {
     return Object.entries(m).map(([chain, value]) => ({ chain, value })).sort((a, b) => b.value - a.value);
   }, [allPositions]);
 
-  // Portfolio history chart
+  // Portfolio history — two sources:
+  //  1. `usePortfolioHistory` (localStorage snapshots) still drives the
+  //     Portfolio Performance chart below — it's authoritative for chart shape
+  //     because it captures the actual LP value at each sample.
+  //  2. `useHistoricalPortfolio` computes historical totals from on-chain /
+  //     market-data (CoinGecko market_chart × today's holdings). This is what
+  //     powers the hero's 1D/7D/30D/1Y P&L numbers — so a brand-new user sees
+  //     a real number on first page load instead of waiting for snapshots.
   const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
   const activeRange    = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
   const rangeCutoff    = Date.now() - activeRange.ms;
   const rangedHistory  = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
   const effectiveHistory = rangedHistory.length >= 2 ? rangedHistory : portfolioHistory;
-  const effectiveFirst   = effectiveHistory[0];
-  const pnlDollar = effectiveFirst ? totalValue - effectiveFirst.totalValue : 0;
-  const pnlPct    = effectiveFirst && effectiveFirst.totalValue > 0
-    ? (pnlDollar / effectiveFirst.totalValue) * 100
-    : 0;
-  const pnlLabel = (() => {
-    if (!effectiveFirst) return activeRange.label;
-    const coverage = Date.now() - effectiveFirst.timestamp;
-    if (coverage < activeRange.ms * 0.5)
-      return `since ${new Date(effectiveFirst.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-    return activeRange.label;
-  })();
   const chartData = effectiveHistory.map((s) => ({
     label: activeRange.xFmt(new Date(s.timestamp)),
     value: s.totalValue,
   }));
+
+  // Hero P&L — historical approach (works for any wallet on first load)
+  const heroRangeKey: HistRangeKey = rangeKey === "90D" ? "30D" : (rangeKey as HistRangeKey);
+  const histPortfolio = useHistoricalPortfolio(allPositions, walletTokensList, totalValue);
+  const heroRangeData = histPortfolio.byRange[heroRangeKey];
+  const pnlDollar = heroRangeData.available ? heroRangeData.pnlDollar : 0;
+  const pnlPct    = heroRangeData.available ? heroRangeData.pnlPct : 0;
+  const pnlAvailable = heroRangeData.available;
+  const pnlLabel = activeRange.label;
 
   // Hero price pills — separate light fetch for BTC/ETH/SOL
   const [heroPrices, setHeroPrices] = useState<Record<string, number>>({});
@@ -530,18 +536,24 @@ export default function Dashboard() {
                 style={{ fontSize:48, fontWeight:700, color:"white", letterSpacing:-2 }}>
                 {fmt$(totalValue)}
               </span>
-              {mounted && effectiveHistory.length >= 2 && (
+              {mounted && pnlAvailable && (
                 <span style={{ fontSize:14, color: pnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
                   {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
                   ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
                   <span style={{ color:"rgba(255,255,255,0.3)", fontSize:12, marginLeft:4 }}>{pnlLabel}</span>
                 </span>
               )}
+              {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (
+                <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
+                  Data unavailable {pnlLabel}
+                </span>
+              )}
             </div>
             {mounted && (
               <div style={{ display:"flex", gap:4, marginTop:10 }}>
                 {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => {
-                  const hasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
+                  const rangeKeyTyped = r.key as HistRangeKey;
+                  const hasData = histPortfolio.byRange[rangeKeyTyped]?.available ?? false;
                   const active = rangeKey === r.key;
                   return (
                     <button
@@ -899,7 +911,7 @@ export default function Dashboard() {
                       color:"rgba(255,255,255,0.35)", margin:0 }}>Portfolio History</h3>
                     <div style={{ display:"flex", gap:4 }}>
                       {TIME_RANGES.map((r) => {
-                        const hasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
+                        const snapshotHasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
                         return (
                           <button
                             key={r.key}
@@ -909,7 +921,7 @@ export default function Dashboard() {
                               cursor:"pointer",
                               background: rangeKey === r.key ? "#10b981" : "rgba(255,255,255,0.06)",
                               color: rangeKey === r.key ? "white"
-                                : hasData ? "rgba(255,255,255,0.5)"
+                                : snapshotHasData ? "rgba(255,255,255,0.5)"
                                 : "rgba(255,255,255,0.2)",
                             }}
                           >{r.key}</button>
@@ -917,7 +929,7 @@ export default function Dashboard() {
                       })}
                     </div>
                   </div>
-                  {effectiveHistory.length >= 2 && (
+                  {pnlAvailable && (
                     <div style={{ fontSize:13, fontWeight:500,
                       color: pnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
                       {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}

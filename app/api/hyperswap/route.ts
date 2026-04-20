@@ -18,14 +18,21 @@ const POSITION_MANAGERS = [
   { address: PRJX_NFT_MANAGER, protocol: 'ProjectX', factory: '0xff7b3e8c00e57ea31477c32a5b52a58eea47b072' },
 ];
 
-// Known tokens on HyperEVM
-// Note: 0x5555...5555 is how native HYPE is represented in V3 pool token slots
+// HyperEVM tokens — pricing/decimals hints only. Symbol is ALWAYS read from
+// the token contract on-chain (see fetchTokenInfo). The symbol stored here is
+// a CoinGecko-routing hint used only when the on-chain symbol cannot be read
+// from the contract (e.g. native HYPE pseudo-address 0x5555...5555 which has
+// no ERC-20 contract to call symbol() on).
 const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingeckoId: string }> = {
   '0x5555555555555555555555555555555555555555': { symbol: 'HYPE', decimals: 18, coingeckoId: 'hyperliquid' },
   '0xadcb2f358eae6492f61a5f87eb8893d09391d160': { symbol: 'WHYPE', decimals: 18, coingeckoId: 'hyperliquid' },
   '0xb88339cb7199b77e23db6e890353e22632ba630f': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
   '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
 };
+
+// 0x5555...5555 is a pseudo-address used inside V3 pool slots to represent
+// native HYPE — there's no contract at that address, so symbol() would fail.
+const NATIVE_HYPE_PSEUDO = '0x5555555555555555555555555555555555555555';
 
 // Function selectors (ERC-721 + Uniswap V3 NonfungiblePositionManager interface)
 const SELECTORS = {
@@ -140,15 +147,32 @@ function decodeHexStringUtf8(hex: string, strLen: number): string {
   return new TextDecoder('utf-8').decode(bytes).replace(/\0/g, '');
 }
 
-// Strip non-printable, non-ASCII, and stray control/arrow characters from token symbols.
-// Only keep alphanumeric, dots, hyphens, underscores, and spaces (common in token symbols).
+// Clean an on-chain symbol for display. Only strips characters that cannot be
+// rendered as text (null bytes, ASCII control codes, direction/format marks).
+// Preserves printable Unicode — tokens with branded glyphs like USD₮0 or
+// ringed/decorated symbols must render exactly as the contract publishes them
+// rather than being silently downgraded to a lookalike.
 function cleanSymbol(s: string): string {
-  return s.replace(/[^a-zA-Z0-9.\-_ ]/g, '').trim();
+  return s
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')  // ASCII + C1 control
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '') // zero-width + BiDi marks
+    .trim();
 }
 
+// Resolve a token's symbol + decimals by calling the token contract directly.
+// Never returns a hardcoded display name — the symbol comes from symbol() on
+// the contract. KNOWN_TOKENS is consulted only for:
+//   * the native-HYPE pseudo-address 0x5555…5555 (no ERC-20 contract exists)
+//   * decimals when the contract call fails
+//   * CoinGecko pricing hints (separately, via KNOWN_TOKENS[addr].coingeckoId)
 async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
-  const known = KNOWN_TOKENS[tokenAddress.toLowerCase()];
-  if (known) return { symbol: known.symbol, decimals: known.decimals };
+  const lower = tokenAddress.toLowerCase();
+  // Native HYPE has no ERC-20 contract — symbol/decimals would revert.
+  if (lower === NATIVE_HYPE_PSEUDO) {
+    return { symbol: 'HYPE', decimals: 18 };
+  }
+
+  const known = KNOWN_TOKENS[lower];
 
   try {
     const [symResult, decResult] = await Promise.all([
@@ -156,24 +180,33 @@ async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; d
       rpcCall(tokenAddress, SELECTORS.decimals),
     ]);
 
-    let symbol = tokenAddress.slice(0, 8);
+    let symbol = '';
     if (symResult && symResult.length > 130) {
       // ABI-encoded string: offset(32) + length(32) + data
       const hex = symResult.startsWith('0x') ? symResult.slice(2) : symResult;
       const strLen = parseInt(hex.slice(64, 128), 16);
-      const s = cleanSymbol(decodeHexStringUtf8(hex.slice(128), strLen));
-      if (s) symbol = s;
+      symbol = cleanSymbol(decodeHexStringUtf8(hex.slice(128), strLen));
     } else if (symResult && symResult !== '0x' && symResult.length === 66) {
       // bytes32 encoded symbol (short string without length prefix)
       const hex = symResult.startsWith('0x') ? symResult.slice(2) : symResult;
-      const s = cleanSymbol(decodeHexStringUtf8(hex, 32));
-      if (s) symbol = s;
+      symbol = cleanSymbol(decodeHexStringUtf8(hex, 32));
     }
 
-    const decimals = decResult && decResult !== '0x' ? parseInt(decResult, 16) : 18;
+    // If the contract returned a usable symbol, that's the truth — use it.
+    // Otherwise fall back to any known hint for the address, then to a short
+    // address tag so the UI isn't blank.
+    if (!symbol) symbol = known?.symbol ?? tokenAddress.slice(2, 8).toUpperCase();
+
+    const decimals = decResult && decResult !== '0x'
+      ? parseInt(decResult, 16)
+      : (known?.decimals ?? 18);
+
     return { symbol, decimals };
   } catch {
-    return { symbol: tokenAddress.slice(2, 8).toUpperCase(), decimals: 18 };
+    return {
+      symbol: known?.symbol ?? tokenAddress.slice(2, 8).toUpperCase(),
+      decimals: known?.decimals ?? 18,
+    };
   }
 }
 

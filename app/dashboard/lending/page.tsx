@@ -43,27 +43,6 @@ function getFallbackSupplyApy(underlying: string): number {
   return FALLBACK_AAVE_SUPPLY_APY[underlying] ?? 0;
 }
 
-// aToken → underlying symbol (duplicated from hook, used for display labels)
-function getUnderlying(symbol: string): string {
-  const rest = symbol.startsWith("a") ? symbol.slice(1) : symbol.slice(1);
-  for (const prefix of ["Bas", "Arb", "Opt", "Eth", "Pol"]) {
-    if (rest.startsWith(prefix)) return rest.slice(prefix.length);
-  }
-  return rest;
-}
-
-// Detect chain prefix from aToken symbol
-function getATokenChain(symbol: string): string | null {
-  const rest = symbol.startsWith("a") ? symbol.slice(1) : null;
-  if (!rest) return null;
-  if (rest.startsWith("Bas")) return "Base";
-  if (rest.startsWith("Arb")) return "Arbitrum";
-  if (rest.startsWith("Opt")) return "Optimism";
-  if (rest.startsWith("Eth")) return "Ethereum";
-  if (rest.startsWith("Pol")) return "Polygon";
-  return null;
-}
-
 // Inline token icon
 function TokenIcon({ symbol, size = 28, logo, style }: {
   symbol: string; size?: number; logo?: string; style?: CSSProperties;
@@ -107,8 +86,8 @@ interface LendingPosition {
 function rateForToken(t: TokenItem, liveRates: AaveV3RatesMap): { supplyApy: number; borrowApy: number } {
   const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
   if (live) return live;
-  const underlying = getUnderlying(t.symbol);
-  const supplyApy = getFallbackSupplyApy(underlying);
+  // t.symbol is already the underlying (useWalletTokens strips AAVE prefixes)
+  const supplyApy = getFallbackSupplyApy(t.symbol);
   return { supplyApy, borrowApy: 0 };
 }
 
@@ -116,13 +95,13 @@ function buildPositions(tokens: TokenItem[], liveRates: AaveV3RatesMap): Lending
   const lendingTokens = tokens.filter((t) => t.isLending);
   const debtTokens    = tokens.filter((t) => t.isDebt);
 
-  // Group by detected chain
+  // Group by chain — t.chain is set to the chain the token was fetched from
+  // by useWalletTokens, so no need to re-derive from the symbol prefix.
   const chainMap = new Map<string, TokenItem[]>();
   for (const t of lendingTokens) {
-    const detectedChain = getATokenChain(t.symbol) ?? t.chain;
-    const arr = chainMap.get(detectedChain) ?? [];
+    const arr = chainMap.get(t.chain) ?? [];
     arr.push(t);
-    chainMap.set(detectedChain, arr);
+    chainMap.set(t.chain, arr);
   }
 
   return [...chainMap.entries()].map(([chain, supplied]) => {
@@ -437,9 +416,8 @@ function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: Aav
               ↑ Supplied Assets
             </p>
             {pos.suppliedTokens.map((t) => {
-              const underlying = getUnderlying(t.symbol);
               const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
-              const apy = live?.supplyApy ?? getFallbackSupplyApy(underlying);
+              const apy = live?.supplyApy ?? getFallbackSupplyApy(t.symbol);
               const isLive = !!live;
               return (
                 <div key={t.contractAddress}
@@ -447,9 +425,9 @@ function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: Aav
                     padding: "10px 14px", borderRadius: 10,
                     background: "rgba(52,211,153,0.04)",
                     border: "1px solid rgba(52,211,153,0.1)", marginBottom: 6 }}>
-                  <TokenIcon symbol={underlying || t.symbol} size={32} logo={t.logo} />
+                  <TokenIcon symbol={t.symbol} size={32} logo={t.logo} />
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{underlying || t.symbol}</p>
+                    <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{t.symbol}</p>
                     <p style={{ fontSize: 11, color: "#34d399", margin: 0 }}>
                       APY: {apy.toFixed(2)}%
                       {!isLive && (
@@ -479,7 +457,6 @@ function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: Aav
               ↓ Borrowed Assets
             </p>
             {pos.debtTokens.map((t) => {
-              const underlying = getUnderlying(t.symbol);
               const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
               const borrowApy = live?.borrowApy;
               return (
@@ -488,9 +465,9 @@ function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: Aav
                   padding: "10px 14px", borderRadius: 10,
                   background: "rgba(239,68,68,0.04)",
                   border: "1px solid rgba(239,68,68,0.15)", marginBottom: 6 }}>
-                <TokenIcon symbol={underlying || t.symbol} size={32} logo={t.logo} />
+                <TokenIcon symbol={t.symbol} size={32} logo={t.logo} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{underlying || t.symbol}</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{t.symbol}</p>
                   <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>
                     Borrow APY: {borrowApy !== undefined ? `${borrowApy.toFixed(2)}%` : "—"}
                   </p>
@@ -500,7 +477,7 @@ function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: Aav
                     {t.usdValue > 0 ? fmt$(t.usdValue) : "—"}
                   </p>
                   <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                    {fmtBalance(t.balance)} tokens
+                    {fmtBalance(t.balance)} {t.symbol}
                   </p>
                 </div>
               </div>

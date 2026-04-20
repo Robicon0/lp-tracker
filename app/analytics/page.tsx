@@ -711,10 +711,11 @@ export default function Analytics() {
             </div>
             <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
               <p className="text-xs text-gray-500 mb-1">Total Impermanent Loss</p>
-              <p className={`text-lg font-bold ${lpPnl.ilUSD <= 0 ? "text-red-400" : "text-emerald-400"}`}>
-                {fmt$(lpPnl.ilUSD)}
+              {/* IL = Σ(HODL − Current) across open positions. Positive number = LP underperformed HODL. */}
+              <p className={`text-lg font-bold ${-lpPnl.ilUSD > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                {-lpPnl.ilUSD > 0 ? "+" : ""}{fmt$(-lpPnl.ilUSD)}
               </p>
-              <p className="text-[10px] text-gray-600 mt-0.5">vs HODL</p>
+              <p className="text-[10px] text-gray-600 mt-0.5">Σ(HODL − Current), open only</p>
             </div>
             <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
               <p className="text-xs text-gray-500 mb-1">Net P&amp;L</p>

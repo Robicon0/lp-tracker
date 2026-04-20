@@ -17,36 +17,48 @@ const STABLE_SYMBOLS = new Set([
   "USDC", "USDT", "DAI", "USDbC", "USDC.E", "USDS", "FRAX", "LUSD", "BUSD", "GUSD",
 ]);
 
-// AAVE V3 uses the "n" suffix on aTokens / variableDebt tokens for native USDC
-// (e.g. aArbUSDCn, variableDebtArbUSDCn, aPolUSDCn) to differentiate from the
-// bridged USDC.e market. The underlying is plain USDC — normalize the trailing
-// "n" off so display everywhere (lending page, wallet balances, analytics) just
-// shows "USDC". Does not affect the contract address / amounts / rates.
-function normalizeTokenSymbol(symbol: string): string {
-  if (!symbol) return symbol;
-  if (symbol.endsWith("USDCn")) return symbol.slice(0, -1);
-  return symbol;
-}
+// AAVE V3 wraps every reserve as a prefixed token:
+//   aToken:         aBasUSDC, aArbUSDT, aPolUSDCn, aEthWETH, ...
+//   debt tokens:    variableDebtArbUSDT, stableDebtOptDAI, ...
+// These prefixes are an internal AAVE convention. The user wants to see the
+// UNDERLYING asset name (USDC, USDT, DAI, WETH) on every display surface.
+//
+// `stripAavePrefix(raw)` returns the on-chain underlying symbol by stripping:
+//   1. AAVE token-class prefix:  variableDebt | stableDebt | a
+//   2. AAVE chain sub-prefix:    Bas | Arb | Opt | Eth | Pol
+//   3. trailing "n" on native-USDC markets (aArbUSDCn → USDC)
+// If the input doesn't match the AAVE naming shape, the symbol is returned
+// unchanged — so non-AAVE tokens (USDC from a pool, WHYPE from a wallet, etc.)
+// are pass-through.
+const AAVE_CHAIN_PREFIXES = ["Bas", "Arb", "Opt", "Eth", "Pol"];
 
-// aToken detection: AAVE V3 uses chain-prefix patterns; AAVE V2 uses direct names
-function getATokenUnderlying(symbol: string): string | null {
-  if (symbol.length < 3) return null;
-  if (!symbol.startsWith("a") && !symbol.startsWith("A")) return null;
-  const rest = symbol.slice(1);
-  for (const prefix of ["Bas", "Arb", "Opt", "Eth", "Pol"]) {
-    if (rest.startsWith(prefix)) return rest.slice(prefix.length);
+function stripAavePrefix(raw: string): string {
+  if (!raw) return raw;
+  let s = raw;
+  if (/^variableDebt/.test(s))      s = s.slice("variableDebt".length);
+  else if (/^stableDebt/.test(s))   s = s.slice("stableDebt".length);
+  else if (/^a[A-Z]/.test(s))       s = s.slice(1);
+  else return raw; // not an AAVE wrapper — leave symbol as-is
+  for (const p of AAVE_CHAIN_PREFIXES) {
+    if (s.startsWith(p) && /^[A-Z0-9]/.test(s.slice(p.length))) {
+      s = s.slice(p.length);
+      break;
+    }
   }
-  if (/^[A-Z]/.test(rest) && rest.length >= 2) return rest;
-  return null;
+  if (s.endsWith("n") && s.length > 1 && /[A-Z]$/.test(s.slice(-2, -1))) {
+    s = s.slice(0, -1);
+  }
+  return s || raw;
 }
 
-function isLendingToken(symbol: string): boolean {
-  return getATokenUnderlying(symbol) !== null;
+// Detection runs on the RAW symbol (pre-strip), since detection keys off the
+// AAVE wrapper prefix which strip removes.
+function isLendingToken(rawSymbol: string): boolean {
+  return /^a[A-Z]/.test(rawSymbol);
 }
 
-function isDebtToken(symbol: string): boolean {
-  const s = symbol.toLowerCase();
-  return s.startsWith("variabledebt") || s.startsWith("stabledebt");
+function isDebtToken(rawSymbol: string): boolean {
+  return /^variableDebt/.test(rawSymbol) || /^stableDebt/.test(rawSymbol);
 }
 
 export interface TokenItem {
@@ -171,8 +183,6 @@ export function useWalletTokens(): WalletTokensData {
           if (s === "OP") return changes.optimism ?? null;
           if (s === "BNB" || s === "WBNB") return changes.bnb ?? null;
           if (s === "AVAX") return changes.avax ?? null;
-          const underlying = getATokenUnderlying(symbol);
-          if (underlying) return changeOf(underlying);
           return null;
         }
 
@@ -188,9 +198,6 @@ export function useWalletTokens(): WalletTokensData {
           if (s === "OP") return prices.optimism;
           if (s === "BNB" || s === "WBNB") return prices.bnb;
           if (s === "AVAX") return prices.avax;
-          // aToken: resolve underlying price
-          const underlying = getATokenUnderlying(symbol);
-          if (underlying) return priceOf(underlying);
           return 0;
         }
 
@@ -233,11 +240,16 @@ export function useWalletTokens(): WalletTokensData {
                       });
                       const m = meta.result;
                       if (!m?.symbol || m.symbol.length >= 20) return;
-                      // Detect lending/debt against the raw on-chain symbol BEFORE
-                      // normalization (prefix rules rely on full symbol).
+                      // Detect lending/debt against the RAW on-chain symbol —
+                      // the detection keys on the AAVE wrapper prefix which the
+                      // strip step removes.
                       const lending = isLendingToken(m.symbol);
                       const debt = isDebtToken(m.symbol);
-                      const displaySymbol = normalizeTokenSymbol(m.symbol);
+                      // Display symbol: for AAVE aTokens / debtTokens, use the
+                      // stripped underlying (USDC, USDT, DAI, WETH, …). For
+                      // everything else the on-chain symbol passes through
+                      // unchanged.
+                      const displaySymbol = stripAavePrefix(m.symbol);
                       const decimals = m.decimals || 18;
                       const rawBal = BigInt(token.tokenBalance);
                       const balance = Number(rawBal) / Math.pow(10, decimals);
@@ -247,13 +259,13 @@ export function useWalletTokens(): WalletTokensData {
                       if (!cancelled) {
                         tokens.push({
                           symbol: displaySymbol,
-                          name: m.name && m.name.length < 40 ? normalizeTokenSymbol(m.name) : displaySymbol,
+                          name: displaySymbol,
                           balance,
                           usdValue,
                           price,
-                          change24h: changeOf(m.symbol),
+                          change24h: changeOf(displaySymbol),
                           chain: chain.name,
-                          logo: m.logo || getTokenLogo(m.symbol) || "",
+                          logo: m.logo || getTokenLogo(displaySymbol) || "",
                           isLending: lending,
                           isDebt: debt,
                           contractAddress: token.contractAddress,
