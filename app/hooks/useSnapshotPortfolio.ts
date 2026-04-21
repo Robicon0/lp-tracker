@@ -10,9 +10,12 @@ import { useEffect, useRef, useState } from "react";
 // without worrying about row inflation.
 //
 // It also fetches the snapshot series for the given range and computes
-// a P&L (oldest snapshot → current live value). If the range covers a
-// period the user wasn't tracking yet, `available` is false and the UI
-// should fall back to "Tracking started — N days of data collected".
+// a P&L (oldest snapshot → current live value). Strict gating — a range
+// is marked `available: true` ONLY when there are ≥2 snapshots in the
+// window AND the oldest / newest snapshots are far enough apart to be a
+// meaningful comparison (configured per range). Otherwise `available`
+// is false and the UI shows "Not enough data yet" or
+// "Tracking started … check back in N days".
 
 export type SnapshotRangeKey = "1D" | "7D" | "30D" | "1Y";
 
@@ -21,6 +24,16 @@ const RANGE_DAYS: Record<SnapshotRangeKey, number> = {
   "7D": 7,
   "30D": 30,
   "1Y": 365,
+};
+
+// Minimum hours between the oldest and newest in-range snapshots for a
+// range to be considered "enough data". Prevents the toggle from showing
+// a bogus P&L computed from two snapshots taken minutes apart.
+const MIN_HOURS_APART: Record<SnapshotRangeKey, number> = {
+  "1D":  20,          // 20 hours
+  "7D":  6 * 24,      // 6 days
+  "30D": 25 * 24,     // 25 days
+  "1Y":  300 * 24,    // 300 days
 };
 
 export interface SnapshotPoint {
@@ -39,6 +52,11 @@ export interface SnapshotRangeResult {
   pnlDollar: number | null;
   pnlPct: number | null;
   available: boolean;
+  // When `available` is false, `checkBackInDays` tells the UI how long
+  // until the user is expected to have a valid comparison. 0 means
+  // "less than a day"; use the "Not enough data yet — check back tomorrow"
+  // copy for 1D specifically.
+  checkBackInDays: number;
 }
 
 export interface UseSnapshotPortfolioData {
@@ -56,6 +74,7 @@ const EMPTY_RANGE: SnapshotRangeResult = {
   pnlDollar: null,
   pnlPct: null,
   available: false,
+  checkBackInDays: 0,
 };
 
 export function useSnapshotPortfolio(
@@ -89,7 +108,6 @@ export function useSnapshotPortfolio(
     if (!addrKey) return;
     if (!Number.isFinite(currentTotalValue) || currentTotalValue <= 0) return;
 
-    // Fire one save per (address-set, value) change
     const sig = `${addrKey}|${Math.round(currentTotalValue * 100)}`;
     if (lastSavedRef.current.key === sig) return;
     lastSavedRef.current = { key: sig, value: currentTotalValue };
@@ -102,10 +120,6 @@ export function useSnapshotPortfolio(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             walletAddress: addr,
-            // Split current totals across wallets proportionally — we don't
-            // know per-wallet totals at this layer, so put the full total
-            // on the first address and zeros elsewhere. This keeps the
-            // aggregated sum correct when reading back via the range API.
             totalLpValue:  addr === addrList[0] ? currentLpValue     : 0,
             lendingValue:  addr === addrList[0] ? currentLendingValue : 0,
             tokenValue:    addr === addrList[0] ? currentTokenValue  : 0,
@@ -116,8 +130,6 @@ export function useSnapshotPortfolio(
     ).catch(() => { /* already logged */ });
   }, [addrKey, currentTotalValue, currentLpValue, currentLendingValue, currentTokenValue, positionCount]);
 
-  // Fetch snapshot series for the longest range (1Y) and derive every
-  // subrange from it in memory.
   useEffect(() => {
     if (!addrKey) {
       setData({
@@ -150,11 +162,27 @@ export function useSnapshotPortfolio(
         const daysTracked = res.daysTracked ?? 0;
 
         const now = Date.now();
+        const trackingStartMs = trackingSince ? new Date(trackingSince).getTime() : now;
+        const daysSinceStart = Math.max(0, (now - trackingStartMs) / 86_400_000);
+
         const byRange = {} as Record<SnapshotRangeKey, SnapshotRangeResult>;
         for (const key of Object.keys(RANGE_DAYS) as SnapshotRangeKey[]) {
           const cutoff = now - RANGE_DAYS[key] * 86_400_000;
           const inRange = snapshots.filter((s) => new Date(s.timestamp).getTime() >= cutoff);
-          if (inRange.length === 0) {
+          const minHours = MIN_HOURS_APART[key];
+          const minDaysNeeded = minHours / 24;
+
+          // Gate 1: need ≥2 snapshots in the range.
+          // Gate 2: oldest and newest must be ≥ minHoursApart apart.
+          const hasTwo = inRange.length >= 2;
+          const spanHours = hasTwo
+            ? (new Date(inRange[inRange.length - 1].timestamp).getTime()
+               - new Date(inRange[0].timestamp).getTime()) / 3_600_000
+            : 0;
+          const enoughSpan = spanHours >= minHours;
+
+          if (!hasTwo || !enoughSpan) {
+            const daysToGo = Math.max(0, Math.ceil(minDaysNeeded - daysSinceStart));
             byRange[key] = {
               value: currentTotalValue,
               oldestValue: null,
@@ -162,9 +190,11 @@ export function useSnapshotPortfolio(
               pnlDollar: null,
               pnlPct: null,
               available: false,
+              checkBackInDays: daysToGo,
             };
             continue;
           }
+
           const oldest = inRange[0];
           const pnlDollar = currentTotalValue - oldest.totalValue;
           const pnlPct = oldest.totalValue > 0 ? (pnlDollar / oldest.totalValue) * 100 : null;
@@ -175,6 +205,7 @@ export function useSnapshotPortfolio(
             pnlDollar,
             pnlPct,
             available: true,
+            checkBackInDays: 0,
           };
         }
 

@@ -565,13 +565,23 @@ export default function Dashboard() {
                   <span style={{ color:"rgba(255,255,255,0.3)", fontSize:12, marginLeft:4 }}>{pnlLabel}</span>
                 </span>
               )}
-              {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (
-                <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
-                  {trackingSince
-                    ? `Tracking started ${new Date(trackingSince).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — ${daysTracked} day${daysTracked === 1 ? "" : "s"} of data collected`
-                    : `Tracking started today — building your history`}
-                </span>
-              )}
+              {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (() => {
+                const checkBackInDays = heroRangeData.checkBackInDays ?? 0;
+                const trackingDate = trackingSince
+                  ? new Date(trackingSince).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                  : null;
+                let msg: string;
+                if (heroRangeKey === "1D") {
+                  msg = "Not enough data yet — check back tomorrow";
+                } else if (trackingDate) {
+                  msg = `Tracking started ${trackingDate} — check back in ${checkBackInDays} day${checkBackInDays === 1 ? "" : "s"}`;
+                } else {
+                  msg = `Tracking started today — building your history`;
+                }
+                return (
+                  <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>{msg}</span>
+                );
+              })()}
             </div>
             {mounted && (
               <div style={{ display:"flex", gap:4, marginTop:10 }}>

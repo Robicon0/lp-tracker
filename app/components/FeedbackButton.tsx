@@ -85,6 +85,8 @@ export default function FeedbackButton() {
         throw new Error(body?.error || `Formspree returned ${res.status}`);
       }
       setSent(true);
+      // Auto-close after 3s so the user doesn't have to hunt for a button
+      setTimeout(() => { close(); }, 3000);
     } catch (err) {
       console.error("[FeedbackButton] submit failed:", err);
       setError(err instanceof Error ? err.message : "Failed to send feedback");
@@ -134,6 +136,7 @@ export default function FeedbackButton() {
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            overflowY: "auto",
           }}
         >
           <div
@@ -141,6 +144,9 @@ export default function FeedbackButton() {
             style={{
               width: "100%",
               maxWidth: 460,
+              maxHeight: "calc(100dvh - 32px)",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
               background: CARD_BG,
               backgroundImage: `linear-gradient(135deg, ${BG_DEEP} 0%, #0a1f17 100%)`,
               border: `1px solid ${BORDER}`,
@@ -148,8 +154,38 @@ export default function FeedbackButton() {
               padding: 24,
               color: TEXT,
               boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(16,185,129,0.06)",
+              position: "relative",
             }}
           >
+            {!sent && (
+              <button
+                type="button"
+                onClick={close}
+                aria-label="Close feedback"
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  marginLeft: "auto",
+                  marginBottom: -24,
+                  marginRight: -8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 32,
+                  height: 32,
+                  background: "rgba(16,185,129,0.12)",
+                  color: "#6ee7b7",
+                  border: `1px solid ${BORDER}`,
+                  borderRadius: 999,
+                  fontSize: 18,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  zIndex: 2,
+                }}
+              >
+                ×
+              </button>
+            )}
             {sent ? (
               <div style={{ textAlign: "center", padding: "24px 0" }}>
                 <div style={{
@@ -183,26 +219,10 @@ export default function FeedbackButton() {
               </div>
             ) : (
               <>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <div style={{ marginBottom: 16, paddingRight: 40 }}>
                   <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: TEXT }}>
                     Send feedback
                   </h3>
-                  <button
-                    type="button"
-                    onClick={close}
-                    aria-label="Close"
-                    style={{
-                      background: "transparent",
-                      color: MUTED,
-                      border: "none",
-                      fontSize: 20,
-                      cursor: "pointer",
-                      padding: 4,
-                      lineHeight: 1,
-                    }}
-                  >
-                    ×
-                  </button>
                 </div>
 
                 {/* Star rating */}
