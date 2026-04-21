@@ -266,6 +266,7 @@ export async function GET(request: Request) {
         price1,
         token0Address: tokens?.token0,
         token1Address: tokens?.token1,
+        poolAddress: raw.lp,
         walletAddress: account,
       };
     });

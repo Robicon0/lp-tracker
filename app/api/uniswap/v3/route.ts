@@ -5,6 +5,8 @@ const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
 // Uniswap V3 NonfungiblePositionManager - same address on all chains
 const POSITION_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
+// Uniswap V3 factory - same address on all V3-supported chains
+const FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
 
 // Chain configurations with Alchemy RPC endpoints
 const CHAINS: Record<string, { rpc: string; chainName: string; defillamaChain: string }> = {

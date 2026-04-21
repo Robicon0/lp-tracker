@@ -14,7 +14,10 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
-import { useSnapshotPortfolio, type SnapshotRangeKey } from "../hooks/useSnapshotPortfolio";
+import {
+  useOnchainHistoricalPortfolio,
+  type HistRangeKey as OnchainHistRangeKey,
+} from "../hooks/useOnchainHistoricalPortfolio";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -370,36 +373,20 @@ export default function Dashboard() {
     value: s.totalValue,
   }));
 
-  // Hero P&L — driven by daily Postgres snapshots written server-side every
-  // UTC midnight plus an immediate client-side save on every positions load,
-  // so a user gets their first data point the moment they connect.
-  const heroRangeKey: SnapshotRangeKey = rangeKey === "90D" ? "30D" : (rangeKey as SnapshotRangeKey);
-  const snapshotAddresses = useMemo(() => {
-    const list: string[] = [];
-    if (address) list.push(address.toLowerCase());
-    if (solanaAddress) list.push(solanaAddress);
-    if (suiAddress) list.push(suiAddress.toLowerCase());
-    for (const w of watchedWallets) {
-      const a = w.chain === "evm" || w.chain === "sui" ? w.address.toLowerCase() : w.address;
-      if (!list.includes(a)) list.push(a);
-    }
-    return list;
-  }, [address, solanaAddress, suiAddress, watchedWallets]);
-  const histPortfolio = useSnapshotPortfolio(
-    snapshotAddresses,
-    totalValue + combinedLendingValue + totalTokenValue,
-    totalValue,
-    combinedLendingValue,
-    totalTokenValue,
-    allPositions.length,
-  );
+  // Hero P&L — driven entirely by on-chain Uniswap V3-style pool oracle
+  // observations. No snapshots, no DB, no external price APIs. For each
+  // range the pool's observation ring is read to derive a historical tick,
+  // stablecoin anchoring produces USD prices, and we multiply by current
+  // LP token amounts to get the historical portfolio value.
+  const heroRangeKey: OnchainHistRangeKey = rangeKey === "90D" ? "30D" : (rangeKey as OnchainHistRangeKey);
+  const histPortfolio = useOnchainHistoricalPortfolio(allPositions, totalValue);
   const heroRangeData = histPortfolio.byRange[heroRangeKey];
-  const pnlDollar = heroRangeData.available ? (heroRangeData.pnlDollar ?? 0) : 0;
-  const pnlPct    = heroRangeData.available ? (heroRangeData.pnlPct ?? 0) : 0;
+  const pnlDollar = heroRangeData.available ? heroRangeData.pnlDollar : 0;
+  const pnlPct    = heroRangeData.available ? heroRangeData.pnlPct    : 0;
   const pnlAvailable = heroRangeData.available;
   const pnlLabel = activeRange.label;
-  const trackingSince = histPortfolio.trackingSince;
-  const daysTracked = histPortfolio.daysTracked;
+  const heroExcluded = heroRangeData.excluded;
+  const heroIncluded = heroRangeData.included;
 
   // Hero price pills — separate light fetch for BTC/ETH/SOL
   const [heroPrices, setHeroPrices] = useState<Record<string, number>>({});
@@ -565,28 +552,27 @@ export default function Dashboard() {
                   <span style={{ color:"rgba(255,255,255,0.3)", fontSize:12, marginLeft:4 }}>{pnlLabel}</span>
                 </span>
               )}
-              {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (() => {
-                const checkBackInDays = heroRangeData.checkBackInDays ?? 0;
-                const trackingDate = trackingSince
-                  ? new Date(trackingSince).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                  : null;
-                let msg: string;
-                if (heroRangeKey === "1D") {
-                  msg = "Not enough data yet — check back tomorrow";
-                } else if (trackingDate) {
-                  msg = `Tracking started ${trackingDate} — check back in ${checkBackInDays} day${checkBackInDays === 1 ? "" : "s"}`;
-                } else {
-                  msg = `Tracking started today — building your history`;
-                }
-                return (
-                  <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>{msg}</span>
-                );
-              })()}
+              {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (
+                <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
+                  Historical pool data unavailable {pnlLabel}
+                </span>
+              )}
+              {mounted && histPortfolio.isLoading && totalValue > 0 && (
+                <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
+                  Reading pool history…
+                </span>
+              )}
             </div>
+            {mounted && pnlAvailable && heroExcluded > 0 && (
+              <p style={{ fontSize:11, color:"rgba(255,255,255,0.35)", margin:"4px 0 0" }}>
+                Some positions excluded — historical pool data unavailable
+                ({heroIncluded} of {heroIncluded + heroExcluded} included)
+              </p>
+            )}
             {mounted && (
               <div style={{ display:"flex", gap:4, marginTop:10 }}>
                 {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => {
-                  const rangeKeyTyped = r.key as SnapshotRangeKey;
+                  const rangeKeyTyped = r.key as OnchainHistRangeKey;
                   const hasData = histPortfolio.byRange[rangeKeyTyped]?.available ?? false;
                   const active = rangeKey === r.key;
                   return (

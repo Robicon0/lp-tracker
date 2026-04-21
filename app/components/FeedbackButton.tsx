@@ -127,11 +127,14 @@ export default function FeedbackButton() {
           onClick={close}
           style={{
             position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.72)",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.75)",
             backdropFilter: "blur(6px)",
             WebkitBackdropFilter: "blur(6px)",
-            zIndex: 100,
+            zIndex: 99999,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -145,13 +148,12 @@ export default function FeedbackButton() {
               width: "100%",
               maxWidth: 460,
               maxHeight: "calc(100dvh - 32px)",
-              overflowY: "auto",
-              WebkitOverflowScrolling: "touch",
+              display: "flex",
+              flexDirection: "column",
               background: CARD_BG,
               backgroundImage: `linear-gradient(135deg, ${BG_DEEP} 0%, #0a1f17 100%)`,
               border: `1px solid ${BORDER}`,
               borderRadius: 16,
-              padding: 24,
               color: TEXT,
               boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(16,185,129,0.06)",
               position: "relative",
@@ -163,11 +165,9 @@ export default function FeedbackButton() {
                 onClick={close}
                 aria-label="Close feedback"
                 style={{
-                  position: "sticky",
-                  top: 0,
-                  marginLeft: "auto",
-                  marginBottom: -24,
-                  marginRight: -8,
+                  position: "absolute",
+                  top: 12,
+                  right: 12,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -187,7 +187,7 @@ export default function FeedbackButton() {
               </button>
             )}
             {sent ? (
-              <div style={{ textAlign: "center", padding: "24px 0" }}>
+              <div style={{ textAlign: "center", padding: "32px 24px" }}>
                 <div style={{
                   width: 56, height: 56, margin: "0 auto 16px",
                   borderRadius: "50%", background: ACCENT_BG,
@@ -198,31 +198,25 @@ export default function FeedbackButton() {
                   Thank you!
                 </h3>
                 <p style={{ fontSize: 14, color: MUTED, margin: "0 0 20px", lineHeight: 1.5 }}>
-                  Your feedback helps us improve DefiDesh
+                  Your feedback helps us improve DefiDesh. This window will close automatically.
                 </p>
-                <button
-                  type="button"
-                  onClick={close}
-                  style={{
-                    background: ACCENT_BG,
-                    color: "#6ee7b7",
-                    border: `1px solid ${BORDER}`,
-                    borderRadius: 8,
-                    padding: "8px 20px",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                  }}
-                >
-                  Close
-                </button>
               </div>
             ) : (
-              <>
-                <div style={{ marginBottom: 16, paddingRight: 40 }}>
-                  <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: TEXT }}>
-                    Send feedback
+              <div
+                style={{
+                  padding: "24px 24px 20px",
+                  overflowY: "auto",
+                  WebkitOverflowScrolling: "touch",
+                  flex: 1,
+                }}
+              >
+                <div style={{ marginBottom: 18, paddingRight: 40 }}>
+                  <h3 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 4px", color: TEXT }}>
+                    Share your feedback
                   </h3>
+                  <p style={{ fontSize: 13, color: MUTED, margin: 0, lineHeight: 1.5 }}>
+                    Help us make DefiDesh better — takes 30 seconds.
+                  </p>
                 </div>
 
                 {/* Star rating */}
@@ -343,7 +337,7 @@ export default function FeedbackButton() {
                 >
                   {submitting ? "Sending…" : "Submit feedback"}
                 </button>
-              </>
+              </div>
             )}
           </div>
         </div>

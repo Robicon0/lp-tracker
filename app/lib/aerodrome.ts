@@ -30,6 +30,10 @@ export interface AerodromePosition {
   // Pool-level statistics (optional — populated when available from DefiLlama)
   poolTvl?: number;
   pool24hVolume?: number;
+  // On-chain pool address — used to query observe() for historical prices.
+  // Populated by EVM V3-style routes (Uniswap V3, Aerodrome CL, Velodrome CL,
+  // HyperSwap/KittenSwap/PRJX, PancakeSwap). Absent for non-V3 protocols.
+  poolAddress?: string;
 }
 
 interface AerodromeResponse {

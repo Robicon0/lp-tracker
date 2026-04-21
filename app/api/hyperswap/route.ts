@@ -218,6 +218,7 @@ interface PoolExtras {
   pending1: bigint;
   sqrtPriceX96: bigint;
   currentTick: number;
+  poolAddress?: string;
 }
 
 async function fetchPoolExtras(
@@ -319,7 +320,7 @@ async function fetchPoolExtras(
     const pending0 = (pos.liquidity * ((fgInside0 - pos.feeGrowthInside0LastX128) & U256_MASK)) >> 128n;
     const pending1 = (pos.liquidity * ((fgInside1 - pos.feeGrowthInside1LastX128) & U256_MASK)) >> 128n;
 
-    return { pending0, pending1, sqrtPriceX96, currentTick };
+    return { pending0, pending1, sqrtPriceX96, currentTick, poolAddress };
   } catch (err) {
     console.error(`[HyperSwap] fetchPoolExtras threw for manager ${nftManager}:`, err);
     return zero;
@@ -508,7 +509,7 @@ export async function GET(request: Request) {
       const t0Info = tokenInfoMap[pos.token0] || { symbol: pos.token0.slice(2, 8), decimals: 18, coingeckoId: '' };
       const t1Info = tokenInfoMap[pos.token1] || { symbol: pos.token1.slice(2, 8), decimals: 18, coingeckoId: '' };
 
-      const { pending0, pending1, sqrtPriceX96, currentTick } = poolExtrasList[i];
+      const { pending0, pending1, sqrtPriceX96, currentTick, poolAddress } = poolExtrasList[i];
 
       // Use actual sqrtPriceX96 from slot0 for precise amount calculation
       const { amount0, amount1 } = calculateAmounts(
@@ -565,6 +566,7 @@ export async function GET(request: Request) {
         walletAddress: account,
         token0Address: pos.token0,
         token1Address: pos.token1,
+        poolAddress,
         ...(poolStats ? { poolTvl: Math.round(poolStats.tvlUsd), pool24hVolume: Math.round(poolStats.volumeUsd1d) } : {}),
       };
     });
