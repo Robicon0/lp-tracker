@@ -275,15 +275,6 @@ export default function Navbar() {
               <Link href="/analytics" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Analytics</Link>
               <Link href="/about" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">About</Link>
 
-              <a
-                href="https://tally.so/r/NpBa9p"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-emerald-300/80 hover:text-emerald-300 transition-colors"
-              >
-                Feedback
-              </a>
-
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (
                 <div className="flex items-center space-x-2">
@@ -361,15 +352,6 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Analytics</Link>
               <Link href="/about" className="block text-emerald-300/80 hover:text-emerald-300 py-2">About</Link>
-
-              <a
-                href="https://tally.so/r/NpBa9p"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-emerald-300/80 hover:text-emerald-300 py-2"
-              >
-                Feedback
-              </a>
 
               {/* EVM — mobile */}
               {isConnected && address ? (

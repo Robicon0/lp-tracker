@@ -537,13 +537,6 @@ export default function Dashboard() {
                 style={{ fontSize:48, fontWeight:700, color:"white", letterSpacing:-2 }}>
                 {fmt$(totalValue)}
               </span>
-              {mounted && heroPnlAvailable && (
-                <span style={{ fontSize:14, color: heroPnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
-                  {heroPnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(heroPnlDollar))}{" "}
-                  ({heroPnlDollar >= 0 ? "+" : ""}{heroPnlPct.toFixed(1)}%)
-                  <span style={{ color:"rgba(255,255,255,0.3)", fontSize:12, marginLeft:4 }}>in last 30 days</span>
-                </span>
-              )}
             </div>
           </div>
 
