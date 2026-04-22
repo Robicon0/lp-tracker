@@ -14,10 +14,6 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
-import {
-  useOnchainHistoricalPortfolio,
-  type HistRangeKey as OnchainHistRangeKey,
-} from "../hooks/useOnchainHistoricalPortfolio";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -358,10 +354,6 @@ export default function Dashboard() {
   //  1. `usePortfolioHistory` (localStorage snapshots) still drives the
   //     Portfolio Performance chart below — it's authoritative for chart shape
   //     because it captures the actual LP value at each sample.
-  //  2. `useHistoricalPortfolio` computes historical totals from on-chain /
-  //     market-data (CoinGecko market_chart × today's holdings). This is what
-  //     powers the hero's 1D/7D/30D/1Y P&L numbers — so a brand-new user sees
-  //     a real number on first page load instead of waiting for snapshots.
   const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
   const activeRange    = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
@@ -373,20 +365,20 @@ export default function Dashboard() {
     value: s.totalValue,
   }));
 
-  // Hero P&L — driven entirely by on-chain Uniswap V3-style pool oracle
-  // observations. No snapshots, no DB, no external price APIs. For each
-  // range the pool's observation ring is read to derive a historical tick,
-  // stablecoin anchoring produces USD prices, and we multiply by current
-  // LP token amounts to get the historical portfolio value.
-  const heroRangeKey: OnchainHistRangeKey = rangeKey === "90D" ? "30D" : (rangeKey as OnchainHistRangeKey);
-  const histPortfolio = useOnchainHistoricalPortfolio(allPositions, totalValue);
-  const heroRangeData = histPortfolio.byRange[heroRangeKey];
-  const pnlDollar = heroRangeData.available ? heroRangeData.pnlDollar : 0;
-  const pnlPct    = heroRangeData.available ? heroRangeData.pnlPct    : 0;
-  const pnlAvailable = heroRangeData.available;
-  const pnlLabel = activeRange.label;
-  const heroExcluded = heroRangeData.excluded;
-  const heroIncluded = heroRangeData.included;
+  // Hero P&L — simple 30-day change from localStorage snapshots.
+  const THIRTY_DAYS_MS = 30 * 24 * 3_600_000;
+  const thirtyDayCutoff = Date.now() - THIRTY_DAYS_MS;
+  const historyIn30d = portfolioHistory.filter((s) => s.timestamp >= thirtyDayCutoff);
+  const heroBaseline = historyIn30d.length >= 2 ? historyIn30d[0].totalValue : 0;
+  const heroPnlAvailable = historyIn30d.length >= 2 && heroBaseline > 0;
+  const heroPnlDollar = heroPnlAvailable ? totalValue - heroBaseline : 0;
+  const heroPnlPct    = heroPnlAvailable ? (heroPnlDollar / heroBaseline) * 100 : 0;
+
+  // Chart P&L — uses the Portfolio History chart's own range toggle.
+  const chartBaseline = effectiveHistory.length >= 2 ? effectiveHistory[0].totalValue : 0;
+  const chartPnlAvailable = effectiveHistory.length >= 2 && chartBaseline > 0;
+  const chartPnlDollar = chartPnlAvailable ? totalValue - chartBaseline : 0;
+  const chartPnlPct    = chartPnlAvailable ? (chartPnlDollar / chartBaseline) * 100 : 0;
 
   // Hero price pills — separate light fetch for BTC/ETH/SOL
   const [heroPrices, setHeroPrices] = useState<Record<string, number>>({});
@@ -545,54 +537,14 @@ export default function Dashboard() {
                 style={{ fontSize:48, fontWeight:700, color:"white", letterSpacing:-2 }}>
                 {fmt$(totalValue)}
               </span>
-              {mounted && pnlAvailable && (
-                <span style={{ fontSize:14, color: pnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
-                  {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
-                  ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
-                  <span style={{ color:"rgba(255,255,255,0.3)", fontSize:12, marginLeft:4 }}>{pnlLabel}</span>
-                </span>
-              )}
-              {mounted && !pnlAvailable && totalValue > 0 && !histPortfolio.isLoading && (
-                <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
-                  Historical pool data unavailable {pnlLabel}
-                </span>
-              )}
-              {mounted && histPortfolio.isLoading && totalValue > 0 && (
-                <span style={{ fontSize:12, color:"rgba(255,255,255,0.3)" }}>
-                  Reading pool history…
+              {mounted && heroPnlAvailable && (
+                <span style={{ fontSize:14, color: heroPnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
+                  {heroPnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(heroPnlDollar))}{" "}
+                  ({heroPnlDollar >= 0 ? "+" : ""}{heroPnlPct.toFixed(1)}%)
+                  <span style={{ color:"rgba(255,255,255,0.3)", fontSize:12, marginLeft:4 }}>in last 30 days</span>
                 </span>
               )}
             </div>
-            {mounted && pnlAvailable && heroExcluded > 0 && (
-              <p style={{ fontSize:11, color:"rgba(255,255,255,0.35)", margin:"4px 0 0" }}>
-                Some positions excluded — historical pool data unavailable
-                ({heroIncluded} of {heroIncluded + heroExcluded} included)
-              </p>
-            )}
-            {mounted && (
-              <div style={{ display:"flex", gap:4, marginTop:10 }}>
-                {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => {
-                  const rangeKeyTyped = r.key as OnchainHistRangeKey;
-                  const hasData = histPortfolio.byRange[rangeKeyTyped]?.available ?? false;
-                  const active = rangeKey === r.key;
-                  return (
-                    <button
-                      key={r.key}
-                      onClick={() => setRangeKey(r.key)}
-                      style={{
-                        padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:500,
-                        cursor:"pointer",
-                        background: active ? "rgba(16,185,129,0.25)" : "rgba(255,255,255,0.04)",
-                        color: active ? "#6ee7b7"
-                          : hasData ? "rgba(255,255,255,0.5)"
-                          : "rgba(255,255,255,0.2)",
-                        border: active ? "1px solid rgba(16,185,129,0.3)" : "1px solid transparent",
-                      }}
-                    >{r.key}</button>
-                  );
-                })}
-              </div>
-            )}
           </div>
 
           {/* Quick stats + buttons */}
@@ -949,15 +901,15 @@ export default function Dashboard() {
                       })}
                     </div>
                   </div>
-                  {pnlAvailable && (
+                  {chartPnlAvailable && (
                     <div style={{ fontSize:13, fontWeight:500,
-                      color: pnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
-                      {pnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(pnlDollar))}{" "}
+                      color: chartPnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
+                      {chartPnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(chartPnlDollar))}{" "}
                       <span style={{ opacity:0.75 }}>
-                        ({pnlDollar >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
+                        ({chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(2)}%)
                       </span>
                       <span style={{ color:"rgba(255,255,255,0.4)", fontWeight:400, marginLeft:4 }}>
-                        {pnlLabel}
+                        {activeRange.label}
                       </span>
                     </div>
                   )}
