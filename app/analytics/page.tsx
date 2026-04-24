@@ -233,7 +233,7 @@ export default function Analytics() {
   }, [walletTokens, aaveRates, externalLendingPositions]);
 
   // ── Actual performance data from on-chain activity ────────────────────────
-  const { perfMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
+  const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
   const lpPnl = useLpPnl(positions);
 
   // ── Sort state ─────────────────────────────────────────────────────────────
@@ -281,6 +281,62 @@ export default function Analytics() {
     value: s.totalValue,
     ts: s.timestamp,
   }));
+
+  // ── Fee income — aggregate from on-chain fee_claim / reward_claim events ───
+  // Any position whose protocol is supported by `useAllPositionsActivity`
+  // contributes; protocol + chain are read from `positions`, not hardcoded, so
+  // new protocols automatically appear with no code change.
+  const feeIncome = useMemo(() => {
+    interface FlatFee { ts: number; usd: number; protocol: string; chain: string; }
+    const flat: FlatFee[] = [];
+    const posById = new Map(positions.map((p) => [p.id, p]));
+    for (const [posId, events] of eventsMap.entries()) {
+      const pos = posById.get(posId);
+      if (!pos) continue;
+      for (const e of events) {
+        if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
+        const usd = e.usdAtTime ?? 0;
+        if (!Number.isFinite(usd) || usd <= 0) continue;
+        flat.push({ ts: e.timestamp * 1000, usd, protocol: pos.protocol, chain: pos.chain });
+      }
+    }
+    flat.sort((a, b) => a.ts - b.ts);
+
+    const totalAllTime = flat.reduce((s, f) => s + f.usd, 0);
+    const inWindow = flat.filter((f) => f.ts >= rangeCutoff);
+    const totalWindow = inWindow.reduce((s, f) => s + f.usd, 0);
+
+    // Cumulative series within the active range (starts at 0, ends at totalWindow).
+    const now = Date.now();
+    const series: { label: string; ts: number; value: number }[] = [];
+    series.push({ ts: rangeCutoff, label: activeRange.xFmt(new Date(rangeCutoff)), value: 0 });
+    let running = 0;
+    for (const f of inWindow) {
+      running += f.usd;
+      series.push({ ts: f.ts, label: activeRange.xFmt(new Date(f.ts)), value: running });
+    }
+    if (series[series.length - 1].ts < now) {
+      series.push({ ts: now, label: activeRange.xFmt(new Date(now)), value: running });
+    }
+
+    // Protocol breakdown — in-window fees, grouped by protocol+chain.
+    const byKey = new Map<string, { protocol: string; chain: string; usd: number }>();
+    for (const f of inWindow) {
+      const k = `${f.protocol}::${f.chain}`;
+      const prev = byKey.get(k) ?? { protocol: f.protocol, chain: f.chain, usd: 0 };
+      prev.usd += f.usd;
+      byKey.set(k, prev);
+    }
+    const protocols = Array.from(byKey.values())
+      .filter((p) => p.usd > 0)
+      .map((p) => ({
+        ...p,
+        pct: totalWindow > 0 ? (p.usd / totalWindow) * 100 : 0,
+      }))
+      .sort((a, b) => b.usd - a.usd);
+
+    return { totalAllTime, totalWindow, series, protocols };
+  }, [eventsMap, positions, rangeCutoff, activeRange]);
 
   // ── Daily income calc ──────────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
@@ -609,48 +665,41 @@ export default function Analytics() {
           </div>
         </div>
 
-        {/* ── SECTION 2: Portfolio Performance Chart ────────────────────────── */}
+        {/* ── SECTION 2: Fee Income Chart ───────────────────────────────────── */}
         <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-lg font-bold">Portfolio Value</h2>
-              {effectiveFirst && (
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className={`text-sm font-semibold ${pnlDollar >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {pnlDollar >= 0 ? "+" : ""}{fmt$(pnlDollar)} ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
-                  </span>
-                  <span className="text-xs text-gray-600">{pnlLabel}</span>
-                </div>
-              )}
+              <h2 className="text-lg font-bold">Fee Income</h2>
+              <div className="mt-1">
+                <span className="text-2xl font-bold text-emerald-300">
+                  {fmt$(feeIncome.totalAllTime)}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">cumulative fees earned — all chains</p>
             </div>
             <div className="flex gap-1">
-              {TIME_RANGES.map((r) => {
-                const hasData = portfolioHistory.some((s) => s.timestamp >= Date.now() - r.ms);
-                return (
-                  <button
-                    key={r.key}
-                    onClick={() => setRangeKey(r.key)}
-                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                      rangeKey === r.key
-                        ? "bg-emerald-600 text-white"
-                        : hasData
-                        ? "bg-emerald-950/40 text-gray-400 hover:text-white"
-                        : "bg-emerald-950/20 text-gray-700 cursor-default"
-                    }`}
-                  >
-                    {r.key}
-                  </button>
-                );
-              })}
+              {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => (
+                <button
+                  key={r.key}
+                  onClick={() => setRangeKey(r.key)}
+                  className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                    rangeKey === r.key
+                      ? "bg-emerald-600 text-white"
+                      : "bg-emerald-950/40 text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {r.key}
+                </button>
+              ))}
             </div>
           </div>
 
-          {chartData.length >= 2 ? (
+          {feeIncome.series.length >= 2 && feeIncome.totalWindow > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={chartData}>
+              <AreaChart data={feeIncome.series}>
                 <defs>
-                  <linearGradient id="valueGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                  <linearGradient id="feeGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
                     <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -667,14 +716,14 @@ export default function Analytics() {
                   contentStyle={tooltipStyle}
                   itemStyle={tooltipItemStyle}
                   labelStyle={tooltipLabelStyle}
-                  formatter={(value: number | undefined) => [fmt$(value ?? 0), "Portfolio"]}
+                  formatter={(value: number | undefined) => [fmt$(value ?? 0), "Cumulative fees"]}
                 />
                 <Area
                   type="monotone"
                   dataKey="value"
                   stroke="#10b981"
                   strokeWidth={2}
-                  fill="url(#valueGrad)"
+                  fill="url(#feeGrad)"
                   dot={false}
                   activeDot={{ r: 4, fill: "#10b981" }}
                 />
@@ -682,9 +731,52 @@ export default function Analytics() {
             </ResponsiveContainer>
           ) : (
             <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm">
-              Collecting data points... chart appears after ~1 minute
+              {activityLoading
+                ? "Loading on-chain fee history…"
+                : `No fee claims in the last ${activeRange.label}`}
             </div>
           )}
+
+          {/* Protocol breakdown */}
+          <div className="mt-5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] uppercase tracking-wider text-gray-500">
+                By Protocol
+              </p>
+              {feeIncome.protocols.length > 0 && (
+                <p className="text-[11px] text-gray-600">scroll to see all →</p>
+              )}
+            </div>
+            {feeIncome.protocols.length > 0 ? (
+              <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollbarWidth: "thin" }}>
+                {feeIncome.protocols.map((p) => {
+                  const color = PROTOCOL_COLORS[p.protocol] ?? "#10b981";
+                  return (
+                    <div
+                      key={`${p.protocol}::${p.chain}`}
+                      className="flex-shrink-0 bg-[#0a2e1a]/40 border border-emerald-400/10 rounded-lg p-3"
+                      style={{ width: 190, borderLeft: `3px solid ${color}` }}
+                    >
+                      <p className="text-sm font-semibold text-white truncate" title={p.protocol}>
+                        {p.protocol}
+                      </p>
+                      <p className="text-[11px] text-gray-500 mt-0.5 truncate" title={p.chain}>
+                        {p.chain}
+                      </p>
+                      <p className="text-lg font-bold text-emerald-300 mt-2">{fmt$(p.usd)}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
+                        {p.pct.toFixed(1)}% of {activeRange.label}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-600">
+                No fee claims in the last {activeRange.label}.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* ── SECTION 2.5: LP Profit & Loss (on-chain) ──────────────────────── */}
