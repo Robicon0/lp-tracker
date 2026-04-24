@@ -6,6 +6,7 @@ import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
+import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
 import { useLpPnl } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
@@ -70,11 +71,12 @@ const CHAIN_COLORS: Record<string, string> = {
 const PIE_COLORS = ["#10B981", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316", "#84CC16", "#6366F1"];
 
 const TIME_RANGES = [
-  { key: "1D",  ms: 1   * 24 * 3_600_000, label: "24h",    xFmt: (d: Date) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
-  { key: "7D",  ms: 7   * 24 * 3_600_000, label: "7 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
-  { key: "30D", ms: 30  * 24 * 3_600_000, label: "30 days",xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
-  { key: "90D", ms: 90  * 24 * 3_600_000, label: "90 days",xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
-  { key: "1Y",  ms: 365 * 24 * 3_600_000, label: "1 year", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }) },
+  { key: "1D",   ms: 1   * 24 * 3_600_000, label: "24h",     xFmt: (d: Date) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+  { key: "7D",   ms: 7   * 24 * 3_600_000, label: "7 days",  xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "30D",  ms: 30  * 24 * 3_600_000, label: "30 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "90D",  ms: 90  * 24 * 3_600_000, label: "90 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "180D", ms: 180 * 24 * 3_600_000, label: "180 days",xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  { key: "1Y",   ms: 365 * 24 * 3_600_000, label: "1 year",  xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }) },
 ] as const;
 
 // ── Tooltip style ────────────────────────────────────────────────────────────
@@ -234,6 +236,7 @@ export default function Analytics() {
 
   // ── Actual performance data from on-chain activity ────────────────────────
   const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
+  const { events: walletLevelFees } = useWalletLevelFees(positions);
   const lpPnl = useLpPnl(positions);
 
   // ── Sort state ─────────────────────────────────────────────────────────────
@@ -287,20 +290,58 @@ export default function Analytics() {
   // contributes; protocol + chain are read from `positions`, not hardcoded, so
   // new protocols automatically appear with no code change.
   const feeIncome = useMemo(() => {
-    interface FlatFee { ts: number; usd: number; protocol: string; chain: string; }
+    interface FlatFee { ts: number; usd: number; protocol: string; chain: string; dedupeKey: string; }
     const flat: FlatFee[] = [];
     const posById = new Map(positions.map((p) => [p.id, p]));
+
+    // Key used to suppress the same on-chain fee claim showing up twice
+    // (once from the per-position scan, once from the wallet-scope scan).
+    // txHash alone is not enough — a single tx can settle multiple fee
+    // claims — so also hash the amounts. If txHash is missing, fall back
+    // to (protocol, ts, amount0, amount1) so the dedupe still works.
+    const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) => {
+      if (e.txHash) return `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`;
+      return `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
+    };
+
+    const push = (
+      protocol: string,
+      chain: string,
+      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string },
+    ) => {
+      if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
+      const usd = e.usdAtTime ?? 0;
+      if (!Number.isFinite(usd) || usd <= 0) return;
+      flat.push({
+        ts: e.timestamp * 1000,
+        usd,
+        protocol,
+        chain,
+        dedupeKey: buildKey(protocol, e),
+      });
+    };
+
     for (const [posId, events] of eventsMap.entries()) {
       const pos = posById.get(posId);
       if (!pos) continue;
-      for (const e of events) {
-        if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
-        const usd = e.usdAtTime ?? 0;
-        if (!Number.isFinite(usd) || usd <= 0) continue;
-        flat.push({ ts: e.timestamp * 1000, usd, protocol: pos.protocol, chain: pos.chain });
-      }
+      for (const e of events) push(pos.protocol, pos.chain, e);
     }
-    flat.sort((a, b) => a.ts - b.ts);
+    // Wallet-scope events — captures fees from destroyed positions that
+    // no longer appear in `positions`. Tagged with their own protocol/chain.
+    for (const t of walletLevelFees) push(t.protocol, t.chain, t.event);
+
+    // Dedupe — keep only first occurrence per dedupeKey.
+    const seen = new Set<string>();
+    const deduped = flat.filter((f) => {
+      if (seen.has(f.dedupeKey)) return false;
+      seen.add(f.dedupeKey);
+      return true;
+    });
+    deduped.sort((a, b) => a.ts - b.ts);
+    const flatDeduped = deduped;
+    // Replace flat with deduped for the rest of the computation.
+    flat.length = 0;
+    flat.push(...flatDeduped);
 
     const totalAllTime = flat.reduce((s, f) => s + f.usd, 0);
     const inWindow = flat.filter((f) => f.ts >= rangeCutoff);
@@ -336,7 +377,7 @@ export default function Analytics() {
       .sort((a, b) => b.usd - a.usd);
 
     return { totalAllTime, totalWindow, series, protocols };
-  }, [eventsMap, positions, rangeCutoff, activeRange]);
+  }, [eventsMap, positions, rangeCutoff, activeRange, walletLevelFees]);
 
   // ── Daily income calc ──────────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
@@ -678,7 +719,7 @@ export default function Analytics() {
               <p className="text-xs text-gray-500 mt-0.5">cumulative fees earned — all chains</p>
             </div>
             <div className="flex gap-1">
-              {TIME_RANGES.filter((r) => r.key !== "90D").map((r) => (
+              {TIME_RANGES.map((r) => (
                 <button
                   key={r.key}
                   onClick={() => setRangeKey(r.key)}

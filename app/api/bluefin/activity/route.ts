@@ -12,6 +12,13 @@ const STABLECOINS = new Set([
   '0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::coin', // wUSDC
 ]);
 
+// Reward-token symbols that are USD-pegged stablecoins. Bluefin reward
+// events carry only the token's symbol string, not a coin type, so we
+// match on the symbol. Everything here is treated as $1/unit.
+const STABLE_SYMBOLS = new Set([
+  'USDC', 'USDT', 'DAI', 'USDe', 'sUSDe', 'USDY', 'wUSDC', 'USDHL',
+]);
+
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim';
 
 export interface ActivityEvent {
@@ -108,6 +115,13 @@ export async function GET(request: Request) {
   if (!positionId || !account) {
     return NextResponse.json({ error: 'positionId and account required' }, { status: 400 });
   }
+  // Wallet-scope mode: positionId="all" returns fee/reward events from every
+  // Bluefin position this wallet ever interacted with — including positions
+  // that were fully closed on-chain and thus no longer exist as objects. This
+  // is how we recover fee history from destroyed positions (per-position
+  // scans can't see them because the object is gone). Deposits/withdrawals
+  // are omitted in this mode since they'd be ambiguous across pools.
+  const walletScope = positionId === 'all';
 
   try {
     const allDigests = await fetchAllDigests(account);
@@ -146,9 +160,16 @@ export async function GET(request: Request) {
         if (!ev.type.startsWith(BLUEFIN_PKG)) continue;
         const pj = ev.parsedJson ?? {};
         const evPosId = (pj.position_id as string) ?? '';
-        if (evPosId !== positionId) continue;
+        if (!walletScope && evPosId !== positionId) continue;
 
         const evName = ev.type.split('::').pop() ?? '';
+
+        // In wallet-scope mode only emit fee + reward events — deposits /
+        // withdrawals are pool-specific and not useful when aggregating
+        // across multiple destroyed positions.
+        if (walletScope && evName !== 'UserFeeCollected' && evName !== 'UserRewardCollected') {
+          continue;
+        }
 
         if (evName === 'LiquidityProvided') {
           const a0 = BigInt((pj.coin_a_amount as string) ?? '0');
@@ -222,8 +243,34 @@ export async function GET(request: Request) {
         }
       }
 
-      // For fee claims, withdrawals, rewards, or when derivation unavailable: use current prices
-      if (usdAtTime == null) {
+      // Reward claims need their own pricing path — the reward token is
+      // often NOT the pool's token A, so applying fallbackA would give a
+      // wildly wrong USD value. Rules:
+      //   (1) known stablecoin reward symbol → $1
+      //   (2) reward symbol matches the last path segment of coinTypeA
+      //       or coinTypeB → use the matching fallback
+      //   (3) otherwise leave usdAtTime null (uncounted, better than wrong)
+      if (ev.type === 'reward_claim') {
+        const sym = (ev.rewardSymbol ?? '').trim();
+        const symUp = sym.toUpperCase();
+        const symA = coinTypeA.split('::').pop()?.toUpperCase() ?? '';
+        const symB = coinTypeB.split('::').pop()?.toUpperCase() ?? '';
+        let pxReward: number | null = null;
+        if (STABLE_SYMBOLS.has(sym) || STABLE_SYMBOLS.has(symUp)) pxReward = 1;
+        else if (symUp && symUp === symA && fallbackA > 0) pxReward = fallbackA;
+        else if (symUp && symUp === symB && fallbackB > 0) pxReward = fallbackB;
+        if (pxReward != null) {
+          price0AtTime = pxReward;
+          price1AtTime = null;
+          usdAtTime = amount0 * pxReward;
+        } else {
+          price0AtTime = null;
+          price1AtTime = null;
+          usdAtTime = null;
+        }
+      } else if (usdAtTime == null) {
+        // fee_claim / withdrawal / deposit where derivation was unavailable:
+        // value at current pool-token prices.
         price0AtTime = fallbackA || null;
         price1AtTime = fallbackB || null;
         if (fallbackA > 0 || fallbackB > 0) {

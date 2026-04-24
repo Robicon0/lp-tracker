@@ -14,6 +14,9 @@ export interface ActivityEvent {
   // EVM routes populate these; Solana/Sui routes leave them null.
   price0AtTime?: number | null;
   price1AtTime?: number | null;
+  // Every activity route emits this — used to dedupe when per-position and
+  // wallet-scope scans both observe the same fee claim.
+  txHash?: string;
 }
 
 interface ActivityResponse {
