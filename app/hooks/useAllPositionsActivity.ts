@@ -76,6 +76,14 @@ function writeCache(id: string, data: ActivityResponse) {
 function buildActivityUrl(pos: AerodromePosition): string | null {
   const params = new URLSearchParams();
 
+  // Pool address enables historical fee-price derivation (pool.slot0() at the
+  // fee claim's block → exact prices at that block). Routes that receive a
+  // `pool` param compute per-event USD historically; routes that don't fall
+  // back to current-price × amounts.
+  const setPool = () => {
+    if (pos.poolAddress) params.set("pool", pos.poolAddress);
+  };
+
   if (pos.protocol === "Aerodrome") {
     const tokenId = pos.id.replace("aero-", "");
     params.set("positionId", tokenId);
@@ -85,6 +93,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) params.set("token1", pos.token1Address);
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
+    setPool();
     return `/api/aerodrome/activity?${params}`;
   }
 
@@ -139,6 +148,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) params.set("token1", pos.token1Address);
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
+    setPool();
     return `/api/hyperswap/activity?${params}`;
   }
 
@@ -153,6 +163,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) params.set("token1", pos.token1Address);
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
+    setPool();
     return `/api/uniswap/activity?${params}`;
   }
 
@@ -165,6 +176,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) params.set("token1", pos.token1Address);
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
+    setPool();
     return `/api/velodrome/activity?${params}`;
   }
 
@@ -177,6 +189,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) params.set("token1", pos.token1Address);
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
+    setPool();
     return `/api/pancakeswap/activity?${params}`;
   }
 

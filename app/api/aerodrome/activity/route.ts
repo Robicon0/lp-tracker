@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
+import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy used only for eth_getBlockByNumber / eth_blockNumber — free tier supports this
@@ -248,6 +249,7 @@ export async function GET(request: Request) {
   const fallback1 = parseFloat(searchParams.get('p1') ?? '0');
   const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
   const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
+  const pool = (searchParams.get('pool') ?? '').toLowerCase();
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -354,6 +356,21 @@ export async function GET(request: Request) {
     // Sort chronologically to compute cumulative fees (oldest first)
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
+    // Resolve the pool's historical sqrtPriceX96 for every unique fee_claim
+    // block — that gives us the EXACT token0/token1 prices at the moment the
+    // claim was confirmed on-chain. No CoinGecko, no averaging.
+    const feeBlocks = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.blockNumber);
+    const histPrices = pool && feeBlocks.length > 0
+      ? await (async () => {
+          const resolver = createHistoricalFeePriceResolver({
+            rpc: TENDERLY_RPC, pool, token0, token1,
+            decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
+          });
+          try { return await resolver.resolveMany(feeBlocks); }
+          catch (err) { console.error('[aerodrome/activity] hist price resolve failed:', err); return null; }
+        })()
+      : null;
+
     let runningFeeUSD = 0;
     const hasTicks = tickLower != null && tickUpper != null;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
@@ -377,7 +394,18 @@ export async function GET(request: Request) {
         }
       }
 
-      // For fee claims, withdrawals, or when derivation unavailable: use current prices
+      // Fee claims: use historical pool price at the claim block.
+      if (ev.type === 'fee_claim' && histPrices) {
+        const hex = '0x' + ev.blockNumber.toString(16);
+        const hp = histPrices.get(hex);
+        if (hp) {
+          price0AtTime = hp.price0Usd;
+          price1AtTime = hp.price1Usd;
+          usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
+        }
+      }
+
+      // Withdrawals + fallback when derivation / historical fetch unavailable.
       if (usdAtTime == null) {
         price0AtTime = fallback0 || null;
         price1AtTime = fallback1 || null;

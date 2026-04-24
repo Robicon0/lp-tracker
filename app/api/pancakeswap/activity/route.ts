@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
+import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 
 // PancakeSwap V3 is a Uniswap V3 fork on BNB Chain. Same event topic0 hashes,
 // same ABI layout. Only the NFT manager address and the chain RPCs differ.
@@ -184,6 +185,7 @@ export async function GET(request: Request) {
   const fallback1 = parseFloat(searchParams.get('p1') ?? '0');
   const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
   const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
+  const pool      = (searchParams.get('pool') ?? '').toLowerCase();
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -274,6 +276,20 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
+    // Resolve the pool's historical sqrtPriceX96 at each unique fee_claim
+    // block so each claim's USD = amount0*price0_at_block + amount1*price1_at_block.
+    const feeBlocks = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.blockNumber);
+    const histPrices = pool && feeBlocks.length > 0
+      ? await (async () => {
+          const resolver = createHistoricalFeePriceResolver({
+            rpc: PUBLIC_NODE_RPC, pool, token0, token1,
+            decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
+          });
+          try { return await resolver.resolveMany(feeBlocks); }
+          catch (err) { console.error('[pancakeswap/activity] hist price resolve failed:', err); return null; }
+        })()
+      : null;
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
@@ -293,6 +309,16 @@ export async function GET(request: Request) {
           price0AtTime = derived.price0;
           price1AtTime = derived.price1;
           usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+        }
+      }
+
+      if (ev.type === 'fee_claim' && histPrices) {
+        const hex = '0x' + ev.blockNumber.toString(16);
+        const hp = histPrices.get(hex);
+        if (hp) {
+          price0AtTime = hp.price0Usd;
+          price1AtTime = hp.price1Usd;
+          usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
         }
       }
 
