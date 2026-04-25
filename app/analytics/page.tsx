@@ -128,6 +128,127 @@ const PieLegend = (props: any) => {
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+// ── ExposureCard — donut + right-side hover-synced legend ────────────────────
+// Reused for Chain Exposure and Protocol Exposure. Renders the donut on the
+// left (with center text) and an interactive legend on the right where each
+// row stays in sync with donut slice hover. Hovering either side highlights
+// the same slice. Auto-handles any list length so new chains/protocols added
+// in the future appear automatically with no code changes.
+
+type ExposureRow = { name: string; value: number };
+
+interface ExposureCardProps {
+  title: string;
+  warning?: string | null;
+  data: ExposureRow[];
+  colorOf: (name: string, i: number) => string;
+  centerPrimary: string;
+  centerSecondary: string;
+  valueFmt: (v: number) => string;
+}
+
+function ExposureCard({
+  title, warning, data, colorOf, centerPrimary, centerSecondary, valueFmt,
+}: ExposureCardProps) {
+  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const total = data.reduce((s, r) => s + r.value, 0);
+  const colored = data.map((r, i) => ({ ...r, color: colorOf(r.name, i) }));
+
+  return (
+    <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold">{title}</h2>
+        {warning && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-medium">
+            {warning}
+          </span>
+        )}
+      </div>
+      {data.length === 0 ? (
+        <div className="flex items-center justify-center h-[260px] text-gray-600 text-sm">No data</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-4 items-center">
+          <div className="relative" style={{ height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={colored}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={92}
+                  innerRadius={62}
+                  dataKey="value"
+                  paddingAngle={2}
+                  stroke="#0a1a12"
+                  strokeWidth={2}
+                  onMouseEnter={(_, i) => setActiveIdx(i)}
+                  onMouseLeave={() => setActiveIdx(null)}
+                >
+                  {colored.map((entry, i) => (
+                    <Cell
+                      key={entry.name}
+                      fill={entry.color}
+                      opacity={activeIdx == null || activeIdx === i ? 1 : 0.35}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              {activeIdx != null && colored[activeIdx] ? (
+                <>
+                  <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                    {colored[activeIdx].name}
+                  </p>
+                  <p className="text-xl font-bold text-white">{valueFmt(colored[activeIdx].value)}</p>
+                  <p className="text-[10px] text-gray-500">
+                    {total > 0 ? ((colored[activeIdx].value / total) * 100).toFixed(1) : "0"}%
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-white">{centerPrimary}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{centerSecondary}</p>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Right-side legend */}
+          <div className="flex flex-col gap-1 max-h-[240px] overflow-y-auto pr-1">
+            {colored.map((row, i) => {
+              const pct = total > 0 ? (row.value / total) * 100 : 0;
+              const isActive = activeIdx === i;
+              return (
+                <button
+                  type="button"
+                  key={row.name}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onMouseLeave={() => setActiveIdx(null)}
+                  onFocus={() => setActiveIdx(i)}
+                  onBlur={() => setActiveIdx(null)}
+                  className={`flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md text-left transition-colors ${
+                    isActive ? "bg-emerald-900/30" : "hover:bg-emerald-900/15"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: row.color }} />
+                    <span className="text-sm text-white truncate" title={row.name}>{row.name}</span>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-semibold text-emerald-300">{pct.toFixed(1)}%</p>
+                    <p className="text-[10px] text-gray-500">{valueFmt(row.value)}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sort config for position table ───────────────────────────────────────────
 
 type SortKey = "value" | "apy" | "daily" | "fees" | "protocol" | "chain";
@@ -400,60 +521,19 @@ export default function Analytics() {
   const totalDailyIncome = dailyLpIncome + dailyLendingIncome;
 
   // ── Income by Source — D/M/Y toggle ─────────────────────────────────────
-  // D = today (last 24h), M = this month (last 30d), Y = this year (last 365d).
-  // LP fees come from the same on-chain event stream the Fee Income chart uses
-  // (per-position eventsMap + wallet-level fee scan), so any chain/protocol the
-  // user has automatically contributes — no hardcoded list.
+  // D = today, M = this month (last 30d), Y = this year (last 365d).
+  // LP fees show ACCRUED income for the period using each position's APY —
+  // this includes uncollected fees, so the number is non-zero even on days
+  // with no claim. Lending uses the current-APY projection too. The math is
+  // protocol-agnostic — every active position contributes, automatically.
   const [incomePeriod, setIncomePeriod] = useState<"D" | "M" | "Y">("D");
+  const [chainPeriod, setChainPeriod] = useState<"1D" | "7D" | "30D">("1D");
   const incomeWindow = useMemo(() => {
-    const now = Date.now();
-    const periodMs = incomePeriod === "D"
-      ? 24 * 3_600_000
-      : incomePeriod === "M"
-      ? 30 * 24 * 3_600_000
-      : 365 * 24 * 3_600_000;
-    const cutoff = now - periodMs;
-    const periodDays = periodMs / (24 * 3_600_000);
-
-    // LP fees actually claimed on-chain in the selected window.
-    let lpClaimed = 0;
-    const seen = new Set<string>();
-    const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) =>
-      e.txHash
-        ? `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`
-        : `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
-    const posById = new Map(positions.map((p) => [p.id, p]));
-    for (const [posId, evs] of eventsMap.entries()) {
-      const pos = posById.get(posId);
-      if (!pos) continue;
-      for (const e of evs) {
-        if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
-        const usd = e.usdAtTime ?? 0;
-        if (!Number.isFinite(usd) || usd <= 0) continue;
-        if (e.timestamp * 1000 < cutoff) continue;
-        const key = buildKey(pos.protocol, e);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        lpClaimed += usd;
-      }
-    }
-    for (const t of walletLevelFees) {
-      const e = t.event;
-      if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
-      const usd = e.usdAtTime ?? 0;
-      if (!Number.isFinite(usd) || usd <= 0) continue;
-      if (e.timestamp * 1000 < cutoff) continue;
-      const key = buildKey(t.protocol, e);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      lpClaimed += usd;
-    }
-
-    // Lending = current-APY projection over the period (estimated, not claimed).
+    const periodDays = incomePeriod === "D" ? 1 : incomePeriod === "M" ? 30 : 365;
+    const lpAccrued = dailyLpIncome * periodDays;
     const lendingProjected = dailyLendingIncome * periodDays;
-
-    return { lpClaimed, lendingProjected, total: lpClaimed + lendingProjected };
-  }, [incomePeriod, eventsMap, walletLevelFees, positions, dailyLendingIncome]);
+    return { lpAccrued, lendingProjected, total: lpAccrued + lendingProjected };
+  }, [incomePeriod, dailyLpIncome, dailyLendingIncome]);
 
   // ── Weighted average actual APR across all active LP positions ─────────────
   const actualAPRData = useMemo(() => {
@@ -911,9 +991,20 @@ export default function Analytics() {
                 value: `${-lpPnl.ilUSD > 0 ? "+" : ""}${fmt$(-lpPnl.ilUSD)}`,
                 color: -lpPnl.ilUSD > 0 ? "text-red-400" : "text-emerald-400",
                 foot: "Σ(HODL − Current), open only",
-                tooltip: lpPnl.ilUSD >= 0
-                  ? "Your LP position is currently worth MORE than if you had just held the tokens. The AMM rebalancing has worked in your favour. Combined with fees earned, your total return is strong.\n\nIL = Current LP Value − HODL Value"
-                  : "Your LP position has less value than if you had just held the tokens. This difference is impermanent loss — it may recover if prices return to your entry levels. Your fees earned partially or fully offset this loss.\n\nIL = Current LP Value − HODL Value",
+                tooltip: (() => {
+                  // hodlValue derived from the identity ilUSD = currentValue - hodlValue
+                  const hodlValue = lpPnl.currentValue - lpPnl.ilUSD;
+                  const totalFees = lpPnl.feesCollected + lpPnl.feesUnclaimed;
+                  const x = fmt$(lpPnl.currentValue); // current LP value
+                  const y = fmt$(hodlValue);          // HODL value
+                  const z = fmt$(Math.abs(lpPnl.ilUSD)); // |IL|
+                  const w = fmt$(totalFees);          // fees earned
+                  if (lpPnl.ilUSD >= 0) {
+                    return `Your current LP value (${x}) is higher than your HODL value (${y}) by ${z}. The AMM rebalancing has worked in your favour. Combined with ${w} fees earned your total return is strong.\n\nFormula: IL = Current LP Value − HODL Value`;
+                  }
+                  const offset = totalFees >= Math.abs(lpPnl.ilUSD) ? "fully" : "partially";
+                  return `Your current LP value (${x}) is lower than your HODL value (${y}) by ${z}. This is your impermanent loss. Your fees earned (${w}) ${offset} offset this loss. IL may recover if prices return to entry levels.\n\nFormula: IL = Current LP Value − HODL Value`;
+                })(),
               },
               {
                 label: "Net P&L",
@@ -1016,8 +1107,8 @@ export default function Analytics() {
                     <PieChart>
                       <Pie
                         data={[
-                          ...(incomeWindow.lpClaimed > 0
-                            ? [{ name: "LP Fees", value: parseFloat(incomeWindow.lpClaimed.toFixed(2)), color: "#10b981" }]
+                          ...(incomeWindow.lpAccrued > 0
+                            ? [{ name: "LP Fees", value: parseFloat(incomeWindow.lpAccrued.toFixed(2)), color: "#10b981" }]
                             : []),
                           ...(incomeWindow.lendingProjected > 0
                             ? [{ name: "Lending Interest", value: parseFloat(incomeWindow.lendingProjected.toFixed(2)), color: "#3b82f6" }]
@@ -1030,7 +1121,7 @@ export default function Analytics() {
                         dataKey="value"
                         paddingAngle={2}
                       >
-                        {(incomeWindow.lpClaimed > 0 ? [{ color: "#10b981" }] : [])
+                        {(incomeWindow.lpAccrued > 0 ? [{ color: "#10b981" }] : [])
                           .concat(incomeWindow.lendingProjected > 0 ? [{ color: "#3b82f6" }] : [])
                           .map((c, i) => <Cell key={i} fill={c.color} />)}
                       </Pie>
@@ -1051,8 +1142,8 @@ export default function Analytics() {
                   <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/15"
                        style={{ borderLeft: "3px solid #10b981" }}>
                     <p className="text-xs text-gray-400">LP Fees</p>
-                    <p className="text-lg font-bold text-emerald-300">{fmt$(incomeWindow.lpClaimed)}</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">claimed on-chain</p>
+                    <p className="text-lg font-bold text-emerald-300">{fmt$(incomeWindow.lpAccrued)}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">accrued on-chain</p>
                   </div>
                   <div className="bg-[#0a1a3a]/40 rounded-lg p-3 border border-blue-400/15"
                        style={{ borderLeft: "3px solid #3b82f6" }}>
@@ -1069,19 +1160,41 @@ export default function Analytics() {
             )}
           </div>
 
-          {/* Daily Income by Chain — gradient bars + monthly projection + total row */}
+          {/* Daily Income by Chain — period toggle + gradient bars + total row */}
           <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <div className="flex items-baseline justify-between mb-4">
-              <h2 className="text-lg font-bold">Daily Income by Chain</h2>
-              <p className="text-[11px] text-gray-500">est. from current pool APYs</p>
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Daily Income by Chain</h2>
+                <p className="text-[11px] text-gray-500 mt-0.5">est. from current pool APYs</p>
+              </div>
+              <div className="flex gap-1">
+                {(["1D", "7D", "30D"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setChainPeriod(k)}
+                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                      chainPeriod === k
+                        ? "bg-emerald-600 text-white"
+                        : "bg-emerald-950/40 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
             </div>
             {incomeByChain.length > 0 ? (
               <>
                 <div className="flex flex-col gap-2.5">
                   {(() => {
-                    const max = Math.max(...incomeByChain.map((c) => c.daily), 0.0001);
-                    return incomeByChain.map((row) => {
-                      const pct = max > 0 ? (row.daily / max) * 100 : 0;
+                    const days = chainPeriod === "1D" ? 1 : chainPeriod === "7D" ? 7 : 30;
+                    const periodLabel = chainPeriod === "1D" ? "today" : `in ${chainPeriod.toLowerCase()}`;
+                    const rows = [...incomeByChain]
+                      .map((c) => ({ chain: c.chain, period: c.daily * days, daily: c.daily }))
+                      .sort((a, b) => b.period - a.period);
+                    const max = Math.max(...rows.map((r) => r.period), 0.0001);
+                    return rows.map((row) => {
+                      const pct = max > 0 ? (row.period / max) * 100 : 0;
                       const color = CHAIN_COLORS[row.chain] ?? "#10b981";
                       return (
                         <div key={row.chain} className="bg-[#0a2e1a]/30 rounded-lg p-2.5 border border-emerald-400/5">
@@ -1091,7 +1204,9 @@ export default function Analytics() {
                               <span className="text-sm font-medium text-white">{row.chain}</span>
                             </div>
                             <div className="text-right">
-                              <p className="text-sm font-semibold text-emerald-300">{fmt$(row.daily)}/day</p>
+                              <p className="text-sm font-semibold text-emerald-300">
+                                {fmt$(row.period)}<span className="text-[10px] text-gray-500 font-normal"> {periodLabel}</span>
+                              </p>
                               <p className="text-[10px] text-gray-500">{fmt$(row.daily * 30)}/mo</p>
                             </div>
                           </div>
@@ -1110,18 +1225,23 @@ export default function Analytics() {
                   })()}
                 </div>
                 {/* Total row */}
-                <div className="mt-3 pt-3 border-t border-emerald-400/10 flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wider text-gray-500">Total</span>
-                  <div className="text-right">
-                    <p className="text-base font-bold text-white">
-                      {fmt$(incomeByChain.reduce((s, c) => s + c.daily, 0))}
-                      <span className="text-xs text-gray-500 font-normal">/day</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500">
-                      {fmt$(incomeByChain.reduce((s, c) => s + c.daily, 0) * 30)}/mo
-                    </p>
-                  </div>
-                </div>
+                {(() => {
+                  const days = chainPeriod === "1D" ? 1 : chainPeriod === "7D" ? 7 : 30;
+                  const periodLabel = chainPeriod === "1D" ? "today" : `in ${chainPeriod.toLowerCase()}`;
+                  const totalDaily = incomeByChain.reduce((s, c) => s + c.daily, 0);
+                  return (
+                    <div className="mt-3 pt-3 border-t border-emerald-400/10 flex items-center justify-between">
+                      <span className="text-xs uppercase tracking-wider text-gray-500">Total</span>
+                      <div className="text-right">
+                        <p className="text-base font-bold text-white">
+                          {fmt$(totalDaily * days)}
+                          <span className="text-xs text-gray-500 font-normal"> {periodLabel}</span>
+                        </p>
+                        <p className="text-[11px] text-gray-500">{fmt$(totalDaily * 30)}/mo</p>
+                      </div>
+                    </div>
+                  );
+                })()}
               </>
             ) : (
               <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm">
@@ -1274,77 +1394,26 @@ export default function Analytics() {
           )}
         </div>
 
-        {/* ── SECTION 5: Risk Analysis ─────────────────────────────────────── */}
+        {/* ── SECTION 5: Risk Analysis — Chain + Protocol exposure ─────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
-          {/* Chain Exposure */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold">Chain Exposure</h2>
-              {chainWarning && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-medium">
-                  {chainWarning}
-                </span>
-              )}
-            </div>
-            {chainExposure.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={chainExposure}
-                    cx="50%"
-                    cy="45%"
-                    outerRadius={90}
-                    innerRadius={55}
-                    dataKey="value"
-                    paddingAngle={2}
-                  >
-                    {chainExposure.map((entry, i) => (
-                      <Cell key={i} fill={CHAIN_COLORS[entry.name] ?? PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
-                  <Legend content={PieLegend} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[280px] text-gray-600 text-sm">No data</div>
-            )}
-          </div>
-
-          {/* Protocol Exposure */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold">Protocol Exposure</h2>
-              {protocolWarning && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-medium">
-                  {protocolWarning}
-                </span>
-              )}
-            </div>
-            {protocolExposure.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={protocolExposure}
-                    cx="50%"
-                    cy="45%"
-                    outerRadius={90}
-                    innerRadius={55}
-                    dataKey="value"
-                    paddingAngle={2}
-                  >
-                    {protocolExposure.map((entry, i) => (
-                      <Cell key={i} fill={PROTOCOL_COLORS[entry.name] ?? PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
-                  <Legend content={PieLegend} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[280px] text-gray-600 text-sm">No data</div>
-            )}
-          </div>
+          <ExposureCard
+            title="Chain Exposure"
+            warning={chainWarning}
+            data={chainExposure}
+            colorOf={(name, i) => CHAIN_COLORS[name] ?? PIE_COLORS[i % PIE_COLORS.length]}
+            centerPrimary={fmt$(totalPortfolioValue)}
+            centerSecondary={`${chainExposure.length} chain${chainExposure.length === 1 ? "" : "s"}`}
+            valueFmt={(v) => fmt$(v)}
+          />
+          <ExposureCard
+            title="Protocol Exposure"
+            warning={protocolWarning}
+            data={protocolExposure}
+            colorOf={(name, i) => PROTOCOL_COLORS[name] ?? PIE_COLORS[i % PIE_COLORS.length]}
+            centerPrimary={String(protocolExposure.length)}
+            centerSecondary="active"
+            valueFmt={(v) => fmt$(v)}
+          />
         </div>
 
         {/* ── SECTION 6: Top & Bottom Performers ───────────────────────────── */}
