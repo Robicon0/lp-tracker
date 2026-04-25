@@ -15,13 +15,16 @@ export interface LpPnlResult {
   netPnl: number;
   netPnlPct: number;
   included: number;
-  excluded: number;
+  excluded: number;   // positions with no deposits / no on-chain history
+  errored: number;    // positions whose fetch failed (timeout, HTTP error, etc.)
+  errorReasons: string[]; // first-seen unique error reasons (for UI display)
   isLoading: boolean;
 }
 
 const EMPTY: LpPnlResult = {
   initialValue: 0, currentValue: 0, feesCollected: 0, feesUnclaimed: 0,
-  ilUSD: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0, isLoading: false,
+  ilUSD: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
+  errored: 0, errorReasons: [], isLoading: false,
 };
 
 // ── NFT manager lookup ──────────────────────────────────────────────────────
@@ -210,8 +213,16 @@ async function fetchAndCompute(
     console.log(`${tag} cache hit — ${rawEvents.length} events`);
   } else {
     let json: { events?: Array<Record<string, unknown>>; error?: string };
+    // Activity routes can chain through multiple RPC providers (Tenderly →
+    // LlamaRPC → publicnode). If they all slow-fail, the fetch can hang
+    // indefinitely. Cap at 30s per position so the LP P&L section never
+    // gets stuck on one slow position — the error surfaces in `errored`
+    // and the rest of the portfolio still aggregates correctly.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         console.error(`${tag} HTTP ${res.status} ${body.slice(0, 300)}`);
@@ -219,8 +230,10 @@ async function fetchAndCompute(
       }
       json = await res.json();
     } catch (err) {
-      console.error(`${tag} fetch threw:`, err);
-      return { ok: false, reason: "fetch error" };
+      clearTimeout(timer);
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      console.error(`${tag} fetch ${isAbort ? "timed out" : "threw"}:`, err);
+      return { ok: false, reason: isAbort ? "timeout" : "fetch error" };
     }
 
     if (json.error) {
@@ -277,9 +290,20 @@ type PosResult =
   | { ok: true; data: PositionPnLData }
   | { ok: false; reason: string };
 
+// Error reasons that indicate a transport failure (vs. legitimate "no data"
+// like `no_deposits`). These should surface to the UI so the user knows the
+// fetch failed rather than the position just having no on-chain history.
+const ERROR_REASONS = new Set([
+  "timeout", "fetch error", "no activity URL",
+]);
+function isTransportError(reason: string): boolean {
+  return ERROR_REASONS.has(reason) || reason.startsWith("HTTP ");
+}
+
 function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlResult {
   let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
-  let included = 0, excluded = 0;
+  let included = 0, excluded = 0, errored = 0;
+  const errorReasons = new Set<string>();
 
   for (const r of resultsMap.values()) {
     if (r.ok) {
@@ -289,6 +313,9 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
       feesUnclaimed += r.data.feesUnclaimed;
       ilUSD += r.data.ilUSD;
       included += 1;
+    } else if (isTransportError(r.reason)) {
+      errored += 1;
+      errorReasons.add(r.reason);
     } else {
       excluded += 1;
     }
@@ -300,6 +327,7 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
   return {
     initialValue, currentValue, feesCollected, feesUnclaimed,
     ilUSD, netPnl, netPnlPct, included, excluded,
+    errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
   };
 }

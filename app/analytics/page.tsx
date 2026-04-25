@@ -713,10 +713,11 @@ export default function Analytics() {
               <h2 className="text-lg font-bold">Fee Income</h2>
               <div className="mt-1">
                 <span className="text-2xl font-bold text-emerald-300">
-                  {fmt$(feeIncome.totalAllTime)}
+                  {fmt$(feeIncome.totalWindow)}
                 </span>
               </div>
-              <p className="text-xs text-gray-500 mt-0.5">cumulative fees earned — all chains</p>
+              <p className="text-xs text-gray-500 mt-0.5">fees earned in last {activeRange.label} — all chains</p>
+              <p className="text-[11px] text-gray-600 mt-0.5">Lifetime: {fmt$(feeIncome.totalAllTime)}</p>
             </div>
             <div className="flex gap-1">
               {TIME_RANGES.map((r) => (
@@ -824,49 +825,57 @@ export default function Analytics() {
         <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-lg font-bold">LP Profit &amp; Loss</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Aggregated from on-chain deposit &amp; fee events across all LP positions</p>
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                LP Profit &amp; Loss
+                {lpPnl.isLoading && (
+                  <span
+                    className="inline-block w-3 h-3 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 animate-spin"
+                    aria-label="Loading"
+                  />
+                )}
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Aggregated from on-chain deposit &amp; fee events across all LP positions
+                {lpPnl.isLoading && lpPnl.included > 0 && (
+                  <span className="text-gray-600"> — loading {lpPnl.included} of {lpPnl.included + lpPnl.excluded + lpPnl.errored + (lpPnl.isLoading ? 1 : 0)}…</span>
+                )}
+              </p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-              <p className="text-xs text-gray-500 mb-1">Total Initial Value</p>
-              <p className="text-lg font-bold text-white">{fmt$(lpPnl.initialValue)}</p>
-              <p className="text-[10px] text-gray-600 mt-0.5">at deposit prices</p>
-            </div>
-            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-              <p className="text-xs text-gray-500 mb-1">Current Value</p>
-              <p className="text-lg font-bold text-white">{fmt$(lpPnl.currentValue)}</p>
-              <p className="text-[10px] text-gray-600 mt-0.5">live</p>
-            </div>
-            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-              <p className="text-xs text-gray-500 mb-1">Total Fees Collected</p>
-              <p className="text-lg font-bold text-emerald-300">{fmt$(lpPnl.feesCollected)}</p>
-              <p className="text-[10px] text-gray-600 mt-0.5">claimed lifetime</p>
-            </div>
-            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-              <p className="text-xs text-gray-500 mb-1">Total Fees Unclaimed</p>
-              <p className="text-lg font-bold text-emerald-300">{fmt$(lpPnl.feesUnclaimed)}</p>
-              <p className="text-[10px] text-gray-600 mt-0.5">pending on-chain</p>
-            </div>
-            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-              <p className="text-xs text-gray-500 mb-1">Total Impermanent Loss</p>
-              {/* IL = Σ(HODL − Current) across open positions. Positive number = LP underperformed HODL. */}
-              <p className={`text-lg font-bold ${-lpPnl.ilUSD > 0 ? "text-red-400" : "text-emerald-400"}`}>
-                {-lpPnl.ilUSD > 0 ? "+" : ""}{fmt$(-lpPnl.ilUSD)}
-              </p>
-              <p className="text-[10px] text-gray-600 mt-0.5">Σ(HODL − Current), open only</p>
-            </div>
-            <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-              <p className="text-xs text-gray-500 mb-1">Net P&amp;L</p>
-              <p className={`text-lg font-bold ${lpPnl.netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {lpPnl.netPnl >= 0 ? "+" : ""}{fmt$(lpPnl.netPnl)}
-              </p>
-              <p className={`text-[10px] mt-0.5 ${lpPnl.netPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                {lpPnl.netPnlPct >= 0 ? "+" : ""}{lpPnl.netPnlPct.toFixed(2)}%
-              </p>
-            </div>
+            {[
+              { label: "Total Initial Value", value: fmt$(lpPnl.initialValue), color: "text-white", foot: "at deposit prices" },
+              { label: "Current Value",       value: fmt$(lpPnl.currentValue), color: "text-white", foot: "live" },
+              { label: "Total Fees Collected", value: fmt$(lpPnl.feesCollected), color: "text-emerald-300", foot: "claimed lifetime" },
+              { label: "Total Fees Unclaimed", value: fmt$(lpPnl.feesUnclaimed), color: "text-emerald-300", foot: "pending on-chain" },
+              {
+                label: "Total Impermanent Loss",
+                value: `${-lpPnl.ilUSD > 0 ? "+" : ""}${fmt$(-lpPnl.ilUSD)}`,
+                color: -lpPnl.ilUSD > 0 ? "text-red-400" : "text-emerald-400",
+                foot: "Σ(HODL − Current), open only",
+              },
+              {
+                label: "Net P&L",
+                value: `${lpPnl.netPnl >= 0 ? "+" : ""}${fmt$(lpPnl.netPnl)}`,
+                color: lpPnl.netPnl >= 0 ? "text-emerald-400" : "text-red-400",
+                foot: `${lpPnl.netPnlPct >= 0 ? "+" : ""}${lpPnl.netPnlPct.toFixed(2)}%`,
+                footColor: lpPnl.netPnl >= 0 ? "text-emerald-500" : "text-red-500",
+              },
+            ].map((card) => {
+              const showSkeleton = lpPnl.isLoading && lpPnl.included === 0;
+              return (
+                <div key={card.label} className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
+                  <p className="text-xs text-gray-500 mb-1">{card.label}</p>
+                  {showSkeleton ? (
+                    <div className="h-[22px] w-20 rounded bg-emerald-900/30 animate-pulse" />
+                  ) : (
+                    <p className={`text-lg font-bold ${card.color}`}>{card.value}</p>
+                  )}
+                  <p className={`text-[10px] mt-0.5 ${card.footColor ?? "text-gray-600"}`}>{card.foot}</p>
+                </div>
+              );
+            })}
           </div>
 
           {lpPnl.excluded > 0 && (
@@ -874,7 +883,20 @@ export default function Analytics() {
               {lpPnl.excluded} position{lpPnl.excluded === 1 ? "" : "s"} excluded — entry data unavailable.
             </p>
           )}
-          {lpPnl.isLoading && lpPnl.included === 0 && (
+          {lpPnl.errored > 0 && (
+            <div className="mt-3 bg-red-950/30 border border-red-400/20 rounded-lg px-3 py-2">
+              <p className="text-[12px] text-red-300 font-medium">
+                Couldn&apos;t load {lpPnl.errored} position{lpPnl.errored === 1 ? "" : "s"}
+                {lpPnl.errorReasons.length > 0 && (
+                  <> — {lpPnl.errorReasons.slice(0, 3).join(", ")}</>
+                )}
+              </p>
+              <p className="text-[11px] text-red-300/70 mt-0.5">
+                The RPC didn&apos;t respond in 30s. Totals below are for the positions that did load. Refreshing the page will retry.
+              </p>
+            </div>
+          )}
+          {lpPnl.isLoading && lpPnl.included === 0 && lpPnl.errored === 0 && (
             <p className="text-[11px] text-gray-600 mt-3">Loading on-chain history…</p>
           )}
         </div>
