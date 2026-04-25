@@ -39,6 +39,8 @@ const MANAGE_URLS: Record<string, string> = {
   AlphaFi:        "https://app.alphafi.xyz/alphalend",
   Suilend:        "https://app.suilend.fi",
   HyperLend:      "https://app.hyperlend.finance/dashboard",
+  Kamino:         "https://app.kamino.finance/lending",
+  HypurrFi:       "https://hypurr.fi",
 };
 
 function buildPosition(
@@ -164,6 +166,10 @@ export function useLendingPositions(): UseLendingPositionsData {
         tasks.push(fetchMerged(suiAddresses, "/api/lending/alphafi", "AlphaFi", "Sui"));
         // ── HyperLend (HyperEVM) ─────────────────────────────────────────────
         tasks.push(fetchMerged(evmAddresses, "/api/lending/hyperlend", "HyperLend", "HyperEVM"));
+        // ── HypurrFi (HyperEVM) ──────────────────────────────────────────────
+        tasks.push(fetchMerged(evmAddresses, "/api/lending/hypurrfi", "HypurrFi", "HyperEVM"));
+        // ── Kamino Finance (Solana) ──────────────────────────────────────────
+        tasks.push(fetchMerged(solanaAddresses, "/api/lending/kamino", "Kamino", "Solana"));
 
         const results = await Promise.allSettled(tasks);
         if (cancelled) return;

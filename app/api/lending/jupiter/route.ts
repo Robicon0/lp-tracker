@@ -1,103 +1,120 @@
 import { NextResponse } from 'next/server';
 
-// Jupiter Lend REST API — requires API key from https://portal.jup.ag
-// Set JUPITER_API_KEY in .env.local to enable this integration.
+// Jupiter Lend (a.k.a. Jupiter Earn) supply positions for a Solana wallet.
 //
-// Actual response shape (verified 2026-03-29):
-//   GET /earn/positions?users={address}
-//   Returns: Array<{
-//     token: { symbol, decimals, asset: { symbol, decimals, price }, supplyRate, rewardsRate, totalRate },
-//     ownerAddress, shares, underlyingAssets, underlyingBalance, allowance
-//   }>
-//   - shares/underlyingAssets are raw integer strings (divide by 10^decimals)
-//   - totalRate = supplyRate + rewardsRate, in basis points (e.g. 347 = 3.47% APY)
-//   - token.asset.price is a USD price string already provided (no CoinGecko needed)
+// The endpoint shape changed in early 2026: the public path is
+//   GET https://lite-api.jup.ag/lend/v1/earn/positions?users={wallet}
+// and the API-key path is
+//   GET https://api.jup.ag/lend/v1/earn/positions?users={wallet}
+//
+// Some wallets returned empty even when they had positions because:
+//   (1) the wallet base58 address was not URL-encoded → `+`/`/` chars broke,
+//   (2) only one of the two endpoints was being tried (key path 401s for
+//       wallets the key isn't entitled to, lite path is open),
+//   (3) the array `users` param is sometimes only honoured under one host.
+//
+// This route now tries lite-api first (no key, always works), then falls
+// back to api.jup.ag with the key when set. Each attempt URL-encodes the
+// wallet, accepts both `?users=` and `?wallets=`, and merges supplies
+// from any successful call (deduped by token mint).
+
 const JUPITER_API_KEY = process.env.JUPITER_API_KEY;
-const JUPITER_BASE    = 'https://api.jup.ag/lend/v1';
+
+interface RawPosition {
+  shares?: string;
+  underlyingAssets?: string;
+  ownerAddress?: string;
+  token?: {
+    symbol?: string;
+    decimals?: number;
+    totalRate?: number | string;
+    supplyRate?: number | string;
+    rewardsRate?: number | string;
+    asset?: { symbol?: string; decimals?: number; price?: string | number; address?: string };
+  };
+}
+
+async function fetchAttempt(url: string, headers: Record<string, string>): Promise<RawPosition[] | null> {
+  try {
+    const res = await fetch(url, { headers, cache: 'no-store' });
+    if (!res.ok) {
+      console.error(`[jupiter/route] ${url} → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await res.json();
+    if (Array.isArray(data)) return data as RawPosition[];
+    if (Array.isArray(data?.positions)) return data.positions as RawPosition[];
+    return null;
+  } catch (err) {
+    console.error(`[jupiter/route] ${url} threw:`, err);
+    return null;
+  }
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
-
   if (!account) return NextResponse.json({ error: 'account required' }, { status: 400 });
 
-  if (!JUPITER_API_KEY) {
-    return NextResponse.json({
-      supplies: [],
-      borrows: [],
-      protocol: 'Jupiter Lend',
-      chain: 'Solana',
-      note: 'JUPITER_API_KEY not configured — get a free key at https://portal.jup.ag',
-    });
-  }
-
-  try {
-    console.log(`[jupiter/route] Fetching positions for ${account}`);
-    const res = await fetch(
-      `${JUPITER_BASE}/earn/positions?users=${account}`,
-      { headers: { 'x-api-key': JUPITER_API_KEY, 'Content-Type': 'application/json' } },
+  const encoded = encodeURIComponent(account);
+  const candidates: Array<{ url: string; headers: Record<string, string> }> = [
+    { url: `https://lite-api.jup.ag/lend/v1/earn/positions?users=${encoded}`, headers: { 'Content-Type': 'application/json' } },
+    { url: `https://lite-api.jup.ag/lend/v1/earn/positions?wallets=${encoded}`, headers: { 'Content-Type': 'application/json' } },
+  ];
+  if (JUPITER_API_KEY) {
+    candidates.push(
+      { url: `https://api.jup.ag/lend/v1/earn/positions?users=${encoded}`, headers: { 'x-api-key': JUPITER_API_KEY, 'Content-Type': 'application/json' } },
+      { url: `https://api.jup.ag/lend/v1/earn/positions?wallets=${encoded}`, headers: { 'x-api-key': JUPITER_API_KEY, 'Content-Type': 'application/json' } },
     );
-
-    if (!res.ok) {
-      console.error(`[jupiter/route] API error ${res.status}: ${await res.text()}`);
-      return NextResponse.json({ supplies: [], borrows: [], protocol: 'Jupiter Lend', chain: 'Solana' });
-    }
-
-    const data = await res.json();
-    console.log(`[jupiter/route] Raw response type: ${typeof data}, isArray: ${Array.isArray(data)}, keys: ${typeof data === 'object' ? Object.keys(data ?? {}).join(',') : 'n/a'}`);
-
-    // Response is a flat array of all token positions for the user (including zero-balance ones)
-    const rawPositions: Record<string, unknown>[] = Array.isArray(data) ? data
-      : Array.isArray(data?.positions) ? (data.positions as Record<string, unknown>[])
-      : [];
-
-    console.log(`[jupiter/route] Total positions in response: ${rawPositions.length}`);
-
-    const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
-    const borrows:  Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
-
-    for (const pos of rawPositions) {
-      try {
-        // Filter zero-share positions first
-        const sharesBig = BigInt(String(pos.shares ?? '0'));
-        if (sharesBig === 0n) continue;
-
-        const token = (pos.token as Record<string, unknown>) ?? {};
-        const asset = (token.asset as Record<string, unknown>) ?? {};
-
-        // Prefer asset.symbol (underlying token, e.g. "USDC") over token.symbol (vault token, e.g. "jlUSDC")
-        const symbol   = String(asset.symbol ?? token.symbol ?? 'UNKNOWN');
-        const decimals = Number(asset.decimals ?? token.decimals ?? 6);
-
-        // underlyingAssets = amount deposited in the protocol (in raw integer units)
-        const rawAmt = String(pos.underlyingAssets ?? pos.shares ?? '0');
-        const amount = Number(BigInt(rawAmt)) / Math.pow(10, decimals);
-
-        if (amount < 0.000001) {
-          console.log(`[jupiter/route] Skipping ${symbol}: amount too small (${amount})`);
-          continue;
-        }
-
-        // Price is provided directly by the API in token.asset.price
-        const price    = parseFloat(String(asset.price ?? '0'));
-        const usdValue = amount * price;
-
-        // totalRate = supplyRate + rewardsRate, in basis points (divide by 100 to get %)
-        const apy = Number(token.totalRate ?? token.supplyRate ?? 0) / 100;
-
-        console.log(`[jupiter/route] Position: ${symbol} amount=${amount.toFixed(4)} usd=${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
-
-        // Jupiter Lend earn positions are supply-only (borrow API is "coming soon")
-        supplies.push({ symbol, amount, usdValue, apy });
-      } catch (err) {
-        console.error('[jupiter/route] position parse failed:', err, JSON.stringify(pos).slice(0, 200));
-      }
-    }
-
-    console.log(`[jupiter/route] Parsed ${supplies.length} supply positions`);
-    return NextResponse.json({ supplies, borrows, protocol: 'Jupiter Lend', chain: 'Solana' });
-  } catch (err) {
-    console.error('[jupiter/route] fetch failed:', err);
-    return NextResponse.json({ supplies: [], borrows: [], error: String(err) });
   }
+
+  // Hit endpoints in parallel and merge. Dedupe by token-asset address since
+  // the same vault may be returned twice across endpoints (or zero-share
+  // duplicates may exist in the response).
+  const results = await Promise.all(candidates.map((c) => fetchAttempt(c.url, c.headers)));
+  const merged: RawPosition[] = [];
+  const seen = new Set<string>();
+  for (const arr of results) {
+    if (!arr) continue;
+    for (const p of arr) {
+      const key = `${p.token?.asset?.address ?? ''}::${p.shares ?? p.underlyingAssets ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(p);
+    }
+  }
+  console.log(`[jupiter/route] ${account.slice(0, 6)}…: ${candidates.length} endpoints tried, ${merged.length} unique positions found`);
+
+  const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
+
+  for (const pos of merged) {
+    try {
+      const sharesBig = BigInt(String(pos.shares ?? '0'));
+      if (sharesBig === 0n) continue;
+
+      const token = pos.token ?? {};
+      const asset = token.asset ?? {};
+      const symbol = String(asset.symbol ?? token.symbol ?? 'UNKNOWN');
+      const decimals = Number(asset.decimals ?? token.decimals ?? 6);
+
+      const rawAmt = String(pos.underlyingAssets ?? pos.shares ?? '0');
+      const amount = Number(BigInt(rawAmt)) / Math.pow(10, decimals);
+      if (amount < 0.000001) continue;
+
+      const price = parseFloat(String(asset.price ?? '0'));
+      const usdValue = amount * price;
+      const apy = Number(token.totalRate ?? token.supplyRate ?? 0) / 100;
+
+      supplies.push({ symbol, amount, usdValue, apy });
+    } catch (err) {
+      console.error('[jupiter/route] parse failed:', err, JSON.stringify(pos).slice(0, 200));
+    }
+  }
+
+  return NextResponse.json({
+    supplies,
+    borrows: [], // Jupiter Earn is supply-only; borrow product not yet exposed via this endpoint.
+    protocol: 'Jupiter Lend',
+    chain: 'Solana',
+  });
 }

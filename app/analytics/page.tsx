@@ -192,6 +192,17 @@ function ExposureCard({
                     />
                   ))}
                 </Pie>
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  itemStyle={tooltipItemStyle}
+                  labelStyle={tooltipLabelStyle}
+                  formatter={(value, _name, item) => {
+                    const v = typeof value === "number" ? value : Number(value) || 0;
+                    const pctVal = total > 0 ? ((v / total) * 100).toFixed(1) : "0.0";
+                    const payloadName = (item as { payload?: { name?: string } } | undefined)?.payload?.name ?? "";
+                    return [`${valueFmt(v)} (${pctVal}%)`, payloadName];
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
