@@ -399,6 +399,62 @@ export default function Analytics() {
 
   const totalDailyIncome = dailyLpIncome + dailyLendingIncome;
 
+  // ── Income by Source — D/M/Y toggle ─────────────────────────────────────
+  // D = today (last 24h), M = this month (last 30d), Y = this year (last 365d).
+  // LP fees come from the same on-chain event stream the Fee Income chart uses
+  // (per-position eventsMap + wallet-level fee scan), so any chain/protocol the
+  // user has automatically contributes — no hardcoded list.
+  const [incomePeriod, setIncomePeriod] = useState<"D" | "M" | "Y">("D");
+  const incomeWindow = useMemo(() => {
+    const now = Date.now();
+    const periodMs = incomePeriod === "D"
+      ? 24 * 3_600_000
+      : incomePeriod === "M"
+      ? 30 * 24 * 3_600_000
+      : 365 * 24 * 3_600_000;
+    const cutoff = now - periodMs;
+    const periodDays = periodMs / (24 * 3_600_000);
+
+    // LP fees actually claimed on-chain in the selected window.
+    let lpClaimed = 0;
+    const seen = new Set<string>();
+    const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) =>
+      e.txHash
+        ? `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`
+        : `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
+    const posById = new Map(positions.map((p) => [p.id, p]));
+    for (const [posId, evs] of eventsMap.entries()) {
+      const pos = posById.get(posId);
+      if (!pos) continue;
+      for (const e of evs) {
+        if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
+        const usd = e.usdAtTime ?? 0;
+        if (!Number.isFinite(usd) || usd <= 0) continue;
+        if (e.timestamp * 1000 < cutoff) continue;
+        const key = buildKey(pos.protocol, e);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lpClaimed += usd;
+      }
+    }
+    for (const t of walletLevelFees) {
+      const e = t.event;
+      if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
+      const usd = e.usdAtTime ?? 0;
+      if (!Number.isFinite(usd) || usd <= 0) continue;
+      if (e.timestamp * 1000 < cutoff) continue;
+      const key = buildKey(t.protocol, e);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lpClaimed += usd;
+    }
+
+    // Lending = current-APY projection over the period (estimated, not claimed).
+    const lendingProjected = dailyLendingIncome * periodDays;
+
+    return { lpClaimed, lendingProjected, total: lpClaimed + lendingProjected };
+  }, [incomePeriod, eventsMap, walletLevelFees, positions, dailyLendingIncome]);
+
   // ── Weighted average actual APR across all active LP positions ─────────────
   const actualAPRData = useMemo(() => {
     const activeWithValue = positions.filter((p) => p.value > 0 && p.status !== "Closed");
@@ -480,25 +536,26 @@ export default function Analytics() {
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [positions, lendingPositions]);
 
-  // ── Income by chain (for bar chart) ────────────────────────────────────────
+  // ── Income by chain (LP only — only chains with active LP positions) ──────
+  // Lending APRs are excluded here so the section reflects fee-earning chains
+  // exclusively. Sorted desc by daily income; total row appended.
   const incomeByChain = useMemo(() => {
     const m: Record<string, number> = {};
     for (const p of positions) {
-      if (p.apy > 0 && p.value > 0) {
+      if (p.status === "Closed" || p.value <= 0) continue;
+      if (p.apy > 0) {
         const daily = (p.value * p.apy) / 100 / 365;
         m[p.chain] = (m[p.chain] ?? 0) + daily;
-      }
-    }
-    for (const lp of lendingPositions) {
-      if (lp.supplyApy != null && lp.totalSupplied > 0) {
-        const daily = (lp.totalSupplied * lp.supplyApy) / 100 / 365;
-        m[lp.chain] = (m[lp.chain] ?? 0) + daily;
+      } else if (!(p.chain in m)) {
+        // Chain has an active position but APY is unknown — record at $0 so
+        // it shows up in the list rather than being silently dropped.
+        m[p.chain] = 0;
       }
     }
     return Object.entries(m)
       .map(([chain, daily]) => ({ chain, daily }))
       .sort((a, b) => b.daily - a.daily);
-  }, [positions, lendingPositions]);
+  }, [positions]);
 
   // ── Sorted position table (uses actual APR when available) ─────────────────
   // Only show active positions (In Range / Out of Range) — closed positions
@@ -854,6 +911,9 @@ export default function Analytics() {
                 value: `${-lpPnl.ilUSD > 0 ? "+" : ""}${fmt$(-lpPnl.ilUSD)}`,
                 color: -lpPnl.ilUSD > 0 ? "text-red-400" : "text-emerald-400",
                 foot: "Σ(HODL − Current), open only",
+                tooltip: lpPnl.ilUSD >= 0
+                  ? "Your LP position is currently worth MORE than if you had just held the tokens. The AMM rebalancing has worked in your favour. Combined with fees earned, your total return is strong.\n\nIL = Current LP Value − HODL Value"
+                  : "Your LP position has less value than if you had just held the tokens. This difference is impermanent loss — it may recover if prices return to your entry levels. Your fees earned partially or fully offset this loss.\n\nIL = Current LP Value − HODL Value",
               },
               {
                 label: "Net P&L",
@@ -865,8 +925,28 @@ export default function Analytics() {
             ].map((card) => {
               const showSkeleton = lpPnl.isLoading && lpPnl.included === 0;
               return (
-                <div key={card.label} className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5">
-                  <p className="text-xs text-gray-500 mb-1">{card.label}</p>
+                <div key={card.label} className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5 relative">
+                  <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                    <span>{card.label}</span>
+                    {card.tooltip && (
+                      <span className="group relative inline-flex items-center">
+                        <button
+                          type="button"
+                          aria-label={`About ${card.label}`}
+                          tabIndex={0}
+                          className="w-4 h-4 rounded-full border border-emerald-400/40 text-emerald-400/80 text-[10px] leading-none flex items-center justify-center hover:border-emerald-400 hover:text-emerald-300 focus:border-emerald-400 focus:text-emerald-300 focus:outline-none cursor-help"
+                        >
+                          ⓘ
+                        </button>
+                        <span
+                          role="tooltip"
+                          className="pointer-events-none absolute left-0 top-full mt-2 z-30 w-64 sm:w-72 whitespace-pre-wrap text-[11px] leading-relaxed bg-[#0a1f17] border border-emerald-400/30 rounded-lg p-3 text-emerald-50/90 shadow-2xl opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+                        >
+                          {card.tooltip}
+                        </span>
+                      </span>
+                    )}
+                  </p>
                   {showSkeleton ? (
                     <div className="h-[22px] w-20 rounded bg-emerald-900/30 animate-pulse" />
                   ) : (
@@ -903,93 +983,149 @@ export default function Analytics() {
 
         {/* ── SECTION 3: Income Breakdown ───────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
-          {/* Income by Source */}
+          {/* Income by Source — donut center + D/M/Y toggle */}
           <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <h2 className="text-lg font-bold mb-4">Income by Source</h2>
-            {totalDailyIncome > 0 ? (
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Income by Source</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {incomePeriod === "D" ? "Today" : incomePeriod === "M" ? "This month" : "This year"}
+                </p>
+              </div>
+              <div className="flex gap-1">
+                {(["D", "M", "Y"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setIncomePeriod(k)}
+                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                      incomePeriod === k
+                        ? "bg-emerald-600 text-white"
+                        : "bg-emerald-950/40 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {incomeWindow.total > 0 ? (
               <>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie
-                      data={[
-                        { name: "LP Fees", value: parseFloat((dailyLpIncome * 365).toFixed(2)) },
-                        ...(dailyLendingIncome > 0
-                          ? [{ name: "Lending Interest", value: parseFloat((dailyLendingIncome * 365).toFixed(2)) }]
-                          : []),
-                      ]}
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={80}
-                      innerRadius={50}
-                      dataKey="value"
-                      paddingAngle={2}
-                    >
-                      <Cell fill="#10b981" />
-                      {dailyLendingIncome > 0 && <Cell fill="#3b82f6" />}
-                    </Pie>
-                    <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex justify-center gap-6 mt-2">
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span className="text-gray-400">LP Fees</span>
-                    <span className="text-white font-medium">{fmt$(dailyLpIncome * 365)}/yr</span>
+                <div className="relative">
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          ...(incomeWindow.lpClaimed > 0
+                            ? [{ name: "LP Fees", value: parseFloat(incomeWindow.lpClaimed.toFixed(2)), color: "#10b981" }]
+                            : []),
+                          ...(incomeWindow.lendingProjected > 0
+                            ? [{ name: "Lending Interest", value: parseFloat(incomeWindow.lendingProjected.toFixed(2)), color: "#3b82f6" }]
+                            : []),
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={88}
+                        innerRadius={62}
+                        dataKey="value"
+                        paddingAngle={2}
+                      >
+                        {(incomeWindow.lpClaimed > 0 ? [{ color: "#10b981" }] : [])
+                          .concat(incomeWindow.lendingProjected > 0 ? [{ color: "#3b82f6" }] : [])
+                          .map((c, i) => <Cell key={i} fill={c.color} />)}
+                      </Pie>
+                      <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Total</p>
+                    <p className="text-2xl font-bold text-white">{fmt$(incomeWindow.total)}</p>
+                    <p className="text-[10px] text-gray-500">
+                      {incomePeriod === "D" ? "today" : incomePeriod === "M" ? "this month" : "this year"}
+                    </p>
                   </div>
-                  {dailyLendingIncome > 0 && (
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-gray-400">Lending</span>
-                      <span className="text-white font-medium">{fmt$(dailyLendingIncome * 365)}/yr</span>
-                    </div>
-                  )}
+                </div>
+
+                {/* Source cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/15"
+                       style={{ borderLeft: "3px solid #10b981" }}>
+                    <p className="text-xs text-gray-400">LP Fees</p>
+                    <p className="text-lg font-bold text-emerald-300">{fmt$(incomeWindow.lpClaimed)}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">claimed on-chain</p>
+                  </div>
+                  <div className="bg-[#0a1a3a]/40 rounded-lg p-3 border border-blue-400/15"
+                       style={{ borderLeft: "3px solid #3b82f6" }}>
+                    <p className="text-xs text-gray-400">Lending Interest</p>
+                    <p className="text-lg font-bold text-blue-300">{fmt$(incomeWindow.lendingProjected)}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">estimated at current APY</p>
+                  </div>
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-[220px] text-gray-600 text-sm">
-                No active income sources
+              <div className="flex items-center justify-center h-[260px] text-gray-600 text-sm">
+                No income in this period
               </div>
             )}
           </div>
 
-          {/* Income by Chain */}
+          {/* Daily Income by Chain — gradient bars + monthly projection + total row */}
           <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <h2 className="text-lg font-bold mb-4">Daily Income by Chain</h2>
+            <div className="flex items-baseline justify-between mb-4">
+              <h2 className="text-lg font-bold">Daily Income by Chain</h2>
+              <p className="text-[11px] text-gray-500">est. from current pool APYs</p>
+            </div>
             {incomeByChain.length > 0 ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={incomeByChain} layout="vertical" margin={{ left: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#0f2e1f" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fill: "#6b7280", fontSize: 10 }}
-                    tickFormatter={(v) => `$${v.toFixed(1)}`}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="chain"
-                    tick={{ fill: "#9ca3af", fontSize: 11 }}
-                    width={70}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    itemStyle={tooltipItemStyle}
-                    labelStyle={tooltipLabelStyle}
-                    formatter={(value: number | undefined) => [fmt$(value ?? 0) + "/day", "Income"]}
-                  />
-                  <Bar dataKey="daily" radius={[0, 4, 4, 0]} maxBarSize={24}>
-                    {incomeByChain.map((entry, i) => (
-                      <Cell key={i} fill={CHAIN_COLORS[entry.chain] ?? PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <>
+                <div className="flex flex-col gap-2.5">
+                  {(() => {
+                    const max = Math.max(...incomeByChain.map((c) => c.daily), 0.0001);
+                    return incomeByChain.map((row) => {
+                      const pct = max > 0 ? (row.daily / max) * 100 : 0;
+                      const color = CHAIN_COLORS[row.chain] ?? "#10b981";
+                      return (
+                        <div key={row.chain} className="bg-[#0a2e1a]/30 rounded-lg p-2.5 border border-emerald-400/5">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+                              <span className="text-sm font-medium text-white">{row.chain}</span>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-semibold text-emerald-300">{fmt$(row.daily)}/day</p>
+                              <p className="text-[10px] text-gray-500">{fmt$(row.daily * 30)}/mo</p>
+                            </div>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-emerald-950/50 overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.max(pct, 2)}%`,
+                                background: `linear-gradient(90deg, ${color}33 0%, ${color} 100%)`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+                {/* Total row */}
+                <div className="mt-3 pt-3 border-t border-emerald-400/10 flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wider text-gray-500">Total</span>
+                  <div className="text-right">
+                    <p className="text-base font-bold text-white">
+                      {fmt$(incomeByChain.reduce((s, c) => s + c.daily, 0))}
+                      <span className="text-xs text-gray-500 font-normal">/day</span>
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      {fmt$(incomeByChain.reduce((s, c) => s + c.daily, 0) * 30)}/mo
+                    </p>
+                  </div>
+                </div>
+              </>
             ) : (
-              <div className="flex items-center justify-center h-[260px] text-gray-600 text-sm">
-                No income data available
+              <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm">
+                No active LP positions
               </div>
             )}
           </div>

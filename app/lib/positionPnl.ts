@@ -70,29 +70,50 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   }
 
   const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
-  const deposits = sorted.filter((e) => e.type === 'deposit');
+  // Skip truly empty deposit events — some protocols (especially Sui Move
+  // emitters and protocol upgrades) emit a `LiquidityProvided` / similar
+  // event with both amounts equal to zero on the very first add or on a
+  // protocol-side rebalance. Those rows have no economic content and
+  // shouldn't fail the whole position.
+  const deposits = sorted.filter(
+    (e) => e.type === 'deposit' && (e.amount0 > 0 || e.amount1 > 0),
+  );
 
   if (deposits.length === 0) {
     return { ok: false, reason: 'no_deposits' };
   }
 
-  // Every deposit MUST have real historical prices. No fallbacks.
+  // Each deposit needs SOMETHING we can value it with. We accept any of:
+  //   (a) historical per-token prices (deriveDepositPrices result), OR
+  //   (b) usdAtTime computed by the route at deposit time, OR
+  //   (c) at least one side has a non-zero amount AND a non-zero price
+  //       (current-price fallback the route already passes through). This
+  //       covers non-stable pairs where v3 derivation returns null and one
+  //       fallback price is missing — we still get a usable USD figure
+  //       from the side that IS priced rather than excluding the whole
+  //       position. Better an approximate Initial than silently dropping.
   for (const d of deposits) {
     const hasHistoricalPrices = d.price0AtTime != null && d.price1AtTime != null;
     const hasUsdAtTime = d.usdAtTime != null && d.usdAtTime > 0;
-    if (!hasHistoricalPrices && !hasUsdAtTime) {
+    const hasAnyPricedSide =
+      (d.amount0 > 0 && d.price0AtTime != null && d.price0AtTime > 0) ||
+      (d.amount1 > 0 && d.price1AtTime != null && d.price1AtTime > 0);
+    if (!hasHistoricalPrices && !hasUsdAtTime && !hasAnyPricedSide) {
       return { ok: false, reason: 'missing_deposit_prices' };
     }
   }
 
-  // Initial value — sum at historical prices only.
+  // Initial value — sum at historical prices when available, else best-effort
+  // from whichever per-token price we DO have (matches the relaxed acceptance
+  // check above). Each deposit was verified to have at least one usable price.
   let initialValue = 0;
   for (const d of deposits) {
     if (d.usdAtTime != null && d.usdAtTime > 0) {
       initialValue += d.usdAtTime;
     } else {
-      // Safe: we checked above that at least one of these branches holds.
-      initialValue += d.amount0 * (d.price0AtTime as number) + d.amount1 * (d.price1AtTime as number);
+      const p0 = d.price0AtTime ?? 0;
+      const p1 = d.price1AtTime ?? 0;
+      initialValue += d.amount0 * p0 + d.amount1 * p1;
     }
   }
 
