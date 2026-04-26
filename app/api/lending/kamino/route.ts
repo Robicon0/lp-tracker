@@ -1,17 +1,40 @@
 import { NextResponse } from 'next/server';
 
-// Kamino Finance — main lending market on Solana.
-// Public REST API at https://api.kamino.finance/.
+// Kamino Finance — three lending markets on Solana, queried per wallet:
+//   Main     7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF
+//   JLP      DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek
+//   Altcoins ByYiZxp8QrdENEaskMe388D4kFqFSFJ8ZKMjKcFnf4o5
 //
-// We try multiple endpoint shapes in parallel because Kamino's REST surface
-// has shifted (the `/v2/...` paths and the older `/kamino-market/...` paths
-// coexist for different wallet shards) and a single 404 used to mean "no
-// position" when really we just hit the wrong path. Each attempt is logged
-// (URL, status, item count, first-row keys) so production failures are
-// debuggable from Vercel logs.
+// Public REST API at https://api.kamino.finance/. We fan out one
+// `reserves/metrics` + one `users/{wallet}/obligations` call per market in
+// parallel, then aggregate every non-empty obligation into a single
+// supplies/borrows pair (markets are summed because all three feed into
+// the same protocol card).
+//
+// Real obligation response shape (verified live 2026-04-26):
+//   [{
+//     obligationAddress,
+//     state: {
+//       deposits: [{ depositReserve, depositedAmount, marketValueSf, ... }],
+//       borrows:  [{ borrowReserve,  borrowedAmountSf, marketValueSf, ... }],
+//     },
+//     refreshedStats: { userTotalDeposit, userTotalBorrow, ... },
+//   }]
+// `marketValueSf` is a Q60 fixed-point USD value (divide by 2^60). This
+// applies to BOTH deposits and borrows — for borrows it's already the USD
+// value, not the raw token amount (e.g. a $0.006 dust borrow shows
+// marketValueSf/2^60 = 0.006, while a $3,931 USDC borrow shows 3,931).
+// `depositedAmount` is raw underlying-token base units (apply reserve
+// decimals to get the human number for display).
 
 const KAMINO_API = 'https://api.kamino.finance';
-const MAIN_MARKET = '7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF';
+const MARKETS: Array<{ key: string; pubkey: string }> = [
+  { key: 'Main',     pubkey: '7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF' },
+  { key: 'JLP',      pubkey: 'DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek' },
+  { key: 'Altcoins', pubkey: 'ByYiZxp8QrdENEaskMe388D4kFqFSFJ8ZKMjKcFnf4o5' },
+];
+
+const TWO_60 = 2n ** 60n;
 
 interface ReserveMetric {
   reserve?: string;
@@ -21,36 +44,32 @@ interface ReserveMetric {
   decimals?: number | string;
   supplyApy?: string | number;
   borrowApy?: string | number;
+  totalSupply?: string | number;
+  totalBorrow?: string | number;
   totalSupplyUsd?: string | number;
   totalBorrowUsd?: string | number;
 }
 
-interface ObligationLeg {
-  reserveAddress?: string;
-  reserve?: string;
-  mintAddress?: string;
-  mint?: string;
-  symbol?: string;
-  decimals?: number | string;
-  amount?: string | number;
-  rawAmount?: string | number;
-  depositedAmount?: string | number;
-  borrowedAmount?: string | number;
-  marketValueUsd?: string | number;
-  marketValue?: string | number;
-  usdValue?: string | number;
-  amountUsd?: string | number;
-  apy?: string | number;
-  supplyApy?: string | number;
-  borrowApy?: string | number;
+interface DepositLeg {
+  depositReserve?: string;
+  depositedAmount?: string;
+  marketValueSf?: string;
+}
+
+interface BorrowLeg {
+  borrowReserve?: string;
+  borrowedAmountSf?: string;
+  marketValueSf?: string;
+  borrowedAmountOutsideElevationGroups?: string;
 }
 
 interface RawObligation {
   obligationAddress?: string;
-  deposits?: ObligationLeg[];
-  borrows?: ObligationLeg[];
-  totalCollateralUsd?: string | number;
-  totalBorrowUsd?: string | number;
+  state?: {
+    deposits?: DepositLeg[];
+    borrows?: BorrowLeg[];
+    owner?: string;
+  };
 }
 
 async function fetchJson<T>(url: string, label: string): Promise<T | null> {
@@ -58,25 +77,13 @@ async function fetchJson<T>(url: string, label: string): Promise<T | null> {
   try {
     const res = await fetch(url, { cache: 'no-store' });
     const ms = Date.now() - t0;
-    const bodyText = await res.text();
-    const preview = bodyText.slice(0, 200);
     if (!res.ok) {
-      console.error(`[kamino/route] FAIL ${label} ${res.status} ${ms}ms ${url} body="${preview}"`);
+      console.error(`[kamino/route] FAIL ${label} ${res.status} ${ms}ms ${url}`);
       return null;
     }
-    let data: unknown;
-    try { data = JSON.parse(bodyText); }
-    catch (err) {
-      console.error(`[kamino/route] FAIL parse ${label} ${ms}ms ${url} err=${String(err)} body="${preview}"`);
-      return null;
-    }
-    const sample = Array.isArray(data)
-      ? `array(len=${data.length}${data.length > 0 ? `, keys=${Object.keys(data[0] as object).slice(0, 6).join(',')}` : ''})`
-      : data && typeof data === 'object'
-      ? `object(keys=${Object.keys(data as object).slice(0, 6).join(',')})`
-      : typeof data;
-    console.log(`[kamino/route] OK ${label} ${res.status} ${ms}ms ${url} → ${sample}`);
-    return data as T;
+    const data = (await res.json()) as T;
+    console.log(`[kamino/route] OK ${label} ${res.status} ${ms}ms ${url}`);
+    return data;
   } catch (err) {
     console.error(`[kamino/route] FAIL throw ${label} ${Date.now() - t0}ms ${url} err=${String(err)}`);
     return null;
@@ -89,118 +96,93 @@ function n(v: unknown): number {
   return Number.isFinite(num) ? num : 0;
 }
 
+// Q60 fixed-point USD → JS number. Divide BigInt(value) by 2^60. Safe for
+// any value Kamino ever emits because USD totals never approach Number.MAX.
+function sfToUsd(sf: string | undefined): number {
+  if (!sf) return 0;
+  try {
+    const big = BigInt(sf);
+    // Split high/low to keep precision: usd_int = big / 2^60, frac = (big % 2^60) / 2^60
+    const intPart = big / TWO_60;
+    const remPart = big % TWO_60;
+    return Number(intPart) + Number(remPart) / Number(TWO_60);
+  } catch {
+    return 0;
+  }
+}
+
+interface NormalisedAsset { symbol: string; amount: number; usdValue: number; apy: number; }
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = (searchParams.get('account') ?? '').trim();
   if (!account) return NextResponse.json({ error: 'account required' }, { status: 400 });
-  const enc = encodeURIComponent(account);
-  console.log(`[kamino/route] BEGIN account="${account}" market="${MAIN_MARKET}"`);
+  console.log(`[kamino/route] BEGIN account="${account}" markets=${MARKETS.length}`);
 
-  // Reserves metrics — used to attach symbol / decimals / APY by reserve key.
-  const metrics =
-    (await fetchJson<ReserveMetric[]>(
-      `${KAMINO_API}/kamino-market/${MAIN_MARKET}/reserves/metrics`,
-      'reserves',
-    )) ?? [];
-  const byReserve = new Map<string, ReserveMetric>();
-  const byMint = new Map<string, ReserveMetric>();
-  for (const m of metrics) {
-    if (m.reserve) byReserve.set(m.reserve, m);
-    if (m.liquidityTokenMint) byMint.set(m.liquidityTokenMint, m);
-  }
+  // Per-market parallel fetches: each market needs its OWN reserves metric
+  // map (reserves are scoped to a market) and its own obligations list.
+  const marketResults = await Promise.all(MARKETS.map(async (market) => {
+    const [metrics, obligations] = await Promise.all([
+      fetchJson<ReserveMetric[]>(
+        `${KAMINO_API}/kamino-market/${market.pubkey}/reserves/metrics`,
+        `${market.key}:reserves`,
+      ),
+      fetchJson<RawObligation[]>(
+        `${KAMINO_API}/kamino-market/${market.pubkey}/users/${encodeURIComponent(account)}/obligations`,
+        `${market.key}:obligations`,
+      ),
+    ]);
+    return { market, metrics: metrics ?? [], obligations: obligations ?? [] };
+  }));
 
-  // Try every known user-positions endpoint shape in parallel — first one
-  // that returns a non-empty array wins. Empty/404/error responses are
-  // logged but don't abort the search.
-  const candidateUrls: Array<[string, string]> = [
-    [`${KAMINO_API}/kamino-market/${MAIN_MARKET}/users/${enc}/obligations`, 'obligations:legacy'],
-    [`${KAMINO_API}/v2/kamino-market/${MAIN_MARKET}/users/${enc}/obligations`, 'obligations:v2'],
-    [`${KAMINO_API}/v2/users/${enc}/markets/${MAIN_MARKET}/obligations`, 'obligations:v2-userfirst'],
-    [`${KAMINO_API}/kamino-market/${MAIN_MARKET}/users/${enc}/positions`, 'positions:legacy'],
-    [`${KAMINO_API}/v2/kamino-market/${MAIN_MARKET}/users/${enc}/positions`, 'positions:v2'],
-  ];
-  const obligationResults = await Promise.all(
-    candidateUrls.map(([url, label]) => fetchJson<RawObligation[] | { obligations?: RawObligation[] } | null>(url, label)),
-  );
+  const supplies: NormalisedAsset[] = [];
+  const borrows: NormalisedAsset[] = [];
 
-  let obligations: RawObligation[] = [];
-  let pickedLabel = '<none>';
-  for (let i = 0; i < obligationResults.length; i++) {
-    const r = obligationResults[i];
-    if (!r) continue;
-    let arr: RawObligation[] | null = null;
-    if (Array.isArray(r)) arr = r as RawObligation[];
-    else if (typeof r === 'object' && Array.isArray((r as { obligations?: RawObligation[] }).obligations)) {
-      arr = (r as { obligations: RawObligation[] }).obligations;
+  for (const { market, metrics, obligations } of marketResults) {
+    if (obligations.length === 0) {
+      console.log(`[kamino/route]  ${market.key}: 0 obligations`);
+      continue;
     }
-    if (arr && arr.length > 0) {
-      obligations = arr;
-      pickedLabel = candidateUrls[i][1];
-      break;
-    }
-  }
+    const byReserve = new Map<string, ReserveMetric>();
+    for (const m of metrics) if (m.reserve) byReserve.set(m.reserve, m);
 
-  console.log(
-    `[kamino/route] account="${account.slice(0, 6)}…" reserves=${metrics.length} ` +
-    `obligations=${obligations.length} via=${pickedLabel}`,
-  );
+    for (const ob of obligations) {
+      const deposits = ob.state?.deposits ?? [];
+      const borrowsArr = ob.state?.borrows ?? [];
+      console.log(
+        `[kamino/route]  ${market.key} obligation=${ob.obligationAddress?.slice(0, 8)}… ` +
+        `deposits=${deposits.length} borrows=${borrowsArr.length}`,
+      );
 
-  const supplies: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
-  const borrows: Array<{ symbol: string; amount: number; usdValue: number; apy: number }> = [];
+      for (const d of deposits) {
+        const usdValue = sfToUsd(d.marketValueSf);
+        if (usdValue <= 0) continue;
+        const reserve = d.depositReserve ? byReserve.get(d.depositReserve) : undefined;
+        const symbol = reserve?.liquidityToken ?? d.depositReserve ?? 'UNKNOWN';
+        const apy = n(reserve?.supplyApy) * 100;
+        // Derive price-per-token from the reserve's totalSupplyUsd / totalSupply
+        // (both are in human units in the metrics endpoint).
+        const supplyHuman = n(reserve?.totalSupply);
+        const supplyUsd = n(reserve?.totalSupplyUsd);
+        const price = supplyHuman > 0 ? supplyUsd / supplyHuman : 0;
+        const amount = price > 0 ? usdValue / price : 0;
+        console.log(`[kamino/route]   + ${market.key} supply ${symbol} amount=${amount.toFixed(6)} usd=${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
+        supplies.push({ symbol, amount, usdValue, apy });
+      }
 
-  function lookupReserve(leg: ObligationLeg): ReserveMetric | undefined {
-    const rk = leg.reserveAddress ?? leg.reserve;
-    if (rk && byReserve.has(rk)) return byReserve.get(rk);
-    const mk = leg.mintAddress ?? leg.mint;
-    if (mk && byMint.has(mk)) return byMint.get(mk);
-    return undefined;
-  }
-
-  function legAmount(leg: ObligationLeg, metric: ReserveMetric | undefined): number {
-    const candidates = [leg.amount, leg.depositedAmount, leg.borrowedAmount, leg.rawAmount];
-    for (const c of candidates) {
-      if (c == null) continue;
-      const num = n(c);
-      if (num <= 0) continue;
-      const dec = Number(metric?.liquidityTokenDecimals ?? metric?.decimals ?? leg.decimals ?? 0);
-      if (dec > 0 && num >= 10 ** Math.max(dec - 2, 1)) return num / 10 ** dec;
-      return num;
-    }
-    return 0;
-  }
-  function legUsd(leg: ObligationLeg): number {
-    const candidates = [leg.marketValueUsd, leg.usdValue, leg.amountUsd, leg.marketValue];
-    for (const c of candidates) {
-      const num = n(c);
-      if (num > 0) return num;
-    }
-    return 0;
-  }
-
-  for (const ob of obligations) {
-    console.log(
-      `[kamino/route]  obligation=${ob.obligationAddress ?? '?'} ` +
-      `deposits=${ob.deposits?.length ?? 0} borrows=${ob.borrows?.length ?? 0}`,
-    );
-    for (const leg of ob.deposits ?? []) {
-      const metric = lookupReserve(leg);
-      const symbol = leg.symbol ?? metric?.liquidityToken ?? leg.mint ?? leg.mintAddress ?? 'UNKNOWN';
-      const apy = n(leg.apy ?? leg.supplyApy ?? metric?.supplyApy);
-      const usd = legUsd(leg);
-      const amount = legAmount(leg, metric);
-      console.log(`[kamino/route]   + supply ${symbol} amount=${amount.toFixed(6)} usd=${usd.toFixed(2)} apy=${apy.toFixed(2)}%`);
-      if (usd <= 0 && amount <= 0) continue;
-      supplies.push({ symbol, amount, usdValue: usd, apy });
-    }
-    for (const leg of ob.borrows ?? []) {
-      const metric = lookupReserve(leg);
-      const symbol = leg.symbol ?? metric?.liquidityToken ?? leg.mint ?? leg.mintAddress ?? 'UNKNOWN';
-      const apy = n(leg.apy ?? leg.borrowApy ?? metric?.borrowApy);
-      const usd = legUsd(leg);
-      const amount = legAmount(leg, metric);
-      console.log(`[kamino/route]   - borrow ${symbol} amount=${amount.toFixed(6)} usd=${usd.toFixed(2)} apy=${apy.toFixed(2)}%`);
-      if (usd <= 0 && amount <= 0) continue;
-      borrows.push({ symbol, amount, usdValue: usd, apy });
+      for (const b of borrowsArr) {
+        const usdValue = sfToUsd(b.marketValueSf);
+        if (usdValue <= 0.01) continue; // ignore dust borrows
+        const reserve = b.borrowReserve ? byReserve.get(b.borrowReserve) : undefined;
+        const symbol = reserve?.liquidityToken ?? b.borrowReserve ?? 'UNKNOWN';
+        const apy = n(reserve?.borrowApy) * 100;
+        const borrowHuman = n(reserve?.totalBorrow);
+        const borrowUsd = n(reserve?.totalBorrowUsd);
+        const price = borrowHuman > 0 ? borrowUsd / borrowHuman : 0;
+        const amount = price > 0 ? usdValue / price : 0;
+        console.log(`[kamino/route]   - ${market.key} borrow ${symbol} amount=${amount.toFixed(6)} usd=${usdValue.toFixed(2)} apy=${apy.toFixed(2)}%`);
+        borrows.push({ symbol, amount, usdValue, apy });
+      }
     }
   }
 
