@@ -136,16 +136,32 @@ export function useLendingPositions(): UseLendingPositionsData {
         ): Promise<ExternalLendingPosition | null> {
           if (addrs.length === 0) return null;
           try {
-            console.log(`[useLendingPositions] Fetching ${protocol} for ${addrs.length} address(es)...`);
+            // Per-wallet visibility: log the exact address list we fetch for
+            // each protocol so multi-wallet setups are debuggable from the
+            // browser console without server access. Each address gets its
+            // own /api call below — never just the first address.
+            console.log(
+              `[useLendingPositions] ${protocol}: querying ${addrs.length} ${chain} address(es) →`,
+              addrs.map((a) => `${a.slice(0, 6)}…${a.slice(-4)}`),
+            );
             const results = await Promise.allSettled(
               addrs.map((a) => fetch(`${endpoint}?account=${a}`).then((r) => r.json())),
             );
             if (cancelled) return null;
             const supplies: ExternalLendingAsset[] = [];
             const borrows: ExternalLendingAsset[] = [];
-            for (const r of results) {
-              if (r.status !== "fulfilled") continue;
-              if (r.value?.note) console.info(`[useLendingPositions] ${protocol}:`, r.value.note);
+            for (let i = 0; i < results.length; i++) {
+              const r = results[i];
+              const addr = addrs[i];
+              const tag = `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+              if (r.status !== "fulfilled") {
+                console.warn(`[useLendingPositions] ${protocol} ${tag} → fetch rejected:`, r.reason);
+                continue;
+              }
+              if (r.value?.note) console.info(`[useLendingPositions] ${protocol} ${tag}: ${r.value.note}`);
+              const sN = (r.value?.supplies ?? []).length;
+              const bN = (r.value?.borrows  ?? []).length;
+              console.log(`[useLendingPositions] ${protocol} ${tag} → ${sN} supplies, ${bN} borrows`);
               for (const s of (r.value?.supplies ?? []) as ExternalLendingAsset[]) supplies.push(s);
               for (const b of (r.value?.borrows  ?? []) as ExternalLendingAsset[]) borrows.push(b);
             }
