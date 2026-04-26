@@ -192,34 +192,29 @@ function ExposureCard({
                     />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  itemStyle={tooltipItemStyle}
-                  labelStyle={tooltipLabelStyle}
-                  formatter={(value, _name, item) => {
-                    const v = typeof value === "number" ? value : Number(value) || 0;
-                    const pctVal = total > 0 ? ((v / total) * 100).toFixed(1) : "0.0";
-                    const payloadName = (item as { payload?: { name?: string } } | undefined)?.payload?.name ?? "";
-                    return [`${valueFmt(v)} (${pctVal}%)`, payloadName];
-                  }}
-                />
+                {/* External tooltip popup intentionally omitted — slice info
+                    is mirrored into the donut center on hover and listed in
+                    the right-side legend, so duplicating the numbers in a
+                    floating popup just clutters the chart. */}
               </PieChart>
             </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-3 text-center">
               {activeIdx != null && colored[activeIdx] ? (
                 <>
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-500 truncate max-w-full">
                     {colored[activeIdx].name}
                   </p>
-                  <p className="text-xl font-bold text-white">{valueFmt(colored[activeIdx].value)}</p>
+                  <p className="text-base sm:text-lg font-bold text-white truncate max-w-full">
+                    {valueFmt(colored[activeIdx].value)}
+                  </p>
                   <p className="text-[10px] text-gray-500">
                     {total > 0 ? ((colored[activeIdx].value / total) * 100).toFixed(1) : "0"}%
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-2xl font-bold text-white">{centerPrimary}</p>
-                  <p className="text-[11px] text-gray-500 mt-0.5">{centerSecondary}</p>
+                  <p className="text-lg sm:text-xl font-bold text-white truncate max-w-full">{centerPrimary}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 truncate max-w-full">{centerSecondary}</p>
                 </>
               )}
             </div>
@@ -1136,12 +1131,14 @@ export default function Analytics() {
                           .concat(incomeWindow.lendingProjected > 0 ? [{ color: "#3b82f6" }] : [])
                           .map((c, i) => <Cell key={i} fill={c.color} />)}
                       </Pie>
-                      <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} labelStyle={tooltipLabelStyle} formatter={dollarFormatter} />
+                      {/* External tooltip removed — totals & per-source figures are
+                          already shown in the donut center and the source cards
+                          below; a floating popup just duplicates them. */}
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4 text-center">
                     <p className="text-[10px] uppercase tracking-wider text-gray-500">Total</p>
-                    <p className="text-2xl font-bold text-white">{fmt$(incomeWindow.total)}</p>
+                    <p className="text-xl font-bold text-white truncate max-w-full">{fmt$(incomeWindow.total)}</p>
                     <p className="text-[10px] text-gray-500">
                       {incomePeriod === "D" ? "today" : incomePeriod === "M" ? "this month" : "this year"}
                     </p>
