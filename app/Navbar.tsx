@@ -7,6 +7,7 @@ import type { WalletName } from "@solana/wallet-adapter-base";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "./contexts/WalletAuthContext";
+import { setDisconnected, clearDisconnected } from "./lib/walletDisconnectFlag";
 import Link from "next/link";
 
 // EVM wallet display metadata (order and logos). connectorId matches the id
@@ -197,14 +198,26 @@ export default function Navbar() {
     }
   }, [adapterSuiAccount, suiAddress, setSuiAddress]);
 
-  // --- Connect handlers ---
+  // --- Connect / disconnect handlers ---
+  // Each chain has a per-chain "explicitly disconnected" flag in localStorage
+  // (`defidesh_{chain}_disconnected`). Setting it on disconnect prevents the
+  // provider's autoConnect from silently restoring the connection on the next
+  // page load. Clearing it on a successful connect re-enables silent
+  // restoration on subsequent refreshes.
   const handleEvmConnect = (connectorIndex: number) => {
+    clearDisconnected("evm");
     connect({ connector: connectors[connectorIndex] });
     setShowEvmModal(false);
   };
 
+  const handleEvmDisconnect = () => {
+    setDisconnected("evm");
+    disconnect();
+  };
+
   const handleSolanaConnect = async (walletName: string) => {
     setShowSolanaModal(false);
+    clearDisconnected("solana");
     try {
       // Fast path: adapter already connected to this wallet via autoConnect/Wallet Standard.
       // In that case connectSolana() would throw "Wallet already connected" and the
@@ -233,12 +246,14 @@ export default function Navbar() {
   };
 
   const handleSolanaDisconnect = () => {
+    setDisconnected("solana");
     setSolanaAddress(null);
     localStorage.removeItem('defidesh-solana-addr');
     disconnectSolana();
   };
 
   const handleSuiConnect = async (wallet: (typeof suiWallets)[0]) => {
+    clearDisconnected("sui");
     try {
       awaitingSuiConnect.current = true;
       await connectSuiAsync({ wallet });
@@ -251,6 +266,7 @@ export default function Navbar() {
   };
 
   const handleSuiDisconnect = () => {
+    setDisconnected("sui");
     setSuiAddress(null);
     localStorage.removeItem('defidesh-sui-addr');
     disconnectSui();
@@ -281,7 +297,7 @@ export default function Navbar() {
                   <span className="bg-emerald-950 border border-emerald-400/30 text-emerald-400 px-3 py-1.5 rounded-lg text-sm font-mono">
                     {truncateAddress(address)}
                   </span>
-                  <button onClick={() => disconnect()} className="text-emerald-300/70 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={handleEvmDisconnect} className="text-emerald-300/70 hover:text-red-400 text-sm transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
@@ -357,7 +373,7 @@ export default function Navbar() {
               {isConnected && address ? (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-green-400 text-sm font-mono">{truncateAddress(address)}</span>
-                  <button onClick={() => disconnect()} className="text-red-400 text-sm">Disconnect EVM</button>
+                  <button onClick={handleEvmDisconnect} className="text-red-400 text-sm">Disconnect EVM</button>
                 </div>
               ) : (
                 <button
