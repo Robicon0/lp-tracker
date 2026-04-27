@@ -7,7 +7,7 @@ import type { WalletName } from "@solana/wallet-adapter-base";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "./contexts/WalletAuthContext";
-import { setDisconnected, clearDisconnected } from "./lib/walletDisconnectFlag";
+import { setDisconnected } from "./lib/walletDisconnectFlag";
 import Link from "next/link";
 
 // EVM wallet display metadata (order and logos). connectorId matches the id
@@ -202,10 +202,16 @@ export default function Navbar() {
   // Each chain has a per-chain "explicitly disconnected" flag in localStorage
   // (`defidesh_{chain}_disconnected`). Setting it on disconnect prevents the
   // provider's autoConnect from silently restoring the connection on the next
-  // page load. Clearing it on a successful connect re-enables silent
-  // restoration on subsequent refreshes.
+  // page load.
+  //
+  // CRITICAL: the flag is NEVER cleared inside these click handlers. Clearing
+  // here would strand the flag in a cleared state if the connection attempt
+  // fails (e.g. wallet is locked, user dismisses the prompt) — autoConnect
+  // would then silently reconnect from the adapter's cached session on the
+  // next click without prompting for password. The flag is cleared by the
+  // provider-side connection watchers (see app/providers.tsx) which fire ONLY
+  // on a confirmed `connected` transition AFTER mount.
   const handleEvmConnect = (connectorIndex: number) => {
-    clearDisconnected("evm");
     connect({ connector: connectors[connectorIndex] });
     setShowEvmModal(false);
   };
@@ -217,7 +223,6 @@ export default function Navbar() {
 
   const handleSolanaConnect = async (walletName: string) => {
     setShowSolanaModal(false);
-    clearDisconnected("solana");
     try {
       // Fast path: adapter already connected to this wallet via autoConnect/Wallet Standard.
       // In that case connectSolana() would throw "Wallet already connected" and the
@@ -253,7 +258,6 @@ export default function Navbar() {
   };
 
   const handleSuiConnect = async (wallet: (typeof suiWallets)[0]) => {
-    clearDisconnected("sui");
     try {
       awaitingSuiConnect.current = true;
       await connectSuiAsync({ wallet });

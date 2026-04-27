@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { WagmiProvider, useDisconnect } from "wagmi";
+import { useState, useEffect, useRef } from "react";
+import { WagmiProvider, useDisconnect, useAccount } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { SuiClientProvider, WalletProvider as SuiWalletProvider, createNetworkConfig } from "@mysten/dapp-kit";
+import { ConnectionProvider, WalletProvider, useWallet } from "@solana/wallet-adapter-react";
+import { SuiClientProvider, WalletProvider as SuiWalletProvider, createNetworkConfig, useCurrentAccount } from "@mysten/dapp-kit";
 import { config } from "./config/wagmi";
 import { PositionsProvider } from "./contexts/PositionsContext";
 import { WalletAuthProvider } from "./contexts/WalletAuthContext";
 import { WatchedWalletsProvider } from "./contexts/WatchedWalletsContext";
-import { isDisconnected } from "./lib/walletDisconnectFlag";
+import { isDisconnected, clearDisconnected } from "./lib/walletDisconnectFlag";
 
 const queryClient = new QueryClient();
 // Empty array: WalletProvider auto-detects any Solana Wallet Standard-compliant
@@ -37,6 +37,47 @@ function EvmDisconnectGate() {
   return null;
 }
 
+// Per-chain "connection confirmed" watchers — these are the ONLY places that
+// clear the corresponding `defidesh_<chain>_disconnected` flag. They fire
+// only when the adapter reports a fully-confirmed connection, never when the
+// user merely clicks Connect. That way a failed connect attempt (e.g. wallet
+// is locked) can't strand the flag in a cleared state and let autoConnect
+// silently reconnect on the next click.
+//
+// Pattern: skip the FIRST effect run on mount. Reason: when wagmi has stored
+// state (or the adapter silently reconnected before the disconnect gate
+// fired), `connected` is true on the very first render. Reacting to that
+// would clear a flag the user never asked us to clear. We only act on
+// transitions that happen AFTER mount — i.e. real user-initiated connects.
+function useClearOnConfirmedConnect(chain: "evm" | "solana" | "sui", connected: boolean) {
+  const initialized = useRef(false);
+  useEffect(() => {
+    if (!initialized.current) {
+      initialized.current = true;
+      return;
+    }
+    if (connected) clearDisconnected(chain);
+  }, [chain, connected]);
+}
+
+function EvmConnectionWatcher() {
+  const { isConnected } = useAccount();
+  useClearOnConfirmedConnect("evm", isConnected);
+  return null;
+}
+
+function SolanaConnectionWatcher() {
+  const { connected } = useWallet();
+  useClearOnConfirmedConnect("solana", connected);
+  return null;
+}
+
+function SuiConnectionWatcher() {
+  const account = useCurrentAccount();
+  useClearOnConfirmedConnect("sui", !!account);
+  return null;
+}
+
 export default function Providers({ children }: { children: React.ReactNode }) {
   // Read each chain's "explicitly disconnected" flag synchronously on first
   // render so providers mount with the correct autoConnect value. Default
@@ -47,12 +88,15 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ConnectionProvider endpoint={SOLANA_RPC}>
       <WalletProvider wallets={solanaWallets} autoConnect={solanaAutoConnect}>
+        <SolanaConnectionWatcher />
         <WalletAuthProvider>
           <WagmiProvider config={config}>
             <QueryClientProvider client={queryClient}>
               <EvmDisconnectGate />
+              <EvmConnectionWatcher />
               <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
                 <SuiWalletProvider autoConnect={suiAutoConnect}>
+                  <SuiConnectionWatcher />
                   <WatchedWalletsProvider>
                     <PositionsProvider>
                       {children}
