@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, type CSSProperties } from "react";
 import Link from "next/link";
-import Navbar from "../Navbar";
+import TerminalNavbar from "../components/TerminalNavbar";
 import { getTokenLogo } from "../lib/tokenLogos";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useLendingPositions } from "../hooks/useLendingPositions";
@@ -72,49 +72,48 @@ const STABLES_SET = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
 // ── Token color map (reusable across the app) ─────────────────────────────────
 export const TOKEN_COLORS: Record<string, string> = {
-  // Ethereum
-  ETH:     "#627EEA",
-  WETH:    "#627EEA",
-  // USDC variants
-  USDC:    "#2775CA",
-  "USDC.e":"#2775CA",
-  USDbC:   "#2775CA",
-  // USDT
-  USDT:    "#26A17B",
-  // Bitcoin
-  BTC:     "#F7931A",
-  WBTC:    "#F7931A",
-  cbBTC:   "#F7931A",
-  tBTC:    "#F7931A",
-  // Solana
-  SOL:     "#9945FF",
-  WSOL:    "#9945FF",
-  // Sui
-  SUI:     "#6FBCF0",
-  // HYPE (HyperEVM)
-  HYPE:    "#00D4AA",
-  WHYPE:   "#00D4AA",
-  // DAI
-  DAI:     "#F5AC37",
-  // BNB
-  BNB:     "#F0B90B",
-  WBNB:    "#F0B90B",
-  // MATIC / POL
-  MATIC:   "#8247E5",
-  POL:     "#8247E5",
-  // AVAX
-  AVAX:    "#E84142",
-  // ARB
-  ARB:     "#2D9CDB",
-  // OP
-  OP:      "#FF0420",
-  // USDS
-  USDS:    "#26A17B",
+  ETH: "#627EEA", WETH: "#627EEA",
+  USDC: "#2775CA", "USDC.e": "#2775CA", USDbC: "#2775CA",
+  USDT: "#26A17B",
+  BTC: "#F7931A", WBTC: "#F7931A", cbBTC: "#F7931A", tBTC: "#F7931A",
+  SOL: "#9945FF", WSOL: "#9945FF",
+  SUI: "#6FBCF0",
+  HYPE: "#00D4AA", WHYPE: "#00D4AA",
+  DAI: "#F5AC37",
+  BNB: "#F0B90B", WBNB: "#F0B90B",
+  MATIC: "#8247E5", POL: "#8247E5",
+  AVAX: "#E84142",
+  ARB: "#2D9CDB",
+  OP: "#FF0420",
+  USDS: "#26A17B",
 };
 
 export function getTokenColor(symbol: string): string {
   return TOKEN_COLORS[symbol] ?? "#6B7280";
 }
+
+// ── Terminal palette ──────────────────────────────────────────────────────────
+const C = {
+  bg: "#000000",
+  card: "#090909",
+  cardSoft: "#050505",
+  border: "#1c1c1c",
+  borderSoft: "#111111",
+  green: "#00ff41",
+  greenSoft: "rgba(0,255,65,0.08)",
+  amber: "#f59e0b",
+  amberSoft: "rgba(245,158,11,0.08)",
+  red: "#ff3355",
+  redSoft: "rgba(255,51,85,0.08)",
+  text: "#e8e8e8",
+  textDim: "#c8c8c8",
+  muted: "#7a7a7a",
+  mute2: "#555555",
+  mute3: "#333333",
+} as const;
+
+const SCANLINE_BG =
+  "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)";
 
 // ── TokenCircle: circular token logo with colored-letter fallback ─────────────
 function TokenCircle({
@@ -125,7 +124,7 @@ function TokenCircle({
   const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
   const shared: CSSProperties = {
     width: size, height: size, borderRadius: "50%",
-    border: "2px solid #060d08", flexShrink: 0, ...style,
+    border: `2px solid ${C.bg}`, flexShrink: 0, ...style,
   };
   if (logoUrl && !imgError) {
     return (
@@ -196,26 +195,56 @@ function getTickPriceUSD(tick: number, pos: AerodromePosition): number | null {
   } catch { return null; }
 }
 
-function chainGradient(chain: string): string {
-  const map: Record<string, string> = {
-    Base:        "linear-gradient(135deg, #059669, #10b981)",
-    Ethereum:    "linear-gradient(135deg, #0d9488, #14b8a6)",
-    Solana:      "linear-gradient(135deg, #065f46, #047857)",
-    Sui:         "linear-gradient(135deg, #0d9488, #2dd4bf)",
-    Arbitrum:    "linear-gradient(135deg, #0891b2, #06b6d4)",
-    Optimism:    "linear-gradient(135deg, #dc2626, #b91c1c)",
-    Polygon:     "linear-gradient(135deg, #047857, #0d9488)",
-    HyperEVM:    "linear-gradient(135deg, #065f46, #059669)",
-    "BNB Chain": "linear-gradient(135deg, #92400e, #b45309)",
-    Avalanche:   "linear-gradient(135deg, #991b1b, #dc2626)",
-  };
-  return map[chain] ?? "linear-gradient(135deg, #064e3b, #065f46)";
+// ── Reusable presentational pieces ────────────────────────────────────────────
+function SectionHeader({ label, right }: { label: string; right?: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        marginBottom: 16,
+        fontSize: 10,
+        letterSpacing: "0.2em",
+        textTransform: "uppercase",
+        color: C.mute2,
+      }}
+    >
+      <span style={{ color: C.green }}>//</span>
+      <span>{label}</span>
+      <span style={{ flex: 1, height: 1, background: C.border }} />
+      {right}
+    </div>
+  );
 }
 
-function tokenInitials(pair: string): string {
-  const parts = pair.split("/").map((s) => s.trim());
-  return `${parts[0]?.[0] ?? "?"}/${parts[1]?.[0] ?? "?"}`;
-}
+const cardStyle: CSSProperties = {
+  background: C.card,
+  border: `1px solid ${C.border}`,
+  padding: 20,
+};
+
+const statusTagStyle = (status: "In Range" | "Out of Range" | "Closed"): CSSProperties => {
+  if (status === "In Range") {
+    return {
+      background: "rgba(0,255,65,0.08)",
+      border: `1px solid ${C.green}`,
+      color: C.green,
+    };
+  }
+  if (status === "Out of Range") {
+    return {
+      background: C.amberSoft,
+      border: `1px solid ${C.amber}`,
+      color: C.amber,
+    };
+  }
+  return {
+    background: "transparent",
+    border: `1px solid ${C.mute3}`,
+    color: C.mute2,
+  };
+};
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
@@ -239,7 +268,6 @@ export default function Dashboard() {
   const { mutate: disconnectSuiWallet } = useDisconnectWallet();
   const awaitingSuiConnectModal = useRef(false);
 
-  // Track modal Solana connect
   useEffect(() => {
     if (awaitingSolanaConnectModal.current && adapterSolanaConnected && adapterPublicKey) {
       setSolanaAddress(adapterPublicKey.toBase58());
@@ -247,7 +275,6 @@ export default function Dashboard() {
     }
   }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
 
-  // Track modal Sui connect
   useEffect(() => {
     if (awaitingSuiConnectModal.current && adapterSuiAccount) {
       setSuiAddress(adapterSuiAccount.address);
@@ -258,15 +285,12 @@ export default function Dashboard() {
   const { watchedWallets, addWallet, removeWallet, updateLabel } = useWatchedWallets();
   const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
 
-  // Wallet token balances (for Tokens + Lending summary cards)
   const {
-    tokens: walletTokensList,
     totalTokenValue, totalLendingValue,
     tokenCount, lendingCount,
     isLoading: walletTokensLoading,
   } = useWalletTokens();
 
-  // External lending platforms (Dolomite, Jupiter Lend, AlphaFi, Suilend)
   const { positions: externalLendingPositions } = useLendingPositions();
   const externalLendingValue = externalLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
   const externalLendingCount = externalLendingPositions.length;
@@ -284,7 +308,6 @@ export default function Dashboard() {
   const [editingWallet, setEditingWallet] = useState<string | null>(null);
   const [editLabelValue, setEditLabelValue] = useState("");
 
-  // Status filter
   const [statusFilter, setStatusFilter] = useState("In Range");
 
   // "Updated X ago" ticker
@@ -312,12 +335,10 @@ export default function Dashboard() {
     );
   }, [allPositions, statusFilter]);
 
-  // Aggregate stats
   const totalValue   = allPositions.reduce((s, p) => s + p.value, 0);
   const totalFees    = allPositions.reduce((s, p) => s + p.fees, 0);
   const uniqueChains = new Set(allPositions.filter((p) => p.value > 0).map((p) => p.chain)).size;
 
-  // Cashflow estimates
   const { dailyCashflow, hasCashflowData } = useMemo(() => {
     const active = allPositions.filter((p) => p.apy > 0 && p.value > 0);
     if (!active.length) return { dailyCashflow: 0, hasCashflowData: false };
@@ -325,7 +346,6 @@ export default function Dashboard() {
     return { dailyCashflow: yearly / 365, hasCashflowData: true };
   }, [allPositions]);
 
-  // Value-weighted average APR
   const avgApr = useMemo(() => {
     const active = allPositions.filter((p) => p.value > 0 && p.apy > 0);
     if (!active.length) return null;
@@ -333,7 +353,6 @@ export default function Dashboard() {
     return w > 0 ? active.reduce((s, p) => s + p.apy * p.value, 0) / w : null;
   }, [allPositions]);
 
-  // Protocol + chain breakdown for charts
   const protocolBreakdown = useMemo(() => {
     const m: Record<string, number> = {};
     for (const p of allPositions) {
@@ -350,10 +369,6 @@ export default function Dashboard() {
     return Object.entries(m).map(([chain, value]) => ({ chain, value })).sort((a, b) => b.value - a.value);
   }, [allPositions]);
 
-  // Portfolio history — two sources:
-  //  1. `usePortfolioHistory` (localStorage snapshots) still drives the
-  //     Portfolio Performance chart below — it's authoritative for chart shape
-  //     because it captures the actual LP value at each sample.
   const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
   const activeRange    = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
@@ -365,37 +380,11 @@ export default function Dashboard() {
     value: s.totalValue,
   }));
 
-  // Hero P&L — simple 30-day change from localStorage snapshots.
-  const THIRTY_DAYS_MS = 30 * 24 * 3_600_000;
-  const thirtyDayCutoff = Date.now() - THIRTY_DAYS_MS;
-  const historyIn30d = portfolioHistory.filter((s) => s.timestamp >= thirtyDayCutoff);
-  const heroBaseline = historyIn30d.length >= 2 ? historyIn30d[0].totalValue : 0;
-  const heroPnlAvailable = historyIn30d.length >= 2 && heroBaseline > 0;
-  const heroPnlDollar = heroPnlAvailable ? totalValue - heroBaseline : 0;
-  const heroPnlPct    = heroPnlAvailable ? (heroPnlDollar / heroBaseline) * 100 : 0;
-
-  // Chart P&L — uses the Portfolio History chart's own range toggle.
   const chartBaseline = effectiveHistory.length >= 2 ? effectiveHistory[0].totalValue : 0;
   const chartPnlAvailable = effectiveHistory.length >= 2 && chartBaseline > 0;
   const chartPnlDollar = chartPnlAvailable ? totalValue - chartBaseline : 0;
   const chartPnlPct    = chartPnlAvailable ? (chartPnlDollar / chartBaseline) * 100 : 0;
 
-  // Hero price pills — separate light fetch for BTC/ETH/SOL
-  const [heroPrices, setHeroPrices] = useState<Record<string, number>>({});
-  useEffect(() => {
-    fetch(
-      "/api/prices?endpoint=coins/markets&ids=bitcoin,ethereum,solana&vs_currencies=usd&order=market_cap_desc",
-    )
-      .then((r) => r.json())
-      .then((data: Array<{ id: string; current_price: number }>) => {
-        const map: Record<string, number> = {};
-        for (const d of data) if (d.current_price) map[d.id] = d.current_price;
-        setHeroPrices(map);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Formatting helpers
   const fmt$ = (n: number, dec = 2) =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 
@@ -410,7 +399,6 @@ export default function Dashboard() {
     URL.revokeObjectURL(url);
   };
 
-  // Detect chain from address format
   function detectChain(addr: string): WatchedWalletChain | null {
     if (/^0x[0-9a-fA-F]{40}$/.test(addr)) return "evm";
     if (/^0x[0-9a-fA-F]{63,64}$/.test(addr)) return "sui";
@@ -459,544 +447,596 @@ export default function Dashboard() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
+    <div
+      style={{
+        background: C.bg,
+        minHeight: "100vh",
+        color: C.textDim,
+        fontFamily: "var(--font-jetbrains-mono), 'Courier New', monospace",
+        fontSize: 13,
+        lineHeight: 1.6,
+      }}
+    >
       <style>{`
-        .pos-card { transition: border-color 0.18s; }
-        .pos-card.in-range:hover  { border-color: rgba(16,185,129,0.3)  !important; }
-        .pos-card.out-range:hover { border-color: rgba(245,158,11,0.25) !important; }
         @keyframes _spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
+        .pos-card  { transition: border-color 0.15s, background 0.15s; }
+        .pos-card.in-range:hover  { border-color: ${C.green} !important; background:#0a0f0a !important; }
+        .pos-card.out-range:hover { border-color: ${C.amber} !important; }
+        .pos-card.closed:hover    { border-color: ${C.mute3} !important; }
+        .term-tab:hover           { color: ${C.green} !important; border-color: ${C.green} !important; }
+        .term-tab[data-active="true"]:hover { color: ${C.bg} !important; }
+        .term-btn:hover           { background: ${C.greenSoft} !important; color: ${C.green} !important; border-color: ${C.green} !important; }
         @media (max-width:640px) {
-          .hero-pills    { display:none !important; }
-          .hero-big-num  { font-size:32px !important; letter-spacing:-1px !important; }
-          .hero-stats    { gap:16px !important; }
+          .hero-big-num  { font-size:36px !important; letter-spacing:-1px !important; }
           .pos-grid      { grid-template-columns: 1fr 1fr !important; }
           .pos-grid-apr  { display:none; }
         }
         @media (max-width:480px) {
           .pos-grid      { grid-template-columns: 1fr !important; }
           .pos-grid-val  { display:none; }
-          .pos-grid-apr  { display:none; }
         }
       `}</style>
 
-      <Navbar />
+      {/* Scanline overlay — matches landing */}
+      <div
+        aria-hidden
+        className="fixed inset-0 pointer-events-none z-[9999]"
+        style={{ background: SCANLINE_BG }}
+      />
 
-      {/* ── Hero Section ──────────────────────────────────────────────────────── */}
-      <div style={{
-        background: "linear-gradient(135deg, #041a0a 0%, #071f12 30%, #0a1e1a 55%, #061215 100%)",
-        position: "relative",
-        overflow: "hidden",
-        padding: "80px 28px 24px",
-      }}>
-        {/* Glow orbs */}
-        <div style={{ position:"absolute", top:0, right:0, width:400, height:300,
-          background:"radial-gradient(circle, rgba(16,185,129,0.14) 0%, transparent 70%)",
-          pointerEvents:"none" }} />
-        <div style={{ position:"absolute", bottom:0, left:0, width:300, height:200,
-          background:"radial-gradient(circle, rgba(52,211,153,0.08) 0%, transparent 70%)",
-          pointerEvents:"none" }} />
-        <div style={{ position:"absolute", top:"50%", right:"30%", width:200, height:200,
-          background:"radial-gradient(circle, rgba(6,214,160,0.06) 0%, transparent 70%)",
-          pointerEvents:"none" }} />
+      <TerminalNavbar />
 
-        <div style={{ maxWidth:1200, margin:"0 auto", position:"relative" }}>
-
-          {/* Brand + price pills */}
-          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:24 }}>
-            <div>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                <span style={{ fontSize:20, fontWeight:700, color:"white" }}>DefiDesh</span>
-                <span style={{ background:"rgba(16,185,129,0.2)", color:"#6ee7b7", fontSize:10,
-                  padding:"2px 8px", borderRadius:6, fontWeight:500 }}>BETA</span>
-              </div>
-              <p style={{ fontSize:11, color:"rgba(255,255,255,0.3)", letterSpacing:1, margin:0 }}>
-                Track · Analyze · Optimize
-              </p>
-            </div>
-            <div className="hero-pills" style={{ display:"flex", alignItems:"center", gap:6 }}>
-              {[{ id:"bitcoin", label:"BTC" }, { id:"ethereum", label:"ETH" }, { id:"solana", label:"SOL" }].map(
-                ({ id, label }) => heroPrices[id] ? (
-                  <div key={id} style={{ background:"rgba(255,255,255,0.06)", borderRadius:12,
-                    padding:"4px 10px", fontSize:10, color:"rgba(255,255,255,0.5)" }}>
-                    {label} ${heroPrices[id].toLocaleString("en-US", { maximumFractionDigits: id === "bitcoin" ? 0 : 2 })}
-                  </div>
-                ) : null,
-              )}
-            </div>
-          </div>
-
-          {/* Big number */}
-          <div style={{ marginBottom:20 }}>
-            <p style={{ fontSize:11, letterSpacing:2, textTransform:"uppercase",
-              color:"rgba(255,255,255,0.35)", margin:"0 0 6px" }}>
-              Total Portfolio Value
-            </p>
-            <div style={{ display:"flex", alignItems:"baseline", gap:12, flexWrap:"wrap" }}>
-              <span className="hero-big-num"
-                style={{ fontSize:48, fontWeight:700, color:"white", letterSpacing:-2 }}>
-                {fmt$(totalValue)}
+      {/* ── Hero panel ───────────────────────────────────────────────────────── */}
+      <section
+        style={{
+          padding: "40px 12px 32px",
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px" }}>
+          <SectionHeader
+            label="portfolio_overview.live"
+            right={
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 10,
+                  color: C.green,
+                  letterSpacing: "0.1em",
+                }}
+              >
+                <span
+                  className="animate-pulse"
+                  style={{ width: 5, height: 5, background: C.green, display: "inline-block" }}
+                />
+                LIVE
               </span>
-            </div>
+            }
+          />
+
+          <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: C.mute2, marginBottom: 8 }}>
+            Total Portfolio Value
+          </div>
+          <div
+            className="hero-big-num"
+            style={{
+              fontSize: "clamp(40px, 5.6vw, 72px)",
+              fontWeight: 700,
+              color: C.text,
+              letterSpacing: "-0.02em",
+              lineHeight: 1.05,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {fmt$(totalValue)}
           </div>
 
-          {/* Quick stats + buttons */}
-          <div style={{ borderTop:"1px solid rgba(255,255,255,0.05)", paddingTop:16,
-            display:"flex", alignItems:"flex-end", justifyContent:"space-between",
-            flexWrap:"wrap", gap:16 }}>
-            <div className="hero-stats" style={{ display:"flex", gap:24, flexWrap:"wrap" }}>
-              {[
-                { label:"Positions",  value: String(allPositions.length), color:"white" },
-                { label:"Chains",     value: uniqueChains > 0 ? String(uniqueChains) : "—", color:"white" },
-                { label:"Uncollected",value: totalFees > 0 ? fmt$(totalFees) : "—", color:"#34d399" },
-                { label:"Daily yield",value: hasCashflowData ? `+${fmt$(dailyCashflow)}` : "N/A", color:"#34d399" },
-                { label:"Avg APR",    value: avgApr !== null ? `${avgApr.toFixed(1)}%` : "N/A", color:"#6ee7b7" },
-              ].map(({ label, value, color }) => (
-                <div key={label}>
-                  <p style={{ fontSize:10, letterSpacing:1, textTransform:"uppercase",
-                    color:"rgba(255,255,255,0.3)", margin:"0 0 4px" }}>{label}</p>
-                  <p style={{ fontSize:20, fontWeight:600, color, margin:0 }}>{value}</p>
+          {/* Stats strip */}
+          <div
+            style={{
+              marginTop: 28,
+              borderTop: `1px solid ${C.border}`,
+              paddingTop: 20,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 24,
+            }}
+          >
+            {[
+              { label: "Positions",   value: String(allPositions.length),                        color: C.text },
+              { label: "Chains",      value: uniqueChains > 0 ? String(uniqueChains) : "—",      color: C.text },
+              { label: "Uncollected", value: totalFees > 0 ? fmt$(totalFees) : "—",              color: C.green },
+              { label: "Daily Yield", value: hasCashflowData ? `+${fmt$(dailyCashflow)}` : "N/A",color: C.green },
+              { label: "Avg APR",     value: avgApr !== null ? `${avgApr.toFixed(1)}%` : "N/A", color: C.green },
+            ].map(({ label, value, color }) => (
+              <div key={label}>
+                <div style={{ fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", color: C.mute2, marginBottom: 4 }}>
+                  {label}
                 </div>
-              ))}
-            </div>
-
-            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-              <button
-                onClick={() => { if (!isFetching) refetch(); }}
-                aria-disabled={isFetching}
-                style={{ background:"rgba(255,255,255,0.06)", borderRadius:12, padding:"6px 14px",
-                  fontSize:12, color:"rgba(255,255,255,0.5)", border:"none",
-                  cursor: isFetching ? "not-allowed" : "pointer",
-                  opacity: isFetching ? 0.5 : 1 }}
-              >
-                <span className={isFetching ? "spin-icon" : ""}>↻</span>{" "}
-                {isFetching ? "Refreshing…" : "Refresh"}
-              </button>
-              <button
-                onClick={() => setShowManageWallets(true)}
-                style={{ background:"rgba(16,185,129,0.2)", borderRadius:12, padding:"6px 14px",
-                  fontSize:12, color:"#6ee7b7", border:"1px solid rgba(16,185,129,0.3)", cursor:"pointer" }}
-              >
-                Manage Wallets
-              </button>
-            </div>
+                <div style={{ fontSize: 20, fontWeight: 600, color, fontVariantNumeric: "tabular-nums" }}>
+                  {value}
+                </div>
+              </div>
+            ))}
           </div>
 
+          {/* Action buttons */}
+          <div style={{ marginTop: 22, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="term-btn"
+              onClick={() => { if (!isFetching) refetch(); }}
+              aria-disabled={isFetching}
+              style={{
+                background: C.card,
+                border: `1px solid ${C.border}`,
+                color: C.textDim,
+                padding: "9px 16px",
+                fontSize: 11,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontFamily: "var(--font-jetbrains-mono)",
+                cursor: isFetching ? "not-allowed" : "pointer",
+                opacity: isFetching ? 0.6 : 1,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span className={isFetching ? "spin-icon" : ""}>↻</span>
+              {isFetching ? "REFRESHING…" : "REFRESH"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowManageWallets(true)}
+              style={{
+                background: C.green,
+                border: `1px solid ${C.green}`,
+                color: "#000",
+                padding: "9px 16px",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontFamily: "var(--font-jetbrains-mono)",
+                cursor: "pointer",
+              }}
+            >
+              ▸ Manage Wallets
+            </button>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* ── Summary Cards ─────────────────────────────────────────────────────── */}
+      {/* ── Summary cards ────────────────────────────────────────────────────── */}
       {mounted && (
-        <div style={{ background:"#060d08", padding:"20px 28px 0" }}>
-          <div style={{ maxWidth:1200, margin:"0 auto" }}>
+        <section
+          style={{
+            padding: "32px 12px 0",
+            borderBottom: `1px solid ${C.border}`,
+            paddingBottom: 32,
+          }}
+        >
+          <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px" }}>
+            <SectionHeader label="wallets · balances · lending · cashflow" />
 
-            {/* Row 1 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-
-              {/* Card 1: Wallets */}
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Wallets</h3>
-                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: 1,
+                background: C.border,
+                border: `1px solid ${C.border}`,
+              }}
+            >
+              {/* Wallets */}
+              <div style={cardStyle}>
+                <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: C.green, marginBottom: 14, fontWeight: 600 }}>
+                  ▸ Wallets
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {address && (
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                      <div>
-                        <span style={{ fontSize:10, color:"#3b82f6", fontWeight:700,
-                          textTransform:"uppercase", letterSpacing:0.5 }}>EVM</span>
-                        <p style={{ fontSize:12, fontFamily:"monospace",
-                          color:"rgba(255,255,255,0.65)", margin:0, marginTop:2 }}>
-                          {address.slice(0,8)}…{address.slice(-6)}
-                        </p>
-                      </div>
-                      <button onClick={() => navigator.clipboard.writeText(address)}
-                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
-                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
-                    </div>
+                    <WalletRow color="#00e5ff" label="EVM" addr={address} />
                   )}
                   {solanaAddress && (
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                      <div>
-                        <span style={{ fontSize:10, color:"#9945ff", fontWeight:700,
-                          textTransform:"uppercase", letterSpacing:0.5 }}>Solana</span>
-                        <p style={{ fontSize:12, fontFamily:"monospace",
-                          color:"rgba(255,255,255,0.65)", margin:0, marginTop:2 }}>
-                          {solanaAddress.slice(0,6)}…{solanaAddress.slice(-4)}
-                        </p>
-                      </div>
-                      <button onClick={() => navigator.clipboard.writeText(solanaAddress)}
-                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
-                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
-                    </div>
+                    <WalletRow color="#9945ff" label="SOL" addr={solanaAddress} />
                   )}
                   {suiAddress && (
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                      <div>
-                        <span style={{ fontSize:10, color:"#6fbcf0", fontWeight:700,
-                          textTransform:"uppercase", letterSpacing:0.5 }}>Sui</span>
-                        <p style={{ fontSize:12, fontFamily:"monospace",
-                          color:"rgba(255,255,255,0.65)", margin:0, marginTop:2 }}>
-                          {suiAddress.slice(0,8)}…{suiAddress.slice(-6)}
-                        </p>
-                      </div>
-                      <button onClick={() => navigator.clipboard.writeText(suiAddress)}
-                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
-                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
-                    </div>
+                    <WalletRow color="#4da2ff" label="SUI" addr={suiAddress} />
                   )}
                   {watchedWallets.map((w) => (
-                    <div key={w.address} style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                      <div>
-                        <span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", fontWeight:700,
-                          textTransform:"uppercase", letterSpacing:0.5 }}>
-                          {w.chain} · {w.label ?? "Watched"}
-                        </span>
-                        <p style={{ fontSize:12, fontFamily:"monospace",
-                          color:"rgba(255,255,255,0.5)", margin:0, marginTop:2 }}>
-                          {w.address.slice(0,6)}…{w.address.slice(-4)}
-                        </p>
-                      </div>
-                      <button onClick={() => navigator.clipboard.writeText(w.address)}
-                        style={{ background:"none", border:"none", color:"rgba(255,255,255,0.35)",
-                          cursor:"pointer", fontSize:14, padding:"2px 6px" }} title="Copy address">⧉</button>
-                    </div>
+                    <WalletRow
+                      key={w.address}
+                      color={C.mute2}
+                      label={`${w.chain.toUpperCase()} · ${w.label ?? "WATCHED"}`}
+                      addr={w.address}
+                    />
                   ))}
                   {!hasWallet && (
-                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.3)", margin:0 }}>No wallet connected</p>
+                    <div style={{ fontSize: 12, color: C.mute2 }}>No wallet connected.</div>
                   )}
                 </div>
               </div>
 
-              {/* Card 3: Estimated Net Cashflow */}
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20 }}>
-                <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                  color:"#FBBF24", margin:"0 0 14px", fontWeight:600 }}>Estimated Net Cashflow</h3>
+              {/* Estimated Net Cashflow */}
+              <div style={cardStyle}>
+                <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: C.green, marginBottom: 14, fontWeight: 600 }}>
+                  ▸ Estimated Net Cashflow
+                </div>
                 {hasCashflowData ? (
-                  <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {[
-                      { label:"Daily",   value: dailyCashflow },
-                      { label:"Monthly", value: dailyCashflow * 30 },
-                      { label:"Yearly",  value: dailyCashflow * 365 },
+                      { label: "Daily",   value: dailyCashflow },
+                      { label: "Monthly", value: dailyCashflow * 30 },
+                      { label: "Yearly",  value: dailyCashflow * 365 },
                     ].map(({ label, value }) => (
-                      <div key={label} style={{ display:"flex", justifyContent:"space-between",
-                        alignItems:"center" }}>
-                        <span style={{ fontSize:13, color:"rgba(255,255,255,0.45)" }}>{label}</span>
-                        <span style={{ fontSize:15, fontWeight:600, color:"#34d399" }}>
+                      <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 11, color: C.mute2, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                          {label}
+                        </span>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>
                           +{fmt$(value)}
                         </span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>
-                    Connect wallet to see cashflow estimates.
-                  </p>
+                  <div style={{ fontSize: 12, color: C.mute2 }}>
+                    Connect a wallet to estimate cashflow.
+                  </div>
                 )}
               </div>
-            </div>
 
-            {/* Row 2 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-
-              {/* Card 4: Tokens — clickable */}
-              <Link href="/dashboard/tokens" style={{ textDecoration:"none" }}>
-                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                  borderRadius:14, padding:20, cursor:"pointer", transition:"border-color 0.15s",
-                  height:"100%", boxSizing:"border-box" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(251,191,36,0.25)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
-                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                      color:"#FBBF24", margin:0, fontWeight:600 }}>Wallet Balances</h3>
-                    <span style={{ fontSize:11, color:"rgba(255,255,255,0.25)" }}>View →</span>
+              {/* Wallet Balances — clickable */}
+              <Link href="/dashboard/tokens" style={{ textDecoration: "none", color: "inherit" }}>
+                <div className="term-card" style={{ ...cardStyle, cursor: "pointer", height: "100%" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: C.green, fontWeight: 600 }}>
+                      ▸ Wallet Balances
+                    </div>
+                    <span style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.1em" }}>VIEW →</span>
                   </div>
                   {!hasWallet ? (
-                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see balances.</p>
+                    <div style={{ fontSize: 12, color: C.mute2 }}>Connect a wallet to see balances.</div>
                   ) : walletTokensLoading ? (
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
-                        animation:"_spin 1s linear infinite" }} />
-                      <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.mute2, fontSize: 12 }}>
+                      <span className="spin-icon" style={{ width: 10, height: 10, border: `1px solid ${C.green}`, borderTopColor: "transparent", display: "inline-block" }} />
+                      Loading…
                     </div>
                   ) : (
                     <>
-                      <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                        letterSpacing:-1 }}>{fmt$(totalTokenValue)}</p>
-                      <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                        {fmt$(totalTokenValue)}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.mute2, marginTop: 4, letterSpacing: "0.06em" }}>
                         {tokenCount > 0 ? `${tokenCount} token${tokenCount === 1 ? "" : "s"}` : "No tokens found"}
-                      </p>
+                      </div>
                     </>
                   )}
                 </div>
               </Link>
 
-              {/* Card 5: Lending / Borrowing — clickable */}
-              <Link href="/dashboard/lending" style={{ textDecoration:"none" }}>
-                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                  borderRadius:14, padding:20, cursor:"pointer", transition:"border-color 0.15s",
-                  height:"100%", boxSizing:"border-box" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(251,191,36,0.25)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
-                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                      color:"#FBBF24", margin:0, fontWeight:600 }}>Lending / Borrowing</h3>
-                    <span style={{ fontSize:11, color:"rgba(255,255,255,0.25)" }}>View →</span>
+              {/* Lending — clickable */}
+              <Link href="/dashboard/lending" style={{ textDecoration: "none", color: "inherit" }}>
+                <div className="term-card" style={{ ...cardStyle, cursor: "pointer", height: "100%" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: C.green, fontWeight: 600 }}>
+                      ▸ Lending / Borrowing
+                    </div>
+                    <span style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.1em" }}>VIEW →</span>
                   </div>
                   {!hasWallet ? (
-                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.3)", margin:0 }}>Connect wallet to see positions.</p>
+                    <div style={{ fontSize: 12, color: C.mute2 }}>Connect a wallet to see positions.</div>
                   ) : walletTokensLoading ? (
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      <div style={{ width:8, height:8, borderRadius:"50%", background:"#FBBF24",
-                        animation:"_spin 1s linear infinite" }} />
-                      <span style={{ fontSize:13, color:"rgba(255,255,255,0.3)" }}>Loading…</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.mute2, fontSize: 12 }}>
+                      <span className="spin-icon" style={{ width: 10, height: 10, border: `1px solid ${C.green}`, borderTopColor: "transparent", display: "inline-block" }} />
+                      Loading…
                     </div>
                   ) : (
                     <>
-                      <p style={{ fontSize:34, fontWeight:700, color:"white", margin:"0 0 6px",
-                        letterSpacing:-1 }}>{fmt$(combinedLendingValue)}</p>
-                      <p style={{ fontSize:12, color:"rgba(255,255,255,0.4)", margin:0 }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                        {fmt$(combinedLendingValue)}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.mute2, marginTop: 4, letterSpacing: "0.06em" }}>
                         {combinedLendingCount > 0 ? `${combinedLendingCount} position${combinedLendingCount === 1 ? "" : "s"}` : "No positions found"}
-                      </p>
+                      </div>
                     </>
                   )}
                 </div>
               </Link>
             </div>
-
           </div>
-        </div>
+        </section>
       )}
 
-      {/* ── Charts Section ────────────────────────────────────────────────────── */}
+      {/* ── Charts ───────────────────────────────────────────────────────────── */}
       {mounted && (
-        <div style={{ background:"#060d08", padding:"20px 28px 0" }}>
-          <div style={{ maxWidth:1200, margin:"0 auto" }}>
-
+        <section
+          style={{
+            padding: "32px 12px",
+            borderBottom: `1px solid ${C.border}`,
+          }}
+        >
+          <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px" }}>
             {allPositions.some((p) => p.value > 0) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-
-                {/* Portfolio Allocation */}
-                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                  borderRadius:14, padding:20 }}>
-                  <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                    color:"rgba(255,255,255,0.35)", margin:"0 0 16px" }}>Portfolio Allocation</h3>
-                  <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-                    <div style={{ flexShrink:0 }}>
-                      <ResponsiveContainer width={130} height={130}>
-                        <PieChart>
-                          <Pie data={protocolBreakdown} cx="50%" cy="50%"
-                            innerRadius={38} outerRadius={62} dataKey="value" strokeWidth={0}>
-                            {protocolBreakdown.map((entry) => (
-                              <Cell key={entry.name} fill={getProtocolColor(entry.name)} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{ backgroundColor:"#0a1410",
-                              border:"1px solid rgba(255,255,255,0.06)",
-                              borderRadius:8, color:"#fff", fontSize:12 }}
-                            formatter={(v: number | undefined) => [fmt$(v ?? 0), ""]}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
+              <>
+                <SectionHeader label="portfolio_allocation" />
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+                    gap: 1,
+                    background: C.border,
+                    border: `1px solid ${C.border}`,
+                    marginBottom: 24,
+                  }}
+                >
+                  {/* Allocation by Protocol */}
+                  <div style={cardStyle}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: C.mute2, marginBottom: 14 }}>
+                      Protocol Allocation
                     </div>
-                    <div style={{ flex:1, overflow:"hidden" }}>
-                      {protocolBreakdown.map((entry) => (
-                        <div key={entry.name}
-                          style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                            gap:8, marginBottom:6 }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:6, overflow:"hidden" }}>
-                            <div style={{ width:8, height:8, borderRadius:"50%",
-                              background:getProtocolColor(entry.name), flexShrink:0 }} />
-                            <span style={{ fontSize:12, color:"rgba(255,255,255,0.5)",
-                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {entry.name}
-                            </span>
-                          </div>
-                          <div style={{ fontSize:12, textAlign:"right", flexShrink:0 }}>
-                            <span style={{ color:"white", fontWeight:500 }}>{fmt$(entry.value, 0)}</span>
-                            <span style={{ color:"rgba(255,255,255,0.3)", marginLeft:4 }}>
-                              ({totalValue > 0 ? ((entry.value / totalValue) * 100).toFixed(1) : "0"}%)
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Chain Distribution */}
-                <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                  borderRadius:14, padding:20 }}>
-                  <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                    color:"rgba(255,255,255,0.35)", margin:"0 0 16px" }}>Chain Distribution</h3>
-                  <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-                    {chainBreakdown.map((entry) => {
-                      const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
-                      return (
-                        <div key={entry.chain}>
-                          <div style={{ display:"flex", justifyContent:"space-between",
-                            alignItems:"center", marginBottom:4 }}>
-                            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                              <div style={{ width:8, height:8, borderRadius:"50%",
-                                background:getChainColor(entry.chain) }} />
-                              <span style={{ fontSize:12, color:"rgba(255,255,255,0.7)" }}>{entry.chain}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                      <div style={{ flexShrink: 0 }}>
+                        <ResponsiveContainer width={130} height={130}>
+                          <PieChart>
+                            <Pie data={protocolBreakdown} cx="50%" cy="50%"
+                              innerRadius={38} outerRadius={62} dataKey="value" strokeWidth={0}>
+                              {protocolBreakdown.map((entry) => (
+                                <Cell key={entry.name} fill={getProtocolColor(entry.name)} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              contentStyle={{ backgroundColor: C.card, border: `1px solid ${C.border}`, borderRadius: 0, color: C.text, fontSize: 12 }}
+                              itemStyle={{ color: C.text }}
+                              labelStyle={{ color: C.mute2 }}
+                              formatter={(v: number | undefined) => [fmt$(v ?? 0), ""]}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div style={{ flex: 1, overflow: "hidden" }}>
+                        {protocolBreakdown.map((entry) => (
+                          <div key={entry.name}
+                            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+                              <div style={{ width: 8, height: 8, background: getProtocolColor(entry.name), flexShrink: 0 }} />
+                              <span style={{ fontSize: 11, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {entry.name}
+                              </span>
                             </div>
-                            <div style={{ fontSize:12 }}>
-                              <span style={{ color:"white" }}>{fmt$(entry.value, 0)}</span>
-                              <span style={{ color:"rgba(255,255,255,0.3)", marginLeft:4 }}>
-                                ({pct.toFixed(1)}%)
+                            <div style={{ fontSize: 11, textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                              <span style={{ color: C.text, fontWeight: 500 }}>{fmt$(entry.value, 0)}</span>
+                              <span style={{ color: C.mute2, marginLeft: 4 }}>
+                                ({totalValue > 0 ? ((entry.value / totalValue) * 100).toFixed(1) : "0"}%)
                               </span>
                             </div>
                           </div>
-                          <div style={{ height:4, background:"rgba(255,255,255,0.06)",
-                            borderRadius:2, overflow:"hidden" }}>
-                            <div style={{ height:"100%", borderRadius:2,
-                              background:getChainColor(entry.chain), width:`${pct}%` }} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Chain Distribution */}
+                  <div style={cardStyle}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: C.mute2, marginBottom: 14 }}>
+                      Chain Distribution
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {chainBreakdown.map((entry) => {
+                        const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
+                        return (
+                          <div key={entry.chain}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ width: 8, height: 8, background: getChainColor(entry.chain) }} />
+                                <span style={{ fontSize: 11, color: C.textDim }}>{entry.chain}</span>
+                              </div>
+                              <div style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                                <span style={{ color: C.text }}>{fmt$(entry.value, 0)}</span>
+                                <span style={{ color: C.mute2, marginLeft: 4 }}>({pct.toFixed(1)}%)</span>
+                              </div>
+                            </div>
+                            <div style={{ height: 3, background: C.border, overflow: "hidden" }}>
+                              <div style={{ height: "100%", background: getChainColor(entry.chain), width: `${pct}%` }} />
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                    {chainBreakdown.length === 0 && (
-                      <p style={{ color:"rgba(255,255,255,0.3)", fontSize:13 }}>No chain data</p>
-                    )}
+                        );
+                      })}
+                      {chainBreakdown.length === 0 && (
+                        <div style={{ color: C.mute2, fontSize: 12 }}>No chain data</div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </>
             )}
 
             {/* Portfolio History */}
             {hasWallet && (
-              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
-                borderRadius:14, padding:20, marginBottom:20 }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                  marginBottom:16, flexWrap:"wrap", gap:12 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-                    <h3 style={{ fontSize:11, textTransform:"uppercase", letterSpacing:1,
-                      color:"rgba(255,255,255,0.35)", margin:0 }}>Portfolio History</h3>
-                    <div style={{ display:"flex", gap:4 }}>
+              <>
+                <SectionHeader label="portfolio_history" />
+                <div style={cardStyle}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 16,
+                      flexWrap: "wrap",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 0, border: `1px solid ${C.border}` }}>
                       {TIME_RANGES.map((r) => {
                         const snapshotHasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
+                        const active = rangeKey === r.key;
                         return (
                           <button
                             key={r.key}
                             onClick={() => setRangeKey(r.key)}
+                            data-active={active}
+                            className="term-tab"
                             style={{
-                              padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:500, border:"none",
-                              cursor:"pointer",
-                              background: rangeKey === r.key ? "#10b981" : "rgba(255,255,255,0.06)",
-                              color: rangeKey === r.key ? "white"
-                                : snapshotHasData ? "rgba(255,255,255,0.5)"
-                                : "rgba(255,255,255,0.2)",
+                              padding: "5px 12px",
+                              border: "none",
+                              borderRight: `1px solid ${C.border}`,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              letterSpacing: "0.06em",
+                              fontFamily: "var(--font-jetbrains-mono)",
+                              cursor: "pointer",
+                              background: active ? C.green : "transparent",
+                              color: active ? "#000" : (snapshotHasData ? C.textDim : C.mute3),
                             }}
-                          >{r.key}</button>
+                          >
+                            {r.key}
+                          </button>
                         );
                       })}
                     </div>
+                    {chartPnlAvailable && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: chartPnlDollar >= 0 ? C.green : C.red,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {chartPnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(chartPnlDollar))}{" "}
+                        <span style={{ opacity: 0.75 }}>
+                          ({chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(2)}%)
+                        </span>
+                        <span style={{ color: C.mute2, fontWeight: 400, marginLeft: 6 }}>
+                          {activeRange.label}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  {chartPnlAvailable && (
-                    <div style={{ fontSize:13, fontWeight:500,
-                      color: chartPnlDollar >= 0 ? "#34d399" : "#ef4444" }}>
-                      {chartPnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(chartPnlDollar))}{" "}
-                      <span style={{ opacity:0.75 }}>
-                        ({chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(2)}%)
-                      </span>
-                      <span style={{ color:"rgba(255,255,255,0.4)", fontWeight:400, marginLeft:4 }}>
-                        {activeRange.label}
-                      </span>
+                  {portfolioHistory.length < 2 ? (
+                    <div style={{ textAlign: "center", padding: "32px 0" }}>
+                      <div style={{ fontSize: 12, color: C.mute2 }}>
+                        Tracking started — chart appears after the next refresh.
+                      </div>
+                      <div style={{ fontSize: 10, color: C.mute3, marginTop: 4, letterSpacing: "0.06em" }}>
+                        A data point is saved on every 60-second refresh.
+                      </div>
                     </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={chartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                        <XAxis dataKey="label" tick={{ fill: C.mute2, fontSize: 11 }}
+                          axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                        <YAxis tick={{ fill: C.mute2, fontSize: 11 }}
+                          axisLine={false} tickLine={false} width={72}
+                          tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: C.card, border: `1px solid ${C.border}`, borderRadius: 0, color: C.text }}
+                          itemStyle={{ color: C.green }}
+                          labelStyle={{ color: C.mute2, marginBottom: 4 }}
+                          formatter={(v: number | undefined) => [fmt$(v ?? 0), "Portfolio Value"]}
+                        />
+                        <Line type="monotone" dataKey="value" stroke={C.green} strokeWidth={2}
+                          dot={chartData.length <= 20}
+                          activeDot={{ r: 4, fill: C.green }} />
+                      </LineChart>
+                    </ResponsiveContainer>
                   )}
                 </div>
-                {portfolioHistory.length < 2 ? (
-                  <div style={{ textAlign:"center", padding:"32px 0" }}>
-                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.4)" }}>
-                      Tracking started — chart appears after the next refresh.
-                    </p>
-                    <p style={{ fontSize:11, color:"rgba(255,255,255,0.2)", marginTop:4 }}>
-                      A data point is saved on every 60-second refresh.
-                    </p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={chartData} margin={{ top:4, right:16, left:8, bottom:4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                      <XAxis dataKey="label" tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11 }}
-                        axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                      <YAxis tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11 }}
-                        axisLine={false} tickLine={false} width={72}
-                        tickFormatter={(v) =>
-                          `$${Number(v).toLocaleString("en-US", { maximumFractionDigits:0 })}`} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor:"#0a1410",
-                          border:"1px solid rgba(255,255,255,0.06)",
-                          borderRadius:8, color:"#fff" }}
-                        formatter={(v: number | undefined) => [fmt$(v ?? 0), "Portfolio Value"]}
-                        labelStyle={{ color:"rgba(255,255,255,0.5)", marginBottom:4 }}
-                      />
-                      <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
-                        dot={chartData.length <= 20}
-                        activeDot={{ r:4, fill:"#34d399" }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
+              </>
             )}
-
           </div>
-        </div>
+        </section>
       )}
 
-      {/* ── Positions Section ─────────────────────────────────────────────────── */}
-      <div style={{ background:"#060d08", padding:"20px 28px 40px" }}>
-        <div style={{ maxWidth:1200, margin:"0 auto" }}>
+      {/* ── Positions ────────────────────────────────────────────────────────── */}
+      <section style={{ padding: "32px 12px 56px" }}>
+        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px" }}>
+          <SectionHeader label="open_positions" />
 
-          {/* Filter / action bar */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            marginBottom:16, gap:12, flexWrap:"wrap" }}>
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-              {STATUS_FILTERS.map((s) => {
+          {/* Filter tabs + Export */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 16,
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", border: `1px solid ${C.border}` }}>
+              {STATUS_FILTERS.map((s, i) => {
                 const active = statusFilter === s;
-                const count  = s === "All"
-                  ? allPositions.length
-                  : allPositions.filter((p) => effectiveStatus(p) === s).length;
+                const count =
+                  s === "All"
+                    ? allPositions.length
+                    : allPositions.filter((p) => effectiveStatus(p) === s).length;
                 return (
                   <button
                     key={s}
                     onClick={() => setStatusFilter(s)}
+                    data-active={active}
+                    className="term-tab"
                     style={{
-                      background: active
-                        ? "linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,214,160,0.1))"
-                        : "rgba(255,255,255,0.03)",
-                      border: `1px solid ${active ? "rgba(16,185,129,0.25)" : "rgba(255,255,255,0.06)"}`,
-                      color: active ? "#6ee7b7" : "rgba(255,255,255,0.4)",
-                      borderRadius: 8,
-                      padding: "6px 14px",
-                      fontSize: 12,
+                      background: active ? C.green : "transparent",
+                      color: active ? "#000" : C.mute2,
+                      border: "none",
+                      borderRight: i < STATUS_FILTERS.length - 1 ? `1px solid ${C.border}` : "none",
+                      padding: "8px 14px",
+                      fontSize: 11,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      fontFamily: "var(--font-jetbrains-mono)",
+                      fontWeight: 600,
                       cursor: "pointer",
                     }}
                   >
-                    {s === "All" ? "All positions" : s} ({count})
+                    {s === "All" ? "All" : s}{" "}
+                    <span style={{ opacity: 0.7 }}>({count})</span>
                   </button>
                 );
               })}
             </div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button
-                onClick={exportCSV}
-                style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.06)",
-                  color:"rgba(255,255,255,0.4)", borderRadius:8, padding:"6px 14px",
-                  fontSize:12, cursor:"pointer" }}
-              >Export CSV</button>
-            </div>
+
+            <button
+              onClick={exportCSV}
+              className="term-btn"
+              style={{
+                background: C.card,
+                border: `1px solid ${C.border}`,
+                color: C.textDim,
+                padding: "8px 14px",
+                fontSize: 11,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontFamily: "var(--font-jetbrains-mono)",
+                cursor: "pointer",
+              }}
+            >
+              ▸ Export.csv
+            </button>
           </div>
 
           {/* Loading */}
           {mounted && isLoading && (
-            <div style={{ textAlign:"center", padding:"64px 0", color:"rgba(255,255,255,0.4)" }}>
-              <div className="spin-icon" style={{ width:32, height:32, border:"2px solid #10b981",
-                borderTopColor:"transparent", borderRadius:"50%", margin:"0 auto 16px",
-                display:"block" }} />
-              <p>Fetching your positions…</p>
+            <div style={{ textAlign: "center", padding: "64px 0", color: C.mute2 }}>
+              <div
+                className="spin-icon"
+                style={{
+                  width: 24, height: 24,
+                  border: `2px solid ${C.green}`,
+                  borderTopColor: "transparent",
+                  margin: "0 auto 16px",
+                  display: "block",
+                }}
+              />
+              <div style={{ fontSize: 12, letterSpacing: "0.08em" }}>Fetching your positions…</div>
             </div>
           )}
 
@@ -1004,60 +1044,61 @@ export default function Dashboard() {
           {!isLoading && mounted && filtered.length === 0 && (
             <div>
               {!hasWallet ? (
-                <div style={{ textAlign:"center", padding:"80px 0" }}>
-                  <div style={{ fontSize:48, marginBottom:24 }}>💼</div>
-                  <h3 style={{ fontSize:20, fontWeight:600, color:"white", marginBottom:8 }}>
-                    No wallet connected
-                  </h3>
-                  <p style={{ color:"rgba(255,255,255,0.4)", marginBottom:32 }}>
-                    Connect your wallet to track your LP positions across EVM chains, Solana, and Sui.
-                  </p>
-                  <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"center", gap:12, fontSize:13, color:"rgba(255,255,255,0.4)" }}>
+                <div style={{ textAlign: "center", padding: "64px 0", color: C.textDim }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8, letterSpacing: "0.06em" }}>
+                    NO_WALLET_CONNECTED
+                  </div>
+                  <div style={{ color: C.mute2, marginBottom: 28, fontSize: 12, letterSpacing: "0.04em" }}>
+                    Connect a wallet to track LP positions across EVM, Solana, and Sui.
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 10, fontSize: 11, color: C.mute2 }}>
                     {[
-                      { chain:"EVM",    color:"#3b82f6", desc:"Ethereum · Base · Arbitrum · Optimism" },
-                      { chain:"Solana", color:"#9945ff", desc:"Raydium · Orca" },
-                      { chain:"Sui",    color:"#6fbcf0", desc:"Bluefin · Cetus" },
+                      { chain: "EVM",    color: "#00e5ff", desc: "Ethereum · Base · Arbitrum · Optimism" },
+                      { chain: "SOLANA", color: "#9945ff", desc: "Raydium · Orca" },
+                      { chain: "SUI",    color: "#4da2ff", desc: "Bluefin · Cetus" },
                     ].map(({ chain, color, desc }) => (
-                      <div key={chain} style={{ background:"rgba(255,255,255,0.03)",
-                        border:"1px solid rgba(255,255,255,0.06)", borderRadius:12,
-                        padding:"12px 16px", display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ color, fontWeight:600 }}>{chain}</span>
-                        <span>{desc}</span>
+                      <div key={chain} style={{
+                        background: C.card,
+                        border: `1px solid ${C.border}`,
+                        padding: "10px 14px",
+                        display: "flex", alignItems: "center", gap: 8,
+                      }}>
+                        <span style={{ color, fontWeight: 700, letterSpacing: "0.1em" }}>{chain}</span>
+                        <span style={{ color: C.mute2 }}>{desc}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : allPositions.length === 0 ? (
-                <div style={{ textAlign:"center", padding:"80px 0" }}>
-                  <div style={{ fontSize:48, marginBottom:24 }}>📭</div>
-                  <h3 style={{ fontSize:20, fontWeight:600, color:"white", marginBottom:8 }}>
-                    No positions found
-                  </h3>
-                  <p style={{ color:"rgba(255,255,255,0.4)" }}>
+                <div style={{ textAlign: "center", padding: "64px 0" }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8, letterSpacing: "0.06em" }}>
+                    NO_POSITIONS_FOUND
+                  </div>
+                  <div style={{ color: C.mute2, fontSize: 12 }}>
                     No LP positions were found for your connected wallet(s).
-                  </p>
+                  </div>
                 </div>
               ) : (
-                <div style={{ textAlign:"center", padding:"48px 0", color:"rgba(255,255,255,0.4)" }}>
-                  No positions match your filter.
+                <div style={{ textAlign: "center", padding: "48px 0", color: C.mute2, fontSize: 12 }}>
+                  No positions match this filter.
                 </div>
               )}
             </div>
           )}
 
-          {/* Position Cards */}
+          {/* Position cards */}
           {!isLoading && filtered.length > 0 && (
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1, background: C.border, border: `1px solid ${C.border}` }}>
               {filtered.map((pos) => {
-                const posStatus     = effectiveStatus(pos);
-                const isClosed      = posStatus === "Closed";
-                const slug          = encodeURIComponent(pos.id);
-                const dailyEarnings = pos.apy > 0 && pos.value > 0
-                  ? (pos.value * pos.apy) / 100 / 365
-                  : null;
-                const statusClass = posStatus === "In Range" ? "in-range"
+                const posStatus = effectiveStatus(pos);
+                const isClosed = posStatus === "Closed";
+                const slug = encodeURIComponent(pos.id);
+                const dailyEarnings =
+                  pos.apy > 0 && pos.value > 0 ? (pos.value * pos.apy) / 100 / 365 : null;
+                const statusClass =
+                  posStatus === "In Range" ? "in-range"
                   : posStatus === "Out of Range" ? "out-range"
-                  : "";
+                  : "closed";
 
                 return (
                   <Link
@@ -1065,105 +1106,103 @@ export default function Dashboard() {
                     href={`/dashboard/position/${slug}`}
                     className={`pos-card pos-grid ${statusClass}`}
                     style={{
-                      display:"grid",
-                      gridTemplateColumns:"2fr 1fr 1fr 130px",
-                      alignItems:"center",
-                      gap:16,
-                      padding:16,
-                      borderRadius:14,
-                      background: isClosed ? "rgba(255,255,255,0.015)" : "rgba(255,255,255,0.03)",
-                      border: `1px solid ${isClosed ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.06)"}`,
-                      textDecoration:"none",
-                      color:"white",
-                      cursor:"pointer",
-                      opacity: isClosed ? 0.45 : 1,
+                      display: "grid",
+                      gridTemplateColumns: "2fr 1fr 1fr 140px",
+                      alignItems: "center",
+                      gap: 16,
+                      padding: 16,
+                      background: isClosed ? C.cardSoft : C.card,
+                      border: "1px solid transparent",
+                      textDecoration: "none",
+                      color: C.text,
+                      cursor: "pointer",
+                      opacity: isClosed ? 0.5 : 1,
                     }}
                   >
-                    {/* Col 1: Pair info */}
-                    <div style={{ display:"flex", alignItems:"center", gap:12, overflow:"hidden" }}>
-                      {/* Dual overlapping token circles */}
+                    {/* Pair info */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, overflow: "hidden" }}>
                       {(() => {
                         const parts = pos.pair.split(/\s*\/\s*/);
                         const sym0 = parts[0]?.trim() ?? "";
                         const sym1 = parts[1]?.trim() ?? "";
-                        const SIZE = 32;
+                        const SIZE = 30;
                         const OVERLAP = 10;
                         return (
-                          <div style={{ position:"relative", width:SIZE * 2 - OVERLAP, height:SIZE, flexShrink:0 }}>
-                            <TokenCircle symbol={sym1} size={SIZE}
-                              style={{ position:"absolute", right:0, top:0, zIndex:1 }} />
-                            <TokenCircle symbol={sym0} size={SIZE}
-                              style={{ position:"absolute", left:0, top:0, zIndex:2 }} />
+                          <div style={{ position: "relative", width: SIZE * 2 - OVERLAP, height: SIZE, flexShrink: 0 }}>
+                            <TokenCircle symbol={sym1} size={SIZE} style={{ position: "absolute", right: 0, top: 0, zIndex: 1 }} />
+                            <TokenCircle symbol={sym0} size={SIZE} style={{ position: "absolute", left: 0, top: 0, zIndex: 2 }} />
                           </div>
                         );
                       })()}
-                      <div style={{ overflow:"hidden" }}>
-                        <p style={{ fontSize:15, fontWeight:600, color:"white", margin:0,
-                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      <div style={{ overflow: "hidden" }}>
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: C.text,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            letterSpacing: "0.02em",
+                          }}
+                        >
                           {pos.pair}
-                        </p>
-                        <p style={{ fontSize:11, color:"rgba(255,255,255,0.3)", margin:0 }}>
+                        </div>
+                        <div style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 2 }}>
                           {pos.protocol} · {pos.chain}{pos.feeTier != null ? ` · ${pos.feeTier}%` : ""}
-                        </p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Col 2: Value */}
+                    {/* Value */}
                     <div className="pos-grid-val">
-                      <p style={{ fontSize:18, fontWeight:600, color:"white", margin:0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: C.text, fontVariantNumeric: "tabular-nums" }}>
                         {fmt$(pos.value)}
-                      </p>
+                      </div>
                       {pos.fees > 0 && (
-                        <p style={{ fontSize:11, color:"#34d399", margin:0 }}>
+                        <div style={{ fontSize: 10, color: C.green, letterSpacing: "0.06em", marginTop: 2 }}>
                           +{fmt$(pos.fees)} fees
-                        </p>
+                        </div>
                       )}
                     </div>
 
-                    {/* Col 3: APR */}
+                    {/* APR */}
                     <div className="pos-grid-apr">
                       {pos.apy > 0 ? (
                         <>
-                          <p style={{ fontSize:16, fontWeight:600, color:"#6ee7b7", margin:0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>
                             {pos.apy.toFixed(1)}%
-                          </p>
+                          </div>
                           {dailyEarnings !== null && (
-                            <p style={{ fontSize:11, color:"rgba(255,255,255,0.3)", margin:0 }}>
+                            <div style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.06em", marginTop: 2 }}>
                               ${dailyEarnings.toFixed(2)}/day
-                            </p>
+                            </div>
                           )}
                         </>
                       ) : (
-                        <p style={{ fontSize:16, fontWeight:600, color:"#6ee7b7", margin:0 }}>N/A</p>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.mute2 }}>N/A</div>
                       )}
                     </div>
 
-                    {/* Col 4: Status badge */}
-                    <div style={{ display:"flex", justifyContent:"flex-end" }}>
-                      <span style={{
-                        background: posStatus === "In Range"
-                          ? "rgba(52,211,153,0.1)"
+                    {/* Status badge */}
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <span
+                        style={{
+                          ...statusTagStyle(posStatus),
+                          fontSize: 10,
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                          fontWeight: 600,
+                          padding: "4px 10px",
+                          fontFamily: "var(--font-jetbrains-mono)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {posStatus === "In Range"
+                          ? "● IN_RANGE"
                           : posStatus === "Out of Range"
-                          ? "rgba(245,158,11,0.1)"
-                          : "rgba(255,255,255,0.03)",
-                        border: `1px solid ${
-                          posStatus === "In Range"
-                            ? "rgba(52,211,153,0.2)"
-                            : posStatus === "Out of Range"
-                            ? "rgba(245,158,11,0.2)"
-                            : "rgba(255,255,255,0.06)"
-                        }`,
-                        color: posStatus === "In Range" ? "#34d399"
-                          : posStatus === "Out of Range" ? "#f59e0b"
-                          : "rgba(255,255,255,0.3)",
-                        borderRadius:20,
-                        padding:"4px 10px",
-                        fontSize:11,
-                        whiteSpace:"nowrap",
-                      }}>
-                        {posStatus === "In Range" ? "● In range"
-                          : posStatus === "Out of Range" ? "Out of range"
-                          : "Closed"}
+                          ? "◌ OUT_RANGE"
+                          : "◇ CLOSED"}
                       </span>
                     </div>
                   </Link>
@@ -1171,204 +1210,223 @@ export default function Dashboard() {
               })}
             </div>
           )}
-
         </div>
+      </section>
+
+      {/* ── Keyboard hint bar (visual only) ───────────────────────────────────── */}
+      <div
+        style={{
+          borderTop: `1px solid ${C.border}`,
+          padding: "10px 24px",
+          display: "flex",
+          gap: 24,
+          fontSize: 10,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          color: C.mute2,
+          flexWrap: "wrap",
+        }}
+      >
+        <span><span style={{ color: C.green }}>[F5]</span> refresh</span>
+        <span><span style={{ color: C.green }}>[W]</span> manage wallets</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: C.mute3 }}>v0.9.1-beta</span>
       </div>
 
-      {/* ── Manage Wallets Modal ───────────────────────────────────────────────── */}
+      {/* ── Manage Wallets Modal ─────────────────────────────────────────────── */}
       {showManageWallets && mounted && (
-        <div style={{ position:"fixed", inset:0, zIndex:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", backdropFilter:"blur(4px)" }}
-            onClick={() => { setShowManageWallets(false); setShowEvmConnectors(false); setShowSolanaWalletList(false); setShowSuiWalletList(false); }} />
-          <div style={{ position:"relative", background:"#070e09", border:"1px solid rgba(16,185,129,0.2)",
-            borderRadius:20, width:"100%", maxWidth:520, margin:"0 16px", maxHeight:"90vh", overflowY:"auto" }}>
-
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div
+            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(4px)" }}
+            onClick={() => {
+              setShowManageWallets(false);
+              setShowEvmConnectors(false);
+              setShowSolanaWalletList(false);
+              setShowSuiWalletList(false);
+            }}
+          />
+          <div
+            style={{
+              position: "relative",
+              background: C.bg,
+              border: `1px solid ${C.green}`,
+              width: "100%",
+              maxWidth: 540,
+              margin: "0 16px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              fontFamily: "var(--font-jetbrains-mono)",
+            }}
+          >
             {/* Modal Header */}
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-              padding:"20px 20px 16px", borderBottom:"1px solid rgba(255,255,255,0.05)",
-              position:"sticky", top:0, background:"#070e09", zIndex:10 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <span style={{ fontSize:20 }}>💼</span>
-                <h2 style={{ fontSize:17, fontWeight:700, color:"white", margin:0 }}>Manage Wallets</h2>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "14px 18px",
+                borderBottom: `1px solid ${C.green}`,
+                position: "sticky",
+                top: 0,
+                background: C.bg,
+                zIndex: 10,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+                MANAGE_WALLETS
               </div>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <button onClick={() => refetch()} title="Refresh positions"
-                  style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)",
-                    cursor:"pointer", fontSize:18, padding:"4px 6px", borderRadius:6,
-                    display:"flex", alignItems:"center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  onClick={() => refetch()}
+                  title="Refresh positions"
+                  style={{
+                    background: "none",
+                    border: `1px solid ${C.border}`,
+                    color: C.textDim,
+                    cursor: "pointer",
+                    fontSize: 14,
+                    padding: "2px 8px",
+                    fontFamily: "var(--font-jetbrains-mono)",
+                  }}
+                >
                   <span className={isFetching ? "spin-icon" : ""}>↻</span>
                 </button>
-                <button onClick={() => { setShowManageWallets(false); setShowEvmConnectors(false); setShowSolanaWalletList(false); setShowSuiWalletList(false); }}
-                  style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)",
-                    cursor:"pointer", fontSize:20, padding:"4px 6px", borderRadius:6 }}>✕</button>
+                <button
+                  onClick={() => {
+                    setShowManageWallets(false);
+                    setShowEvmConnectors(false);
+                    setShowSolanaWalletList(false);
+                    setShowSuiWalletList(false);
+                  }}
+                  style={{
+                    background: "none",
+                    border: `1px solid ${C.border}`,
+                    color: C.textDim,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    padding: "2px 8px",
+                    fontFamily: "var(--font-jetbrains-mono)",
+                  }}
+                >
+                  [X]
+                </button>
               </div>
             </div>
 
-            <div style={{ padding:20, display:"flex", flexDirection:"column", gap:24 }}>
-
-              {/* ── Section 1: Add New Wallet ── */}
-              <div style={{ border:"1px solid rgba(255,255,255,0.08)", borderRadius:14, padding:16 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-                  <span style={{ fontSize:14, fontWeight:700, color:"white" }}>Add New Wallet</span>
-                  <button title="Watch any wallet address — read-only, no private keys needed"
-                    style={{ background:"rgba(255,255,255,0.06)", border:"none", color:"rgba(255,255,255,0.4)",
-                      cursor:"pointer", fontSize:12, width:22, height:22, borderRadius:"50%",
-                      display:"flex", alignItems:"center", justifyContent:"center" }}>?</button>
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 22 }}>
+              {/* Section 1: Add New Wallet */}
+              <div style={{ border: `1px solid ${C.border}`, padding: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                  ▸ Add New Wallet
                 </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <input
                     type="text"
                     value={addWalletAddress}
                     onChange={(e) => { setAddWalletAddress(e.target.value); setAddWalletError(""); }}
                     onKeyDown={(e) => e.key === "Enter" && handleAddWatchedWallet()}
-                    placeholder="Enter EVM, Solana, or SUI Address"
-                    style={{ width:"100%", background:"#060d08", border:"1px solid rgba(255,255,255,0.1)",
-                      color:"white", borderRadius:8, padding:"10px 12px", fontSize:13,
-                      outline:"none", boxSizing:"border-box" }}
+                    placeholder="0x… / sol… / 0x(sui)…"
+                    style={{
+                      width: "100%",
+                      background: C.bg,
+                      border: `1px solid ${C.border}`,
+                      color: C.text,
+                      padding: "9px 11px",
+                      fontSize: 12,
+                      outline: "none",
+                      boxSizing: "border-box",
+                      fontFamily: "var(--font-jetbrains-mono)",
+                    }}
                   />
                   <input
                     type="text"
                     value={addWalletLabel}
                     onChange={(e) => setAddWalletLabel(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleAddWatchedWallet()}
-                    placeholder="Label (Optional) — e.g., Main Wallet, Trading Account"
-                    style={{ width:"100%", background:"#060d08", border:"1px solid rgba(255,255,255,0.1)",
-                      color:"white", borderRadius:8, padding:"10px 12px", fontSize:13,
-                      outline:"none", boxSizing:"border-box" }}
+                    placeholder="Label (optional) — e.g. Main Wallet"
+                    style={{
+                      width: "100%",
+                      background: C.bg,
+                      border: `1px solid ${C.border}`,
+                      color: C.text,
+                      padding: "9px 11px",
+                      fontSize: 12,
+                      outline: "none",
+                      boxSizing: "border-box",
+                      fontFamily: "var(--font-jetbrains-mono)",
+                    }}
                   />
                   {addWalletError && (
-                    <p style={{ color:"#ef4444", fontSize:12, margin:0 }}>{addWalletError}</p>
+                    <div style={{ color: C.red, fontSize: 11 }}>{addWalletError}</div>
                   )}
                   <button
                     onClick={handleAddWatchedWallet}
+                    disabled={!addWalletAddress.trim()}
                     style={{
-                      width:"100%",
-                      background: addWalletAddress.trim() ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.04)",
-                      border: `1px solid ${addWalletAddress.trim() ? "rgba(16,185,129,0.35)" : "rgba(255,255,255,0.08)"}`,
-                      color: addWalletAddress.trim() ? "#6ee7b7" : "rgba(255,255,255,0.3)",
-                      borderRadius:8, padding:"10px", fontSize:14, fontWeight:600,
-                      cursor: addWalletAddress.trim() ? "pointer" : "default",
+                      width: "100%",
+                      background: addWalletAddress.trim() ? C.green : C.card,
+                      border: `1px solid ${addWalletAddress.trim() ? C.green : C.border}`,
+                      color: addWalletAddress.trim() ? "#000" : C.mute2,
+                      padding: "9px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                      cursor: addWalletAddress.trim() ? "pointer" : "not-allowed",
+                      fontFamily: "var(--font-jetbrains-mono)",
                     }}
                   >
-                    Add Wallet
+                    ▸ Add Wallet
                   </button>
-                  <div style={{ background:"rgba(16,185,129,0.07)", border:"1px solid rgba(16,185,129,0.15)",
-                    borderRadius:8, padding:"10px 12px", display:"flex", alignItems:"flex-start", gap:10 }}>
-                    <span style={{ color:"#34d399", fontSize:15, flexShrink:0, marginTop:1 }}>✓</span>
-                    <p style={{ fontSize:12, color:"rgba(255,255,255,0.5)", margin:0, lineHeight:1.6 }}>
-                      <strong style={{ color:"#6ee7b7" }}>100% Safe &amp; Read-Only.</strong>{" "}
-                      We never connect to your wallet or request private keys. DefiDesh only reads public blockchain data.
-                    </p>
+                  <div style={{ background: C.greenSoft, border: `1px solid ${C.green}`, padding: "9px 12px", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <span style={{ color: C.green, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
+                    <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.6 }}>
+                      <strong style={{ color: C.green }}>READ_ONLY.</strong>{" "}
+                      No private keys, no signing — DefiDesh only reads public chain data.
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* ── Section 2: Connect Browser Wallet ── */}
+              {/* Section 2: Connect Browser Wallet */}
               <div>
-                <h3 style={{ fontSize:14, fontWeight:700, color:"white", margin:"0 0 12px" }}>Connect Browser Wallet</h3>
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                  ▸ Connect Browser Wallet
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {/* EVM */}
                   {mounted && address ? (
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                      background:"rgba(255,255,255,0.03)", border:"1px solid rgba(16,185,129,0.2)",
-                      borderRadius:10, padding:"10px 14px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <span style={{ fontSize:20 }}>🦊</span>
-                        <div>
-                          <p style={{ fontSize:13, fontWeight:600, color:"white", margin:0 }}>EVM Wallet</p>
-                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0, fontFamily:"monospace" }}>
-                            {address.slice(0,8)}...{address.slice(-6)}
-                          </p>
-                        </div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ color:"#34d399", fontSize:13, fontWeight:600 }}>● Connected</span>
-                        <button onClick={() => evmDisconnect()}
-                          style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)",
-                            color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer" }}>
-                          Disconnect
-                        </button>
-                      </div>
-                    </div>
+                    <ConnectedRow
+                      tagColor="#00e5ff" tagLabel="EVM" addr={address}
+                      onDisconnect={() => evmDisconnect()}
+                    />
                   ) : mounted && (
-                    <button onClick={() => setShowEvmConnectors(true)}
-                      style={{ display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.03)",
-                        border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
-                        width:"100%", cursor:"pointer", color:"white", textAlign:"left" }}>
-                      <span style={{ fontSize:20 }}>🦊</span>
-                      <span style={{ fontSize:13 }}>Connect EVM Wallet</span>
-                    </button>
+                    <ConnectButton onClick={() => setShowEvmConnectors(true)} label="Connect EVM Wallet" tagColor="#00e5ff" tagLabel="EVM" />
                   )}
 
                   {/* Solana */}
                   {mounted && solanaAddress ? (
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                      background:"rgba(255,255,255,0.03)", border:"1px solid rgba(153,69,255,0.3)",
-                      borderRadius:10, padding:"10px 14px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <span style={{ fontSize:20 }}>◎</span>
-                        <div>
-                          <p style={{ fontSize:13, fontWeight:600, color:"white", margin:0 }}>Solana Wallet</p>
-                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0, fontFamily:"monospace" }}>
-                            {solanaAddress.slice(0,8)}...{solanaAddress.slice(-6)}
-                          </p>
-                        </div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ color:"#34d399", fontSize:13, fontWeight:600 }}>● Connected</span>
-                        <button onClick={() => { setSolanaAddress(null); disconnectSolanaWallet(); }}
-                          style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)",
-                            color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer" }}>
-                          Disconnect
-                        </button>
-                      </div>
-                    </div>
+                    <ConnectedRow
+                      tagColor="#9945ff" tagLabel="SOL" addr={solanaAddress}
+                      onDisconnect={() => { setSolanaAddress(null); disconnectSolanaWallet(); }}
+                    />
                   ) : mounted && (
-                    <button onClick={() => setShowSolanaWalletList(true)}
-                      style={{ display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.03)",
-                        border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
-                        width:"100%", cursor:"pointer", color:"white", textAlign:"left" }}>
-                      <span style={{ fontSize:20 }}>◎</span>
-                      <span style={{ fontSize:13 }}>Connect Solana Wallet</span>
-                    </button>
+                    <ConnectButton onClick={() => setShowSolanaWalletList(true)} label="Connect Solana Wallet" tagColor="#9945ff" tagLabel="SOL" />
                   )}
 
                   {/* Sui */}
                   {mounted && suiAddress ? (
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                      background:"rgba(255,255,255,0.03)", border:"1px solid rgba(111,188,240,0.3)",
-                      borderRadius:10, padding:"10px 14px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <span style={{ fontSize:20 }}>◈</span>
-                        <div>
-                          <p style={{ fontSize:13, fontWeight:600, color:"white", margin:0 }}>Sui Wallet</p>
-                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0, fontFamily:"monospace" }}>
-                            {suiAddress.slice(0,8)}...{suiAddress.slice(-6)}
-                          </p>
-                        </div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ color:"#34d399", fontSize:13, fontWeight:600 }}>● Connected</span>
-                        <button onClick={() => { setSuiAddress(null); disconnectSuiWallet(); }}
-                          style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)",
-                            color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer" }}>
-                          Disconnect
-                        </button>
-                      </div>
-                    </div>
+                    <ConnectedRow
+                      tagColor="#4da2ff" tagLabel="SUI" addr={suiAddress}
+                      onDisconnect={() => { setSuiAddress(null); disconnectSuiWallet(); }}
+                    />
                   ) : mounted && (
-                    <button onClick={() => setShowSuiWalletList(true)}
-                      style={{ display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.03)",
-                        border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
-                        width:"100%", cursor:"pointer", color:"white", textAlign:"left" }}>
-                      <span style={{ fontSize:20 }}>◈</span>
-                      <span style={{ fontSize:13 }}>Connect Sui Wallet</span>
-                    </button>
+                    <ConnectButton onClick={() => setShowSuiWalletList(true)} label="Connect Sui Wallet" tagColor="#4da2ff" tagLabel="SUI" />
                   )}
                 </div>
               </div>
 
-              {/* ── Section 3: Your Wallets ── */}
+              {/* Section 3: Your Wallets */}
               {(() => {
                 type WalletEntry = { addr: string; label?: string; type: "browser" | "watched" };
                 const evmWalletList: WalletEntry[] = [];
@@ -1390,32 +1448,49 @@ export default function Dashboard() {
                 if (!hasAny) return null;
 
                 const groups = [
-                  { label: "EVM Wallets", icon: "⟠", wallets: evmWalletList },
-                  { label: "Solana Wallets", icon: "◎", wallets: solWalletList },
-                  { label: "Sui Wallets", icon: "◈", wallets: suiWalletList },
+                  { label: "EVM", color: "#00e5ff", wallets: evmWalletList },
+                  { label: "SOL", color: "#9945ff", wallets: solWalletList },
+                  { label: "SUI", color: "#4da2ff", wallets: suiWalletList },
                 ].filter((g) => g.wallets.length > 0);
 
                 return (
                   <div>
-                    <h3 style={{ fontSize:14, fontWeight:700, color:"white", margin:"0 0 12px" }}>Your Wallets</h3>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                      ▸ Your Wallets
+                    </div>
                     {groups.map((group) => (
-                      <div key={group.label} style={{ marginBottom:16 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                          <span style={{ color:"rgba(255,255,255,0.4)", fontSize:14 }}>{group.icon}</span>
-                          <span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", fontWeight:600,
-                            textTransform:"uppercase", letterSpacing:1 }}>{group.label}</span>
+                      <div key={group.label} style={{ marginBottom: 14 }}>
+                        <div
+                          style={{
+                            fontSize: 9,
+                            color: group.color,
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.16em",
+                            marginBottom: 6,
+                          }}
+                        >
+                          {group.label} WALLETS
                         </div>
-                        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {group.wallets.map((w) => {
                             const isEditing = editingWallet === w.addr;
                             return (
-                              <div key={w.addr} style={{ background:"rgba(255,255,255,0.03)",
-                                border:"1px solid rgba(255,255,255,0.06)", borderRadius:10,
-                                padding:"10px 14px", display:"flex", alignItems:"center",
-                                justifyContent:"space-between", gap:12 }}>
-                                <div style={{ flex:1, overflow:"hidden" }}>
+                              <div
+                                key={w.addr}
+                                style={{
+                                  background: C.card,
+                                  border: `1px solid ${C.border}`,
+                                  padding: "9px 12px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 12,
+                                }}
+                              >
+                                <div style={{ flex: 1, overflow: "hidden" }}>
                                   {isEditing ? (
-                                    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                                       <input
                                         autoFocus
                                         type="text"
@@ -1429,57 +1504,89 @@ export default function Dashboard() {
                                           }
                                           if (e.key === "Escape") setEditingWallet(null);
                                         }}
-                                        style={{ background:"#060d08", border:"1px solid rgba(255,255,255,0.2)",
-                                          color:"white", borderRadius:6, padding:"4px 8px",
-                                          fontSize:12, outline:"none", flex:1 }}
+                                        style={{
+                                          background: C.bg,
+                                          border: `1px solid ${C.border}`,
+                                          color: C.text,
+                                          padding: "3px 8px",
+                                          fontSize: 11,
+                                          outline: "none",
+                                          flex: 1,
+                                          fontFamily: "var(--font-jetbrains-mono)",
+                                        }}
                                       />
-                                      <button onClick={() => {
-                                        const ww = watchedWallets.find((wl) => wl.address === w.addr);
-                                        if (ww) updateLabel(ww.address, ww.chain, editLabelValue);
-                                        setEditingWallet(null);
-                                      }} style={{ color:"#34d399", background:"none", border:"none",
-                                        cursor:"pointer", fontSize:12, whiteSpace:"nowrap" }}>Save</button>
-                                      <button onClick={() => setEditingWallet(null)}
-                                        style={{ color:"rgba(255,255,255,0.4)", background:"none",
-                                          border:"none", cursor:"pointer", fontSize:12 }}>✕</button>
+                                      <button
+                                        onClick={() => {
+                                          const ww = watchedWallets.find((wl) => wl.address === w.addr);
+                                          if (ww) updateLabel(ww.address, ww.chain, editLabelValue);
+                                          setEditingWallet(null);
+                                        }}
+                                        style={{
+                                          color: C.green,
+                                          background: "none",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          fontSize: 11,
+                                          whiteSpace: "nowrap",
+                                          fontFamily: "var(--font-jetbrains-mono)",
+                                        }}
+                                      >
+                                        SAVE
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingWallet(null)}
+                                        style={{ color: C.mute2, background: "none", border: "none", cursor: "pointer", fontSize: 12 }}
+                                      >
+                                        ✕
+                                      </button>
                                     </div>
                                   ) : (
                                     <div>
-                                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-                                        <span style={{ fontSize:13, fontWeight:600, color:"white" }}>
-                                          {w.label || (w.type === "browser" ? group.label.replace(" Wallets","") : "Watched")}
+                                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>
+                                          {w.label || (w.type === "browser" ? group.label : "Watched")}
                                         </span>
                                         {w.type === "watched" && (
                                           <button
                                             onClick={() => { setEditingWallet(w.addr); setEditLabelValue(w.label ?? ""); }}
-                                            style={{ color:"rgba(255,255,255,0.3)", background:"none",
-                                              border:"none", cursor:"pointer", fontSize:12, padding:0 }}
+                                            style={{ color: C.mute2, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
                                             title="Edit label"
-                                          >✎</button>
+                                          >
+                                            ✎
+                                          </button>
                                         )}
-                                        <span style={{ fontSize:10,
-                                          color: w.type === "browser" ? "#6ee7b7" : "rgba(255,255,255,0.35)",
-                                          background: w.type === "browser" ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.05)",
-                                          borderRadius:4, padding:"1px 6px", marginLeft:2 }}>
+                                        <span
+                                          style={{
+                                            fontSize: 9,
+                                            color: w.type === "browser" ? C.green : C.mute2,
+                                            background: w.type === "browser" ? C.greenSoft : "transparent",
+                                            border: `1px solid ${w.type === "browser" ? C.green : C.border}`,
+                                            padding: "0 6px",
+                                            marginLeft: 2,
+                                            letterSpacing: "0.1em",
+                                            textTransform: "uppercase",
+                                          }}
+                                        >
                                           {w.type === "browser" ? "Browser" : "Watched"}
                                         </span>
                                       </div>
-                                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                                        <span style={{ fontSize:11, color:"rgba(255,255,255,0.35)", fontFamily:"monospace" }}>
-                                          {w.addr.slice(0,8)}...{w.addr.slice(-6)}
+                                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <span style={{ fontSize: 10, color: C.mute2, fontFamily: "var(--font-jetbrains-mono)" }}>
+                                          {w.addr.slice(0, 8)}…{w.addr.slice(-6)}
                                         </span>
                                         <button
                                           onClick={() => navigator.clipboard.writeText(w.addr)}
-                                          style={{ color:"rgba(255,255,255,0.3)", background:"none",
-                                            border:"none", cursor:"pointer", fontSize:12, padding:0 }}
+                                          style={{ color: C.mute2, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
                                           title="Copy address"
-                                        >⧉</button>
+                                        >
+                                          ⧉
+                                        </button>
                                       </div>
                                     </div>
                                   )}
                                 </div>
-                                <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-                                  <span style={{ color:"#34d399", fontSize:14 }}>✓</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                  <span style={{ color: C.green, fontSize: 12 }}>✓</span>
                                   {w.type === "watched" ? (
                                     <button
                                       onClick={() => {
@@ -1487,10 +1594,18 @@ export default function Dashboard() {
                                         if (ww) removeWallet(ww.address, ww.chain);
                                       }}
                                       title="Remove watched wallet"
-                                      style={{ color:"#ef4444", background:"rgba(239,68,68,0.08)",
-                                        border:"1px solid rgba(239,68,68,0.15)", borderRadius:6,
-                                        padding:"3px 8px", fontSize:12, cursor:"pointer" }}
-                                    >🗑</button>
+                                      style={{
+                                        color: C.red,
+                                        background: C.redSoft,
+                                        border: `1px solid ${C.red}`,
+                                        padding: "2px 7px",
+                                        fontSize: 11,
+                                        cursor: "pointer",
+                                        fontFamily: "var(--font-jetbrains-mono)",
+                                      }}
+                                    >
+                                      🗑
+                                    </button>
                                   ) : (
                                     <button
                                       onClick={() => {
@@ -1499,10 +1614,18 @@ export default function Dashboard() {
                                         else if (w.addr === suiAddress) { setSuiAddress(null); disconnectSuiWallet(); }
                                       }}
                                       title="Disconnect wallet"
-                                      style={{ color:"#ef4444", background:"rgba(239,68,68,0.08)",
-                                        border:"1px solid rgba(239,68,68,0.15)", borderRadius:6,
-                                        padding:"3px 8px", fontSize:12, cursor:"pointer" }}
-                                    >✕</button>
+                                      style={{
+                                        color: C.red,
+                                        background: C.redSoft,
+                                        border: `1px solid ${C.red}`,
+                                        padding: "2px 7px",
+                                        fontSize: 11,
+                                        cursor: "pointer",
+                                        fontFamily: "var(--font-jetbrains-mono)",
+                                      }}
+                                    >
+                                      ✕
+                                    </button>
                                   )}
                                 </div>
                               </div>
@@ -1514,115 +1637,288 @@ export default function Dashboard() {
                   </div>
                 );
               })()}
-
             </div>
 
-            {/* EVM wallet picker sub-modal */}
+            {/* EVM picker sub-modal */}
             {showEvmConnectors && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)",
-                borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ background:"#070e09", border:"1px solid rgba(255,255,255,0.1)",
-                  borderRadius:14, padding:20, width:"85%", maxWidth:320 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                    <h3 style={{ fontSize:15, fontWeight:700, color:"white", margin:0 }}>Choose EVM Wallet</h3>
-                    <button onClick={() => setShowEvmConnectors(false)}
-                      style={{ color:"rgba(255,255,255,0.4)", background:"none", border:"none", cursor:"pointer", fontSize:18 }}>✕</button>
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                    {connectors.map((connector, i) => (
-                      <button key={connector.id}
-                        onClick={() => { evmConnect({ connector: connectors[i] }); setShowEvmConnectors(false); }}
-                        style={{ display:"flex", alignItems:"center", gap:12, background:"rgba(255,255,255,0.03)",
-                          border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
-                          width:"100%", cursor:"pointer", color:"white" }}>
-                        <span style={{ fontSize:22 }}>{connector.name === "MetaMask" ? "🦊" : "🔗"}</span>
-                        <div style={{ textAlign:"left" }}>
-                          <p style={{ fontSize:14, fontWeight:500, color:"white", margin:0 }}>{connector.name}</p>
-                          <p style={{ fontSize:11, color:"rgba(255,255,255,0.4)", margin:0 }}>Connect with browser extension</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <SubPickerOverlay
+                title="CHOOSE_EVM_WALLET"
+                onClose={() => setShowEvmConnectors(false)}
+                accent={C.green}
+              >
+                {connectors.map((connector, i) => (
+                  <button
+                    key={connector.id}
+                    onClick={() => {
+                      evmConnect({ connector: connectors[i] });
+                      setShowEvmConnectors(false);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      background: C.card,
+                      border: `1px solid ${C.border}`,
+                      padding: "10px 12px",
+                      width: "100%",
+                      cursor: "pointer",
+                      color: C.text,
+                      fontFamily: "var(--font-jetbrains-mono)",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: C.green }}>▸</span>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{connector.name}</div>
+                      <div style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.06em" }}>Browser extension</div>
+                    </div>
+                  </button>
+                ))}
+              </SubPickerOverlay>
             )}
 
-            {/* Solana wallet picker sub-modal */}
+            {/* Solana picker sub-modal */}
             {showSolanaWalletList && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)",
-                borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ background:"#070e09", border:"1px solid rgba(153,69,255,0.3)",
-                  borderRadius:14, padding:20, width:"85%", maxWidth:320 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                    <h3 style={{ fontSize:15, fontWeight:700, color:"white", margin:0 }}>Choose Solana Wallet</h3>
-                    <button onClick={() => setShowSolanaWalletList(false)}
-                      style={{ color:"rgba(255,255,255,0.4)", background:"none", border:"none", cursor:"pointer", fontSize:18 }}>✕</button>
+              <SubPickerOverlay
+                title="CHOOSE_SOLANA_WALLET"
+                onClose={() => setShowSolanaWalletList(false)}
+                accent="#9945ff"
+              >
+                {solanaWallets.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.mute2, textAlign: "center", padding: 8 }}>
+                    No Solana wallet detected. Install Phantom, Backpack, or Solflare.
                   </div>
-                  {solanaWallets.length === 0 ? (
-                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.5)", textAlign:"center", padding:"8px 0" }}>
-                      No Solana wallet detected. Install Phantom, Backpack, or Solflare.
-                    </p>
-                  ) : (
-                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                      {solanaWallets.map((w) => (
-                        <button key={w.adapter.name}
-                          onClick={() => handleSolanaConnectFromModal(w.adapter.name)}
-                          style={{ display:"flex", alignItems:"center", gap:12, background:"rgba(255,255,255,0.03)",
-                            border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
-                            width:"100%", cursor:"pointer", color:"white" }}>
-                          {w.adapter.icon && (
-                            <img src={w.adapter.icon} alt={w.adapter.name}
-                              style={{ width:28, height:28, borderRadius:6 }} />
-                          )}
-                          <span style={{ fontSize:14 }}>{w.adapter.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
+                ) : (
+                  solanaWallets.map((w) => (
+                    <button
+                      key={w.adapter.name}
+                      onClick={() => handleSolanaConnectFromModal(w.adapter.name)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        background: C.card,
+                        border: `1px solid ${C.border}`,
+                        padding: "10px 12px",
+                        width: "100%",
+                        cursor: "pointer",
+                        color: C.text,
+                        fontFamily: "var(--font-jetbrains-mono)",
+                        textAlign: "left",
+                      }}
+                    >
+                      {w.adapter.icon && (
+                        <img src={w.adapter.icon} alt={w.adapter.name} style={{ width: 22, height: 22 }} />
+                      )}
+                      <span style={{ fontSize: 12 }}>{w.adapter.name}</span>
+                    </button>
+                  ))
+                )}
+              </SubPickerOverlay>
             )}
 
-            {/* Sui wallet picker sub-modal */}
+            {/* Sui picker sub-modal */}
             {showSuiWalletList && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)",
-                borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ background:"#070e09", border:"1px solid rgba(111,188,240,0.3)",
-                  borderRadius:14, padding:20, width:"85%", maxWidth:320 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                    <h3 style={{ fontSize:15, fontWeight:700, color:"white", margin:0 }}>Choose Sui Wallet</h3>
-                    <button onClick={() => setShowSuiWalletList(false)}
-                      style={{ color:"rgba(255,255,255,0.4)", background:"none", border:"none", cursor:"pointer", fontSize:18 }}>✕</button>
+              <SubPickerOverlay
+                title="CHOOSE_SUI_WALLET"
+                onClose={() => setShowSuiWalletList(false)}
+                accent="#4da2ff"
+              >
+                {modalSuiWallets.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.mute2, textAlign: "center", padding: 8 }}>
+                    No Sui wallet detected. Install Phantom, Suiet, or Slush.
                   </div>
-                  {modalSuiWallets.length === 0 ? (
-                    <p style={{ fontSize:13, color:"rgba(255,255,255,0.5)", textAlign:"center", padding:"8px 0" }}>
-                      No Sui wallet detected. Install Phantom, Suiet, or Slush.
-                    </p>
-                  ) : (
-                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                      {modalSuiWallets.map((w) => (
-                        <button key={w.name}
-                          onClick={() => handleSuiConnectFromModal(w)}
-                          style={{ display:"flex", alignItems:"center", gap:12, background:"rgba(255,255,255,0.03)",
-                            border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 14px",
-                            width:"100%", cursor:"pointer", color:"white" }}>
-                          {w.icon && (
-                            <img src={w.icon} alt={w.name}
-                              style={{ width:28, height:28, borderRadius:6 }} />
-                          )}
-                          <span style={{ fontSize:14 }}>{w.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
+                ) : (
+                  modalSuiWallets.map((w) => (
+                    <button
+                      key={w.name}
+                      onClick={() => handleSuiConnectFromModal(w)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        background: C.card,
+                        border: `1px solid ${C.border}`,
+                        padding: "10px 12px",
+                        width: "100%",
+                        cursor: "pointer",
+                        color: C.text,
+                        fontFamily: "var(--font-jetbrains-mono)",
+                        textAlign: "left",
+                      }}
+                    >
+                      {w.icon && <img src={w.icon} alt={w.name} style={{ width: 22, height: 22 }} />}
+                      <span style={{ fontSize: 12 }}>{w.name}</span>
+                    </button>
+                  ))
+                )}
+              </SubPickerOverlay>
             )}
-
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
+// ── Tiny presentational helpers (kept local to dashboard) ────────────────────
+function WalletRow({ color, label, addr }: { color: string; label: string; addr: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ overflow: "hidden" }}>
+        <div style={{ fontSize: 9, color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.16em" }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: C.textDim, marginTop: 2 }}>
+          {addr.slice(0, 8)}…{addr.slice(-6)}
+        </div>
+      </div>
+      <button
+        onClick={() => navigator.clipboard.writeText(addr)}
+        style={{ background: "none", border: "none", color: C.mute2, cursor: "pointer", fontSize: 13, padding: "2px 6px" }}
+        title="Copy address"
+      >
+        ⧉
+      </button>
+    </div>
+  );
+}
+
+function ConnectedRow({
+  tagColor, tagLabel, addr, onDisconnect,
+}: { tagColor: string; tagLabel: string; addr: string; onDisconnect: () => void }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        background: C.card,
+        border: `1px solid ${tagColor}`,
+        padding: "9px 12px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            fontSize: 10,
+            color: tagColor,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            border: `1px solid ${tagColor}`,
+            padding: "1px 6px",
+          }}
+        >
+          {tagLabel}
+        </span>
+        <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--font-jetbrains-mono)" }}>
+          {addr.slice(0, 8)}…{addr.slice(-6)}
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ color: C.green, fontSize: 11, fontWeight: 600, letterSpacing: "0.08em" }}>● CONNECTED</span>
+        <button
+          onClick={onDisconnect}
+          style={{
+            background: C.redSoft,
+            border: `1px solid ${C.red}`,
+            color: C.red,
+            padding: "2px 8px",
+            fontSize: 10,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            fontFamily: "var(--font-jetbrains-mono)",
+          }}
+        >
+          Disconnect
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConnectButton({
+  onClick, label, tagColor, tagLabel,
+}: { onClick: () => void; label: string; tagColor: string; tagLabel: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        padding: "9px 12px",
+        width: "100%",
+        cursor: "pointer",
+        color: C.text,
+        textAlign: "left",
+        fontFamily: "var(--font-jetbrains-mono)",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          color: tagColor,
+          fontWeight: 700,
+          letterSpacing: "0.14em",
+          border: `1px solid ${tagColor}`,
+          padding: "1px 6px",
+        }}
+      >
+        {tagLabel}
+      </span>
+      <span style={{ fontSize: 12 }}>{label}</span>
+    </button>
+  );
+}
+
+function SubPickerOverlay({
+  title, onClose, accent, children,
+}: { title: string; onClose: () => void; accent: string; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(0,0,0,0.85)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          background: C.bg,
+          border: `1px solid ${accent}`,
+          padding: 18,
+          width: "85%",
+          maxWidth: 320,
+          fontFamily: "var(--font-jetbrains-mono)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: accent, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+            {title}
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              color: C.textDim,
+              background: "none",
+              border: `1px solid ${C.border}`,
+              cursor: "pointer",
+              fontSize: 11,
+              padding: "1px 8px",
+            }}
+          >
+            [X]
+          </button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{children}</div>
+      </div>
     </div>
   );
 }
