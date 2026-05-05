@@ -759,9 +759,7 @@ export default function Dashboard() {
                     style={{
                       display: "grid",
                       gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-                      gap: 1,
-                      background: C.border,
-                      border: `1px solid ${C.border}`,
+                      gap: 0,
                       marginBottom: 24,
                     }}
                   >
@@ -954,9 +952,7 @@ export default function Dashboard() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 1,
-                background: C.border,
-                border: `1px solid ${C.border}`,
+                gap: 0,
               }}
             >
               {[
@@ -969,6 +965,7 @@ export default function Dashboard() {
                   key={label}
                   style={{
                     background: C.card,
+                    border: `1px solid ${C.border}`,
                     padding: "20px 24px",
                   }}
                 >
@@ -1194,9 +1191,7 @@ export default function Dashboard() {
                   style={{
                     display: "flex",
                     flexDirection: "column",
-                    gap: 1,
-                    background: C.border,
-                    border: `1px solid ${C.border}`,
+                    gap: 0,
                   }}
                 >
                   {filtered.map((pos) => {
@@ -1227,7 +1222,8 @@ export default function Dashboard() {
                           gap: 16,
                           padding: 16,
                           background: isClosed ? C.cardSoft : C.card,
-                          border: "1px solid transparent",
+                          border: `1px solid ${C.border}`,
+                          marginTop: -1,
                           textDecoration: "none",
                           color: C.text,
                           cursor: "pointer",
@@ -1867,9 +1863,9 @@ export default function Dashboard() {
 
               {/* Wallet Balances + Lending shortcuts */}
               {hasWallet && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: C.border, border: `1px solid ${C.border}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
                   <Link href="/dashboard/tokens" style={{ textDecoration: "none", color: "inherit" }}>
-                    <div style={{ background: C.card, padding: 14 }}>
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, padding: 14 }}>
                       <div style={{ fontSize: 9, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>
                         ▸ Wallet Balances
                       </div>
@@ -1882,7 +1878,7 @@ export default function Dashboard() {
                     </div>
                   </Link>
                   <Link href="/dashboard/lending" style={{ textDecoration: "none", color: "inherit" }}>
-                    <div style={{ background: C.card, padding: 14 }}>
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: "none", padding: 14 }}>
                       <div style={{ fontSize: 9, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>
                         ▸ Lending / Borrowing
                       </div>

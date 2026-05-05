@@ -34,6 +34,7 @@ const PROTOCOL_LIST: { name: string; matchKeys: string[]; type: "lp" | "lending"
   { name: "Kamino",     matchKeys: ["Kamino"],    type: "lending" },
   { name: "Orca",       matchKeys: ["Orca"],      type: "lp" },
   { name: "Cetus",      matchKeys: ["Cetus"],     type: "lp" },
+  { name: "Bluefin",    matchKeys: ["Bluefin"],   type: "lp" },
 ];
 
 function truncate(addr: string, head = 6, tail = 4) {
