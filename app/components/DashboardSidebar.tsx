@@ -171,8 +171,10 @@ export default function DashboardSidebar({
                     style={{
                       width: 6,
                       height: 6,
-                      background: live ? C.green : C.mute3,
+                      background: live ? C.green : "transparent",
+                      border: live ? "none" : `1px solid rgba(0,255,65,0.25)`,
                       display: "inline-block",
+                      boxSizing: "border-box",
                     }}
                   />
                   {p.name}

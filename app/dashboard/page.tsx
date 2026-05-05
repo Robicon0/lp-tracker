@@ -107,9 +107,7 @@ export function getTokenColor(symbol: string): string {
 const C = {
   bg: "#000000",
   card: "#090909",
-  cardSoft: "#050505",
   border: "#1c1c1c",
-  borderSoft: "#111111",
   green: "#00ff41",
   greenSoft: "rgba(0,255,65,0.08)",
   amber: "#f59e0b",
@@ -229,7 +227,7 @@ function SectionHeader({ label, right }: { label: string; right?: React.ReactNod
     >
       <span style={{ color: C.green }}>//</span>
       <span>{label}</span>
-      <span style={{ flex: 1, height: 1, background: C.border }} />
+      <span style={{ flex: 1, height: 1, background: "rgba(0,255,65,0.12)" }} />
       {right}
     </div>
   );
@@ -248,7 +246,7 @@ const statusTagStyle = (status: "In Range" | "Out of Range" | "Closed"): CSSProp
   if (status === "Out of Range") {
     return { background: C.amberSoft, border: `1px solid ${C.amber}`, color: C.amber };
   }
-  return { background: "transparent", border: `1px solid ${C.mute3}`, color: C.mute2 };
+  return { background: "transparent", border: `1px solid ${C.border}`, color: C.mute2 };
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -527,7 +525,7 @@ export default function Dashboard() {
         @keyframes _spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
         .pos-row   { transition: border-color 0.15s, background 0.15s; }
-        .pos-row.in-range:hover  { border-color: ${C.green} !important; background:#0a0f0a !important; }
+        .pos-row.in-range:hover  { border-color: ${C.green} !important; }
         .pos-row.out-range:hover { border-color: ${C.amber} !important; }
         .pos-row.closed:hover    { border-color: ${C.mute3} !important; }
         .term-tab:hover          { color: ${C.green} !important; }
@@ -829,7 +827,7 @@ export default function Dashboard() {
                                   <span style={{ color: C.mute2, marginLeft: 4 }}>({pct.toFixed(1)}%)</span>
                                 </div>
                               </div>
-                              <div style={{ height: 3, background: C.border, overflow: "hidden" }}>
+                              <div style={{ height: 3, background: C.bg, border: `1px solid ${C.border}`, overflow: "hidden" }}>
                                 <div style={{ height: "100%", background: getChainColor(entry.chain), width: `${pct}%` }} />
                               </div>
                             </div>
@@ -1221,7 +1219,7 @@ export default function Dashboard() {
                           alignItems: "center",
                           gap: 16,
                           padding: 16,
-                          background: isClosed ? C.cardSoft : C.card,
+                          background: C.card,
                           border: `1px solid ${C.border}`,
                           marginTop: -1,
                           textDecoration: "none",
@@ -1300,7 +1298,7 @@ export default function Dashboard() {
                           <div
                             style={{
                               height: 6,
-                              background: C.border,
+                              background: C.bg,
                               border: `1px solid ${C.border}`,
                               overflow: "hidden",
                               marginBottom: 4,
@@ -1309,7 +1307,7 @@ export default function Dashboard() {
                             <div
                               style={{
                                 height: "100%",
-                                background: pos.fees > 0 ? C.green : C.mute3,
+                                background: pos.fees > 0 ? C.green : "transparent",
                                 width: `${pnlBarPct}%`,
                               }}
                             />
@@ -1345,7 +1343,8 @@ export default function Dashboard() {
                           <div
                             style={{
                               height: 4,
-                              background: C.border,
+                              background: C.bg,
+                              border: `1px solid ${C.border}`,
                               overflow: "hidden",
                               marginLeft: "auto",
                               maxWidth: 80,
@@ -1358,7 +1357,7 @@ export default function Dashboard() {
                                 background:
                                   health >= 100 ? C.green
                                   : health > 0  ? C.amber
-                                  : C.mute3,
+                                  : "transparent",
                               }}
                             />
                           </div>
