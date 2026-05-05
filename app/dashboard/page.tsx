@@ -531,6 +531,7 @@ export default function Dashboard() {
         .term-tab:hover          { color: ${C.green} !important; }
         .term-tab[data-active="true"]:hover { color: ${C.bg} !important; }
         .term-btn:hover          { background: ${C.greenSoft} !important; color: ${C.green} !important; border-color: ${C.green} !important; }
+        .lending-card:hover      { border-color: ${C.green} !important; }
         @media (max-width:1100px) {
           .pos-pnl   { display:none !important; }
         }
@@ -743,6 +744,208 @@ export default function Dashboard() {
               ))}
             </div>
           </section>
+
+          {/* ── Section: wallets + lending/borrowing row ──────────────────── */}
+          {mounted && (
+            <section
+              id="section-wallets"
+              style={{ padding: "28px 28px", borderBottom: `1px solid ${C.border}` }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+                  gap: 0,
+                }}
+              >
+                {/* WALLETS card */}
+                <div style={{ ...cardStyle }}>
+                  <SectionHeader label="connected_wallets" />
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {!hasWallet && (
+                      <div style={{ fontSize: 12, color: C.mute2, letterSpacing: "0.04em" }}>
+                        No wallet connected. Use ▸ MANAGE WALLETS above to connect.
+                      </div>
+                    )}
+
+                    {address && (
+                      <WalletCardRow
+                        tagColor="#00e5ff"
+                        tagLabel="EVM"
+                        addr={address}
+                        type="browser"
+                        onDisconnect={() => evmDisconnect()}
+                      />
+                    )}
+                    {solanaAddress && (
+                      <WalletCardRow
+                        tagColor="#9945ff"
+                        tagLabel="SOL"
+                        addr={solanaAddress}
+                        type="browser"
+                        onDisconnect={() => {
+                          setSolanaAddress(null);
+                          disconnectSolanaWallet();
+                        }}
+                      />
+                    )}
+                    {suiAddress && (
+                      <WalletCardRow
+                        tagColor="#4da2ff"
+                        tagLabel="SUI"
+                        addr={suiAddress}
+                        type="browser"
+                        onDisconnect={() => {
+                          setSuiAddress(null);
+                          disconnectSuiWallet();
+                        }}
+                      />
+                    )}
+
+                    {watchedWallets.map((w) => (
+                      <WalletCardRow
+                        key={w.address}
+                        tagColor={
+                          w.chain === "evm" ? "#00e5ff" :
+                          w.chain === "solana" ? "#9945ff" :
+                          w.chain === "sui" ? "#4da2ff" : C.mute2
+                        }
+                        tagLabel={w.chain.toUpperCase()}
+                        addr={w.address}
+                        type="watched"
+                        label={w.label}
+                        onRemove={() => removeWallet(w.address, w.chain)}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* LENDING / BORROWING card — clickable */}
+                <Link
+                  href="/dashboard/lending"
+                  style={{ textDecoration: "none", color: "inherit" }}
+                >
+                  <div
+                    style={{
+                      ...cardStyle,
+                      height: "100%",
+                      boxSizing: "border-box",
+                      cursor: "pointer",
+                    }}
+                    className="lending-card"
+                  >
+                    <SectionHeader
+                      label="lending_borrowing"
+                      right={
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: C.mute2,
+                            letterSpacing: "0.14em",
+                          }}
+                        >
+                          VIEW →
+                        </span>
+                      }
+                    />
+
+                    {!hasWallet ? (
+                      <div style={{ fontSize: 12, color: C.mute2, letterSpacing: "0.04em" }}>
+                        Connect a wallet to see lending positions.
+                      </div>
+                    ) : walletTokensLoading ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.mute2, fontSize: 12 }}>
+                        <span
+                          className="spin-icon"
+                          style={{
+                            width: 10,
+                            height: 10,
+                            border: `1px solid ${C.green}`,
+                            borderTopColor: "transparent",
+                            display: "inline-block",
+                          }}
+                        />
+                        Loading…
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          style={{
+                            fontSize: 32,
+                            fontWeight: 700,
+                            color: C.text,
+                            fontVariantNumeric: "tabular-nums",
+                            letterSpacing: "-0.02em",
+                            lineHeight: 1.1,
+                          }}
+                        >
+                          {fmt$(combinedLendingValue)}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: C.mute2,
+                            marginTop: 6,
+                            letterSpacing: "0.06em",
+                          }}
+                        >
+                          {combinedLendingCount > 0
+                            ? `${combinedLendingCount} position${combinedLendingCount === 1 ? "" : "s"}`
+                            : "No positions found"}
+                        </div>
+
+                        {/* Tokens shortcut row */}
+                        <div
+                          style={{
+                            marginTop: 16,
+                            paddingTop: 14,
+                            borderTop: `1px solid ${C.border}`,
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "baseline",
+                            gap: 8,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 9,
+                              letterSpacing: "0.18em",
+                              textTransform: "uppercase",
+                              color: C.mute2,
+                            }}
+                          >
+                            Wallet Balances
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 600,
+                              color: C.green,
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            {fmt$(totalTokenValue)}
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: C.mute2,
+                                fontWeight: 400,
+                                marginLeft: 6,
+                                letterSpacing: "0.06em",
+                              }}
+                            >
+                              · {tokenCount} token{tokenCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </Link>
+              </div>
+            </section>
+          )}
 
           {/* ── Section: charts (allocation + chain + history) ────────────── */}
           {mounted && (
@@ -2016,6 +2219,162 @@ export default function Dashboard() {
 }
 
 // ── Tiny presentational helpers ──────────────────────────────────────────────
+function WalletCardRow({
+  tagColor,
+  tagLabel,
+  addr,
+  type,
+  label,
+  onDisconnect,
+  onRemove,
+}: {
+  tagColor: string;
+  tagLabel: string;
+  addr: string;
+  type: "browser" | "watched";
+  label?: string;
+  onDisconnect?: () => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        padding: "9px 11px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden", flex: 1 }}>
+        <span
+          style={{
+            fontSize: 9,
+            color: tagColor,
+            fontWeight: 700,
+            letterSpacing: "0.16em",
+            border: `1px solid ${tagColor}`,
+            padding: "1px 6px",
+            flexShrink: 0,
+          }}
+        >
+          {tagLabel}
+        </span>
+        <div style={{ overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {label && (
+            <span style={{ fontSize: 11, color: C.text, fontWeight: 600, letterSpacing: "0.04em" }}>
+              {label}
+            </span>
+          )}
+          <span
+            style={{
+              fontSize: 11,
+              color: C.textDim,
+              fontFamily: "var(--font-jetbrains-mono)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {addr.slice(0, 8)}…{addr.slice(-6)}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <button
+          type="button"
+          title="Copy address"
+          onClick={() => navigator.clipboard.writeText(addr)}
+          style={{
+            background: "none",
+            border: `1px solid ${C.border}`,
+            color: C.mute2,
+            padding: "2px 7px",
+            fontSize: 11,
+            cursor: "pointer",
+            fontFamily: "var(--font-jetbrains-mono)",
+          }}
+        >
+          ⧉
+        </button>
+        {type === "browser" ? (
+          <span
+            style={{
+              fontSize: 9,
+              color: C.green,
+              letterSpacing: "0.14em",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            ● CONNECTED
+          </span>
+        ) : (
+          <span
+            style={{
+              fontSize: 9,
+              color: C.mute2,
+              letterSpacing: "0.14em",
+              fontWeight: 700,
+              border: `1px solid ${C.border}`,
+              padding: "1px 6px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            WATCHED
+          </span>
+        )}
+        {type === "browser" && onDisconnect && (
+          <button
+            type="button"
+            onClick={onDisconnect}
+            style={{
+              background: C.redSoft,
+              border: `1px solid ${C.red}`,
+              color: C.red,
+              padding: "3px 9px",
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "var(--font-jetbrains-mono)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Disconnect
+          </button>
+        )}
+        {type === "watched" && onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            title="Remove watched wallet"
+            style={{
+              background: C.redSoft,
+              border: `1px solid ${C.red}`,
+              color: C.red,
+              padding: "3px 9px",
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "var(--font-jetbrains-mono)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ConnectedRow({
   tagColor, tagLabel, addr, onDisconnect,
 }: { tagColor: string; tagLabel: string; addr: string; onDisconnect: () => void }) {
