@@ -20,8 +20,8 @@ import {
   PieChart,
   Pie,
   Cell,
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -41,44 +41,31 @@ const TIME_RANGES = [
 const STATUS_FILTERS = ["In Range", "Out of Range", "Closed", "All"] as const;
 type StatusFilter = typeof STATUS_FILTERS[number];
 
-const CHAIN_FILTERS = ["ALL", "EVM", "SOLANA", "SUI"] as const;
+const CHAIN_FILTERS = ["All", "EVM", "Solana", "Sui"] as const;
 type ChainFilter = typeof CHAIN_FILTERS[number];
 
-const EVM_CHAINS = new Set(["Base", "Ethereum", "Arbitrum", "Optimism", "Polygon", "Avalanche", "HyperEVM", "BNB Chain"]);
-function chainCategory(chain: string): "EVM" | "SOLANA" | "SUI" | "OTHER" {
-  if (chain === "Solana") return "SOLANA";
-  if (chain === "Sui")    return "SUI";
-  if (EVM_CHAINS.has(chain)) return "EVM";
+const EVM_CHAINS_SET = new Set(["Base", "Ethereum", "Arbitrum", "Optimism", "Polygon", "Avalanche", "HyperEVM", "BNB Chain"]);
+function chainCategory(chain: string): "EVM" | "Solana" | "Sui" | "OTHER" {
+  if (chain === "Solana") return "Solana";
+  if (chain === "Sui")    return "Sui";
+  if (EVM_CHAINS_SET.has(chain)) return "EVM";
   return "OTHER";
 }
 
 const PROTOCOL_COLORS: Record<string, string> = {
-  Aerodrome:    "#22c55e",
-  "Uniswap V3": "#a855f7",
-  Velodrome:    "#3b82f6",
-  Orca:         "#f59e0b",
-  Raydium:      "#ef4444",
-  Cetus:        "#06b6d4",
-  Bluefin:      "#0ea5e9",
-  Momentum:     "#84cc16",
-  HyperSwap:    "#f97316",
-  KittenSwap:   "#ec4899",
-  ProjectX:     "#8b5cf6",
-  PRJX:         "#8b5cf6",
-  PancakeSwap:  "#fbbf24",
-};
-
-const CHAIN_COLORS: Record<string, string> = {
-  Base:        "#0052ff",
-  Ethereum:    "#627eea",
-  Arbitrum:    "#2d9cdb",
-  Optimism:    "#ff0420",
-  Polygon:     "#8247e5",
-  Avalanche:   "#e84142",
-  Solana:      "#9945ff",
-  Sui:         "#6fbcf0",
-  HyperEVM:    "#00d4aa",
-  "BNB Chain": "#f0b90b",
+  Aerodrome:    "#00ff41",
+  "Uniswap V3": "#00d4ff",
+  Velodrome:    "#3d9fff",
+  Orca:         "#ffaa00",
+  Raydium:      "#ff3355",
+  Cetus:        "#9945ff",
+  Bluefin:      "#3d9fff",
+  Momentum:     "#00ff41",
+  HyperSwap:    "#ffaa00",
+  KittenSwap:   "#9945ff",
+  ProjectX:     "#9945ff",
+  PRJX:         "#9945ff",
+  PancakeSwap:  "#ffaa00",
 };
 
 const STABLES_SET = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
@@ -104,29 +91,50 @@ export function getTokenColor(symbol: string): string {
   return TOKEN_COLORS[symbol] ?? "#6B7280";
 }
 
+// ── Terminal palette (matches dashboard.html exactly) ─────────────────────────
 const C = {
-  bg: "#000000",
-  card: "#090909",
-  border: "#1c1c1c",
-  green: "#00ff41",
-  greenSoft: "rgba(0,255,65,0.08)",
-  amber: "#f59e0b",
-  amberSoft: "rgba(245,158,11,0.08)",
-  red: "#ff3355",
-  redSoft: "rgba(255,51,85,0.08)",
-  text: "#e8e8e8",
-  textDim: "#c8c8c8",
-  muted: "#7a7a7a",
-  mute2: "#555555",
-  mute3: "#333333",
+  bg:         "#050505",
+  bg1:        "#090909",
+  bg2:        "#0d0d0d",
+  bg3:        "#121212",
+  bg4:        "#171717",
+  border:     "#1c1c1c",
+  borderHi:   "#262626",
+  borderGlow: "#2e2e2e",
+  text:       "#8a8a8a",
+  textMid:    "#b4b4b4",
+  textBright: "#e8e8e8",
+  textWhite:  "#f5f5f5",
+  green:      "#00ff41",
+  green2:     "#00e535",
+  greenDim:   "#00b82a",
+  greenFaint: "rgba(0,255,65,0.06)",
+  greenGlow:  "rgba(0,255,65,0.18)",
+  cyan:       "#00d4ff",
+  cyanDim:    "#0099bb",
+  cyanFaint:  "rgba(0,212,255,0.07)",
+  red:        "#ff3355",
+  redFaint:   "rgba(255,51,85,0.08)",
+  purple:     "#9945ff",
+  blue:       "#3d9fff",
+  amber:      "#ffaa00",
 } as const;
 
+const FONT = "'JetBrains Mono','Courier New',monospace";
+
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.015) 3px, rgba(0,0,0,0.015) 4px)";
+
+// ── Chain UI tokens ───────────────────────────────────────────────────────────
+const CHAIN_DISPLAY: Record<"EVM" | "Solana" | "Sui", { color: string; faint: string; border: string }> = {
+  EVM:    { color: C.cyan,   faint: "rgba(0,212,255,0.06)",  border: "rgba(0,212,255,0.27)"  },
+  Solana: { color: C.purple, faint: "rgba(153,69,255,0.06)", border: "rgba(153,69,255,0.27)" },
+  Sui:    { color: C.blue,   faint: "rgba(61,159,255,0.06)", border: "rgba(61,159,255,0.27)" },
+};
 
 // ── TokenCircle ───────────────────────────────────────────────────────────────
 function TokenCircle({
-  symbol, size = 32, style,
+  symbol, size = 22, style,
 }: { symbol: string; size?: number; style?: CSSProperties }) {
   const [imgError, setImgError] = useState(false);
   const logoUrl = getTokenLogo(symbol);
@@ -148,7 +156,7 @@ function TokenCircle({
     <div style={{
       ...shared, background: color,
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.35, fontWeight: 700, color: "white",
+      fontSize: size * 0.4, fontWeight: 700, color: "white",
     }}>
       {symbol.charAt(0).toUpperCase()}
     </div>
@@ -160,11 +168,7 @@ function getProtocolColor(protocol: string): string {
   for (const [key, color] of Object.entries(PROTOCOL_COLORS)) {
     if (protocol.includes(key)) return color;
   }
-  return "#6b7280";
-}
-
-function getChainColor(chain: string): string {
-  return CHAIN_COLORS[chain] ?? "#6b7280";
+  return "#9945ff";
 }
 
 function getManageUrl(protocol: string): string {
@@ -204,50 +208,37 @@ function getTickPriceUSD(tick: number, pos: AerodromePosition): number | null {
   } catch { return null; }
 }
 
-function healthPctFor(status: "In Range" | "Out of Range" | "Closed"): number {
-  if (status === "In Range") return 100;
-  if (status === "Out of Range") return 50;
+function healthFor(status: "In Range" | "Out of Range" | "Closed"): number {
+  if (status === "In Range")     return 90;
+  if (status === "Out of Range") return 55;
   return 0;
 }
-
-// ── Reusable bits ─────────────────────────────────────────────────────────────
-function SectionHeader({ label, right }: { label: string; right?: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        marginBottom: 16,
-        fontSize: 10,
-        letterSpacing: "0.2em",
-        textTransform: "uppercase",
-        color: C.mute2,
-      }}
-    >
-      <span style={{ color: C.green }}>//</span>
-      <span>{label}</span>
-      <span style={{ flex: 1, height: 1, background: "rgba(0,255,65,0.12)" }} />
-      {right}
-    </div>
-  );
+function healthColor(h: number): string {
+  if (h >= 80) return C.green;
+  if (h >= 60) return C.amber;
+  return C.red;
 }
 
-const cardStyle: CSSProperties = {
-  background: C.card,
-  border: `1px solid ${C.border}`,
-  padding: 20,
-};
+function tokenInitials(pair: string): string {
+  const parts = pair.split("/").map((s) => s.trim());
+  return `${parts[0]?.[0] ?? "?"}${parts[1]?.[0] ?? "?"}`;
+}
 
-const statusTagStyle = (status: "In Range" | "Out of Range" | "Closed"): CSSProperties => {
-  if (status === "In Range") {
-    return { background: "rgba(0,255,65,0.08)", border: `1px solid ${C.green}`, color: C.green };
-  }
-  if (status === "Out of Range") {
-    return { background: C.amberSoft, border: `1px solid ${C.amber}`, color: C.amber };
-  }
-  return { background: "transparent", border: `1px solid ${C.border}`, color: C.mute2 };
-};
+function chainInfoFromConnected(addr: string | null | undefined, kind: "EVM" | "SOL" | "SUI") {
+  if (!addr) return null;
+  const colour =
+    kind === "EVM" ? C.cyan :
+    kind === "SOL" ? C.purple :
+    C.blue;
+  const chains =
+    kind === "EVM" ? "Ethereum · Base · Arbitrum" :
+    kind === "SOL" ? "Solana Mainnet" :
+    "Sui Network";
+  const name = kind === "EVM" ? "EVM Wallet"
+             : kind === "SOL" ? "Solana Wallet"
+             : "Sui Wallet";
+  return { colour, chains, name, addr };
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
@@ -298,11 +289,17 @@ export default function Dashboard() {
   const combinedLendingValue = totalLendingValue + externalLendingValue;
   const combinedLendingCount = lendingCount + externalLendingCount;
 
-  // Names of lending protocols the user actually has positions in (drives sidebar live dots)
   const lendingProtocolNames = useMemo(
     () => Array.from(new Set(externalLendingPositions.map((p) => p.protocol))),
     [externalLendingPositions],
   );
+
+  // Top 3 lending positions for the Lend & Borrow pane breakdown
+  const topLending = useMemo(() => {
+    return [...externalLendingPositions]
+      .sort((a, b) => b.totalSupplied - a.totalSupplied)
+      .slice(0, 3);
+  }, [externalLendingPositions]);
 
   // Manage Wallets modal state
   const [showManageWallets, setShowManageWallets] = useState(false);
@@ -316,8 +313,9 @@ export default function Dashboard() {
   const [editLabelValue, setEditLabelValue] = useState("");
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("In Range");
-  const [chainFilter, setChainFilter] = useState<ChainFilter>("ALL");
+  const [chainFilter, setChainFilter] = useState<ChainFilter>("All");
   const [activeSection, setActiveSection] = useState<NavSection>("overview");
+  const [chartTab, setChartTab] = useState<typeof TIME_RANGES[number]["key"]>("30D");
 
   // "Updated X ago" ticker
   const [secondsAgo, setSecondsAgo] = useState(0);
@@ -338,7 +336,7 @@ export default function Dashboard() {
   const filtered = useMemo(() => {
     let result = allPositions;
     if (statusFilter !== "All") result = result.filter((p) => effectiveStatus(p) === statusFilter);
-    if (chainFilter !== "ALL") result = result.filter((p) => chainCategory(p.chain) === chainFilter);
+    if (chainFilter !== "All") result = result.filter((p) => chainCategory(p.chain) === chainFilter);
     const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1, Closed: 2 };
     return [...result].sort(
       (a, b) => (STATUS_ORDER[effectiveStatus(a)] ?? 1) - (STATUS_ORDER[effectiveStatus(b)] ?? 1),
@@ -364,11 +362,12 @@ export default function Dashboard() {
     return w > 0 ? active.reduce((s, p) => s + p.apy * p.value, 0) / w : null;
   }, [allPositions]);
 
-  // Simple unweighted average APY (for the "Avg APY" header column)
-  const avgApySimple = useMemo(() => {
-    const active = allPositions.filter((p) => p.value > 0 && p.apy > 0);
+  // Composite portfolio health (avg of per-position health)
+  const portfolioHealth = useMemo(() => {
+    const active = allPositions.filter((p) => p.value > 0);
     if (!active.length) return null;
-    return active.reduce((s, p) => s + p.apy, 0) / active.length;
+    const sum = active.reduce((s, p) => s + healthFor(effectiveStatus(p)), 0);
+    return sum / active.length;
   }, [allPositions]);
 
   const protocolBreakdown = useMemo(() => {
@@ -379,17 +378,33 @@ export default function Dashboard() {
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [allPositions]);
 
-  const chainBreakdown = useMemo(() => {
-    const m: Record<string, number> = {};
+  // Group chains into EVM / Solana / Sui buckets for the chain distribution row
+  const chainGrouped = useMemo(() => {
+    const m: Record<"EVM" | "Solana" | "Sui", { value: number; chains: Set<string> }> = {
+      EVM:    { value: 0, chains: new Set<string>() },
+      Solana: { value: 0, chains: new Set<string>() },
+      Sui:    { value: 0, chains: new Set<string>() },
+    };
     for (const p of allPositions) {
-      if (p.value > 0) m[p.chain] = (m[p.chain] ?? 0) + p.value;
+      if (p.value <= 0) continue;
+      const cat = chainCategory(p.chain);
+      if (cat === "OTHER") continue;
+      m[cat].value += p.value;
+      m[cat].chains.add(p.chain === "Solana" ? "Mainnet" : p.chain === "Sui" ? "Mainnet" : p.chain);
     }
-    return Object.entries(m).map(([chain, value]) => ({ chain, value })).sort((a, b) => b.value - a.value);
+    const total = m.EVM.value + m.Solana.value + m.Sui.value;
+    return (Object.keys(m) as Array<"EVM" | "Solana" | "Sui">)
+      .map((name) => ({
+        name,
+        value: m[name].value,
+        chains: Array.from(m[name].chains).join(" · ") || "—",
+        pct: total > 0 ? (m[name].value / total) * 100 : 0,
+      }))
+      .filter((r) => r.value > 0);
   }, [allPositions]);
 
-  const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
-  const activeRange    = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
+  const activeRange    = TIME_RANGES.find((r) => r.key === chartTab) ?? TIME_RANGES[2];
   const rangeCutoff    = Date.now() - activeRange.ms;
   const rangedHistory  = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
   const effectiveHistory = rangedHistory.length >= 2 ? rangedHistory : portfolioHistory;
@@ -402,9 +417,22 @@ export default function Dashboard() {
   const chartPnlAvailable = effectiveHistory.length >= 2 && chartBaseline > 0;
   const chartPnlDollar = chartPnlAvailable ? totalValue - chartBaseline : 0;
   const chartPnlPct    = chartPnlAvailable ? (chartPnlDollar / chartBaseline) * 100 : 0;
+  const peakValue = effectiveHistory.length > 0
+    ? Math.max(...effectiveHistory.map((s) => s.totalValue))
+    : totalValue;
 
   const fmt$ = (n: number, dec = 2) =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
+
+  // Split a $ value into integer and cents pieces for the page-header big number
+  const splitDollars = (n: number): { whole: string; cents: string } => {
+    const fixed = n.toFixed(2);
+    const [w, c] = fixed.split(".");
+    return {
+      whole: Number(w).toLocaleString("en-US"),
+      cents: c ?? "00",
+    };
+  };
 
   const exportCSV = () => {
     const rows = filtered
@@ -426,24 +454,18 @@ export default function Dashboard() {
         uniqueChains,
         totalPositions: allPositions.length,
         dailyCashflow,
-        avgApyWeighted: avgApr,
-        avgApySimple,
+        avgApy: avgApr,
+        portfolioHealth,
         totalTokenValue,
         combinedLendingValue,
         tokenCount,
         combinedLendingCount,
       },
       protocolBreakdown,
-      chainBreakdown,
+      chainGrouped,
       positions: allPositions.map((p) => ({
-        id: p.id,
-        pair: p.pair,
-        protocol: p.protocol,
-        chain: p.chain,
-        value: p.value,
-        apy: p.apy,
-        fees: p.fees,
-        status: effectiveStatus(p),
+        id: p.id, pair: p.pair, protocol: p.protocol, chain: p.chain,
+        value: p.value, apy: p.apy, fees: p.fees, status: effectiveStatus(p),
       })),
       lendingPositions: externalLendingPositions,
     };
@@ -505,62 +527,85 @@ export default function Dashboard() {
     }
   }
 
+  const splitTotal = splitDollars(totalValue);
+
   // Suppress unused-var lint
   void secondsAgo;
   void getTickPriceUSD;
+  void tokenInitials;
+
+  // Build wallet rows for the Wallets pane in row 1
+  const walletPaneRows = useMemo(() => {
+    const rows: Array<{ key: string; color: string; name: string; addr: string; sub: string; type: "browser" | "watched"; chain?: WatchedWalletChain; }> = [];
+    if (address)        { const i = chainInfoFromConnected(address, "EVM")!;        rows.push({ key: address,        color: i.colour, name: i.name, addr: i.addr, sub: i.chains, type: "browser", chain: "evm"    }); }
+    if (solanaAddress)  { const i = chainInfoFromConnected(solanaAddress, "SOL")!;  rows.push({ key: solanaAddress,  color: i.colour, name: i.name, addr: i.addr, sub: i.chains, type: "browser", chain: "solana" }); }
+    if (suiAddress)     { const i = chainInfoFromConnected(suiAddress, "SUI")!;     rows.push({ key: suiAddress,     color: i.colour, name: i.name, addr: i.addr, sub: i.chains, type: "browser", chain: "sui"    }); }
+    for (const w of watchedWallets) {
+      const colour = w.chain === "evm" ? C.cyan : w.chain === "solana" ? C.purple : w.chain === "sui" ? C.blue : C.text;
+      const sub = w.chain === "evm" ? "EVM Watched"
+                : w.chain === "solana" ? "Solana Watched"
+                : w.chain === "sui" ? "Sui Watched"
+                : "Watched";
+      rows.push({ key: w.address, color: colour, name: w.label ?? "Watched", addr: w.address, sub, type: "watched", chain: w.chain });
+    }
+    return rows;
+  }, [address, solanaAddress, suiAddress, watchedWallets]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
       style={{
-        background: C.bg,
+        display: "flex",
+        flexDirection: "column",
         minHeight: "100vh",
-        color: C.textDim,
-        fontFamily: "var(--font-jetbrains-mono), 'Courier New', monospace",
-        fontSize: 13,
-        lineHeight: 1.6,
+        background: C.bg,
+        color: C.text,
+        fontFamily: FONT,
+        fontSize: 12,
+        lineHeight: 1.5,
+        overflowX: "hidden",
       }}
     >
       <style>{`
-        @keyframes _spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+        @keyframes _spin  { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+        @keyframes _pulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+        @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
-        .pos-row   { transition: border-color 0.15s, background 0.15s; }
-        .pos-row.in-range:hover  { border-color: ${C.green} !important; }
-        .pos-row.out-range:hover { border-color: ${C.amber} !important; }
-        .pos-row.closed:hover    { border-color: ${C.mute3} !important; }
-        .term-tab:hover          { color: ${C.green} !important; }
-        .term-tab[data-active="true"]:hover { color: ${C.bg} !important; }
-        .term-btn:hover          { background: ${C.greenSoft} !important; color: ${C.green} !important; border-color: ${C.green} !important; }
-        .lending-card:hover      { border-color: ${C.green} !important; }
-        @media (max-width:1100px) {
-          .pos-pnl   { display:none !important; }
-        }
-        @media (max-width:900px) {
-          .pos-health{ display:none !important; }
-        }
-        @media (max-width:760px) {
-          .hero-big-num { font-size:36px !important; letter-spacing:-1px !important; }
-          .pos-grid    { grid-template-columns: 1.6fr 1fr 1fr 110px 90px !important; }
-          .pos-apr     { display:none !important; }
-        }
-        @media (max-width:520px) {
-          .pos-grid    { grid-template-columns: 1.6fr 1fr 90px !important; }
-          .pos-val-fees{ display:none !important; }
-          .pos-manage  { display:none !important; }
-        }
+        .ptable tbody tr { transition: background 0.1s; }
+        .ptable tbody tr:hover td { background: rgba(255,255,255,0.013); }
+        .pos-row { transition: background 0.1s; }
+        .pos-row:hover { background: rgba(255,255,255,0.013); }
+        .nav-tab-link:hover { color: ${C.textMid} !important; background: ${C.bg2} !important; }
+        .filter-pill { transition: all 0.12s; }
+        .filter-pill:hover { color: ${C.textMid}; border-color: ${C.border}; }
+        .ct-tab { transition: all 0.1s; }
+        .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
+        .manage-btn:hover { border-color: ${C.cyanDim} !important; color: ${C.cyan} !important; background: ${C.cyanFaint} !important; }
+        .pane-link:hover { color: ${C.green}; }
+        .lending-card:hover { border-color: ${C.green} !important; }
+        .term-btn:hover { color: ${C.green} !important; border-color: ${C.borderGlow} !important; background: ${C.bg2} !important; }
+        .save-btn:hover { background: ${C.green2} !important; box-shadow: 0 4px 20px rgba(0,255,65,0.2); }
+        .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+        .scroll-thin::-webkit-scrollbar-thumb { background: ${C.borderHi}; }
+        .anim-fade { animation: _fadeUp 0.45s ease both; }
       `}</style>
 
       {/* Scanline overlay */}
       <div
         aria-hidden
-        className="fixed inset-0 pointer-events-none z-[9999]"
-        style={{ background: SCANLINE_BG }}
+        style={{
+          position: "fixed",
+          inset: 0,
+          pointerEvents: "none",
+          zIndex: 9998,
+          background: SCANLINE_BG,
+        }}
       />
 
       <TerminalNavbar />
 
       {/* Layout: sidebar + main */}
-      <div style={{ display: "flex", alignItems: "flex-start", minHeight: "calc(100vh - 52px)" }}>
+      <div style={{ display: "flex", flex: 1, minHeight: "calc(100vh - 52px)" }}>
         <DashboardSidebar
           activeSection={activeSection}
           onSectionChange={handleSectionChange}
@@ -573,730 +618,862 @@ export default function Dashboard() {
           onAddWallet={() => setShowManageWallets(true)}
         />
 
-        <main style={{ flex: 1, minWidth: 0 }}>
-          {/* ── Section: overview ─────────────────────────────────────────── */}
+        <main className="scroll-thin" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
+
+          {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
           <section
             id="section-overview"
+            className="anim-fade"
             style={{
-              padding: "32px 28px 28px",
+              padding: "36px 40px 28px",
               borderBottom: `1px solid ${C.border}`,
+              background: `linear-gradient(180deg, ${C.bg1} 0%, ${C.bg} 100%)`,
+              position: "relative",
+              overflow: "hidden",
             }}
           >
-            <SectionHeader
-              label="portfolio_overview.live"
-              right={
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 10,
-                    color: C.green,
-                    letterSpacing: "0.1em",
-                  }}
-                >
-                  <span
-                    className="animate-pulse"
-                    style={{ width: 5, height: 5, background: C.green, display: "inline-block" }}
-                  />
-                  LIVE
-                </span>
-              }
+            <div
+              aria-hidden
+              style={{
+                position: "absolute", right: -40, top: -40, width: 300, height: 300,
+                background: "radial-gradient(circle, rgba(0,255,65,0.04) 0%, transparent 70%)",
+                pointerEvents: "none",
+              }}
             />
 
-            <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div
+              style={{
+                fontSize: 9,
+                color: C.text,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                marginBottom: 10,
+                opacity: 0.6,
+              }}
+            >
+              <span style={{ color: C.green, opacity: 1 }}>// </span>
+              total_portfolio_value · <span style={{ color: C.green, opacity: 1 }}>updated {dataUpdatedAt > 0 ? `${secondsAgo}s ago` : "—"}</span>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                justifyContent: "space-between",
+                marginBottom: 28,
+                gap: 16,
+                flexWrap: "wrap",
+              }}
+            >
               <div>
-                <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: C.mute2, marginBottom: 8 }}>
-                  Total Portfolio Value
-                </div>
                 <div
-                  className="hero-big-num"
                   style={{
-                    fontSize: "clamp(40px, 5.4vw, 72px)",
+                    fontSize: 56,
                     fontWeight: 700,
-                    color: C.text,
-                    letterSpacing: "-0.02em",
-                    lineHeight: 1.05,
+                    color: C.textWhite,
+                    letterSpacing: "-0.04em",
+                    lineHeight: 1,
+                    textShadow: "0 0 60px rgba(0,255,65,0.08)",
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {fmt$(totalValue)}
+                  ${splitTotal.whole}
+                  <span style={{ fontSize: 32, color: C.textMid, fontWeight: 500 }}>.{splitTotal.cents}</span>
                 </div>
+                {chartPnlAvailable && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 10,
+                      fontSize: 12,
+                      color: chartPnlDollar >= 0 ? C.green : C.red,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{chartPnlDollar >= 0 ? "↑" : "↓"}</span>
+                    <span>{chartPnlDollar >= 0 ? "+" : "-"}{fmt$(Math.abs(chartPnlDollar))}</span>
+                    <span style={{ color: C.text, fontSize: 10, marginLeft: 4, opacity: 0.6 }}>
+                      {chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(1)}% ({activeRange.label.replace("in last ", "")})
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, alignSelf: "flex-end" }}>
                 <button
                   type="button"
                   className="term-btn"
                   onClick={() => { if (!isFetching) refetch(); }}
                   aria-disabled={isFetching}
                   style={{
-                    background: C.card,
-                    border: `1px solid ${C.border}`,
-                    color: C.textDim,
-                    padding: "9px 16px",
-                    fontSize: 11,
+                    background: "transparent",
+                    border: `1px solid ${C.borderHi}`,
+                    color: C.text,
+                    padding: "9px 20px",
+                    fontSize: 10,
+                    fontWeight: 600,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
-                    fontFamily: "var(--font-jetbrains-mono)",
                     cursor: isFetching ? "not-allowed" : "pointer",
-                    opacity: isFetching ? 0.6 : 1,
+                    fontFamily: FONT,
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: 6,
+                    opacity: isFetching ? 0.6 : 1,
                   }}
                 >
                   <span className={isFetching ? "spin-icon" : ""}>↻</span>
-                  {isFetching ? "REFRESHING…" : "REFRESH"}
+                  {isFetching ? "Refreshing" : "Refresh"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowManageWallets(true)}
+                  className="term-btn"
                   style={{
-                    background: C.card,
-                    border: `1px solid ${C.border}`,
-                    color: C.textDim,
-                    padding: "9px 16px",
-                    fontSize: 11,
+                    background: "transparent",
+                    border: `1px solid ${C.borderHi}`,
+                    color: C.text,
+                    padding: "9px 20px",
+                    fontSize: 10,
+                    fontWeight: 600,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
-                    fontFamily: "var(--font-jetbrains-mono)",
                     cursor: "pointer",
+                    fontFamily: FONT,
                   }}
-                  className="term-btn"
                 >
-                  ▸ Manage Wallets
+                  ▸ Wallets
                 </button>
                 <button
                   type="button"
                   onClick={saveReport}
+                  className="save-btn"
                   style={{
                     background: C.green,
-                    border: `1px solid ${C.green}`,
+                    border: "none",
                     color: "#000",
-                    padding: "9px 16px",
-                    fontSize: 11,
+                    padding: "9px 20px",
+                    fontSize: 10,
                     fontWeight: 700,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
-                    fontFamily: "var(--font-jetbrains-mono)",
                     cursor: "pointer",
+                    fontFamily: FONT,
+                    transition: "all 0.15s",
                   }}
-                  title="Download a JSON snapshot of the full dashboard state"
+                  title="Download a JSON snapshot of the dashboard state"
                 >
-                  ▸ Save Report
+                  ↓ Save Report
                 </button>
               </div>
             </div>
 
-            {/* 6-column metric strip */}
-            <div
-              style={{
-                marginTop: 24,
-                borderTop: `1px solid ${C.border}`,
-                paddingTop: 18,
-                display: "grid",
-                gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-                gap: 0,
-              }}
-            >
+            {/* 4 stat tiles */}
+            <div style={{ display: "flex", gap: 0 }}>
               {[
-                { label: "Positions",   value: String(allPositions.length),                                 color: C.text },
-                { label: "Chains",      value: uniqueChains > 0 ? String(uniqueChains) : "—",               color: C.text },
-                { label: "APY",         value: avgApr !== null      ? `${avgApr.toFixed(1)}%`      : "N/A", color: C.green },
-                { label: "Avg APY",     value: avgApySimple !== null ? `${avgApySimple.toFixed(1)}%` : "N/A", color: C.green },
-                { label: "Uncollected", value: totalFees > 0 ? fmt$(totalFees) : "—",                       color: C.green },
-                { label: "Daily Yield", value: hasCashflowData ? `+${fmt$(dailyCashflow)}` : "N/A",         color: C.green },
-              ].map(({ label, value, color }, i, arr) => (
+                {
+                  label: "Positions",
+                  val:   String(allPositions.length),
+                  cls:   "white" as const,
+                  sub:   uniqueChains > 0 ? `across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}` : "—",
+                },
+                {
+                  label: "Avg APY",
+                  val:   avgApr !== null ? `${avgApr.toFixed(1)}%` : "N/A",
+                  cls:   "green" as const,
+                  sub:   "value-weighted",
+                },
+                {
+                  label: "Uncollected Fees",
+                  val:   totalFees > 0 ? fmt$(totalFees) : "—",
+                  cls:   totalFees > 0 ? "green" as const : "white" as const,
+                  sub:   `${allPositions.filter((p) => p.fees > 0).length} positions claiming`,
+                },
+                {
+                  label: "Daily Yield",
+                  val:   hasCashflowData ? `+${fmt$(dailyCashflow)}` : "N/A",
+                  cls:   "green" as const,
+                  sub:   hasCashflowData ? `${fmt$(dailyCashflow * 30, 0)}/mo est.` : "—",
+                },
+              ].map((s, i, arr) => (
                 <div
-                  key={label}
+                  key={s.label}
                   style={{
-                    paddingLeft: i === 0 ? 0 : 16,
-                    paddingRight: i === arr.length - 1 ? 0 : 16,
+                    paddingLeft: i === 0 ? 0 : 32,
+                    paddingRight: i === arr.length - 1 ? 0 : 32,
                     borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 9,
-                      letterSpacing: "0.16em",
-                      textTransform: "uppercase",
-                      color: C.mute2,
-                      marginBottom: 4,
-                    }}
-                  >
-                    {label}
+                  <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6 }}>
+                    {s.label}
                   </div>
                   <div
                     style={{
-                      fontSize: 18,
-                      fontWeight: 600,
-                      color,
+                      fontSize: 16,
+                      fontWeight: 700,
+                      letterSpacing: "-0.01em",
+                      color:
+                        s.cls === "green" ? C.green :
+                        s.cls === "white" ? C.textWhite : C.textMid,
+                      textShadow: s.cls === "green" ? "0 0 16px rgba(0,255,65,0.3)" : "none",
                       fontVariantNumeric: "tabular-nums",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
                     }}
                   >
-                    {value}
+                    {s.val}
                   </div>
+                  <div style={{ fontSize: 9, color: C.text, opacity: 0.5 }}>{s.sub}</div>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* ── Section: wallets + lending/borrowing row ──────────────────── */}
-          {mounted && (
-            <section
-              id="section-wallets"
-              style={{ padding: "28px 28px", borderBottom: `1px solid ${C.border}` }}
+          {/* ── ROW 1: Wallets · Cashflow · Lend & Borrow ───────────────── */}
+          <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexWrap: "wrap" }} className="anim-fade">
+            {/* WALLETS */}
+            <div
+              style={{
+                flex: "1 1 320px",
+                borderRight: `1px solid ${C.border}`,
+                padding: "24px 28px",
+                minWidth: 0,
+              }}
             >
+              <PaneHead title="wallets" linkLabel="+ Add wallet" onLinkClick={() => setShowManageWallets(true)} />
+
+              {!hasWallet && mounted && (
+                <div style={{ fontSize: 11, color: C.text, opacity: 0.5, padding: "12px 0" }}>
+                  No wallet connected — use ▸ Wallets above.
+                </div>
+              )}
+
+              {walletPaneRows.map((w) => (
+                <div
+                  key={w.key}
+                  className="pos-row"
+                  onClick={() => setShowManageWallets(true)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "11px 0",
+                    borderBottom: `1px solid ${C.border}`,
+                    gap: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ width: 2, height: 36, background: w.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1, overflow: "hidden" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: C.textBright, letterSpacing: "0.02em" }}>
+                      {w.name}
+                    </div>
+                    <div style={{ fontSize: 9, color: C.text, marginTop: 2, fontStyle: "italic", opacity: 0.6 }}>
+                      {w.addr.slice(0, 6)}…{w.addr.slice(-4)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, color: C.textMid, opacity: 0.7 }}>
+                      {w.type === "browser" ? "● Connected" : "Watched"}
+                    </div>
+                    <div style={{ fontSize: 9, color: C.text, marginTop: 2, opacity: 0.5 }}>
+                      {w.sub}
+                    </div>
+                  </div>
+                  <div style={{ color: C.borderGlow, fontSize: 12 }}>▸</div>
+                </div>
+              ))}
+            </div>
+
+            {/* CASHFLOW */}
+            <div
+              style={{
+                flex: "1 1 320px",
+                borderRight: `1px solid ${C.border}`,
+                padding: "24px 28px",
+                minWidth: 0,
+              }}
+            >
+              <PaneHead title="estimated_net_cashflow" />
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
-                  gap: 0,
+                  marginBottom: 6,
+                  fontSize: 9,
+                  color: C.text,
+                  opacity: 0.4,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
                 }}
               >
-                {/* WALLETS card */}
-                <div style={{ ...cardStyle }}>
-                  <SectionHeader label="connected_wallets" />
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {!hasWallet && (
-                      <div style={{ fontSize: 12, color: C.mute2, letterSpacing: "0.04em" }}>
-                        No wallet connected. Use ▸ MANAGE WALLETS above to connect.
-                      </div>
-                    )}
-
-                    {address && (
-                      <WalletCardRow
-                        tagColor="#00e5ff"
-                        tagLabel="EVM"
-                        addr={address}
-                        type="browser"
-                        onDisconnect={() => evmDisconnect()}
-                      />
-                    )}
-                    {solanaAddress && (
-                      <WalletCardRow
-                        tagColor="#9945ff"
-                        tagLabel="SOL"
-                        addr={solanaAddress}
-                        type="browser"
-                        onDisconnect={() => {
-                          setSolanaAddress(null);
-                          disconnectSolanaWallet();
-                        }}
-                      />
-                    )}
-                    {suiAddress && (
-                      <WalletCardRow
-                        tagColor="#4da2ff"
-                        tagLabel="SUI"
-                        addr={suiAddress}
-                        type="browser"
-                        onDisconnect={() => {
-                          setSuiAddress(null);
-                          disconnectSuiWallet();
-                        }}
-                      />
-                    )}
-
-                    {watchedWallets.map((w) => (
-                      <WalletCardRow
-                        key={w.address}
-                        tagColor={
-                          w.chain === "evm" ? "#00e5ff" :
-                          w.chain === "solana" ? "#9945ff" :
-                          w.chain === "sui" ? "#4da2ff" : C.mute2
-                        }
-                        tagLabel={w.chain.toUpperCase()}
-                        addr={w.address}
-                        type="watched"
-                        label={w.label}
-                        onRemove={() => removeWallet(w.address, w.chain)}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* LENDING / BORROWING card — clickable */}
-                <Link
-                  href="/dashboard/lending"
-                  style={{ textDecoration: "none", color: "inherit" }}
-                >
+                per day
+              </div>
+              <div
+                style={{
+                  fontSize: 36,
+                  fontWeight: 700,
+                  color: C.green,
+                  letterSpacing: "-0.03em",
+                  lineHeight: 1,
+                  margin: "6px 0",
+                  textShadow: "0 0 32px rgba(0,255,65,0.25)",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {hasCashflowData ? `+${fmt$(dailyCashflow)}` : "—"}
+              </div>
+              <div style={{ marginTop: 20 }}>
+                {[
+                  { label: "Weekly",      val: hasCashflowData ? `+${fmt$(dailyCashflow * 7)}`      : "—", c: C.green },
+                  { label: "Monthly",     val: hasCashflowData ? `+${fmt$(dailyCashflow * 30)}`     : "—", c: C.green },
+                  { label: "Yearly est.", val: hasCashflowData ? `+${fmt$(dailyCashflow * 365, 0)}` : "—", c: C.cyan  },
+                ].map((r, i, arr) => (
                   <div
+                    key={r.label}
                     style={{
-                      ...cardStyle,
-                      height: "100%",
-                      boxSizing: "border-box",
-                      cursor: "pointer",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 0",
+                      borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
+                      fontSize: 10,
                     }}
-                    className="lending-card"
                   >
-                    <SectionHeader
-                      label="lending_borrowing"
-                      right={
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: C.mute2,
-                            letterSpacing: "0.14em",
-                          }}
-                        >
-                          VIEW →
+                    <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 9, opacity: 0.6 }}>
+                      {r.label}
+                    </span>
+                    <span style={{ fontWeight: 600, color: r.c, fontVariantNumeric: "tabular-nums" }}>
+                      {r.val}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* LEND & BORROW */}
+            <Link href="/dashboard/lending" style={{ textDecoration: "none", color: "inherit", flex: "1 1 320px", minWidth: 0 }}>
+              <div
+                className="lending-card"
+                style={{
+                  padding: "24px 28px",
+                  cursor: "pointer",
+                  height: "100%",
+                  boxSizing: "border-box",
+                  borderRight: "none",
+                  transition: "border-color 0.15s",
+                }}
+              >
+                <PaneHead title="lend_and_borrow" linkLabel="View →" linkColor={C.cyan} />
+                <div
+                  style={{
+                    marginBottom: 6,
+                    fontSize: 9,
+                    color: C.text,
+                    opacity: 0.4,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  total supplied
+                </div>
+                <div
+                  style={{
+                    fontSize: 36,
+                    fontWeight: 700,
+                    color: C.cyan,
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1,
+                    margin: "6px 0",
+                    textShadow: "0 0 32px rgba(0,212,255,0.2)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {walletTokensLoading ? "—" : fmt$(combinedLendingValue)}
+                </div>
+                <div style={{ marginTop: 20 }}>
+                  {topLending.length === 0 ? (
+                    <div style={{ fontSize: 11, color: C.text, opacity: 0.5, padding: "8px 0" }}>
+                      {hasWallet ? "No lending positions" : "Connect a wallet to see lending"}
+                    </div>
+                  ) : (
+                    topLending.map((p, i) => (
+                      <div
+                        key={p.protocol + p.chain + i}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "8px 0",
+                          borderBottom: i < topLending.length - 1 ? `1px solid ${C.border}` : "none",
+                          fontSize: 10,
+                        }}
+                      >
+                        <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 9, opacity: 0.6 }}>
+                          {p.protocol}{" "}
+                          <span style={{ opacity: 0.4 }}>({p.chain})</span>
                         </span>
-                      }
-                    />
+                        <span style={{ fontWeight: 600, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
+                          {fmt$(p.totalSupplied)}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </Link>
+          </div>
 
-                    {!hasWallet ? (
-                      <div style={{ fontSize: 12, color: C.mute2, letterSpacing: "0.04em" }}>
-                        Connect a wallet to see lending positions.
-                      </div>
-                    ) : walletTokensLoading ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.mute2, fontSize: 12 }}>
-                        <span
-                          className="spin-icon"
-                          style={{
-                            width: 10,
-                            height: 10,
-                            border: `1px solid ${C.green}`,
-                            borderTopColor: "transparent",
-                            display: "inline-block",
-                          }}
-                        />
-                        Loading…
-                      </div>
-                    ) : (
-                      <>
-                        <div
-                          style={{
-                            fontSize: 32,
-                            fontWeight: 700,
-                            color: C.text,
-                            fontVariantNumeric: "tabular-nums",
-                            letterSpacing: "-0.02em",
-                            lineHeight: 1.1,
-                          }}
+          {/* ── ROW 2: Allocation (wide) + Chain Distribution (narrow) ──── */}
+          {allPositions.some((p) => p.value > 0) && (
+            <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexWrap: "wrap" }} className="anim-fade">
+              <div
+                style={{
+                  flex: "2 1 480px",
+                  borderRight: `1px solid ${C.border}`,
+                  padding: "24px 28px",
+                  minWidth: 0,
+                }}
+              >
+                <PaneHead title="protocol_allocation" />
+                <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ position: "relative", flexShrink: 0, width: 130, height: 130 }}>
+                    <ResponsiveContainer width={130} height={130}>
+                      <PieChart>
+                        <Pie
+                          data={protocolBreakdown}
+                          cx="50%" cy="50%"
+                          innerRadius={42}
+                          outerRadius={62}
+                          dataKey="value"
+                          stroke={C.bg1}
+                          strokeWidth={1}
                         >
-                          {fmt$(combinedLendingValue)}
-                        </div>
-                        <div
-                          style={{
+                          {protocolBreakdown.map((entry) => (
+                            <Cell key={entry.name} fill={getProtocolColor(entry.name)} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: C.bg1,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 0,
+                            color: C.textBright,
                             fontSize: 11,
-                            color: C.mute2,
-                            marginTop: 6,
-                            letterSpacing: "0.06em",
+                            fontFamily: FONT,
                           }}
-                        >
-                          {combinedLendingCount > 0
-                            ? `${combinedLendingCount} position${combinedLendingCount === 1 ? "" : "s"}`
-                            : "No positions found"}
-                        </div>
+                          itemStyle={{ color: C.textBright }}
+                          labelStyle={{ color: C.text }}
+                          formatter={(v: number | undefined) => [fmt$(v ?? 0), ""]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.textBright }}>
+                        {protocolBreakdown.length}
+                      </div>
+                      <div style={{ fontSize: 8, color: C.text, letterSpacing: "0.2em", opacity: 0.5 }}>
+                        POOLS
+                      </div>
+                    </div>
+                  </div>
 
-                        {/* Tokens shortcut row */}
-                        <div
-                          style={{
-                            marginTop: 16,
-                            paddingTop: 14,
-                            borderTop: `1px solid ${C.border}`,
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "baseline",
-                            gap: 8,
-                          }}
-                        >
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 9, minWidth: 200 }}>
+                    {protocolBreakdown.map((entry) => {
+                      const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
+                      const colour = getProtocolColor(entry.name);
+                      return (
+                        <div key={entry.name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10 }}>
                           <div
                             style={{
-                              fontSize: 9,
-                              letterSpacing: "0.18em",
-                              textTransform: "uppercase",
-                              color: C.mute2,
+                              width: 7, height: 7, background: colour, flexShrink: 0,
+                              boxShadow: `0 0 6px ${colour}66`,
                             }}
-                          >
-                            Wallet Balances
+                          />
+                          <div style={{ color: C.text, minWidth: 90, fontSize: 10 }}>{entry.name}</div>
+                          <div style={{ flex: 1, height: 2, background: C.border, margin: "0 4px" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, background: colour, transition: "width 1s ease" }} />
                           </div>
                           <div
                             style={{
-                              fontSize: 14,
-                              fontWeight: 600,
-                              color: C.green,
+                              color: C.textBright,
+                              fontWeight: 700,
+                              minWidth: 36,
+                              textAlign: "right",
+                              fontSize: 11,
                               fontVariantNumeric: "tabular-nums",
                             }}
                           >
-                            {fmt$(totalTokenValue)}
-                            <span
-                              style={{
-                                fontSize: 10,
-                                color: C.mute2,
-                                fontWeight: 400,
-                                marginLeft: 6,
-                                letterSpacing: "0.06em",
-                              }}
-                            >
-                              · {tokenCount} token{tokenCount === 1 ? "" : "s"}
-                            </span>
+                            {pct.toFixed(0)}%
+                          </div>
+                          <div style={{ color: C.text, fontSize: 9, minWidth: 56, textAlign: "right", opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>
+                            {fmt$(entry.value, 0)}
                           </div>
                         </div>
-                      </>
-                    )}
-                  </div>
-                </Link>
-              </div>
-            </section>
-          )}
-
-          {/* ── Section: charts (allocation + chain + history) ────────────── */}
-          {mounted && (
-            <section
-              id="section-charts"
-              style={{ padding: "28px 28px", borderBottom: `1px solid ${C.border}` }}
-            >
-              {allPositions.some((p) => p.value > 0) && (
-                <>
-                  <SectionHeader label="portfolio_allocation" />
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-                      gap: 0,
-                      marginBottom: 24,
-                    }}
-                  >
-                    {/* Allocation by Protocol */}
-                    <div style={cardStyle}>
-                      <div style={{ fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: C.mute2, marginBottom: 14 }}>
-                        Protocol Allocation
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                        <div style={{ flexShrink: 0 }}>
-                          <ResponsiveContainer width={130} height={130}>
-                            <PieChart>
-                              <Pie data={protocolBreakdown} cx="50%" cy="50%"
-                                innerRadius={38} outerRadius={62} dataKey="value" strokeWidth={0}>
-                                {protocolBreakdown.map((entry) => (
-                                  <Cell key={entry.name} fill={getProtocolColor(entry.name)} />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                contentStyle={{ backgroundColor: C.card, border: `1px solid ${C.border}`, borderRadius: 0, color: C.text, fontSize: 12 }}
-                                itemStyle={{ color: C.text }}
-                                labelStyle={{ color: C.mute2 }}
-                                formatter={(v: number | undefined) => [fmt$(v ?? 0), ""]}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div style={{ flex: 1, overflow: "hidden" }}>
-                          {protocolBreakdown.map((entry) => (
-                            <div key={entry.name}
-                              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
-                                <div style={{ width: 8, height: 8, background: getProtocolColor(entry.name), flexShrink: 0 }} />
-                                <span style={{ fontSize: 11, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {entry.name}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: 11, textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-                                <span style={{ color: C.text, fontWeight: 500 }}>{fmt$(entry.value, 0)}</span>
-                                <span style={{ color: C.mute2, marginLeft: 4 }}>
-                                  ({totalValue > 0 ? ((entry.value / totalValue) * 100).toFixed(1) : "0"}%)
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Chain Distribution */}
-                    <div style={cardStyle}>
-                      <div style={{ fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: C.mute2, marginBottom: 14 }}>
-                        Chain Distribution
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                        {chainBreakdown.map((entry) => {
-                          const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
-                          return (
-                            <div key={entry.chain}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <div style={{ width: 8, height: 8, background: getChainColor(entry.chain) }} />
-                                  <span style={{ fontSize: 11, color: C.textDim }}>{entry.chain}</span>
-                                </div>
-                                <div style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
-                                  <span style={{ color: C.text }}>{fmt$(entry.value, 0)}</span>
-                                  <span style={{ color: C.mute2, marginLeft: 4 }}>({pct.toFixed(1)}%)</span>
-                                </div>
-                              </div>
-                              <div style={{ height: 3, background: C.bg, border: `1px solid ${C.border}`, overflow: "hidden" }}>
-                                <div style={{ height: "100%", background: getChainColor(entry.chain), width: `${pct}%` }} />
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {chainBreakdown.length === 0 && (
-                          <div style={{ color: C.mute2, fontSize: 12 }}>No chain data</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Portfolio History */}
-              {hasWallet && (
-                <>
-                  <SectionHeader label="portfolio_history" />
-                  <div style={cardStyle}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        marginBottom: 16,
-                        flexWrap: "wrap",
-                        gap: 12,
-                      }}
-                    >
-                      <div style={{ display: "flex", border: `1px solid ${C.border}` }}>
-                        {TIME_RANGES.map((r, i, arr) => {
-                          const snapshotHasData = portfolioHistory.filter((s) => s.timestamp >= Date.now() - r.ms).length >= 2;
-                          const active = rangeKey === r.key;
-                          return (
-                            <button
-                              key={r.key}
-                              onClick={() => setRangeKey(r.key)}
-                              data-active={active}
-                              className="term-tab"
-                              style={{
-                                padding: "5px 12px",
-                                border: "none",
-                                borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                letterSpacing: "0.06em",
-                                fontFamily: "var(--font-jetbrains-mono)",
-                                cursor: "pointer",
-                                background: active ? C.green : "transparent",
-                                color: active ? "#000" : (snapshotHasData ? C.textDim : C.mute3),
-                              }}
-                            >
-                              {r.key}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {chartPnlAvailable && (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 500,
-                            color: chartPnlDollar >= 0 ? C.green : C.red,
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {chartPnlDollar >= 0 ? "+" : ""}{fmt$(Math.abs(chartPnlDollar))}{" "}
-                          <span style={{ opacity: 0.75 }}>
-                            ({chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(2)}%)
-                          </span>
-                          <span style={{ color: C.mute2, fontWeight: 400, marginLeft: 6 }}>
-                            {activeRange.label}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    {portfolioHistory.length < 2 ? (
-                      <div style={{ textAlign: "center", padding: "32px 0" }}>
-                        <div style={{ fontSize: 12, color: C.mute2 }}>
-                          Tracking started — chart appears after the next refresh.
-                        </div>
-                        <div style={{ fontSize: 10, color: C.mute3, marginTop: 4, letterSpacing: "0.06em" }}>
-                          A data point is saved on every 60-second refresh.
-                        </div>
-                      </div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <LineChart data={chartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                          <XAxis dataKey="label" tick={{ fill: C.mute2, fontSize: 11 }}
-                            axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                          <YAxis tick={{ fill: C.mute2, fontSize: 11 }}
-                            axisLine={false} tickLine={false} width={72}
-                            tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
-                          <Tooltip
-                            contentStyle={{ backgroundColor: C.card, border: `1px solid ${C.border}`, borderRadius: 0, color: C.text }}
-                            itemStyle={{ color: C.green }}
-                            labelStyle={{ color: C.mute2, marginBottom: 4 }}
-                            formatter={(v: number | undefined) => [fmt$(v ?? 0), "Portfolio Value"]}
-                          />
-                          <Line type="monotone" dataKey="value" stroke={C.green} strokeWidth={2}
-                            dot={chartData.length <= 20}
-                            activeDot={{ r: 4, fill: C.green }} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                </>
-              )}
-            </section>
-          )}
-
-          {/* ── Section: cashflow (4 yield blocks) ────────────────────────── */}
-          <section
-            id="section-cashflow"
-            style={{ padding: "28px 28px", borderBottom: `1px solid ${C.border}` }}
-          >
-            <SectionHeader label="cash_flow" />
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 0,
-              }}
-            >
-              {[
-                { label: "Daily Yield",       value: hasCashflowData ? dailyCashflow      : null, color: C.green, prefix: "+" },
-                { label: "Weekly",            value: hasCashflowData ? dailyCashflow * 7  : null, color: C.green, prefix: "+" },
-                { label: "Monthly",           value: hasCashflowData ? dailyCashflow * 30 : null, color: C.green, prefix: "+" },
-                { label: "Total Uncollected", value: totalFees > 0   ? totalFees          : null, color: C.green, prefix: "+" },
-              ].map(({ label, value, color, prefix }) => (
-                <div
-                  key={label}
-                  style={{
-                    background: C.card,
-                    border: `1px solid ${C.border}`,
-                    padding: "20px 24px",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 9,
-                      letterSpacing: "0.18em",
-                      textTransform: "uppercase",
-                      color: C.mute2,
-                      marginBottom: 8,
-                    }}
-                  >
-                    {label}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      color: value !== null ? color : C.mute2,
-                      fontVariantNumeric: "tabular-nums",
-                      letterSpacing: "-0.02em",
-                    }}
-                  >
-                    {value !== null ? `${prefix}${fmt$(value)}` : "—"}
+                      );
+                    })}
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
+              </div>
 
-          {/* ── Section: positions ───────────────────────────────────────── */}
-          <section
-            id="section-positions"
-            style={{ padding: "28px 28px 56px" }}
-          >
-            <SectionHeader
-              label="open_positions"
-              right={
-                <button
-                  onClick={exportCSV}
-                  className="term-btn"
+              <div style={{ flex: "1 1 280px", padding: "24px 28px", minWidth: 0 }}>
+                <PaneHead title="chain_distribution" />
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {chainGrouped.length === 0 ? (
+                    <div style={{ color: C.text, fontSize: 11, opacity: 0.5 }}>No chain data yet.</div>
+                  ) : chainGrouped.map((c) => {
+                    const colour = CHAIN_DISPLAY[c.name].color;
+                    return (
+                      <div key={c.name}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, fontSize: 10 }}>
+                          <div style={{ color: C.textMid, display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ width: 6, height: 6, background: colour, flexShrink: 0, boxShadow: `0 0 5px ${colour}88` }} />
+                            <span>{c.name}</span>
+                            <span style={{ fontSize: 9, opacity: 0.4, marginLeft: 4 }}>{c.chains}</span>
+                          </div>
+                          <div style={{ color: C.textBright, fontWeight: 700, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                            {c.pct.toFixed(0)}%
+                          </div>
+                        </div>
+                        <div style={{ height: 3, background: C.border, width: "100%" }}>
+                          <div
+                            style={{
+                              height: "100%", width: `${c.pct}%`, background: colour,
+                              boxShadow: `0 0 6px ${colour}66`, transition: "width 1s ease",
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 9, fontVariantNumeric: "tabular-nums" }}>
+                          <span style={{ color: C.text, opacity: 0.5 }}>VALUE</span>
+                          <span style={{ color: C.text, opacity: 0.7 }}>{fmt$(c.value, 0)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── ROW 3: yield chart ──────────────────────────────────────── */}
+          {hasWallet && (
+            <div
+              id="section-cashflow"
+              style={{ padding: "24px 28px", borderBottom: `1px solid ${C.border}` }}
+              className="anim-fade"
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20, flexWrap: "wrap" }}>
+                <div
                   style={{
-                    background: C.card,
-                    border: `1px solid ${C.border}`,
-                    color: C.textDim,
-                    padding: "6px 12px",
-                    fontSize: 10,
-                    letterSpacing: "0.12em",
+                    fontSize: 8,
+                    letterSpacing: "0.22em",
                     textTransform: "uppercase",
-                    fontFamily: "var(--font-jetbrains-mono)",
-                    cursor: "pointer",
+                    color: C.text,
+                    opacity: 0.55,
+                    marginRight: 20,
                   }}
                 >
-                  ▸ Export.csv
-                </button>
-              }
-            />
+                  <span style={{ color: C.green, opacity: 1 }}>// </span>
+                  yield_history
+                </div>
+                <div style={{ display: "flex" }}>
+                  {TIME_RANGES.map((r, i, arr) => {
+                    const active = chartTab === r.key;
+                    return (
+                      <button
+                        key={r.key}
+                        onClick={() => setChartTab(r.key)}
+                        data-active={active}
+                        className="ct-tab"
+                        style={{
+                          padding: "4px 12px",
+                          fontFamily: FONT,
+                          fontSize: 9,
+                          letterSpacing: "0.12em",
+                          textTransform: "uppercase",
+                          border: `1px solid ${active ? C.greenDim : C.border}`,
+                          borderRight: i < arr.length - 1 ? "none" : `1px solid ${active ? C.greenDim : C.border}`,
+                          background: active ? C.bg2 : "transparent",
+                          color: active ? C.green : C.text,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {r.key}
+                      </button>
+                    );
+                  })}
+                </div>
 
-            {/* Status filter tabs */}
-            <div style={{ display: "flex", border: `1px solid ${C.border}`, marginBottom: 8, flexWrap: "wrap" }}>
-              {STATUS_FILTERS.map((s, i) => {
-                const active = statusFilter === s;
+                <div
+                  style={{
+                    marginLeft: "auto",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 20,
+                    fontSize: 9,
+                  }}
+                >
+                  {chartPnlAvailable && (
+                    <ChartMeta label="Window P&L" value={`${chartPnlDollar >= 0 ? "+" : "-"}${fmt$(Math.abs(chartPnlDollar), 0)}`} colour={chartPnlDollar >= 0 ? C.green : C.red} />
+                  )}
+                  <ChartMeta label="Peak Value" value={fmt$(peakValue, 0)} colour={C.textBright} />
+                  <ChartMeta label="Avg APY" value={avgApr !== null ? `${avgApr.toFixed(1)}%` : "—"} colour={C.textBright} />
+                </div>
+              </div>
+
+              {portfolioHistory.length < 2 ? (
+                <div style={{ textAlign: "center", padding: "32px 0" }}>
+                  <div style={{ fontSize: 12, color: C.text, opacity: 0.5 }}>
+                    Tracking started — chart appears after the next refresh.
+                  </div>
+                  <div style={{ fontSize: 10, color: C.text, marginTop: 4, letterSpacing: "0.06em", opacity: 0.4 }}>
+                    A data point is saved on every 60-second refresh.
+                  </div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={160}>
+                  <AreaChart data={chartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                    <defs>
+                      <linearGradient id="yieldGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={C.green} stopOpacity={0.18} />
+                        <stop offset="60%" stopColor={C.green} stopOpacity={0.04} />
+                        <stop offset="100%" stopColor={C.green} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 6" stroke="rgba(255,255,255,0.03)" />
+                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.2)", fontSize: 9, fontFamily: FONT }}
+                      axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.18)", fontSize: 9, fontFamily: FONT }}
+                      axisLine={false} tickLine={false} width={64}
+                      tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: C.bg1,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 0,
+                        color: C.textBright,
+                        fontFamily: FONT,
+                      }}
+                      itemStyle={{ color: C.green }}
+                      labelStyle={{ color: C.text, marginBottom: 4 }}
+                      formatter={(v: number | undefined) => [fmt$(v ?? 0), "Value"]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke={C.green}
+                      strokeWidth={1.5}
+                      fill="url(#yieldGrad)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          )}
+
+          {/* ── ROW 4: bottom metrics strip (4 cells) ───────────────────── */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              borderBottom: `1px solid ${C.border}`,
+            }}
+            className="anim-fade"
+          >
+            {[
+              {
+                label: "Daily Yield",
+                val:   hasCashflowData ? `+${fmt$(dailyCashflow)}`     : "—",
+                cls:   "green" as const,
+                sub:   hasCashflowData ? `≈ ${fmt$(dailyCashflow * 30, 0)}/mo` : "—",
+              },
+              {
+                label: "Weekly",
+                val:   hasCashflowData ? `+${fmt$(dailyCashflow * 7)}` : "—",
+                cls:   "green" as const,
+                sub:   "estimated 7d",
+              },
+              {
+                label: "Monthly",
+                val:   hasCashflowData ? `+${fmt$(dailyCashflow * 30, 0)}` : "—",
+                cls:   "cyan" as const,
+                sub:   "estimated 30d",
+              },
+              {
+                label: "Total Uncollected",
+                val:   totalFees > 0 ? `+${fmt$(totalFees)}` : "—",
+                cls:   "white" as const,
+                sub:   `${allPositions.filter((p) => p.fees > 0).length} positions`,
+              },
+            ].map((m, i, arr) => (
+              <div
+                key={m.label}
+                style={{
+                  padding: "22px 28px",
+                  borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  aria-hidden
+                  style={{
+                    position: "absolute", top: 0, left: 0, right: 0, height: 1,
+                    background: `linear-gradient(90deg, transparent, ${C.borderGlow}, transparent)`,
+                  }}
+                />
+                <div
+                  style={{
+                    fontSize: 8,
+                    color: C.text,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    marginBottom: 10,
+                    opacity: 0.5,
+                  }}
+                >
+                  {m.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    letterSpacing: "-0.02em",
+                    marginBottom: 4,
+                    color:
+                      m.cls === "green" ? C.green :
+                      m.cls === "cyan"  ? C.cyan  :
+                      C.textBright,
+                    textShadow:
+                      m.cls === "green" ? "0 0 24px rgba(0,255,65,0.2)" :
+                      m.cls === "cyan"  ? "0 0 24px rgba(0,212,255,0.15)" : "none",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {m.val}
+                </div>
+                <div style={{ fontSize: 9, color: C.text, opacity: 0.45 }}>{m.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── ROW 5: positions table ──────────────────────────────────── */}
+          <div id="section-positions" className="anim-fade">
+            {/* Status filter row */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0,
+                padding: "10px 28px",
+                borderBottom: `1px solid ${C.border}`,
+                background: C.bg1,
+                flexWrap: "wrap",
+              }}
+            >
+              {STATUS_FILTERS.map((s) => {
                 const count =
                   s === "All"
                     ? allPositions.length
                     : allPositions.filter((p) => effectiveStatus(p) === s).length;
+                const active = statusFilter === s;
                 return (
                   <button
                     key={s}
                     onClick={() => setStatusFilter(s)}
-                    data-active={active}
-                    className="term-tab"
                     style={{
-                      background: active ? C.green : "transparent",
-                      color: active ? "#000" : C.mute2,
-                      border: "none",
-                      borderRight: i < STATUS_FILTERS.length - 1 ? `1px solid ${C.border}` : "none",
-                      padding: "8px 14px",
-                      fontSize: 11,
+                      fontFamily: FONT,
+                      fontSize: 10,
                       letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      fontFamily: "var(--font-jetbrains-mono)",
-                      fontWeight: 600,
+                      padding: "5px 14px",
+                      marginRight: 6,
+                      border: `1px solid ${active ? C.greenDim : C.borderHi}`,
+                      background: active ? C.greenFaint : "transparent",
+                      color: active ? C.green : C.text,
                       cursor: "pointer",
+                      transition: "all 0.12s",
+                      boxShadow: active ? "0 0 10px rgba(0,255,65,0.08)" : "none",
                     }}
                   >
-                    {s === "All" ? "All" : s}{" "}
-                    <span style={{ opacity: 0.7 }}>({count})</span>
+                    {s === "All" ? "All Positions" : s}{" "}
+                    <span style={{ opacity: active ? 0.8 : 0.4, marginLeft: 4, fontSize: 9 }}>
+                      ({count})
+                    </span>
                   </button>
                 );
               })}
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                <button
+                  onClick={exportCSV}
+                  className="term-btn"
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${C.borderHi}`,
+                    color: C.text,
+                    padding: "5px 14px",
+                    fontSize: 9,
+                    fontWeight: 600,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                    fontFamily: FONT,
+                  }}
+                >
+                  ↓ Export CSV
+                </button>
+              </div>
             </div>
 
-            {/* Chain filter tabs */}
-            <div style={{ display: "flex", border: `1px solid ${C.border}`, marginBottom: 18, flexWrap: "wrap" }}>
-              {CHAIN_FILTERS.map((c, i) => {
-                const active = chainFilter === c;
-                const count =
-                  c === "ALL"
-                    ? allPositions.length
-                    : allPositions.filter((p) => chainCategory(p.chain) === c).length;
+            {/* Chain filter row */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "12px 28px",
+                borderBottom: `1px solid ${C.border}`,
+                background: C.bg1,
+                flexWrap: "wrap",
+              }}
+            >
+              {CHAIN_FILTERS.map((f) => {
+                const active = chainFilter === f;
                 return (
                   <button
-                    key={c}
-                    onClick={() => setChainFilter(c)}
-                    data-active={active}
-                    className="term-tab"
+                    key={f}
+                    onClick={() => setChainFilter(f)}
+                    className="filter-pill"
                     style={{
-                      background: active ? C.green : "transparent",
-                      color: active ? "#000" : C.mute2,
-                      border: "none",
-                      borderRight: i < CHAIN_FILTERS.length - 1 ? `1px solid ${C.border}` : "none",
-                      padding: "7px 14px",
-                      fontSize: 10,
-                      letterSpacing: "0.14em",
+                      fontFamily: FONT,
+                      fontSize: 9,
+                      letterSpacing: "0.1em",
                       textTransform: "uppercase",
-                      fontFamily: "var(--font-jetbrains-mono)",
-                      fontWeight: 700,
+                      padding: "4px 12px",
                       cursor: "pointer",
+                      border: active ? `1px solid ${C.greenDim}` : `1px solid transparent`,
+                      background: active ? C.greenFaint : "transparent",
+                      color: active ? C.green : C.text,
                     }}
                   >
-                    {c} <span style={{ opacity: 0.7 }}>({count})</span>
+                    {f}
                   </button>
                 );
               })}
             </div>
 
-            {/* Loading */}
-            {mounted && isLoading && (
-              <div style={{ textAlign: "center", padding: "64px 0", color: C.mute2 }}>
+            {/* Table */}
+            {mounted && isLoading ? (
+              <div style={{ textAlign: "center", padding: "64px 0", color: C.text }}>
                 <div
                   className="spin-icon"
                   style={{
@@ -1309,369 +1486,259 @@ export default function Dashboard() {
                 />
                 <div style={{ fontSize: 12, letterSpacing: "0.08em" }}>Fetching your positions…</div>
               </div>
-            )}
-
-            {/* Empty states */}
-            {!isLoading && mounted && filtered.length === 0 && (
-              <div>
+            ) : filtered.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "64px 28px", color: C.text }}>
                 {!hasWallet ? (
-                  <div style={{ textAlign: "center", padding: "64px 0", color: C.textDim }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8, letterSpacing: "0.06em" }}>
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
                       NO_WALLET_CONNECTED
                     </div>
-                    <div style={{ color: C.mute2, marginBottom: 28, fontSize: 12, letterSpacing: "0.04em" }}>
+                    <div style={{ color: C.text, fontSize: 11, opacity: 0.6 }}>
                       Connect a wallet to track LP positions across EVM, Solana, and Sui.
                     </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 10, fontSize: 11, color: C.mute2 }}>
-                      {[
-                        { chain: "EVM",    color: "#00e5ff", desc: "Ethereum · Base · Arbitrum · Optimism" },
-                        { chain: "SOLANA", color: "#9945ff", desc: "Raydium · Orca" },
-                        { chain: "SUI",    color: "#4da2ff", desc: "Bluefin · Cetus" },
-                      ].map(({ chain, color, desc }) => (
-                        <div key={chain} style={{
-                          background: C.card,
-                          border: `1px solid ${C.border}`,
-                          padding: "10px 14px",
-                          display: "flex", alignItems: "center", gap: 8,
-                        }}>
-                          <span style={{ color, fontWeight: 700, letterSpacing: "0.1em" }}>{chain}</span>
-                          <span style={{ color: C.mute2 }}>{desc}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  </>
                 ) : allPositions.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "64px 0" }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8, letterSpacing: "0.06em" }}>
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
                       NO_POSITIONS_FOUND
                     </div>
-                    <div style={{ color: C.mute2, fontSize: 12 }}>
+                    <div style={{ color: C.text, fontSize: 11, opacity: 0.6 }}>
                       No LP positions were found for your connected wallet(s).
                     </div>
-                  </div>
+                  </>
                 ) : (
-                  <div style={{ textAlign: "center", padding: "48px 0", color: C.mute2, fontSize: 12 }}>
-                    No positions match this filter.
-                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>No positions match this filter.</div>
                 )}
               </div>
-            )}
+            ) : (
+              <div style={{ overflowX: "auto" }} className="scroll-thin">
+                <table className="ptable" style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT }}>
+                  <thead>
+                    <tr style={{ background: C.bg1 }}>
+                      {["Position", "Value", "APY", "P&L", "Health", ""].map((h, i) => (
+                        <th
+                          key={h + i}
+                          style={{
+                            padding: i === 0 ? "10px 16px 10px 28px" : "10px 16px 10px 0",
+                            textAlign: i === 0 ? "left" : "right",
+                            fontSize: 8,
+                            fontWeight: 400,
+                            color: C.text,
+                            letterSpacing: "0.16em",
+                            textTransform: "uppercase",
+                            borderBottom: `1px solid ${C.border}`,
+                            opacity: 0.55,
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((pos) => {
+                      const posStatus = effectiveStatus(pos);
+                      const slug = encodeURIComponent(pos.id);
+                      const dailyEarnings = pos.apy > 0 && pos.value > 0
+                        ? (pos.value * pos.apy) / 100 / 365
+                        : null;
+                      const cat = chainCategory(pos.chain);
+                      const chainTok = cat === "OTHER" ? null : CHAIN_DISPLAY[cat];
+                      const health = healthFor(posStatus);
+                      const hColour = healthColor(health);
+                      const manageUrl = getManageUrl(pos.protocol);
+                      const isClosed = posStatus === "Closed";
 
-            {/* Position table */}
-            {!isLoading && filtered.length > 0 && (
-              <>
-                {/* Header row */}
-                <div
-                  className="pos-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(220px, 2.2fr) 1fr 1fr minmax(120px, 1.2fr) minmax(80px, 0.8fr) 130px 90px",
-                    alignItems: "center",
-                    gap: 16,
-                    padding: "10px 16px",
-                    background: C.bg,
-                    borderTop: `1px solid ${C.border}`,
-                    borderLeft: `1px solid ${C.border}`,
-                    borderRight: `1px solid ${C.border}`,
-                    fontSize: 9,
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                    color: C.mute2,
-                  }}
-                >
-                  <span>Position</span>
-                  <span className="pos-val-fees">Value · Fees</span>
-                  <span className="pos-apr">APR · Daily</span>
-                  <span className="pos-pnl">P&amp;L</span>
-                  <span className="pos-health" style={{ textAlign: "right" }}>Health</span>
-                  <span style={{ textAlign: "right" }}>Status</span>
-                  <span className="pos-manage" style={{ textAlign: "right" }}>Action</span>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 0,
-                  }}
-                >
-                  {filtered.map((pos) => {
-                    const posStatus = effectiveStatus(pos);
-                    const isClosed = posStatus === "Closed";
-                    const slug = encodeURIComponent(pos.id);
-                    const dailyEarnings =
-                      pos.apy > 0 && pos.value > 0 ? (pos.value * pos.apy) / 100 / 365 : null;
-                    const statusClass =
-                      posStatus === "In Range" ? "in-range"
-                      : posStatus === "Out of Range" ? "out-range"
-                      : "closed";
-                    const feeRatio = pos.value > 0 ? (pos.fees / pos.value) * 100 : 0;
-                    // Visualise small fee ratios — clamp at 100% bar fill
-                    const pnlBarPct = Math.max(0, Math.min(100, feeRatio * 5));
-                    const health = healthPctFor(posStatus);
-                    const manageUrl = getManageUrl(pos.protocol);
-
-                    return (
-                      <Link
-                        key={pos.id}
-                        href={`/dashboard/position/${slug}`}
-                        className={`pos-row pos-grid ${statusClass}`}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(220px, 2.2fr) 1fr 1fr minmax(120px, 1.2fr) minmax(80px, 0.8fr) 130px 90px",
-                          alignItems: "center",
-                          gap: 16,
-                          padding: 16,
-                          background: C.card,
-                          border: `1px solid ${C.border}`,
-                          marginTop: -1,
-                          textDecoration: "none",
-                          color: C.text,
-                          cursor: "pointer",
-                          opacity: isClosed ? 0.55 : 1,
-                        }}
-                      >
-                        {/* Pair info */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 12, overflow: "hidden" }}>
-                          {(() => {
-                            const parts = pos.pair.split(/\s*\/\s*/);
-                            const sym0 = parts[0]?.trim() ?? "";
-                            const sym1 = parts[1]?.trim() ?? "";
-                            const SIZE = 30;
-                            const OVERLAP = 10;
-                            return (
-                              <div style={{ position: "relative", width: SIZE * 2 - OVERLAP, height: SIZE, flexShrink: 0 }}>
-                                <TokenCircle symbol={sym1} size={SIZE} style={{ position: "absolute", right: 0, top: 0, zIndex: 1 }} />
-                                <TokenCircle symbol={sym0} size={SIZE} style={{ position: "absolute", left: 0, top: 0, zIndex: 2 }} />
-                              </div>
-                            );
-                          })()}
-                          <div style={{ overflow: "hidden" }}>
-                            <div
-                              style={{
-                                fontSize: 14,
-                                fontWeight: 600,
-                                color: C.text,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                letterSpacing: "0.02em",
-                              }}
-                            >
-                              {pos.pair}
-                            </div>
-                            <div style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 2 }}>
-                              {pos.protocol} · {pos.chain}{pos.feeTier != null ? ` · ${pos.feeTier}%` : ""}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Value · Fees */}
-                        <div className="pos-val-fees">
-                          <div style={{ fontSize: 14, fontWeight: 600, color: C.text, fontVariantNumeric: "tabular-nums" }}>
-                            {fmt$(pos.value)}
-                          </div>
-                          {pos.fees > 0 && (
-                            <div style={{ fontSize: 10, color: C.green, letterSpacing: "0.06em", marginTop: 2 }}>
-                              +{fmt$(pos.fees)} fees
-                            </div>
-                          )}
-                        </div>
-
-                        {/* APR · Daily */}
-                        <div className="pos-apr">
-                          {pos.apy > 0 ? (
-                            <>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>
-                                {pos.apy.toFixed(1)}%
-                              </div>
-                              {dailyEarnings !== null && (
-                                <div style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.06em", marginTop: 2 }}>
-                                  ${dailyEarnings.toFixed(2)}/day
+                      return (
+                        <tr
+                          key={pos.id}
+                          className="pos-row"
+                          style={{ opacity: isClosed ? 0.5 : 1 }}
+                          onClick={(e) => {
+                            // ignore clicks on the manage button itself
+                            if ((e.target as HTMLElement).closest(".manage-btn")) return;
+                            window.location.href = `/dashboard/position/${slug}`;
+                          }}
+                        >
+                          {/* Position cell */}
+                          <td style={{ padding: "13px 16px 13px 28px", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle", cursor: "pointer" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                              {/* dual token circles */}
+                              {(() => {
+                                const parts = pos.pair.split(/\s*\/\s*/);
+                                const sym0 = parts[0]?.trim() ?? "";
+                                const sym1 = parts[1]?.trim() ?? "";
+                                const SIZE = 26;
+                                const OVERLAP = 8;
+                                return (
+                                  <div style={{ position: "relative", width: SIZE * 2 - OVERLAP, height: SIZE, flexShrink: 0 }}>
+                                    <TokenCircle symbol={sym1} size={SIZE} style={{ position: "absolute", right: 0, top: 0, zIndex: 1 }} />
+                                    <TokenCircle symbol={sym0} size={SIZE} style={{ position: "absolute", left: 0, top: 0, zIndex: 2 }} />
+                                  </div>
+                                );
+                              })()}
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                                  {pos.pair}
                                 </div>
-                              )}
-                            </>
-                          ) : (
-                            <div style={{ fontSize: 12, fontWeight: 600, color: C.mute2 }}>N/A</div>
-                          )}
-                        </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+                                  <span style={{ fontSize: 9, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                                    {pos.protocol}
+                                  </span>
+                                  {chainTok && (
+                                    <span
+                                      style={{
+                                        fontSize: 8,
+                                        padding: "1px 6px",
+                                        letterSpacing: "0.1em",
+                                        textTransform: "uppercase",
+                                        border: `1px solid ${chainTok.border}`,
+                                        background: chainTok.faint,
+                                        color: chainTok.color,
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {pos.chain}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
 
-                        {/* P&L bar */}
-                        <div className="pos-pnl">
-                          <div
-                            style={{
-                              height: 6,
-                              background: C.bg,
-                              border: `1px solid ${C.border}`,
-                              overflow: "hidden",
-                              marginBottom: 4,
-                            }}
-                          >
-                            <div
-                              style={{
-                                height: "100%",
-                                background: pos.fees > 0 ? C.green : "transparent",
-                                width: `${pnlBarPct}%`,
-                              }}
-                            />
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: pos.fees > 0 ? C.green : C.mute2,
-                              letterSpacing: "0.04em",
-                              fontVariantNumeric: "tabular-nums",
-                            }}
-                          >
-                            {pos.fees > 0 ? `+${fmt$(pos.fees)} (${feeRatio.toFixed(2)}%)` : "—"}
-                          </div>
-                        </div>
+                          {/* Value */}
+                          <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$(pos.value)}
+                            </div>
+                            {dailyEarnings !== null && (
+                              <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                                ${dailyEarnings.toFixed(2)}/day
+                              </div>
+                            )}
+                          </td>
 
-                        {/* Health % */}
-                        <div className="pos-health" style={{ textAlign: "right" }}>
-                          <div
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color:
-                                health >= 100 ? C.green
-                                : health > 0  ? C.amber
-                                : C.mute2,
-                              fontVariantNumeric: "tabular-nums",
-                              marginBottom: 4,
-                            }}
-                          >
-                            {health}%
-                          </div>
-                          <div
-                            style={{
-                              height: 4,
-                              background: C.bg,
-                              border: `1px solid ${C.border}`,
-                              overflow: "hidden",
-                              marginLeft: "auto",
-                              maxWidth: 80,
-                            }}
-                          >
-                            <div
-                              style={{
-                                height: "100%",
-                                width: `${health}%`,
-                                background:
-                                  health >= 100 ? C.green
-                                  : health > 0  ? C.amber
-                                  : "transparent",
-                              }}
-                            />
-                          </div>
-                        </div>
+                          {/* APY */}
+                          <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
+                            {pos.apy > 0 ? (
+                              <>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: C.green, textShadow: "0 0 10px rgba(0,255,65,0.25)", fontVariantNumeric: "tabular-nums" }}>
+                                  {pos.apy.toFixed(1)}%
+                                </div>
+                                <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                                  base
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ fontSize: 11, color: C.text, opacity: 0.5 }}>N/A</div>
+                            )}
+                          </td>
 
-                        {/* Status badge */}
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                          <span
-                            style={{
-                              ...statusTagStyle(posStatus),
-                              fontSize: 10,
-                              letterSpacing: "0.1em",
-                              textTransform: "uppercase",
-                              fontWeight: 600,
-                              padding: "4px 10px",
-                              fontFamily: "var(--font-jetbrains-mono)",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {posStatus === "In Range"
-                              ? "● IN_RANGE"
-                              : posStatus === "Out of Range"
-                              ? "◌ OUT_RANGE"
-                              : "◇ CLOSED"}
-                          </span>
-                        </div>
+                          {/* P&L (uncollected fees as proxy) */}
+                          <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: pos.fees > 0 ? C.green : C.text, fontVariantNumeric: "tabular-nums" }}>
+                              {pos.fees > 0 ? `+${fmt$(pos.fees)}` : "—"}
+                            </div>
+                          </td>
 
-                        {/* MANAGE button */}
-                        <div className="pos-manage" style={{ display: "flex", justifyContent: "flex-end" }}>
-                          {manageUrl ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                window.open(manageUrl, "_blank", "noopener,noreferrer");
-                              }}
-                              className="term-btn"
-                              style={{
-                                background: "transparent",
-                                border: `1px solid ${C.border}`,
-                                color: C.textDim,
-                                padding: "5px 10px",
-                                fontSize: 9,
-                                letterSpacing: "0.14em",
-                                textTransform: "uppercase",
-                                fontWeight: 700,
-                                fontFamily: "var(--font-jetbrains-mono)",
-                                cursor: "pointer",
-                              }}
-                            >
-                              Manage
-                            </button>
-                          ) : (
-                            <span style={{ fontSize: 9, color: C.mute3, letterSpacing: "0.1em" }}>—</span>
-                          )}
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </>
+                          {/* Health */}
+                          <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: hColour, fontVariantNumeric: "tabular-nums" }}>
+                                {health}%
+                              </span>
+                              <div style={{ width: 56, height: 2, background: C.border }}>
+                                <div
+                                  style={{
+                                    height: "100%",
+                                    width: `${health}%`,
+                                    background: hColour,
+                                    boxShadow: `0 0 4px ${hColour}88`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Manage */}
+                          <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle" }}>
+                            {manageUrl ? (
+                              <button
+                                type="button"
+                                className="manage-btn"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  window.open(manageUrl, "_blank", "noopener,noreferrer");
+                                }}
+                                style={{
+                                  fontFamily: FONT,
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  letterSpacing: "0.1em",
+                                  textTransform: "uppercase",
+                                  padding: "6px 14px",
+                                  border: `1px solid ${C.borderHi}`,
+                                  background: "transparent",
+                                  color: C.text,
+                                  cursor: "pointer",
+                                  transition: "all 0.15s",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Manage →
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: 9, color: C.borderGlow }}>—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </section>
+          </div>
 
-          {/* ── Section: alerts (placeholder) ─────────────────────────────── */}
-          <section
+          {/* ── Alerts placeholder section ──────────────────────────────── */}
+          <div
             id="section-alerts"
-            style={{ padding: "28px 28px 56px", borderTop: `1px solid ${C.border}` }}
+            style={{ padding: "24px 28px", borderTop: `1px solid ${C.border}` }}
           >
-            <SectionHeader label="alerts" />
-            <div
-              style={{
-                ...cardStyle,
-                color: C.mute2,
-                fontSize: 12,
-                letterSpacing: "0.04em",
-              }}
-            >
-              <div style={{ color: C.textDim, fontSize: 12, marginBottom: 8 }}>
-                ◇ No active alerts
-              </div>
-              <div style={{ fontSize: 11, color: C.mute2 }}>
-                Coming soon — out-of-range warnings, IL thresholds, and price-drop notifications.
-              </div>
+            <PaneHead title="alerts" />
+            <div style={{ fontSize: 11, color: C.text, padding: "8px 0", letterSpacing: "0.04em" }}>
+              ◇ No active alerts.
             </div>
-          </section>
+            <div style={{ fontSize: 10, color: C.text, opacity: 0.5, marginTop: 4 }}>
+              Coming soon — out-of-range warnings, IL thresholds, and price-drop notifications.
+            </div>
+          </div>
+
+          {/* Keyboard hint bar */}
+          <div
+            style={{
+              borderTop: `1px solid ${C.border}`,
+              padding: "10px 28px",
+              display: "flex",
+              gap: 24,
+              fontSize: 9,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: C.text,
+              flexWrap: "wrap",
+              background: C.bg1,
+            }}
+          >
+            <span><span style={{ color: C.green }}>[F5]</span> refresh</span>
+            <span><span style={{ color: C.green }}>[W]</span> manage wallets</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ color: C.borderGlow }}>v0.9.1-beta</span>
+          </div>
         </main>
       </div>
 
-      {/* Keyboard hint bar (visual only) */}
-      <div
-        style={{
-          borderTop: `1px solid ${C.border}`,
-          padding: "10px 24px",
-          display: "flex",
-          gap: 24,
-          fontSize: 10,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: C.mute2,
-          flexWrap: "wrap",
-        }}
-      >
-        <span><span style={{ color: C.green }}>[F5]</span> refresh</span>
-        <span><span style={{ color: C.green }}>[W]</span> manage wallets</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ color: C.mute3 }}>v0.9.1-beta</span>
-      </div>
-
-      {/* ── Manage Wallets Modal ─────────────────────────────────────────────── */}
+      {/* ── Manage Wallets Modal ─────────────────────────────────────────── */}
       {showManageWallets && mounted && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div
@@ -1693,7 +1760,7 @@ export default function Dashboard() {
               margin: "0 16px",
               maxHeight: "90vh",
               overflowY: "auto",
-              fontFamily: "var(--font-jetbrains-mono)",
+              fontFamily: FONT,
             }}
           >
             <div
@@ -1719,11 +1786,11 @@ export default function Dashboard() {
                   style={{
                     background: "none",
                     border: `1px solid ${C.border}`,
-                    color: C.textDim,
+                    color: C.textMid,
                     cursor: "pointer",
                     fontSize: 14,
                     padding: "2px 8px",
-                    fontFamily: "var(--font-jetbrains-mono)",
+                    fontFamily: FONT,
                   }}
                 >
                   <span className={isFetching ? "spin-icon" : ""}>↻</span>
@@ -1738,11 +1805,11 @@ export default function Dashboard() {
                   style={{
                     background: "none",
                     border: `1px solid ${C.border}`,
-                    color: C.textDim,
+                    color: C.textMid,
                     cursor: "pointer",
                     fontSize: 12,
                     padding: "2px 8px",
-                    fontFamily: "var(--font-jetbrains-mono)",
+                    fontFamily: FONT,
                   }}
                 >
                   [X]
@@ -1767,12 +1834,12 @@ export default function Dashboard() {
                       width: "100%",
                       background: C.bg,
                       border: `1px solid ${C.border}`,
-                      color: C.text,
+                      color: C.textBright,
                       padding: "9px 11px",
                       fontSize: 12,
                       outline: "none",
                       boxSizing: "border-box",
-                      fontFamily: "var(--font-jetbrains-mono)",
+                      fontFamily: FONT,
                     }}
                   />
                   <input
@@ -1785,12 +1852,12 @@ export default function Dashboard() {
                       width: "100%",
                       background: C.bg,
                       border: `1px solid ${C.border}`,
-                      color: C.text,
+                      color: C.textBright,
                       padding: "9px 11px",
                       fontSize: 12,
                       outline: "none",
                       boxSizing: "border-box",
-                      fontFamily: "var(--font-jetbrains-mono)",
+                      fontFamily: FONT,
                     }}
                   />
                   {addWalletError && (
@@ -1801,23 +1868,23 @@ export default function Dashboard() {
                     disabled={!addWalletAddress.trim()}
                     style={{
                       width: "100%",
-                      background: addWalletAddress.trim() ? C.green : C.card,
+                      background: addWalletAddress.trim() ? C.green : C.bg1,
                       border: `1px solid ${addWalletAddress.trim() ? C.green : C.border}`,
-                      color: addWalletAddress.trim() ? "#000" : C.mute2,
+                      color: addWalletAddress.trim() ? "#000" : C.text,
                       padding: "9px",
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: "0.1em",
                       textTransform: "uppercase",
                       cursor: addWalletAddress.trim() ? "pointer" : "not-allowed",
-                      fontFamily: "var(--font-jetbrains-mono)",
+                      fontFamily: FONT,
                     }}
                   >
                     ▸ Add Wallet
                   </button>
-                  <div style={{ background: C.greenSoft, border: `1px solid ${C.green}`, padding: "9px 12px", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{ background: C.greenFaint, border: `1px solid ${C.green}`, padding: "9px 12px", display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <span style={{ color: C.green, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
-                    <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 11, color: C.textBright, lineHeight: 1.6 }}>
                       <strong style={{ color: C.green }}>READ_ONLY.</strong>{" "}
                       No private keys, no signing — DefiDesh only reads public chain data.
                     </div>
@@ -1831,22 +1898,20 @@ export default function Dashboard() {
                   ▸ Connect Browser Wallet
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {mounted && address ? (
-                    <ConnectedRow tagColor="#00e5ff" tagLabel="EVM" addr={address} onDisconnect={() => evmDisconnect()} />
-                  ) : mounted && (
-                    <ConnectButton onClick={() => setShowEvmConnectors(true)} label="Connect EVM Wallet" tagColor="#00e5ff" tagLabel="EVM" />
+                  {address ? (
+                    <ConnectedRow tagColor={C.cyan} tagLabel="EVM" addr={address} onDisconnect={() => evmDisconnect()} />
+                  ) : (
+                    <ConnectButton onClick={() => setShowEvmConnectors(true)} label="Connect EVM Wallet" tagColor={C.cyan} tagLabel="EVM" />
                   )}
-
-                  {mounted && solanaAddress ? (
-                    <ConnectedRow tagColor="#9945ff" tagLabel="SOL" addr={solanaAddress} onDisconnect={() => { setSolanaAddress(null); disconnectSolanaWallet(); }} />
-                  ) : mounted && (
-                    <ConnectButton onClick={() => setShowSolanaWalletList(true)} label="Connect Solana Wallet" tagColor="#9945ff" tagLabel="SOL" />
+                  {solanaAddress ? (
+                    <ConnectedRow tagColor={C.purple} tagLabel="SOL" addr={solanaAddress} onDisconnect={() => { setSolanaAddress(null); disconnectSolanaWallet(); }} />
+                  ) : (
+                    <ConnectButton onClick={() => setShowSolanaWalletList(true)} label="Connect Solana Wallet" tagColor={C.purple} tagLabel="SOL" />
                   )}
-
-                  {mounted && suiAddress ? (
-                    <ConnectedRow tagColor="#4da2ff" tagLabel="SUI" addr={suiAddress} onDisconnect={() => { setSuiAddress(null); disconnectSuiWallet(); }} />
-                  ) : mounted && (
-                    <ConnectButton onClick={() => setShowSuiWalletList(true)} label="Connect Sui Wallet" tagColor="#4da2ff" tagLabel="SUI" />
+                  {suiAddress ? (
+                    <ConnectedRow tagColor={C.blue} tagLabel="SUI" addr={suiAddress} onDisconnect={() => { setSuiAddress(null); disconnectSuiWallet(); }} />
+                  ) : (
+                    <ConnectButton onClick={() => setShowSuiWalletList(true)} label="Connect Sui Wallet" tagColor={C.blue} tagLabel="SUI" />
                   )}
                 </div>
               </div>
@@ -1873,9 +1938,9 @@ export default function Dashboard() {
                 if (!hasAny) return null;
 
                 const groups = [
-                  { label: "EVM", color: "#00e5ff", wallets: evmWalletList },
-                  { label: "SOL", color: "#9945ff", wallets: solWalletList },
-                  { label: "SUI", color: "#4da2ff", wallets: suiWalletList },
+                  { label: "EVM", color: C.cyan,   wallets: evmWalletList },
+                  { label: "SOL", color: C.purple, wallets: solWalletList },
+                  { label: "SUI", color: C.blue,   wallets: suiWalletList },
                 ].filter((g) => g.wallets.length > 0);
 
                 return (
@@ -1887,12 +1952,8 @@ export default function Dashboard() {
                       <div key={group.label} style={{ marginBottom: 14 }}>
                         <div
                           style={{
-                            fontSize: 9,
-                            color: group.color,
-                            fontWeight: 700,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.16em",
-                            marginBottom: 6,
+                            fontSize: 9, color: group.color, fontWeight: 700,
+                            textTransform: "uppercase", letterSpacing: "0.16em", marginBottom: 6,
                           }}
                         >
                           {group.label} WALLETS
@@ -1904,7 +1965,7 @@ export default function Dashboard() {
                               <div
                                 key={w.addr}
                                 style={{
-                                  background: C.card,
+                                  background: C.bg1,
                                   border: `1px solid ${C.border}`,
                                   padding: "9px 12px",
                                   display: "flex",
@@ -1932,12 +1993,12 @@ export default function Dashboard() {
                                         style={{
                                           background: C.bg,
                                           border: `1px solid ${C.border}`,
-                                          color: C.text,
+                                          color: C.textBright,
                                           padding: "3px 8px",
                                           fontSize: 11,
                                           outline: "none",
                                           flex: 1,
-                                          fontFamily: "var(--font-jetbrains-mono)",
+                                          fontFamily: FONT,
                                         }}
                                       />
                                       <button
@@ -1947,20 +2008,15 @@ export default function Dashboard() {
                                           setEditingWallet(null);
                                         }}
                                         style={{
-                                          color: C.green,
-                                          background: "none",
-                                          border: "none",
-                                          cursor: "pointer",
-                                          fontSize: 11,
-                                          whiteSpace: "nowrap",
-                                          fontFamily: "var(--font-jetbrains-mono)",
+                                          color: C.green, background: "none", border: "none",
+                                          cursor: "pointer", fontSize: 11, whiteSpace: "nowrap", fontFamily: FONT,
                                         }}
                                       >
                                         SAVE
                                       </button>
                                       <button
                                         onClick={() => setEditingWallet(null)}
-                                        style={{ color: C.mute2, background: "none", border: "none", cursor: "pointer", fontSize: 12 }}
+                                        style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 12 }}
                                       >
                                         ✕
                                       </button>
@@ -1968,13 +2024,13 @@ export default function Dashboard() {
                                   ) : (
                                     <div>
                                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                                        <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: C.textBright }}>
                                           {w.label || (w.type === "browser" ? group.label : "Watched")}
                                         </span>
                                         {w.type === "watched" && (
                                           <button
                                             onClick={() => { setEditingWallet(w.addr); setEditLabelValue(w.label ?? ""); }}
-                                            style={{ color: C.mute2, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
+                                            style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
                                             title="Edit label"
                                           >
                                             ✎
@@ -1983,8 +2039,8 @@ export default function Dashboard() {
                                         <span
                                           style={{
                                             fontSize: 9,
-                                            color: w.type === "browser" ? C.green : C.mute2,
-                                            background: w.type === "browser" ? C.greenSoft : "transparent",
+                                            color: w.type === "browser" ? C.green : C.text,
+                                            background: w.type === "browser" ? C.greenFaint : "transparent",
                                             border: `1px solid ${w.type === "browser" ? C.green : C.border}`,
                                             padding: "0 6px",
                                             marginLeft: 2,
@@ -1996,12 +2052,12 @@ export default function Dashboard() {
                                         </span>
                                       </div>
                                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                        <span style={{ fontSize: 10, color: C.mute2, fontFamily: "var(--font-jetbrains-mono)" }}>
+                                        <span style={{ fontSize: 10, color: C.text, fontFamily: FONT }}>
                                           {w.addr.slice(0, 8)}…{w.addr.slice(-6)}
                                         </span>
                                         <button
                                           onClick={() => navigator.clipboard.writeText(w.addr)}
-                                          style={{ color: C.mute2, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
+                                          style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
                                           title="Copy address"
                                         >
                                           ⧉
@@ -2020,13 +2076,9 @@ export default function Dashboard() {
                                       }}
                                       title="Remove watched wallet"
                                       style={{
-                                        color: C.red,
-                                        background: C.redSoft,
-                                        border: `1px solid ${C.red}`,
-                                        padding: "2px 7px",
-                                        fontSize: 11,
-                                        cursor: "pointer",
-                                        fontFamily: "var(--font-jetbrains-mono)",
+                                        color: C.red, background: C.redFaint,
+                                        border: `1px solid ${C.red}`, padding: "2px 7px",
+                                        fontSize: 11, cursor: "pointer", fontFamily: FONT,
                                       }}
                                     >
                                       🗑
@@ -2040,13 +2092,9 @@ export default function Dashboard() {
                                       }}
                                       title="Disconnect wallet"
                                       style={{
-                                        color: C.red,
-                                        background: C.redSoft,
-                                        border: `1px solid ${C.red}`,
-                                        padding: "2px 7px",
-                                        fontSize: 11,
-                                        cursor: "pointer",
-                                        fontFamily: "var(--font-jetbrains-mono)",
+                                        color: C.red, background: C.redFaint,
+                                        border: `1px solid ${C.red}`, padding: "2px 7px",
+                                        fontSize: 11, cursor: "pointer", fontFamily: FONT,
                                       }}
                                     >
                                       ✕
@@ -2062,87 +2110,36 @@ export default function Dashboard() {
                   </div>
                 );
               })()}
-
-              {/* Wallet Balances + Lending shortcuts */}
-              {hasWallet && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
-                  <Link href="/dashboard/tokens" style={{ textDecoration: "none", color: "inherit" }}>
-                    <div style={{ background: C.card, border: `1px solid ${C.border}`, padding: 14 }}>
-                      <div style={{ fontSize: 9, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>
-                        ▸ Wallet Balances
-                      </div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>
-                        {walletTokensLoading ? "—" : fmt$(totalTokenValue)}
-                      </div>
-                      <div style={{ fontSize: 10, color: C.mute2, marginTop: 2, letterSpacing: "0.06em" }}>
-                        {tokenCount > 0 ? `${tokenCount} token${tokenCount === 1 ? "" : "s"}` : "—"}
-                      </div>
-                    </div>
-                  </Link>
-                  <Link href="/dashboard/lending" style={{ textDecoration: "none", color: "inherit" }}>
-                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: "none", padding: 14 }}>
-                      <div style={{ fontSize: 9, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>
-                        ▸ Lending / Borrowing
-                      </div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>
-                        {walletTokensLoading ? "—" : fmt$(combinedLendingValue)}
-                      </div>
-                      <div style={{ fontSize: 10, color: C.mute2, marginTop: 2, letterSpacing: "0.06em" }}>
-                        {combinedLendingCount > 0 ? `${combinedLendingCount} position${combinedLendingCount === 1 ? "" : "s"}` : "—"}
-                      </div>
-                    </div>
-                  </Link>
-                </div>
-              )}
             </div>
 
-            {/* EVM picker sub-modal */}
+            {/* Sub-pickers */}
             {showEvmConnectors && (
-              <SubPickerOverlay
-                title="CHOOSE_EVM_WALLET"
-                onClose={() => setShowEvmConnectors(false)}
-                accent={C.green}
-              >
+              <SubPickerOverlay title="CHOOSE_EVM_WALLET" onClose={() => setShowEvmConnectors(false)} accent={C.green}>
                 {connectors.map((connector, i) => (
                   <button
                     key={connector.id}
-                    onClick={() => {
-                      evmConnect({ connector: connectors[i] });
-                      setShowEvmConnectors(false);
-                    }}
+                    onClick={() => { evmConnect({ connector: connectors[i] }); setShowEvmConnectors(false); }}
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      background: C.card,
-                      border: `1px solid ${C.border}`,
-                      padding: "10px 12px",
-                      width: "100%",
-                      cursor: "pointer",
-                      color: C.text,
-                      fontFamily: "var(--font-jetbrains-mono)",
-                      textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 10,
+                      background: C.bg1, border: `1px solid ${C.border}`,
+                      padding: "10px 12px", width: "100%", cursor: "pointer",
+                      color: C.textBright, fontFamily: FONT, textAlign: "left",
                     }}
                   >
                     <span style={{ fontSize: 12, color: C.green }}>▸</span>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{connector.name}</div>
-                      <div style={{ fontSize: 10, color: C.mute2, letterSpacing: "0.06em" }}>Browser extension</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.textBright }}>{connector.name}</div>
+                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.06em" }}>Browser extension</div>
                     </div>
                   </button>
                 ))}
               </SubPickerOverlay>
             )}
 
-            {/* Solana picker sub-modal */}
             {showSolanaWalletList && (
-              <SubPickerOverlay
-                title="CHOOSE_SOLANA_WALLET"
-                onClose={() => setShowSolanaWalletList(false)}
-                accent="#9945ff"
-              >
+              <SubPickerOverlay title="CHOOSE_SOLANA_WALLET" onClose={() => setShowSolanaWalletList(false)} accent={C.purple}>
                 {solanaWallets.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.mute2, textAlign: "center", padding: 8 }}>
+                  <div style={{ fontSize: 12, color: C.text, textAlign: "center", padding: 8 }}>
                     No Solana wallet detected. Install Phantom, Backpack, or Solflare.
                   </div>
                 ) : (
@@ -2151,17 +2148,10 @@ export default function Dashboard() {
                       key={w.adapter.name}
                       onClick={() => handleSolanaConnectFromModal(w.adapter.name)}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        background: C.card,
-                        border: `1px solid ${C.border}`,
-                        padding: "10px 12px",
-                        width: "100%",
-                        cursor: "pointer",
-                        color: C.text,
-                        fontFamily: "var(--font-jetbrains-mono)",
-                        textAlign: "left",
+                        display: "flex", alignItems: "center", gap: 10,
+                        background: C.bg1, border: `1px solid ${C.border}`,
+                        padding: "10px 12px", width: "100%", cursor: "pointer",
+                        color: C.textBright, fontFamily: FONT, textAlign: "left",
                       }}
                     >
                       {w.adapter.icon && (
@@ -2174,15 +2164,10 @@ export default function Dashboard() {
               </SubPickerOverlay>
             )}
 
-            {/* Sui picker sub-modal */}
             {showSuiWalletList && (
-              <SubPickerOverlay
-                title="CHOOSE_SUI_WALLET"
-                onClose={() => setShowSuiWalletList(false)}
-                accent="#4da2ff"
-              >
+              <SubPickerOverlay title="CHOOSE_SUI_WALLET" onClose={() => setShowSuiWalletList(false)} accent={C.blue}>
                 {modalSuiWallets.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.mute2, textAlign: "center", padding: 8 }}>
+                  <div style={{ fontSize: 12, color: C.text, textAlign: "center", padding: 8 }}>
                     No Sui wallet detected. Install Phantom, Suiet, or Slush.
                   </div>
                 ) : (
@@ -2191,17 +2176,10 @@ export default function Dashboard() {
                       key={w.name}
                       onClick={() => handleSuiConnectFromModal(w)}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        background: C.card,
-                        border: `1px solid ${C.border}`,
-                        padding: "10px 12px",
-                        width: "100%",
-                        cursor: "pointer",
-                        color: C.text,
-                        fontFamily: "var(--font-jetbrains-mono)",
-                        textAlign: "left",
+                        display: "flex", alignItems: "center", gap: 10,
+                        background: C.bg1, border: `1px solid ${C.border}`,
+                        padding: "10px 12px", width: "100%", cursor: "pointer",
+                        color: C.textBright, fontFamily: FONT, textAlign: "left",
                       }}
                     >
                       {w.icon && <img src={w.icon} alt={w.name} style={{ width: 22, height: 22 }} />}
@@ -2219,157 +2197,64 @@ export default function Dashboard() {
 }
 
 // ── Tiny presentational helpers ──────────────────────────────────────────────
-function WalletCardRow({
-  tagColor,
-  tagLabel,
-  addr,
-  type,
-  label,
-  onDisconnect,
-  onRemove,
-}: {
-  tagColor: string;
-  tagLabel: string;
-  addr: string;
-  type: "browser" | "watched";
-  label?: string;
-  onDisconnect?: () => void;
-  onRemove?: () => void;
-}) {
+function PaneHead({
+  title, linkLabel, linkColor, onLinkClick,
+}: { title: string; linkLabel?: string; linkColor?: string; onLinkClick?: () => void }) {
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        gap: 10,
-        background: C.card,
-        border: `1px solid ${C.border}`,
-        padding: "9px 11px",
+        marginBottom: 20,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden", flex: 1 }}>
-        <span
-          style={{
-            fontSize: 9,
-            color: tagColor,
-            fontWeight: 700,
-            letterSpacing: "0.16em",
-            border: `1px solid ${tagColor}`,
-            padding: "1px 6px",
-            flexShrink: 0,
-          }}
-        >
-          {tagLabel}
-        </span>
-        <div style={{ overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
-          {label && (
-            <span style={{ fontSize: 11, color: C.text, fontWeight: 600, letterSpacing: "0.04em" }}>
-              {label}
-            </span>
-          )}
-          <span
-            style={{
-              fontSize: 11,
-              color: C.textDim,
-              fontFamily: "var(--font-jetbrains-mono)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {addr.slice(0, 8)}…{addr.slice(-6)}
-          </span>
-        </div>
+      <div
+        style={{
+          fontSize: 8,
+          letterSpacing: "0.22em",
+          textTransform: "uppercase",
+          color: C.text,
+          opacity: 0.55,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <span style={{ color: C.green, opacity: 1, fontSize: 9 }}>//</span>
+        {title}
       </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      {linkLabel && (
         <button
           type="button"
-          title="Copy address"
-          onClick={() => navigator.clipboard.writeText(addr)}
+          onClick={onLinkClick}
+          className="pane-link"
           style={{
-            background: "none",
-            border: `1px solid ${C.border}`,
-            color: C.mute2,
-            padding: "2px 7px",
-            fontSize: 11,
+            fontSize: 9,
+            color: linkColor ?? C.text,
+            letterSpacing: "0.1em",
             cursor: "pointer",
-            fontFamily: "var(--font-jetbrains-mono)",
+            background: "none",
+            border: "none",
+            fontFamily: FONT,
+            opacity: linkColor ? 0.85 : 1,
           }}
         >
-          ⧉
+          {linkLabel}
         </button>
-        {type === "browser" ? (
-          <span
-            style={{
-              fontSize: 9,
-              color: C.green,
-              letterSpacing: "0.14em",
-              fontWeight: 700,
-              whiteSpace: "nowrap",
-            }}
-          >
-            ● CONNECTED
-          </span>
-        ) : (
-          <span
-            style={{
-              fontSize: 9,
-              color: C.mute2,
-              letterSpacing: "0.14em",
-              fontWeight: 700,
-              border: `1px solid ${C.border}`,
-              padding: "1px 6px",
-              whiteSpace: "nowrap",
-            }}
-          >
-            WATCHED
-          </span>
-        )}
-        {type === "browser" && onDisconnect && (
-          <button
-            type="button"
-            onClick={onDisconnect}
-            style={{
-              background: C.redSoft,
-              border: `1px solid ${C.red}`,
-              color: C.red,
-              padding: "3px 9px",
-              fontSize: 10,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "var(--font-jetbrains-mono)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Disconnect
-          </button>
-        )}
-        {type === "watched" && onRemove && (
-          <button
-            type="button"
-            onClick={onRemove}
-            title="Remove watched wallet"
-            style={{
-              background: C.redSoft,
-              border: `1px solid ${C.red}`,
-              color: C.red,
-              padding: "3px 9px",
-              fontSize: 10,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "var(--font-jetbrains-mono)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Remove
-          </button>
-        )}
+      )}
+    </div>
+  );
+}
+
+function ChartMeta({ label, value, colour }: { label: string; value: string; colour: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+      <div style={{ color: C.text, opacity: 0.5, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 9 }}>
+        {label}
+      </div>
+      <div style={{ fontWeight: 700, color: colour, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+        {value}
       </div>
     </div>
   );
@@ -2384,7 +2269,7 @@ function ConnectedRow({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        background: C.card,
+        background: C.bg1,
         border: `1px solid ${tagColor}`,
         padding: "9px 12px",
       }}
@@ -2402,7 +2287,7 @@ function ConnectedRow({
         >
           {tagLabel}
         </span>
-        <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--font-jetbrains-mono)" }}>
+        <span style={{ fontSize: 11, color: C.textBright, fontFamily: FONT }}>
           {addr.slice(0, 8)}…{addr.slice(-6)}
         </span>
       </div>
@@ -2411,7 +2296,7 @@ function ConnectedRow({
         <button
           onClick={onDisconnect}
           style={{
-            background: C.redSoft,
+            background: C.redFaint,
             border: `1px solid ${C.red}`,
             color: C.red,
             padding: "2px 8px",
@@ -2419,7 +2304,7 @@ function ConnectedRow({
             letterSpacing: "0.1em",
             textTransform: "uppercase",
             cursor: "pointer",
-            fontFamily: "var(--font-jetbrains-mono)",
+            fontFamily: FONT,
           }}
         >
           Disconnect
@@ -2439,14 +2324,14 @@ function ConnectButton({
         display: "flex",
         alignItems: "center",
         gap: 10,
-        background: C.card,
+        background: C.bg1,
         border: `1px solid ${C.border}`,
         padding: "9px 12px",
         width: "100%",
         cursor: "pointer",
-        color: C.text,
+        color: C.textBright,
         textAlign: "left",
-        fontFamily: "var(--font-jetbrains-mono)",
+        fontFamily: FONT,
       }}
     >
       <span
@@ -2487,7 +2372,7 @@ function SubPickerOverlay({
           padding: 18,
           width: "85%",
           maxWidth: 320,
-          fontFamily: "var(--font-jetbrains-mono)",
+          fontFamily: FONT,
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -2497,12 +2382,8 @@ function SubPickerOverlay({
           <button
             onClick={onClose}
             style={{
-              color: C.textDim,
-              background: "none",
-              border: `1px solid ${C.border}`,
-              cursor: "pointer",
-              fontSize: 11,
-              padding: "1px 8px",
+              color: C.textMid, background: "none", border: `1px solid ${C.border}`,
+              cursor: "pointer", fontSize: 11, padding: "1px 8px",
             }}
           >
             [X]

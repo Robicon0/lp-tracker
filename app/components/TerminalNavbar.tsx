@@ -7,19 +7,35 @@ import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 
 const NAV_LINKS = [
-  { href: "/", label: "HOME" },
-  { href: "/dashboard", label: "DASHBOARD" },
-  { href: "/analytics", label: "ANALYTICS" },
-  { href: "/about", label: "ABOUT" },
+  { href: "/",          label: "Home"      },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/analytics", label: "Analytics" },
+  { href: "#",          label: "Alerts"    },
+  { href: "#",          label: "API"       },
 ];
 
-const TICKER_IDS = [
-  { id: "bitcoin", label: "BTC" },
-  { id: "ethereum", label: "ETH" },
-  { id: "solana", label: "SOL" },
-] as const;
+const C = {
+  bg:        "#050505",
+  bg1:       "#090909",
+  bg2:       "#0d0d0d",
+  border:    "#1c1c1c",
+  borderHi:  "#262626",
+  borderGlow:"#2e2e2e",
+  text:      "#8a8a8a",
+  textMid:   "#b4b4b4",
+  textBright:"#e8e8e8",
+  green:     "#00ff41",
+  greenDim:  "#00b82a",
+  greenFaint:"rgba(0,255,65,0.06)",
+  greenGlow: "rgba(0,255,65,0.18)",
+  cyan:      "#00d4ff",
+  purple:    "#9945ff",
+  blue:      "#3d9fff",
+} as const;
 
-function truncate(addr: string, head = 5, tail = 4) {
+const FONT = "'JetBrains Mono','Courier New',monospace";
+
+function truncate(addr: string, head = 4, tail = 4) {
   return addr.length > head + tail + 2 ? `${addr.slice(0, head)}…${addr.slice(-tail)}` : addr;
 }
 
@@ -31,168 +47,192 @@ export default function TerminalNavbar() {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
 
-  const [prices, setPrices] = useState<Record<string, number>>({});
-  useEffect(() => {
-    fetch(
-      "/api/prices?endpoint=coins/markets&ids=bitcoin,ethereum,solana&vs_currencies=usd&order=market_cap_desc",
-    )
-      .then((r) => r.json())
-      .then((data: Array<{ id: string; current_price: number }>) => {
-        const map: Record<string, number> = {};
-        for (const d of data) if (d.current_price) map[d.id] = d.current_price;
-        setPrices(map);
-      })
-      .catch(() => {});
-  }, []);
-
   const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+    href === "/" ? pathname === "/"
+    : href !== "#" && (pathname === href || pathname.startsWith(`${href}/`));
 
-  const linkStyle = (active: boolean): CSSProperties => ({
-    fontSize: 11,
-    letterSpacing: "0.08em",
-    color: active ? "#00ff41" : "#555",
-    textTransform: "uppercase",
-    textDecoration: "none",
-    paddingBottom: 4,
-    borderBottom: active ? "1px solid #00ff41" : "1px solid transparent",
-    transition: "color 0.15s, border-color 0.15s",
-  });
-
-  const tagStyle: CSSProperties = {
-    display: "inline-flex",
+  const tabBase: CSSProperties = {
+    display: "flex",
     alignItems: "center",
-    gap: 6,
-    padding: "4px 8px",
-    background: "#090909",
-    border: "1px solid #1c1c1c",
+    padding: "0 22px",
     fontSize: 10,
-    letterSpacing: "0.06em",
-    color: "#c8c8c8",
-    cursor: "pointer",
-    fontFamily: "var(--font-jetbrains-mono), monospace",
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    color: C.text,
+    borderRight: `1px solid ${C.border}`,
+    textDecoration: "none",
+    transition: "color 0.15s, background 0.15s",
+    position: "relative",
+    fontFamily: FONT,
   };
 
-  const priceStyle: CSSProperties = {
-    fontSize: 10,
-    letterSpacing: "0.04em",
-    color: "#c8c8c8",
-    fontFamily: "var(--font-jetbrains-mono), monospace",
-    whiteSpace: "nowrap",
+  const tabActive: CSSProperties = {
+    ...tabBase,
+    color: C.textBright,
   };
+
+  type ChipProps = { color: string; chain: string; addr: string };
+  function Chip({ color, chain, addr }: ChipProps) {
+    return (
+      <button
+        type="button"
+        onClick={() => navigator.clipboard.writeText(addr)}
+        title={`Copy ${chain} address`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 10px",
+          border: `1px solid ${C.border}`,
+          background: C.bg2,
+          cursor: "pointer",
+          fontSize: 10,
+          letterSpacing: "0.04em",
+          fontFamily: FONT,
+        }}
+      >
+        <span style={{ width: 5, height: 5, background: color, flexShrink: 0 }} />
+        <span style={{ color: C.text, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+          {chain}
+        </span>
+        <span style={{ color: C.textMid }}>{truncate(addr)}</span>
+      </button>
+    );
+  }
 
   return (
     <nav
-      className="sticky top-0 z-[10000] flex items-center justify-between gap-4 px-4 sm:px-8 lg:px-12 border-b border-[#1c1c1c]"
       style={{
-        background: "#000",
         height: 52,
-        fontFamily: "var(--font-jetbrains-mono), monospace",
+        display: "flex",
+        alignItems: "stretch",
+        borderBottom: `1px solid ${C.border}`,
+        background: "rgba(5,5,5,0.97)",
+        position: "sticky",
+        top: 0,
+        zIndex: 10000,
+        fontFamily: FONT,
       }}
     >
-      {/* Left: logo */}
-      <Link
-        href="/"
+      {/* Logo block */}
+      <div
         style={{
-          fontSize: 13,
-          fontWeight: 700,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          textDecoration: "none",
+          padding: "0 28px",
+          display: "flex",
+          alignItems: "center",
+          borderRight: `1px solid ${C.border}`,
           flexShrink: 0,
         }}
       >
-        <span style={{ color: "#00ff41" }}>DEFI</span>
-        <span style={{ color: "#555" }}>/</span>
-        <span style={{ color: "#555" }}>DESH</span>
-      </Link>
-
-      {/* Middle: nav links */}
-      <div className="hidden md:flex items-center gap-7" style={{ flexShrink: 0 }}>
-        {NAV_LINKS.map((l) => (
-          <Link key={l.href} href={l.href} style={linkStyle(isActive(l.href))}>
-            {l.label}
-          </Link>
-        ))}
+        <Link
+          href="/"
+          style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 0 }}
+        >
+          <span style={{ fontSize: 14, fontWeight: 700, color: C.green, letterSpacing: "0.14em" }}>DEFI</span>
+          <span style={{ color: C.borderGlow, fontWeight: 300, padding: "0 2px" }}>/</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: C.textMid, letterSpacing: "0.14em" }}>DESH</span>
+        </Link>
       </div>
 
-      {/* Right: prices + wallet tags + LIVE */}
-      <div className="flex items-center gap-3" style={{ minWidth: 0 }}>
-        {/* Prices — hidden below lg */}
-        <div className="hidden lg:flex items-center gap-3" style={{ flexShrink: 0 }}>
-          {TICKER_IDS.map(({ id, label }) =>
-            prices[id] ? (
-              <span key={id} style={priceStyle}>
-                <span style={{ color: "#555" }}>{label}</span>{" "}
-                <span style={{ color: "#c8c8c8" }}>
-                  ${prices[id].toLocaleString("en-US", {
-                    maximumFractionDigits: id === "bitcoin" ? 0 : 2,
-                  })}
-                </span>
-              </span>
-            ) : null,
-          )}
-        </div>
+      {/* Tabs */}
+      <div style={{ display: "flex" }}>
+        {NAV_LINKS.map((l) => {
+          const active = isActive(l.href);
+          return (
+            <Link
+              key={l.label}
+              href={l.href}
+              style={active ? tabActive : tabBase}
+            >
+              {l.label}
+              {active && (
+                <span
+                  style={{
+                    position: "absolute",
+                    bottom: -1,
+                    left: 0,
+                    right: 0,
+                    height: 1,
+                    background: C.green,
+                    boxShadow: `0 0 8px ${C.greenGlow}`,
+                  }}
+                />
+              )}
+            </Link>
+          );
+        })}
+      </div>
 
-        {/* Wallet tags — hidden below md */}
-        <div className="hidden md:flex items-center gap-2" style={{ flexShrink: 0 }}>
-          {mounted && address && (
-            <button
-              type="button"
-              title="Copy EVM address"
-              onClick={() => navigator.clipboard.writeText(address)}
-              style={tagStyle}
-            >
-              <span style={{ color: "#00e5ff", fontWeight: 700 }}>EVM</span>
-              <span style={{ color: "#7a7a7a" }}>{truncate(address, 5, 4)}</span>
-            </button>
-          )}
-          {mounted && solanaAddress && (
-            <button
-              type="button"
-              title="Copy Solana address"
-              onClick={() => navigator.clipboard.writeText(solanaAddress)}
-              style={tagStyle}
-            >
-              <span style={{ color: "#9945ff", fontWeight: 700 }}>SOL</span>
-              <span style={{ color: "#7a7a7a" }}>{truncate(solanaAddress, 4, 4)}</span>
-            </button>
-          )}
-          {mounted && suiAddress && (
-            <button
-              type="button"
-              title="Copy Sui address"
-              onClick={() => navigator.clipboard.writeText(suiAddress)}
-              style={tagStyle}
-            >
-              <span style={{ color: "#4da2ff", fontWeight: 700 }}>SUI</span>
-              <span style={{ color: "#7a7a7a" }}>{truncate(suiAddress, 5, 4)}</span>
-            </button>
-          )}
-        </div>
+      {/* Wallet chips */}
+      <div
+        className="hidden md:flex"
+        style={{
+          alignItems: "center",
+          gap: 6,
+          padding: "0 20px",
+          borderRight: `1px solid ${C.border}`,
+        }}
+      >
+        {mounted && address && (
+          <Chip color={C.cyan} chain="EVM" addr={address} />
+        )}
+        {mounted && solanaAddress && (
+          <Chip color={C.purple} chain="SOL" addr={solanaAddress} />
+        )}
+        {mounted && suiAddress && (
+          <Chip color={C.blue} chain="SUI" addr={suiAddress} />
+        )}
+        {mounted && !address && !solanaAddress && !suiAddress && (
+          <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.08em" }}>
+            no wallet
+          </span>
+        )}
+      </div>
 
-        {/* LIVE badge */}
+      <div style={{ flex: 1 }} />
+
+      {/* LIVE status */}
+      <div style={{ display: "flex", alignItems: "stretch" }}>
         <div
-          className="flex items-center gap-2"
           style={{
-            padding: "5px 10px",
-            border: "1px solid #00cc33",
-            background: "rgba(0,255,65,0.08)",
-            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            border: `1px solid ${C.greenDim}`,
+            background: C.greenFaint,
+            margin: "10px 16px",
+            padding: "0 14px",
           }}
         >
           <span
             className="animate-pulse"
-            style={{ width: 6, height: 6, background: "#00ff41", display: "inline-block" }}
+            style={{
+              width: 6,
+              height: 6,
+              background: C.green,
+              flexShrink: 0,
+              display: "inline-block",
+            }}
           />
           <span
+            className="hidden sm:inline"
             style={{
-              fontSize: 10,
-              letterSpacing: "0.1em",
-              color: "#00ff41",
+              fontSize: 9,
+              color: C.green,
+              letterSpacing: "0.12em",
               textTransform: "uppercase",
             }}
-            className="hidden sm:inline"
+          >
+            All systems nominal
+          </span>
+          <span
+            className="sm:hidden"
+            style={{
+              fontSize: 9,
+              color: C.green,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+            }}
           >
             LIVE
           </span>
