@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
-import Navbar from "../../Navbar";
+import TerminalNav from "../../components/TerminalNav";
+import AnimatedCount from "../../components/AnimatedCount";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
@@ -20,51 +21,72 @@ function fmtBalance(n: number) {
   return n.toFixed(6);
 }
 
-// AAVE V3 manage URLs by chain
 const AAVE_URL: Record<string, string> = {
-  Base:      "https://app.aave.com/?marketName=proto_base_v3",
-  Ethereum:  "https://app.aave.com/?marketName=proto_mainnet_v3",
-  Arbitrum:  "https://app.aave.com/?marketName=proto_arbitrum_v3",
-  Optimism:  "https://app.aave.com/?marketName=proto_optimism_v3",
-  Polygon:   "https://app.aave.com/?marketName=proto_polygon_v3",
+  Base:     "https://app.aave.com/?marketName=proto_base_v3",
+  Ethereum: "https://app.aave.com/?marketName=proto_mainnet_v3",
+  Arbitrum: "https://app.aave.com/?marketName=proto_arbitrum_v3",
+  Optimism: "https://app.aave.com/?marketName=proto_optimism_v3",
+  Polygon:  "https://app.aave.com/?marketName=proto_polygon_v3",
 };
 
-// Fallback supply APYs — used only if the live on-chain rate fetch fails.
-// Real rates come from /api/aave-v3/rates via the useAaveV3Rates hook.
 const FALLBACK_AAVE_SUPPLY_APY: Record<string, number> = {
   USDC: 2.86, USDbC: 2.86, "USDC.e": 2.86,
-  USDT: 3.50,
-  DAI:  2.20,
-  WETH: 1.80, ETH: 1.80,
+  USDT: 3.50, DAI: 2.20, WETH: 1.80, ETH: 1.80,
   WBTC: 0.80, cbBTC: 0.80,
 };
-
-function getFallbackSupplyApy(underlying: string): number {
-  return FALLBACK_AAVE_SUPPLY_APY[underlying] ?? 0;
+function getFallbackSupplyApy(s: string): number {
+  return FALLBACK_AAVE_SUPPLY_APY[s] ?? 0;
 }
 
-// Inline token icon
-function TokenIcon({ symbol, size = 28, logo, style }: {
-  symbol: string; size?: number; logo?: string; style?: CSSProperties;
+// ── Token icon ────────────────────────────────────────────────────────────────
+function TokenIcon({
+  symbol,
+  size = 26,
+  logo,
+}: {
+  symbol: string;
+  size?: number;
+  logo?: string;
 }) {
   const [err, setErr] = useState(false);
   const src = (!err && (logo || getTokenLogo(symbol))) || null;
-  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
-  const base: CSSProperties = { width: size, height: size, borderRadius: "50%", flexShrink: 0, ...style };
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#262626";
+  const base: CSSProperties = {
+    width: size,
+    height: size,
+    flexShrink: 0,
+    border: "1px solid #262626",
+  };
   if (src) {
-    return <img src={src} alt={symbol} onError={() => setErr(true)}
-      style={{ ...base, objectFit: "cover", display: "block" }} />;
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={src}
+        alt={symbol}
+        onError={() => setErr(true)}
+        style={{ ...base, objectFit: "cover", display: "block" }}
+      />
+    );
   }
   return (
-    <div style={{ ...base, background: color,
-      display: "inline-flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.38, fontWeight: 700, color: "white" }}>
+    <div
+      style={{
+        ...base,
+        background: color,
+        color: "#fff",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size * 0.36,
+        fontWeight: 700,
+      }}
+    >
       {symbol.charAt(0).toUpperCase()}
     </div>
   );
 }
 
-// ── LendingPosition = one AAVE card per chain ──────────────────────────────────
+// ── AAVE LendingPosition (built from useWalletTokens) ──────────────────────────
 interface LendingPosition {
   chain: string;
   protocol: string;
@@ -73,57 +95,39 @@ interface LendingPosition {
   totalCollateral: number;
   totalDebt: number;
   netWorth: number;
-  supplyApy: number; // weighted avg supply APY
+  supplyApy: number;
   borrowApy: number;
   netApy: number;
   dailyCashflow: number;
-  ltvPct: number;
-  liquidationThreshold: number;
-  availableToBorrow: number;
-  healthFactor: number | null; // null = ∞
 }
 
-function rateForToken(t: TokenItem, liveRates: AaveV3RatesMap): { supplyApy: number; borrowApy: number } {
+function rateForToken(t: TokenItem, liveRates: AaveV3RatesMap) {
   const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
   if (live) return live;
-  // t.symbol is already the underlying (useWalletTokens strips AAVE prefixes)
-  const supplyApy = getFallbackSupplyApy(t.symbol);
-  return { supplyApy, borrowApy: 0 };
+  return { supplyApy: getFallbackSupplyApy(t.symbol), borrowApy: 0 };
 }
 
 function buildPositions(tokens: TokenItem[], liveRates: AaveV3RatesMap): LendingPosition[] {
-  const lendingTokens = tokens.filter((t) => t.isLending);
-  const debtTokens    = tokens.filter((t) => t.isDebt);
-
-  // Group by chain — t.chain is set to the chain the token was fetched from
-  // by useWalletTokens, so no need to re-derive from the symbol prefix.
+  const lend = tokens.filter((t) => t.isLending);
+  const debt = tokens.filter((t) => t.isDebt);
   const chainMap = new Map<string, TokenItem[]>();
-  for (const t of lendingTokens) {
+  for (const t of lend) {
     const arr = chainMap.get(t.chain) ?? [];
     arr.push(t);
     chainMap.set(t.chain, arr);
   }
-
   return [...chainMap.entries()].map(([chain, supplied]) => {
-    const chainDebt = debtTokens.filter((t) => t.chain === chain);
+    const chainDebt = debt.filter((t) => t.chain === chain);
     const totalCollateral = supplied.reduce((s, t) => s + t.usdValue, 0);
     const totalDebt = chainDebt.reduce((s, t) => s + t.usdValue, 0);
-
-    // Value-weighted live rates
     const supplyApy = totalCollateral > 0
       ? supplied.reduce((s, t) => s + rateForToken(t, liveRates).supplyApy * t.usdValue, 0) / totalCollateral
       : 0;
     const borrowApy = totalDebt > 0
       ? chainDebt.reduce((s, t) => s + rateForToken(t, liveRates).borrowApy * t.usdValue, 0) / totalDebt
       : 0;
-
     const netApy = supplyApy - borrowApy;
-    const dailyCashflow = (totalCollateral * supplyApy) / 100 / 365
-      - (totalDebt * borrowApy) / 100 / 365;
-    const ltvPct = totalCollateral > 0 ? (totalDebt / totalCollateral) * 100 : 0;
-    const liquidationThreshold = 78; // Standard AAVE V3 USDC LT
-    const availableToBorrow = Math.max(0, totalCollateral * liquidationThreshold / 100 - totalDebt);
-
+    const dailyCashflow = (totalCollateral * supplyApy) / 100 / 365 - (totalDebt * borrowApy) / 100 / 365;
     return {
       chain,
       protocol: "AAVE V3",
@@ -136,13 +140,13 @@ function buildPositions(tokens: TokenItem[], liveRates: AaveV3RatesMap): Lending
       borrowApy,
       netApy,
       dailyCashflow,
-      ltvPct,
-      liquidationThreshold,
-      availableToBorrow,
-      healthFactor: totalDebt > 0 ? (totalCollateral * liquidationThreshold / 100) / totalDebt : null,
     };
   });
 }
+
+const PAGE_BG = "#050505";
+const SCANLINE =
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.012) 3px, rgba(0,0,0,0.012) 4px)";
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function LendingPage() {
@@ -153,9 +157,6 @@ export default function LendingPage() {
   const { positions: externalPositions, isLoading: externalLoading } = useLendingPositions();
   const { rates: aaveRates, prices: aavePrices } = useAaveV3Rates(rawTokens);
 
-  // Enrich AAVE aTokens / debt tokens that had price=0 from the symbol map
-  // (exotic reserves like sUSDe, osETH, etc.) with CoinGecko contract-address
-  // prices resolved server-side via the AAVE rates endpoint.
   const tokens: TokenItem[] = useMemo(() => {
     return rawTokens.map((t) => {
       if ((!t.isLending && !t.isDebt) || t.price > 0) return t;
@@ -164,71 +165,144 @@ export default function LendingPage() {
       return { ...t, price: live, usdValue: t.balance * live };
     });
   }, [rawTokens, aavePrices]);
-  const [loadingTimeout, setLoadingTimeout] = useState(false);
 
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
   const combinedLoading = isLoading || externalLoading;
 
   useEffect(() => {
-    if (!combinedLoading) { setLoadingTimeout(false); return; }
+    if (!combinedLoading) {
+      setLoadingTimeout(false);
+      return;
+    }
     const t = setTimeout(() => setLoadingTimeout(true), 15000);
     return () => clearTimeout(t);
   }, [combinedLoading]);
 
   const positions = useMemo(() => buildPositions(tokens, aaveRates), [tokens, aaveRates]);
 
-  // Combined totals across AAVE + external protocols
-  const totalCollateral = positions.reduce((s, p) => s + p.totalCollateral, 0)
-    + externalPositions.reduce((s, p) => s + p.totalSupplied, 0);
-  const totalDebt = positions.reduce((s, p) => s + p.totalDebt, 0)
-    + externalPositions.reduce((s, p) => s + p.totalBorrowed, 0);
-  const netWorth      = totalCollateral - totalDebt;
-  const netApy        = totalCollateral > 0
-    ? (positions.reduce((s, p) => s + p.supplyApy * p.totalCollateral, 0)
-       + externalPositions.reduce((s, p) => s + (p.supplyApy ?? 0) * p.totalSupplied, 0)) / totalCollateral
-    : 0;
-  const dailyCashflow = positions.reduce((s, p) => s + p.dailyCashflow, 0)
-    + externalPositions.reduce((s, p) => s + (p.totalSupplied * (p.supplyApy ?? 0) / 100 / 365), 0);
+  const totalCollateral =
+    positions.reduce((s, p) => s + p.totalCollateral, 0) +
+    externalPositions.reduce((s, p) => s + p.totalSupplied, 0);
+  const totalDebt =
+    positions.reduce((s, p) => s + p.totalDebt, 0) +
+    externalPositions.reduce((s, p) => s + p.totalBorrowed, 0);
+  const netWorth = totalCollateral - totalDebt;
+  const netApy =
+    totalCollateral > 0
+      ? (positions.reduce((s, p) => s + p.supplyApy * p.totalCollateral, 0) +
+          externalPositions.reduce((s, p) => s + (p.supplyApy ?? 0) * p.totalSupplied, 0)) /
+        totalCollateral
+      : 0;
+  const dailyCashflow =
+    positions.reduce((s, p) => s + p.dailyCashflow, 0) +
+    externalPositions.reduce(
+      (s, p) => s + (p.totalSupplied * (p.supplyApy ?? 0)) / 100 / 365,
+      0,
+    );
 
   const hasAnyPositions = positions.length > 0 || externalPositions.length > 0;
 
   return (
-    <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
-      <Navbar />
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "80px 24px 60px" }}>
+    <div
+      className="min-h-screen"
+      style={{
+        background: PAGE_BG,
+        color: "#7a7a7a",
+        fontFamily: "var(--font-jetbrains-mono)",
+        fontSize: 12,
+        lineHeight: 1.5,
+      }}
+    >
+      <style
+        dangerouslySetInnerHTML={{
+          __html:
+            '@keyframes lend-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } } button[aria-label="Share feedback"] { display: none !important; }',
+        }}
+      />
+      <div
+        aria-hidden
+        className="fixed inset-0 pointer-events-none z-[9998]"
+        style={{ background: SCANLINE }}
+      />
+      <TerminalNav active="dashboard" />
 
-        {/* Back + header */}
-        <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 6,
-          fontSize: 13, color: "rgba(255,255,255,0.4)", textDecoration: "none", marginBottom: 24 }}>
+      <div
+        className="px-4 sm:px-10 py-8"
+        style={{ animation: "lend-fade-up 0.4s ease both", maxWidth: 1280, margin: "0 auto" }}
+      >
+        {/* Back link */}
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-2 mb-5 text-[#7a7a7a] hover:text-[#00ff41] transition-colors no-underline"
+          style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase" }}
+        >
           ← Back to Dashboard
         </Link>
-        <h1 style={{ fontSize: 30, fontWeight: 700, margin: "0 0 6px" }}>Lending &amp; Borrowing Positions</h1>
-        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", margin: "0 0 28px" }}>
+
+        {/* Eyebrow + title */}
+        <div
+          className="mb-1.5"
+          style={{
+            fontSize: 9,
+            letterSpacing: "0.22em",
+            textTransform: "uppercase",
+            color: "#7a7a7a",
+            opacity: 0.6,
+          }}
+        >
+          <span className="text-[#00ff41]" style={{ opacity: 1 }}>// lending</span> · borrowing positions across protocols
+        </div>
+        <h1
+          className="font-bold mb-1.5"
+          style={{ fontSize: 32, color: "#f0f0f0", letterSpacing: "-0.02em" }}
+        >
+          Lending &amp; Borrowing Positions
+        </h1>
+        <p className="mb-6" style={{ fontSize: 11, color: "#7a7a7a", opacity: 0.6 }}>
           Track your lending and borrowing across DeFi protocols
         </p>
 
-        {/* No wallet */}
+        {/* Empty / loading states */}
         {!hasWallet && (
-          <div style={{ textAlign: "center", padding: "60px 0" }}>
-            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.4)", marginBottom: 24 }}>
+          <div className="text-center py-16">
+            <p style={{ fontSize: 12, color: "#7a7a7a", marginBottom: 20 }}>
               Connect a wallet to see your lending positions.
             </p>
-            <Link href="/dashboard" style={{ background: "rgba(16,185,129,0.2)",
-              border: "1px solid rgba(16,185,129,0.3)", color: "#6ee7b7",
-              borderRadius: 10, padding: "10px 20px", textDecoration: "none", fontSize: 14 }}>
-              Go to Dashboard
+            <Link
+              href="/dashboard"
+              className="inline-block border border-[#00992a] text-[#00ff41] px-5 py-2.5 no-underline hover:bg-[rgba(0,255,65,0.08)] transition-colors"
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                background: "rgba(0,255,65,0.06)",
+              }}
+            >
+              ▸ Go to Dashboard
             </Link>
           </div>
         )}
 
         {hasWallet && combinedLoading && !hasAnyPositions && (
-          <div style={{ textAlign: "center", padding: "60px 0", color: "rgba(255,255,255,0.3)" }}>
-            <div style={{ width: 28, height: 28, border: "2px solid #10b981",
-              borderTopColor: "transparent", borderRadius: "50%", margin: "0 auto 16px",
-              animation: "spin 1s linear infinite" }} />
-            <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
-            Scanning wallet for lending positions…
+          <div className="text-center py-16" style={{ color: "#7a7a7a" }}>
+            <div
+              className="mx-auto mb-4"
+              style={{
+                width: 24,
+                height: 24,
+                border: "2px solid #00ff41",
+                borderTopColor: "transparent",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            <style>{"@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }"}</style>
+            <span style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              Scanning wallet for lending positions…
+            </span>
             {loadingTimeout && (
-              <p style={{ fontSize: 13, color: "#f59e0b", marginTop: 12 }}>
+              <p
+                style={{ fontSize: 11, color: "#ffaa00", marginTop: 12, letterSpacing: "0.04em" }}
+              >
                 Taking longer than expected. Token prices may be temporarily unavailable.
               </p>
             )}
@@ -236,440 +310,539 @@ export default function LendingPage() {
         )}
 
         {hasWallet && !combinedLoading && !hasAnyPositions && (
-          <div style={{ textAlign: "center", padding: "60px 0" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
-            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.4)" }}>
+          <div className="text-center py-16">
+            <p style={{ fontSize: 13, color: "#7a7a7a" }}>
               No lending positions detected.
             </p>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", marginTop: 8 }}>
-              Supported: AAVE V3 (EVM), Dolomite (Arbitrum), Jupiter Lend (Solana).
+            <p style={{ fontSize: 10, color: "#444", marginTop: 6, letterSpacing: "0.05em" }}>
+              Supported: AAVE V3 (EVM), Dolomite, Jupiter Lend, Kamino, Suilend, AlphaFi, HyperLend, HypurrFi.
             </p>
           </div>
         )}
 
         {hasWallet && hasAnyPositions && (
           <>
-            {/* Summary Stats Row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 28 }}
-              className="lending-stats">
-              {[
-                {
-                  label: "Net Worth",
-                  value: fmt$(netWorth),
-                  sub: "Collateral minus debt",
-                  color: "#34d399",
-                },
-                {
-                  label: "Total Supplied",
-                  value: fmt$(totalCollateral),
-                  sub: totalDebt > 0 ? `Borrowed: ${fmt$(totalDebt)}` : "No borrowing",
-                  color: "#34d399",
-                },
-                {
-                  label: "Net APY",
-                  value: `${netApy.toFixed(2)}%`,
-                  sub: "Weighted average",
-                  color: "#6ee7b7",
-                },
-                {
-                  label: "Est. Daily Yield",
-                  value: `+${fmt$(dailyCashflow, 4)}`,
-                  sub: `+${fmt$(dailyCashflow * 30)}/mo · +${fmt$(dailyCashflow * 365)}/yr`,
-                  color: "#34d399",
-                },
-              ].map(({ label, value, sub, color }) => (
-                <div key={label} style={{ background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 18 }}>
-                  <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
-                    color: "rgba(255,255,255,0.35)", margin: "0 0 8px" }}>{label}</p>
-                  <p style={{ fontSize: 22, fontWeight: 700, color, margin: "0 0 4px",
-                    letterSpacing: -0.5 }}>{value}</p>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>{sub}</p>
-                </div>
-              ))}
-            </div>
+            {/* Top stats */}
+            <TopStats
+              netWorth={netWorth}
+              totalSupplied={totalCollateral}
+              totalDebt={totalDebt}
+              netApy={netApy}
+              dailyCashflow={dailyCashflow}
+            />
 
-            {/* AAVE position cards */}
+            {/* AAVE positions */}
             {positions.map((pos) => (
-              <PositionCard key={pos.chain} pos={pos} liveRates={aaveRates} />
+              <ProtocolCard key={`aave-${pos.chain}`} pos={pos} liveRates={aaveRates} />
             ))}
 
-            {/* External protocol cards (Dolomite, Jupiter Lend, etc.) */}
+            {/* External lending positions */}
             {externalPositions.map((pos) => (
-              <ExternalPositionCard key={`${pos.protocol}-${pos.chain}`} pos={pos} />
+              <ExternalProtocolCard key={`${pos.protocol}-${pos.chain}`} pos={pos} />
             ))}
 
             {/* Footer notes */}
-            <div style={{ marginTop: 32, padding: "16px 20px",
-              background: "rgba(255,255,255,0.02)", borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.05)" }}>
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "0 0 4px" }}>
-                ⚠ Health Factor below 1.0 means your position can be liquidated.
-              </p>
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "0 0 4px" }}>
-                📊 APY values are approximate. Real-time rates are available on each protocol.
-              </p>
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "0 0 4px" }}>
-                Net Worth = Total Collateral − Total Borrowed
-              </p>
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                Jupiter Lend requires a free API key at portal.jup.ag — set JUPITER_API_KEY in .env.local to enable.
-              </p>
+            <div
+              className="mt-6 px-5 py-4 border border-[#1c1c1c]"
+              style={{ background: "#090909", lineHeight: 1.8, color: "#7a7a7a", opacity: 0.75 }}
+            >
+              {[
+                ["⚠", "Health Factor below 1.0 means your position can be liquidated."],
+                ["▸", "APY values are approximate. Real-time rates are available on each protocol."],
+                ["▸", "Net Worth = Total Collateral − Total Borrowed"],
+                [
+                  "▸",
+                  "Jupiter Lend requires a free API key at portal.jup.ag — set JUPITER_API_KEY in .env.local to enable.",
+                ],
+              ].map(([mark, text], i) => (
+                <div key={i} className="flex gap-2 items-start" style={{ fontSize: 10 }}>
+                  <span style={{ color: "#ffaa00", flexShrink: 0 }}>{mark}</span>
+                  <span>{text}</span>
+                </div>
+              ))}
             </div>
           </>
         )}
-
-        <style>{`
-          @media (max-width: 640px) {
-            .lending-stats { grid-template-columns: 1fr 1fr !important; }
-          }
-        `}</style>
       </div>
     </div>
   );
 }
 
-// ── Position Card ──────────────────────────────────────────────────────────────
-function PositionCard({ pos, liveRates }: { pos: LendingPosition; liveRates: AaveV3RatesMap }) {
-  const fmt$ = (n: number, dec = 2) =>
-    `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
+// ── Top stats row ────────────────────────────────────────────────────────────
+function TopStats({
+  netWorth,
+  totalSupplied,
+  totalDebt,
+  netApy,
+  dailyCashflow,
+}: {
+  netWorth: number;
+  totalSupplied: number;
+  totalDebt: number;
+  netApy: number;
+  dailyCashflow: number;
+}) {
+  const stats: { label: string; value: React.ReactNode; sub: string }[] = [
+    {
+      label: "Net Worth",
+      value: <AnimatedCount target={netWorth} prefix="$" decimals={2} />,
+      sub: "Collateral minus debt",
+    },
+    {
+      label: "Total Supplied",
+      value: <AnimatedCount target={totalSupplied} prefix="$" decimals={2} />,
+      sub: totalDebt > 0 ? `Borrowed: ${fmt$(totalDebt)}` : "No borrowing",
+    },
+    {
+      label: "Net APY",
+      value: <AnimatedCount target={netApy} suffix="%" decimals={2} />,
+      sub: "Weighted average",
+    },
+    {
+      label: "Est. Daily Yield",
+      value: <AnimatedCount target={dailyCashflow} prefix="+$" decimals={4} />,
+      sub: `+${fmt$(dailyCashflow * 30)}/mo · +${fmt$(dailyCashflow * 365)}/yr`,
+    },
+  ];
+  return (
+    <div
+      className="grid grid-cols-2 md:grid-cols-4 mb-8 border border-[#1c1c1c]"
+      style={{ background: "#090909" }}
+    >
+      {stats.map((s, i) => (
+        <div
+          key={s.label}
+          className={`p-5 relative ${i < stats.length - 1 ? "md:border-r border-[#1c1c1c]" : ""} ${i % 2 === 0 ? "border-r border-[#1c1c1c] md:border-r" : ""} ${i < 2 ? "border-b md:border-b-0 border-[#1c1c1c]" : ""}`}
+        >
+          <div
+            className="absolute top-0 left-0 right-0 h-px"
+            style={{
+              background:
+                "linear-gradient(90deg, transparent, #262626, transparent)",
+            }}
+          />
+          <div
+            className="mb-2.5"
+            style={{
+              fontSize: 8,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: "#7a7a7a",
+              opacity: 0.6,
+            }}
+          >
+            {s.label}
+          </div>
+          <div
+            className="font-bold tabular-nums"
+            style={{
+              fontSize: 24,
+              letterSpacing: "-0.02em",
+              color: "#00ff41",
+              textShadow: "0 0 22px rgba(0,255,65,0.22)",
+            }}
+          >
+            {s.value}
+          </div>
+          <div className="mt-1.5" style={{ fontSize: 9, color: "#7a7a7a", opacity: 0.5 }}>
+            {s.sub}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  const hfDisplay = pos.healthFactor === null ? "∞"
-    : pos.healthFactor.toFixed(2);
-  const hfColor = pos.healthFactor === null ? "#34d399"
-    : pos.healthFactor > 2 ? "#34d399"
-    : pos.healthFactor > 1 ? "#f59e0b"
-    : "#ef4444";
+// ── Shared metric grid cell ───────────────────────────────────────────────────
+function MetricCell({
+  label,
+  value,
+  tone = "bright",
+}: {
+  label: string;
+  value: string;
+  tone?: "bright" | "green" | "dim" | "zero" | "red";
+}) {
+  const colorMap: Record<string, string> = {
+    bright: "#e0e0e0",
+    green: "#00ff41",
+    dim: "#aaaaaa",
+    zero: "rgba(122,122,122,0.6)",
+    red: "#ff3355",
+  };
+  return (
+    <div className="px-5 py-4 border-r border-b border-[#1c1c1c]">
+      <div
+        className="mb-1.5"
+        style={{
+          fontSize: 8,
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          color: "#7a7a7a",
+          opacity: 0.55,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="font-bold tabular-nums"
+        style={{ fontSize: 16, letterSpacing: "-0.01em", color: colorMap[tone] }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
+// ── Protocol card (AAVE) ─────────────────────────────────────────────────────
+function ProtocolCard({ pos, liveRates }: { pos: LendingPosition; liveRates: AaveV3RatesMap }) {
   const manageUrl = AAVE_URL[pos.chain] ?? AAVE_URL.Ethereum;
-
-  const statBox = (label: string, value: string, color = "white", bg = "rgba(255,255,255,0.03)") => (
-    <div style={{ background: bg, border: "1px solid rgba(255,255,255,0.06)",
-      borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
-      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
-        color: "rgba(255,255,255,0.35)", margin: "0 0 6px" }}>{label}</p>
-      <p style={{ fontSize: 18, fontWeight: 700, color, margin: 0 }}>{value}</p>
+  return (
+    <div
+      className="border border-[#1c1c1c] mb-6"
+      style={{ background: "#090909", animation: "lend-fade-up 0.5s ease both" }}
+    >
+      <CardHeader
+        sym="A"
+        name={`${pos.protocol} · ${pos.chain}`}
+        rightValue={fmt$(pos.totalCollateral)}
+        rightLabel="Total Supplied"
+      />
+      <MetricGrid
+        cells={[
+          { label: "Total Supplied", value: fmt$(pos.totalCollateral), tone: "bright" },
+          { label: "Total Borrowed", value: fmt$(pos.totalDebt), tone: pos.totalDebt > 0 ? "red" : "zero" },
+          { label: "Net Worth", value: fmt$(pos.netWorth), tone: "green" },
+          { label: "Lending APY", value: `${pos.supplyApy.toFixed(2)}%`, tone: pos.supplyApy > 0 ? "green" : "zero" },
+          { label: "Borrowing APY", value: `${pos.borrowApy.toFixed(2)}%`, tone: pos.borrowApy > 0 ? "red" : "zero" },
+          { label: "Net APY", value: `${pos.netApy.toFixed(2)}%`, tone: pos.netApy > 0 ? "green" : "zero" },
+          { label: "Daily Cashflow", value: `+${fmt$(pos.dailyCashflow, 4)}`, tone: pos.dailyCashflow > 0 ? "green" : "zero" },
+          { label: "Monthly Cashflow", value: `+${fmt$(pos.dailyCashflow * 30)}`, tone: pos.dailyCashflow > 0 ? "green" : "zero" },
+          { label: "Yearly Cashflow", value: `+${fmt$(pos.dailyCashflow * 365)}`, tone: pos.dailyCashflow > 0 ? "green" : "zero" },
+        ]}
+      />
+      {pos.suppliedTokens.length > 0 && (
+        <AssetsBlock label="↑ Supplied Assets">
+          {pos.suppliedTokens.map((t) => {
+            const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
+            const apy = live?.supplyApy ?? getFallbackSupplyApy(t.symbol);
+            return (
+              <AssetRow
+                key={t.contractAddress}
+                symbol={t.symbol}
+                logo={t.logo}
+                apyLabel={`APY: ${apy.toFixed(2)}%`}
+                value={t.usdValue > 0 ? fmt$(t.usdValue) : "—"}
+                amount={`${fmtBalance(t.balance)} ${t.symbol}`}
+              />
+            );
+          })}
+        </AssetsBlock>
+      )}
+      {pos.debtTokens.length > 0 && (
+        <AssetsBlock label="↓ Borrowed Assets" tone="red">
+          {pos.debtTokens.map((t) => {
+            const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
+            const borrowApy = live?.borrowApy;
+            return (
+              <AssetRow
+                key={t.contractAddress}
+                symbol={t.symbol}
+                logo={t.logo}
+                apyLabel={
+                  borrowApy !== undefined ? `Borrow APY: ${borrowApy.toFixed(2)}%` : "Borrowed"
+                }
+                apyTone="red"
+                value={t.usdValue > 0 ? fmt$(t.usdValue) : "—"}
+                valueTone="red"
+                amount={`${fmtBalance(t.balance)} ${t.symbol}`}
+              />
+            );
+          })}
+        </AssetsBlock>
+      )}
+      <ManageButton href={manageUrl} label="AAVE" />
     </div>
   );
+}
 
+// ── External protocol card (Dolomite, Jupiter Lend, Kamino, Suilend, etc.) ────
+function ExternalProtocolCard({ pos }: { pos: ExternalLendingPosition }) {
+  const dailyCashflow =
+    (pos.totalSupplied * (pos.supplyApy ?? 0)) / 100 / 365 -
+    (pos.totalBorrowed * pos.borrowApy) / 100 / 365;
+  const hasApy = pos.supplyApy !== null;
+  const netWorth = pos.totalSupplied - pos.totalBorrowed;
+  const netApy = hasApy ? pos.supplyApy! - pos.borrowApy : 0;
   return (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
-      borderRadius: 16, overflow: "hidden", marginBottom: 24 }}>
+    <div
+      className="border border-[#1c1c1c] mb-6"
+      style={{ background: "#090909", animation: "lend-fade-up 0.5s ease both" }}
+    >
+      <CardHeader
+        sym={pos.protocol.charAt(0)}
+        name={`${pos.protocol} · ${pos.chain}`}
+        rightValue={fmt$(pos.totalSupplied)}
+        rightLabel="Total Supplied"
+      />
+      <MetricGrid
+        cells={[
+          { label: "Total Supplied", value: fmt$(pos.totalSupplied), tone: "bright" },
+          { label: "Total Borrowed", value: fmt$(pos.totalBorrowed), tone: pos.totalBorrowed > 0 ? "red" : "zero" },
+          { label: "Net Worth", value: fmt$(netWorth), tone: "green" },
+          { label: "Lending APY", value: hasApy ? `${pos.supplyApy!.toFixed(2)}%` : "—", tone: hasApy && pos.supplyApy! > 0 ? "green" : "zero" },
+          { label: "Borrowing APY", value: `${pos.borrowApy.toFixed(2)}%`, tone: pos.borrowApy > 0 ? "red" : "zero" },
+          { label: "Net APY", value: hasApy ? `${netApy.toFixed(2)}%` : "—", tone: hasApy && netApy > 0 ? "green" : "zero" },
+          { label: "Daily Cashflow", value: hasApy ? `+${fmt$(dailyCashflow, 4)}` : "—", tone: hasApy && dailyCashflow > 0 ? "green" : "zero" },
+          { label: "Monthly Cashflow", value: hasApy ? `+${fmt$(dailyCashflow * 30)}` : "—", tone: hasApy && dailyCashflow > 0 ? "green" : "zero" },
+          { label: "Yearly Cashflow", value: hasApy ? `+${fmt$(dailyCashflow * 365)}` : "—", tone: hasApy && dailyCashflow > 0 ? "green" : "zero" },
+        ]}
+      />
+      {pos.suppliedAssets.length > 0 && (
+        <AssetsBlock label="↑ Supplied Assets">
+          {pos.suppliedAssets.map((a) => (
+            <AssetRow
+              key={a.symbol}
+              symbol={a.symbol}
+              apyLabel={a.apy !== null ? `APY: ${a.apy.toFixed(2)}%` : "APY unavailable"}
+              value={a.usdValue > 0 ? fmt$(a.usdValue) : "—"}
+              amount={`${fmtBalance(a.amount)} ${a.symbol}`}
+            />
+          ))}
+        </AssetsBlock>
+      )}
+      {pos.borrowedAssets.length > 0 && (
+        <AssetsBlock label="↓ Borrowed Assets" tone="red">
+          {pos.borrowedAssets.map((a) => (
+            <AssetRow
+              key={a.symbol}
+              symbol={a.symbol}
+              apyLabel="Borrowed"
+              apyTone="red"
+              value={a.usdValue > 0 ? fmt$(a.usdValue) : "—"}
+              valueTone="red"
+              amount={`${fmtBalance(a.amount)} ${a.symbol}`}
+            />
+          ))}
+        </AssetsBlock>
+      )}
+      <ManageButton href={pos.manageUrl} label={pos.protocol} />
+    </div>
+  );
+}
 
-      {/* Card header */}
-      <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
-        display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%",
-            background: "linear-gradient(135deg, #8b5cf6, #6d28d9)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14, fontWeight: 700, color: "white" }}>A</div>
-          <div>
-            <p style={{ fontSize: 15, fontWeight: 700, color: "white", margin: 0 }}>
-              {pos.protocol} · {pos.chain}
-            </p>
-            <div style={{ display: "flex", gap: 8, marginTop: 3 }}>
-              <span style={{ background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)",
-                color: "#34d399", fontSize: 11, padding: "2px 8px", borderRadius: 20 }}>
-                Lending &amp; Borrowing
-              </span>
-            </div>
-          </div>
+// ── Card header ──────────────────────────────────────────────────────────────
+function CardHeader({
+  sym,
+  name,
+  rightValue,
+  rightLabel,
+}: {
+  sym: string;
+  name: string;
+  rightValue: string;
+  rightLabel: string;
+}) {
+  return (
+    <div className="flex items-center justify-between px-6 py-5 border-b border-[#1c1c1c] gap-3 flex-wrap">
+      <div className="flex items-center gap-3.5">
+        <div
+          className="flex items-center justify-center"
+          style={{
+            width: 36,
+            height: 36,
+            border: "1px solid #262626",
+            background: "#0d0d0d",
+            color: "#00ff41",
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          {sym}
         </div>
-        <div style={{ textAlign: "right" }}>
-          <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: 0 }}>
-            {fmt$(pos.totalCollateral)}
-          </p>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>Total supplied</p>
+        <div>
+          <div
+            className="font-bold"
+            style={{ fontSize: 14, color: "#f0f0f0", letterSpacing: "0.02em" }}
+          >
+            {name}
+          </div>
+          <div
+            className="inline-flex items-center mt-1.5 px-2"
+            style={{
+              fontSize: 8,
+              color: "#00ff41",
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              border: "1px solid #00992a",
+              background: "rgba(0,255,65,0.06)",
+              padding: "2px 8px",
+              fontWeight: 600,
+            }}
+          >
+            [Lending]
+          </div>
         </div>
       </div>
-
-      {/* Stats grid */}
-      <div style={{ padding: "16px 20px" }}>
-
-        {/* Row 1: Health + Collateral + Borrowed + Available */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 10 }}
-          className="pos-4col">
-          {statBox("Health Factor", hfDisplay, hfColor)}
-          {statBox("Total Collateral", fmt$(pos.totalCollateral), "#34d399")}
-          {statBox("Total Borrowed", fmt$(pos.totalDebt), pos.totalDebt > 0 ? "#ef4444" : "rgba(255,255,255,0.4)")}
-          {statBox("Available to Borrow", fmt$(pos.availableToBorrow), "#60a5fa")}
+      <div className="text-right">
+        <div
+          className="font-bold tabular-nums"
+          style={{
+            fontSize: 22,
+            color: "#00ff41",
+            letterSpacing: "-0.02em",
+            textShadow: "0 0 18px rgba(0,255,65,0.2)",
+          }}
+        >
+          {rightValue}
         </div>
-
-        {/* Row 2: LTV + Liquidation threshold */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}
-          className="pos-2col">
-          {statBox("Current LTV", `${pos.ltvPct.toFixed(2)}%`)}
-          {statBox("Liquidation Threshold", `${pos.liquidationThreshold.toFixed(2)}%`, "#f59e0b")}
+        <div
+          className="mt-0.5"
+          style={{
+            fontSize: 8,
+            color: "#7a7a7a",
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            opacity: 0.5,
+          }}
+        >
+          {rightLabel}
         </div>
-
-        {/* Row 3: APY */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}
-          className="pos-3col">
-          {statBox("Lending APY", `${pos.supplyApy.toFixed(2)}%`, "#34d399",  "rgba(52,211,153,0.05)")}
-          {statBox("Borrowing APY", `${pos.borrowApy.toFixed(2)}%`,
-            pos.borrowApy > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
-          {statBox("Net APY", `${pos.netApy.toFixed(2)}%`, "#6ee7b7", "rgba(52,211,153,0.05)")}
-        </div>
-
-        {/* Row 4: Cashflow */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}
-          className="pos-3col">
-          {statBox("Daily Cashflow", `+${fmt$(pos.dailyCashflow, 4)}`, "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Monthly Cashflow", `+${fmt$(pos.dailyCashflow * 30)}`, "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Yearly Cashflow", `+${fmt$(pos.dailyCashflow * 365)}`, "#34d399", "rgba(52,211,153,0.05)")}
-        </div>
-
-        {/* Supplied Assets */}
-        {pos.suppliedTokens.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontSize: 12, color: "#34d399", fontWeight: 600,
-              margin: "0 0 10px", textTransform: "uppercase", letterSpacing: 0.5 }}>
-              ↑ Supplied Assets
-            </p>
-            {pos.suppliedTokens.map((t) => {
-              const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
-              const apy = live?.supplyApy ?? getFallbackSupplyApy(t.symbol);
-              const isLive = !!live;
-              return (
-                <div key={t.contractAddress}
-                  style={{ display: "flex", alignItems: "center", gap: 12,
-                    padding: "10px 14px", borderRadius: 10,
-                    background: "rgba(52,211,153,0.04)",
-                    border: "1px solid rgba(52,211,153,0.1)", marginBottom: 6 }}>
-                  <TokenIcon symbol={t.symbol} size={32} logo={t.logo} />
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{t.symbol}</p>
-                    <p style={{ fontSize: 11, color: "#34d399", margin: 0 }}>
-                      APY: {apy.toFixed(2)}%
-                      {!isLive && (
-                        <span style={{ color: "rgba(255,255,255,0.25)", marginLeft: 6, fontSize: 10 }}>approx.</span>
-                      )}
-                    </p>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-                      {t.usdValue > 0 ? fmt$(t.usdValue) : "—"}
-                    </p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                      {fmtBalance(t.balance)} {t.symbol}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Debt tokens (if any) */}
-        {pos.debtTokens.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontSize: 12, color: "#ef4444", fontWeight: 600,
-              margin: "0 0 10px", textTransform: "uppercase", letterSpacing: 0.5 }}>
-              ↓ Borrowed Assets
-            </p>
-            {pos.debtTokens.map((t) => {
-              const live = liveRates[t.contractAddress?.toLowerCase() ?? ""];
-              const borrowApy = live?.borrowApy;
-              return (
-              <div key={t.contractAddress}
-                style={{ display: "flex", alignItems: "center", gap: 12,
-                  padding: "10px 14px", borderRadius: 10,
-                  background: "rgba(239,68,68,0.04)",
-                  border: "1px solid rgba(239,68,68,0.15)", marginBottom: 6 }}>
-                <TokenIcon symbol={t.symbol} size={32} logo={t.logo} />
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{t.symbol}</p>
-                  <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>
-                    Borrow APY: {borrowApy !== undefined ? `${borrowApy.toFixed(2)}%` : "—"}
-                  </p>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "#ef4444", margin: 0 }}>
-                    {t.usdValue > 0 ? fmt$(t.usdValue) : "—"}
-                  </p>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                    {fmtBalance(t.balance)} {t.symbol}
-                  </p>
-                </div>
-              </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Manage button */}
-        <a href={manageUrl} target="_blank" rel="noopener noreferrer"
-          style={{ display: "block", width: "100%", textAlign: "center",
-            background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.35)",
-            color: "#6ee7b7", borderRadius: 10, padding: "12px",
-            textDecoration: "none", fontSize: 14, fontWeight: 600, boxSizing: "border-box" }}>
-          Manage on AAVE ↗
-        </a>
       </div>
     </div>
   );
 }
 
-// ── External Protocol Card (Dolomite, Jupiter Lend, etc.) ──────────────────────
-function ExternalPositionCard({ pos }: { pos: ExternalLendingPosition }) {
-  const fmt$ = (n: number, dec = 2) =>
-    `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
-
-  const dailyCashflow = pos.totalSupplied * (pos.supplyApy ?? 0) / 100 / 365
-    - pos.totalBorrowed * pos.borrowApy / 100 / 365;
-  const hasApyData = pos.supplyApy !== null;
-
-  const statBox = (label: string, value: string, color = "white", bg = "rgba(255,255,255,0.03)") => (
-    <div style={{ background: bg, border: "1px solid rgba(255,255,255,0.06)",
-      borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
-      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
-        color: "rgba(255,255,255,0.35)", margin: "0 0 6px" }}>{label}</p>
-      <p style={{ fontSize: 18, fontWeight: 700, color, margin: 0 }}>{value}</p>
+function MetricGrid({
+  cells,
+}: {
+  cells: { label: string; value: string; tone?: "bright" | "green" | "dim" | "zero" | "red" }[];
+}) {
+  // 3-column grid of 9 cells. Last column has no right border, last row has no bottom border.
+  return (
+    <div
+      className="grid grid-cols-3"
+      style={{
+        // negative margins to hide outer right/bottom borders
+        marginRight: -1,
+        marginBottom: -1,
+      }}
+    >
+      {cells.map((c, i) => (
+        <MetricCell key={i} label={c.label} value={c.value} tone={c.tone} />
+      ))}
     </div>
   );
+}
 
+function AssetsBlock({
+  label,
+  tone = "green",
+  children,
+}: {
+  label: string;
+  tone?: "green" | "red";
+  children: React.ReactNode;
+}) {
   return (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
-      borderRadius: 16, overflow: "hidden", marginBottom: 24 }}>
+    <div className="px-6 py-4 border-t border-[#1c1c1c]" style={{ background: "#0d0d0d" }}>
+      <div
+        className="mb-3 flex items-center gap-1.5"
+        style={{
+          fontSize: 8,
+          letterSpacing: "0.22em",
+          textTransform: "uppercase",
+          color: tone === "green" ? "#00ff41" : "#ff3355",
+        }}
+      >
+        {label}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
 
-      {/* Card header */}
-      <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
-        display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%",
-            background: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14, fontWeight: 700, color: "white" }}>
-            {pos.protocol.charAt(0)}
-          </div>
-          <div>
-            <p style={{ fontSize: 15, fontWeight: 700, color: "white", margin: 0 }}>
-              {pos.protocol} · {pos.chain}
-            </p>
-            <div style={{ display: "flex", gap: 8, marginTop: 3 }}>
-              <span style={{ background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)",
-                color: "#34d399", fontSize: 11, padding: "2px 8px", borderRadius: 20 }}>
-                {pos.totalBorrowed > 0 ? "Lending & Borrowing" : "Lending"}
-              </span>
-            </div>
-          </div>
+function AssetRow({
+  symbol,
+  logo,
+  apyLabel,
+  apyTone = "default",
+  value,
+  valueTone = "bright",
+  amount,
+}: {
+  symbol: string;
+  logo?: string;
+  apyLabel: string;
+  apyTone?: "default" | "red";
+  value: string;
+  valueTone?: "bright" | "red";
+  amount: string;
+}) {
+  return (
+    <div className="flex items-center gap-3.5 py-2.5 border-b border-[#1c1c1c] last:border-b-0">
+      <TokenIcon symbol={symbol} logo={logo} size={26} />
+      <div>
+        <div className="font-bold" style={{ fontSize: 11, color: "#e0e0e0" }}>
+          {symbol}
         </div>
-        <div style={{ textAlign: "right" }}>
-          <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: 0 }}>
-            {fmt$(pos.totalSupplied)}
-          </p>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>Total supplied</p>
+        <div
+          className="mt-0.5"
+          style={{
+            fontSize: 9,
+            color: apyTone === "red" ? "#ff3355" : "#7a7a7a",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+          }}
+        >
+          {apyLabel}
         </div>
       </div>
-
-      <div style={{ padding: "16px 20px" }}>
-        {/* Stats */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
-          className="pos-3col">
-          {statBox("Total Supplied", fmt$(pos.totalSupplied), "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Total Borrowed", fmt$(pos.totalBorrowed),
-            pos.totalBorrowed > 0 ? "#ef4444" : "rgba(255,255,255,0.4)", "rgba(52,211,153,0.05)")}
-          {statBox("Net Worth", fmt$(pos.totalSupplied - pos.totalBorrowed), "#34d399")}
+      <div className="flex-1" />
+      <div className="text-right">
+        <div
+          className="font-bold tabular-nums"
+          style={{ fontSize: 12, color: valueTone === "red" ? "#ff3355" : "#f0f0f0" }}
+        >
+          {value}
         </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
-          className="pos-3col">
-          {statBox("Lending APY",
-            hasApyData ? `${pos.supplyApy!.toFixed(2)}%` : "APY unavailable",
-            hasApyData ? "#34d399" : "rgba(255,255,255,0.35)", "rgba(52,211,153,0.05)")}
-          {statBox("Borrowing APY", `${pos.borrowApy.toFixed(2)}%`,
-            pos.borrowApy > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
-          {statBox("Net APY",
-            hasApyData ? `${(pos.supplyApy! - pos.borrowApy).toFixed(2)}%` : "—",
-            hasApyData ? "#6ee7b7" : "rgba(255,255,255,0.3)", "rgba(52,211,153,0.05)")}
+        <div
+          className="mt-0.5"
+          style={{ fontSize: 9, color: "#7a7a7a", opacity: 0.55 }}
+        >
+          {amount}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}
-          className="pos-3col">
-          {statBox("Daily Cashflow",
-            hasApyData ? `+${fmt$(dailyCashflow, 4)}` : "—",
-            "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Monthly Cashflow",
-            hasApyData ? `+${fmt$(dailyCashflow * 30)}` : "—",
-            "#34d399", "rgba(52,211,153,0.05)")}
-          {statBox("Yearly Cashflow",
-            hasApyData ? `+${fmt$(dailyCashflow * 365)}` : "—",
-            "#34d399", "rgba(52,211,153,0.05)")}
-        </div>
-
-        {/* Supplied assets */}
-        {pos.suppliedAssets.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontSize: 12, color: "#34d399", fontWeight: 600,
-              margin: "0 0 10px", textTransform: "uppercase", letterSpacing: 0.5 }}>
-              ↑ Supplied Assets
-            </p>
-            {pos.suppliedAssets.map((a) => (
-              <div key={a.symbol} style={{ display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 14px", borderRadius: 10,
-                background: "rgba(52,211,153,0.04)",
-                border: "1px solid rgba(52,211,153,0.1)", marginBottom: 6 }}>
-                <TokenIcon symbol={a.symbol} size={32} />
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{a.symbol}</p>
-                  {a.apy !== null ? (
-                    <p style={{ fontSize: 11, color: "#34d399", margin: 0 }}>APY: {a.apy.toFixed(2)}%</p>
-                  ) : (
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>APY unavailable</p>
-                  )}
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-                    {a.usdValue > 0 ? fmt$(a.usdValue) : "—"}
-                  </p>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                    {fmtBalance(a.amount)} {a.symbol}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Borrowed assets */}
-        {pos.borrowedAssets.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontSize: 12, color: "#ef4444", fontWeight: 600,
-              margin: "0 0 10px", textTransform: "uppercase", letterSpacing: 0.5 }}>
-              ↓ Borrowed Assets
-            </p>
-            {pos.borrowedAssets.map((a) => (
-              <div key={a.symbol} style={{ display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 14px", borderRadius: 10,
-                background: "rgba(239,68,68,0.04)",
-                border: "1px solid rgba(239,68,68,0.15)", marginBottom: 6 }}>
-                <TokenIcon symbol={a.symbol} size={32} />
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>{a.symbol}</p>
-                  <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>Borrowed</p>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "#ef4444", margin: 0 }}>
-                    {a.usdValue > 0 ? fmt$(a.usdValue) : "—"}
-                  </p>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                    {fmtBalance(a.amount)} {a.symbol}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Manage button */}
-        <a href={pos.manageUrl} target="_blank" rel="noopener noreferrer"
-          style={{ display: "block", width: "100%", textAlign: "center",
-            background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.35)",
-            color: "#6ee7b7", borderRadius: 10, padding: "12px",
-            textDecoration: "none", fontSize: 14, fontWeight: 600, boxSizing: "border-box" }}>
-          Manage on {pos.protocol} ↗
-        </a>
       </div>
     </div>
+  );
+}
+
+function ManageButton({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block w-full text-center border-t border-[#1c1c1c] no-underline transition-all"
+      style={{
+        padding: 14,
+        background: "rgba(0,255,65,0.06)",
+        color: "#00ff41",
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: "0.14em",
+        textTransform: "uppercase",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "rgba(0,255,65,0.12)";
+        e.currentTarget.style.boxShadow = "inset 0 0 24px rgba(0,255,65,0.08)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "rgba(0,255,65,0.06)";
+        e.currentTarget.style.boxShadow = "none";
+      }}
+    >
+      Manage on {label} ↗
+    </a>
   );
 }

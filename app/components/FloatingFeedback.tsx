@@ -77,7 +77,7 @@ export default function FloatingFeedback() {
 
   return (
     <>
-      {/* Floating launcher */}
+      {/* Floating launcher — terminal dark */}
       <button
         type="button"
         aria-label="Share feedback"
@@ -86,24 +86,28 @@ export default function FloatingFeedback() {
           position: "fixed",
           right: 20,
           bottom: 20,
-          width: 52,
-          height: 52,
-          borderRadius: "50%",
-          background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-          color: "white",
-          border: "1px solid rgba(110, 231, 183, 0.4)",
-          boxShadow:
-            "0 10px 25px rgba(0,0,0,0.35), 0 0 0 1px rgba(16,185,129,0.25), 0 0 20px rgba(16,185,129,0.35)",
+          padding: "10px 14px",
+          background: "#000000",
+          color: "#00ff00",
+          border: "1px solid #00ff00",
+          borderRadius: 0,
+          fontFamily:
+            'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.15em",
           cursor: "pointer",
+          zIndex: 99998,
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          zIndex: 99998,
+          gap: 8,
+          boxShadow: "0 0 12px rgba(0, 255, 0, 0.25)",
         }}
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
+        <span>FEEDBACK</span>
       </button>
 
       {open && (
