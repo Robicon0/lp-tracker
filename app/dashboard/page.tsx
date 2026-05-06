@@ -15,6 +15,8 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
+import { computePositionPnL, type ActivityEventForPnL } from "../lib/positionPnl";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -171,22 +173,6 @@ function getProtocolColor(protocol: string): string {
   return "#9945ff";
 }
 
-function getManageUrl(protocol: string): string {
-  if (protocol.includes("Aerodrome"))  return "https://aerodrome.finance/positions";
-  if (protocol.includes("Velodrome"))  return "https://velodrome.finance/positions";
-  if (protocol.includes("Uniswap"))    return "https://app.uniswap.org/pools";
-  if (protocol.includes("Orca"))       return "https://v2.orca.so/";
-  if (protocol.includes("Raydium"))    return "https://raydium.io/portfolio/";
-  if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/liquidity";
-  if (protocol.includes("Cetus"))      return "https://app.cetus.zone/liquidity";
-  if (protocol.includes("Momentum"))   return "https://app.mmt.finance";
-  if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.exchange/#/pool";
-  if (protocol.includes("KittenSwap")) return "https://www.kittenswap.org";
-  if (protocol.includes("ProjectX") || protocol.includes("PRJX")) return "https://prjx.com";
-  if (protocol.includes("PancakeSwap")) return "https://pancakeswap.finance/liquidity";
-  return "";
-}
-
 function effectiveStatus(p: { value: number; fees: number; status: string }): "In Range" | "Out of Range" | "Closed" {
   if (p.value === 0 && p.fees === 0) return "Closed";
   return p.status as "In Range" | "Out of Range";
@@ -243,6 +229,8 @@ function chainInfoFromConnected(addr: string | null | undefined, kind: "EVM" | "
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch } = usePositions();
+  // Per-position activity events — used for proper P&L calculation per row.
+  const { eventsMap: positionEventsMap } = useAllPositionsActivity(allPositions);
   const { address } = useAccount();
   const { connect: evmConnect, connectors } = useConnect();
   const { disconnect: evmDisconnect } = useDisconnect();
@@ -442,38 +430,6 @@ export default function Dashboard() {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href = url; a.download = "defidesh-positions.csv"; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const saveReport = () => {
-    const report = {
-      exportedAt: new Date().toISOString(),
-      summary: {
-        totalValue,
-        totalFees,
-        uniqueChains,
-        totalPositions: allPositions.length,
-        dailyCashflow,
-        avgApy: avgApr,
-        portfolioHealth,
-        totalTokenValue,
-        combinedLendingValue,
-        tokenCount,
-        combinedLendingCount,
-      },
-      protocolBreakdown,
-      chainGrouped,
-      positions: allPositions.map((p) => ({
-        id: p.id, pair: p.pair, protocol: p.protocol, chain: p.chain,
-        value: p.value, apy: p.apy, fees: p.fees, status: effectiveStatus(p),
-      })),
-      lendingPositions: externalLendingPositions,
-    };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    a.href = url; a.download = `defidesh-report-${stamp}.json`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -745,27 +701,6 @@ export default function Dashboard() {
                   }}
                 >
                   ▸ Wallets
-                </button>
-                <button
-                  type="button"
-                  onClick={saveReport}
-                  className="save-btn"
-                  style={{
-                    background: C.green,
-                    border: "none",
-                    color: "#000",
-                    padding: "9px 20px",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                    fontFamily: FONT,
-                    transition: "all 0.15s",
-                  }}
-                  title="Download a JSON snapshot of the dashboard state"
-                >
-                  ↓ Save Report
                 </button>
               </div>
             </div>
@@ -1546,8 +1481,36 @@ export default function Dashboard() {
                       const chainTok = cat === "OTHER" ? null : CHAIN_DISPLAY[cat];
                       const health = healthFor(posStatus);
                       const hColour = healthColor(health);
-                      const manageUrl = getManageUrl(pos.protocol);
                       const isClosed = posStatus === "Closed";
+
+                      // ── P&L: (Current − Initial) + Fees Collected + Fees Unclaimed
+                      // (IL is implicit in Current − Initial for an LP position).
+                      // Computed from on-chain activity events via computePositionPnL.
+                      // Falls back to uncollected-fees-as-proxy when events / prices missing.
+                      let pnlUsd: number | null = null;
+                      let pnlPct: number | null = null;
+                      const events = positionEventsMap.get(pos.id);
+                      if (
+                        events &&
+                        events.length > 0 &&
+                        pos.price0 != null &&
+                        pos.price1 != null &&
+                        pos.price0 > 0 &&
+                        pos.price1 > 0
+                      ) {
+                        const r = computePositionPnL({
+                          currentValue: pos.value,
+                          unclaimedFeesUSD: pos.fees,
+                          price0: pos.price0,
+                          price1: pos.price1,
+                          events: events as ActivityEventForPnL[],
+                          isClosed,
+                        });
+                        if (r.ok) {
+                          pnlUsd = r.data.netPnlUSD;
+                          pnlPct = r.data.netPnlPct;
+                        }
+                      }
 
                       return (
                         <tr
@@ -1634,11 +1597,39 @@ export default function Dashboard() {
                             )}
                           </td>
 
-                          {/* P&L (uncollected fees as proxy) */}
+                          {/* P&L = (Current − Initial) + Fees Collected + Fees Unclaimed */}
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: pos.fees > 0 ? C.green : C.text, fontVariantNumeric: "tabular-nums" }}>
-                              {pos.fees > 0 ? `+${fmt$(pos.fees)}` : "—"}
-                            </div>
+                            {pnlUsd !== null ? (
+                              <>
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: pnlUsd >= 0 ? C.green : C.red,
+                                    fontVariantNumeric: "tabular-nums",
+                                    textShadow: pnlUsd >= 0 ? "0 0 10px rgba(0,255,65,0.25)" : "0 0 10px rgba(255,51,85,0.25)",
+                                  }}
+                                >
+                                  {pnlUsd >= 0 ? "+" : "-"}{fmt$(Math.abs(pnlUsd))}
+                                </div>
+                                {pnlPct !== null && Number.isFinite(pnlPct) && (
+                                  <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.55, fontVariantNumeric: "tabular-nums" }}>
+                                    {pnlUsd >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%
+                                  </div>
+                                )}
+                              </>
+                            ) : pos.fees > 0 ? (
+                              <>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: C.green, fontVariantNumeric: "tabular-nums" }}>
+                                  +{fmt$(pos.fees)}
+                                </div>
+                                <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.45 }}>
+                                  fees only
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ fontSize: 12, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>—</div>
+                            )}
                           </td>
 
                           {/* Health */}
@@ -1660,37 +1651,33 @@ export default function Dashboard() {
                             </div>
                           </td>
 
-                          {/* Manage */}
+                          {/* Manage — internal navigation to position detail */}
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle" }}>
-                            {manageUrl ? (
-                              <button
-                                type="button"
-                                className="manage-btn"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  window.open(manageUrl, "_blank", "noopener,noreferrer");
-                                }}
-                                style={{
-                                  fontFamily: FONT,
-                                  fontSize: 9,
-                                  fontWeight: 600,
-                                  letterSpacing: "0.1em",
-                                  textTransform: "uppercase",
-                                  padding: "6px 14px",
-                                  border: `1px solid ${C.borderHi}`,
-                                  background: "transparent",
-                                  color: C.text,
-                                  cursor: "pointer",
-                                  transition: "all 0.15s",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Manage →
-                              </button>
-                            ) : (
-                              <span style={{ fontSize: 9, color: C.borderGlow }}>—</span>
-                            )}
+                            <button
+                              type="button"
+                              className="manage-btn"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                window.location.href = `/dashboard/position/${slug}`;
+                              }}
+                              style={{
+                                fontFamily: FONT,
+                                fontSize: 9,
+                                fontWeight: 600,
+                                letterSpacing: "0.1em",
+                                textTransform: "uppercase",
+                                padding: "6px 14px",
+                                border: `1px solid ${C.borderHi}`,
+                                background: "transparent",
+                                color: C.text,
+                                cursor: "pointer",
+                                transition: "all 0.15s",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              Manage →
+                            </button>
                           </td>
                         </tr>
                       );

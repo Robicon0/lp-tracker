@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 
@@ -236,6 +237,29 @@ export default function DashboardSidebar({
       {/* WALLETS */}
       <div style={sectionWrap}>
         <div style={labelStyle}>Wallets</div>
+
+        {/* Wallet Balances link — navigates to /dashboard/tokens */}
+        <Link
+          href="/dashboard/tokens"
+          style={{
+            ...itemBase,
+            color: C.cyan,
+            opacity: 0.85,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = C.green;
+            e.currentTarget.style.background = C.greenFaint;
+            e.currentTarget.style.opacity = "1";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = C.cyan;
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.opacity = "0.85";
+          }}
+        >
+          <span style={iconStyle}>◫</span>
+          Wallet Balances
+        </Link>
 
         {evmAddr && (
           <WalletItem color={walletColor("EVM")} chain="EVM" />
