@@ -1,6 +1,7 @@
 import Providers from "./providers";
 import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
 import FloatingFeedback from "./components/FloatingFeedback";
+import WalletRestoreEffect from "./components/WalletRestoreEffect";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -41,6 +42,7 @@ export default function RootLayout({
         suppressHydrationWarning={true}
       >
         <Providers>
+          <WalletRestoreEffect />
           {children}
           <FloatingFeedback />
         </Providers>
