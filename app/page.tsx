@@ -203,25 +203,25 @@ export default async function Home() {
         <div className="hidden md:flex gap-8">
           <Link
             href="/"
-            className="text-[10px] text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Home
           </Link>
           <Link
             href="/dashboard"
-            className="text-[10px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Dashboard
           </Link>
           <Link
             href="/analytics"
-            className="text-[10px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Analytics
           </Link>
           <Link
             href="/about"
-            className="text-[10px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             About
           </Link>
@@ -247,7 +247,7 @@ export default async function Home() {
             <span>DeFi Position Intelligence</span>
           </div>
           <h1
-            className="font-bold text-[#ffffff] mb-6"
+            className="font-bold text-[#e8e8e8] mb-6"
             style={{
               fontSize: "clamp(40px, 5vw, 72px)",
               lineHeight: 1.15,

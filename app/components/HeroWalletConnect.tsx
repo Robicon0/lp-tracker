@@ -318,7 +318,7 @@ function ChainButton({
     background: hover ? "#161616" : "#111",
     border: `1px solid ${connected ? "#00ff41" : hover ? chainColor : "#2e2e2e"}`,
     boxShadow: hover && !connected ? GLOW[chainColor] : connected ? "0 0 12px rgba(0,255,65,0.15)" : "none",
-    color: "#e8e8e8",
+    color: "#c8c8c8",
     padding: "10px 14px",
     fontSize: 11,
     fontWeight: 700,
