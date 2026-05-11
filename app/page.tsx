@@ -195,33 +195,33 @@ export default async function Home() {
         className="sticky top-0 z-[10000] flex items-center justify-between h-[52px] px-4 sm:px-12 border-b border-[#1f1f1f]"
         style={{ background: "#000", backdropFilter: "blur(4px)" }}
       >
-        <Link href="/" className="text-sm font-bold tracking-[0.12em] uppercase">
+        <Link href="/" className="text-sm font-bold tracking-[0.14em] uppercase">
           <span className="text-[#00ff41]">DEFI</span>
           <span className="text-[#555]">/</span>
-          <span className="text-[#555]">DESH</span>
+          <span className="text-[#e8e8e8]">DESH</span>
         </Link>
         <div className="hidden md:flex gap-8">
           <Link
             href="/"
-            className="text-[11px] text-[#c8c8c8] uppercase tracking-[0.08em] transition-colors"
+            className="text-[9px] text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
           >
             Home
           </Link>
           <Link
             href="/dashboard"
-            className="text-[11px] text-[#555] hover:text-[#c8c8c8] uppercase tracking-[0.08em] transition-colors"
+            className="text-[9px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
           >
             Dashboard
           </Link>
           <Link
             href="/analytics"
-            className="text-[11px] text-[#555] hover:text-[#c8c8c8] uppercase tracking-[0.08em] transition-colors"
+            className="text-[9px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
           >
             Analytics
           </Link>
           <Link
             href="/about"
-            className="text-[11px] text-[#555] hover:text-[#c8c8c8] uppercase tracking-[0.08em] transition-colors"
+            className="text-[9px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
           >
             About
           </Link>
@@ -241,7 +241,7 @@ export default async function Home() {
         <div className="lg:border-r border-[#1f1f1f] lg:pr-16 pt-12 lg:pt-16 pb-8 lg:pb-10 flex flex-col min-w-0">
           <div
             className="flex items-center gap-3 mb-7 text-[#555] tracking-[0.2em] uppercase"
-            style={{ whiteSpace: "nowrap", fontSize: 13 }}
+            style={{ whiteSpace: "nowrap", fontSize: 9 }}
           >
             <span className="text-[#00ff41]">//</span>
             <span>DeFi Position Intelligence</span>
@@ -262,8 +262,8 @@ export default async function Home() {
             <BlinkingCursor />
           </h1>
           <p
-            className="text-[#555] max-w-[420px] mb-12 font-light"
-            style={{ fontSize: 15, lineHeight: 1.9 }}
+            className="text-[#c8c8c8] max-w-[460px] mb-12 font-light"
+            style={{ fontSize: 12, lineHeight: 1.8 }}
           >
             Real-time liquidity position tracking across EVM, Solana, and Sui. Value, APY, fees,
             and rewards — all in one place. Connect a wallet or paste any address.
@@ -361,7 +361,7 @@ export default async function Home() {
             <div className="text-[13px] font-semibold text-[#e8e8e8] tracking-[0.04em] mb-2.5">
               {f.title}
             </div>
-            <div className="text-[11px] text-[#555]" style={{ lineHeight: 1.8 }}>
+            <div className="text-[11px] text-[#c8c8c8]" style={{ lineHeight: 1.8 }}>
               {f.desc}
             </div>
           </div>

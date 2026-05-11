@@ -28,17 +28,17 @@ export default function PriceTickerStrip() {
           <span className="text-[#00ff41] font-bold text-[13px] tabular-nums">
             {PROTOCOL_COUNT}
           </span>
-          <span className="text-[#555] uppercase tracking-[0.08em] text-[10px]">Protocols</span>
+          <span className="text-[#555] uppercase tracking-[0.2em] text-[9px]">Protocols</span>
         </div>
         <div className="flex items-center gap-2.5 px-6 sm:px-8 border-r border-[#1f1f1f] whitespace-nowrap">
           <span className="text-[#00ff41] font-bold text-[13px] tabular-nums">
             {CHAIN_COUNT}
           </span>
-          <span className="text-[#555] uppercase tracking-[0.08em] text-[10px]">Chains</span>
+          <span className="text-[#555] uppercase tracking-[0.2em] text-[9px]">Chains</span>
         </div>
         <div className="flex items-center gap-2 px-8 border-r border-[#1f1f1f] whitespace-nowrap">
           <span className="inline-block w-[5px] h-[5px] bg-[#00ff41] animate-pulse" />
-          <span className="text-[#00e5ff] uppercase tracking-[0.1em] text-[10px]">
+          <span className="text-[#00e5ff] uppercase tracking-[0.2em] text-[9px]">
             LIVE Prices
           </span>
         </div>
