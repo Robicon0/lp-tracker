@@ -36,7 +36,7 @@ export default function FeedbackTab() {
         border: `1px solid ${hover ? "#00cc33" : "#262626"}`,
         borderBottom: "none",
         background: hover ? "rgba(0,255,65,0.06)" : "#0a0a0a",
-        color: hover ? "#00ff41" : "#7a7a7a",
+        color: hover ? "#00ff41" : "#888",
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 9,
         fontWeight: 600,

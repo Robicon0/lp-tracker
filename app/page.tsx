@@ -195,33 +195,33 @@ export default async function Home() {
         className="sticky top-0 z-[10000] flex items-center justify-between h-[52px] px-4 sm:px-12 border-b border-[#1f1f1f]"
         style={{ background: "#000", backdropFilter: "blur(4px)" }}
       >
-        <Link href="/" className="text-sm font-bold tracking-[0.14em] uppercase">
+        <Link href="/" className="text-[14px] font-bold tracking-[0.14em] uppercase">
           <span className="text-[#00ff41]">DEFI</span>
-          <span className="text-[#555]">/</span>
+          <span className="text-[#888]">/</span>
           <span className="text-[#e8e8e8]">DESH</span>
         </Link>
         <div className="hidden md:flex gap-8">
           <Link
             href="/"
-            className="text-[9px] text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
+            className="text-[10px] text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Home
           </Link>
           <Link
             href="/dashboard"
-            className="text-[9px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
+            className="text-[10px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Dashboard
           </Link>
           <Link
             href="/analytics"
-            className="text-[9px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
+            className="text-[10px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Analytics
           </Link>
           <Link
             href="/about"
-            className="text-[9px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.2em] transition-colors"
+            className="text-[10px] text-[#c8c8c8] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             About
           </Link>
@@ -240,14 +240,14 @@ export default async function Home() {
         {/* LEFT */}
         <div className="lg:border-r border-[#1f1f1f] lg:pr-16 pt-12 lg:pt-16 pb-8 lg:pb-10 flex flex-col min-w-0">
           <div
-            className="flex items-center gap-3 mb-7 text-[#555] tracking-[0.2em] uppercase"
-            style={{ whiteSpace: "nowrap", fontSize: 9 }}
+            className="flex items-center gap-3 mb-7 text-[#888] tracking-[0.2em] uppercase"
+            style={{ whiteSpace: "nowrap", fontSize: 11 }}
           >
             <span className="text-[#00ff41]">//</span>
             <span>DeFi Position Intelligence</span>
           </div>
           <h1
-            className="font-bold text-[#e8e8e8] mb-6"
+            className="font-bold text-[#ffffff] mb-6"
             style={{
               fontSize: "clamp(40px, 5vw, 72px)",
               lineHeight: 1.15,
@@ -263,7 +263,7 @@ export default async function Home() {
           </h1>
           <p
             className="text-[#c8c8c8] max-w-[460px] mb-12 font-light"
-            style={{ fontSize: 12, lineHeight: 1.8 }}
+            style={{ fontSize: 14, lineHeight: 1.9 }}
           >
             Real-time liquidity position tracking across EVM, Solana, and Sui. Value, APY, fees,
             and rewards — all in one place. Connect a wallet or paste any address.
@@ -301,11 +301,11 @@ export default async function Home() {
 
       {/* PROTOCOLS */}
       <section className="px-4 sm:px-12 py-12 border-b border-[#1f1f1f]">
-        <div className="text-[10px] text-[#555] uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
+        <div className="text-[10px] text-[#888] uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
           <span className="text-[#00ff41]">//</span>
           <span>Supported Protocols</span>
           <span className="flex-1 h-px bg-[#1f1f1f]" />
-          <span className="text-[#444] tracking-[0.1em] text-[9px]">src: defillama</span>
+          <span className="text-[#888] tracking-[0.1em] text-[10px]">src: defillama</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-px bg-[#1f1f1f] border border-[#1f1f1f]">
           {PROTOCOL_DEFS.map((p) => {
@@ -316,24 +316,24 @@ export default async function Home() {
                 key={p.name}
                 className="bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5"
               >
-                <div className="text-[9px] text-[#00ff41] tracking-[0.1em]">[{p.type.toUpperCase()}]</div>
+                <div className="text-[10px] text-[#00ff41] tracking-[0.1em]">[{p.type.toUpperCase()}]</div>
                 <div>
-                  <div className="text-[13px] font-semibold text-[#e8e8e8]">{p.name}</div>
-                  <div className="text-[9px] text-[#555] uppercase tracking-[0.1em] mt-0.5">
+                  <div className="text-[13px] font-bold text-[#e8e8e8]">{p.name}</div>
+                  <div className="text-[10px] text-[#888] uppercase tracking-[0.1em] mt-0.5">
                     {p.chain}
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5 mt-1">
                   <div className="flex justify-between items-baseline text-[10px]">
-                    <span className="text-[#555] tracking-[0.06em]">TVL</span>
-                    <span className="text-[#00ff41] font-semibold tabular-nums">
+                    <span className="text-[#888] tracking-[0.06em]">TVL</span>
+                    <span className="text-[#00ff41] font-bold tabular-nums">
                       {fmtBig(s.tvl)}
                     </span>
                   </div>
                   <div className="flex justify-between items-baseline text-[10px]">
-                    <span className="text-[#555] tracking-[0.06em]">VOL 24H</span>
+                    <span className="text-[#888] tracking-[0.06em]">VOL 24H</span>
                     <span
-                      className={`font-semibold tabular-nums ${isDex ? "text-[#00ff41]" : "text-[#444]"}`}
+                      className={`font-bold tabular-nums ${isDex ? "text-[#00ff41]" : "text-[#888]"}`}
                     >
                       {isDex ? fmtBig(s.volume24h) : "n/a"}
                     </span>
@@ -358,10 +358,10 @@ export default async function Home() {
             >
               {f.num}
             </div>
-            <div className="text-[13px] font-semibold text-[#e8e8e8] tracking-[0.04em] mb-2.5">
+            <div className="text-[14px] font-bold text-[#e8e8e8] tracking-[0.04em] mb-2.5">
               {f.title}
             </div>
-            <div className="text-[11px] text-[#c8c8c8]" style={{ lineHeight: 1.8 }}>
+            <div className="text-[12px] text-[#c8c8c8]" style={{ lineHeight: 1.8 }}>
               {f.desc}
             </div>
           </div>
@@ -369,7 +369,7 @@ export default async function Home() {
       </section>
 
       {/* FOOTER */}
-      <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[10px] text-[#555] tracking-[0.08em]">
+      <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[11px] text-[#888] tracking-[0.08em]">
         <div>
           <span className="text-[#c8c8c8]">DEFIDESH</span> — DeFi Position Intelligence{" "}
           <span className="text-[#00ff41]">//</span> v0.9.1-beta
@@ -379,17 +379,17 @@ export default async function Home() {
             href="https://github.com/Robicon0/lp-tracker"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-[#c8c8c8] transition-colors"
+            className="hover:text-[#e8e8e8] transition-colors"
           >
             GitHub
           </a>
-          <Link href="/about" className="hover:text-[#c8c8c8] transition-colors">
+          <Link href="/about" className="hover:text-[#e8e8e8] transition-colors">
             Docs
           </Link>
-          <a href="#" className="hover:text-[#c8c8c8] transition-colors">
+          <a href="#" className="hover:text-[#e8e8e8] transition-colors">
             Twitter
           </a>
-          <a href="#" className="hover:text-[#c8c8c8] transition-colors">
+          <a href="#" className="hover:text-[#e8e8e8] transition-colors">
             Discord
           </a>
         </div>

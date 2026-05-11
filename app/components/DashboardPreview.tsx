@@ -132,7 +132,7 @@ function Donut() {
             x="50"
             y="58"
             textAnchor="middle"
-            fill="#555"
+            fill="#888"
             fontSize="6"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
@@ -144,7 +144,7 @@ function Donut() {
         {ALLOC.map((d, i) => (
           <div key={i} className="flex items-center gap-1.5 text-[9px]">
             <div className="w-1.5 h-1.5 flex-shrink-0" style={{ background: d.color }} />
-            <div className="text-[#555] flex-1 truncate">{d.label}</div>
+            <div className="text-[#888] flex-1 truncate">{d.label}</div>
             <div className="text-[#e8e8e8] tabular-nums">{d.pct}%</div>
           </div>
         ))}
@@ -166,7 +166,7 @@ export default function DashboardPreview() {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", alignSelf: "stretch" }}>
       {/* Panel header */}
       <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-3 mb-3">
-        <span className="text-[10px] text-[#555] tracking-[0.15em] uppercase">
+        <span className="text-[10px] text-[#888] tracking-[0.15em] uppercase">
           {"// portfolio_overview.live"}
         </span>
         <span className="flex items-center gap-1.5 text-[10px] text-[#00ff41] tracking-[0.1em]">
@@ -182,23 +182,23 @@ export default function DashboardPreview() {
         {/* Top metrics */}
         <div className="grid grid-cols-3 border-b border-[#1f1f1f]">
           <div className="p-5 border-r border-[#1f1f1f]">
-            <div className="text-[9px] text-[#555] tracking-[0.15em] uppercase mb-2">Total Value</div>
-            <div className="text-[22px] font-bold text-[#e8e8e8] tracking-[-0.02em] tabular-nums">
+            <div className="text-[9px] text-[#888] tracking-[0.15em] uppercase mb-2">Total Value</div>
+            <div className="text-[26px] font-bold text-[#e8e8e8] tracking-[-0.02em] tabular-nums">
               <AnimatedCounter target={133180} prefix="$" decimals={0} />
             </div>
             <div className="text-[10px] text-[#00ff41] mt-1">▲ +$2,574 (24h)</div>
           </div>
           <div className="p-5 border-r border-[#1f1f1f]">
-            <div className="text-[9px] text-[#555] tracking-[0.15em] uppercase mb-2">Avg APY</div>
-            <div className="text-[22px] font-bold text-[#00ff41] tracking-[-0.02em] tabular-nums">
+            <div className="text-[9px] text-[#888] tracking-[0.15em] uppercase mb-2">Avg APY</div>
+            <div className="text-[26px] font-bold text-[#00ff41] tracking-[-0.02em] tabular-nums">
               <LiveFlicker base={16.4} variance={0.8} suffix="%" decimals={1} />
             </div>
             <div className="text-[10px] text-[#00ff41] mt-1">▲ +0.3% (7d)</div>
           </div>
           <div className="p-5">
-            <div className="text-[9px] text-[#555] tracking-[0.15em] uppercase mb-2">Positions</div>
-            <div className="text-[22px] font-bold text-[#00e5ff] tracking-[-0.02em]">5</div>
-            <div className="text-[10px] text-[#555] mt-1">across 3 chains</div>
+            <div className="text-[9px] text-[#888] tracking-[0.15em] uppercase mb-2">Positions</div>
+            <div className="text-[26px] font-bold text-[#00e5ff] tracking-[-0.02em]">5</div>
+            <div className="text-[10px] text-[#888] mt-1">across 3 chains</div>
           </div>
         </div>
 
@@ -209,7 +209,7 @@ export default function DashboardPreview() {
         >
           <div className="border-r border-[#1f1f1f]">
             <div
-              className="grid gap-2 py-3 px-4 border-b border-[#1f1f1f] text-[9px] text-[#555] tracking-[0.15em] uppercase"
+              className="grid gap-2 py-3 px-4 border-b border-[#1f1f1f] text-[9px] text-[#888] tracking-[0.15em] uppercase"
               style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr" }}
             >
               <span>Position</span>
@@ -225,7 +225,7 @@ export default function DashboardPreview() {
               >
                 <div>
                   <div className="text-[#e8e8e8] font-medium">{p.name}</div>
-                  <div className="text-[9px] text-[#555] tracking-[0.08em]">{p.proto}</div>
+                  <div className="text-[9px] text-[#888] tracking-[0.08em]">{p.proto}</div>
                 </div>
                 <div className="text-right text-[#c8c8c8] tabular-nums">{p.val}</div>
                 <div className="text-right text-[#00ff41] tabular-nums">{p.apy}</div>
@@ -238,7 +238,7 @@ export default function DashboardPreview() {
             ))}
           </div>
           <div className="p-4 flex flex-col">
-            <div className="text-[9px] text-[#555] tracking-[0.15em] uppercase mb-3">Allocation</div>
+            <div className="text-[9px] text-[#888] tracking-[0.15em] uppercase mb-3">Allocation</div>
             <Donut />
           </div>
         </div>
@@ -246,25 +246,25 @@ export default function DashboardPreview() {
         {/* Cashflow */}
         <div className="grid grid-cols-4 border-b border-[#1f1f1f]">
           <div className="p-3.5 border-r border-[#1f1f1f]">
-            <div className="text-[9px] text-[#555] tracking-[0.12em] uppercase mb-1.5">Daily Yield</div>
+            <div className="text-[9px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Daily Yield</div>
             <div className="text-[14px] font-semibold text-[#00ff41] tabular-nums">+$59.84</div>
           </div>
           <div className="p-3.5 border-r border-[#1f1f1f]">
-            <div className="text-[9px] text-[#555] tracking-[0.12em] uppercase mb-1.5">Weekly</div>
+            <div className="text-[9px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Weekly</div>
             <div className="text-[14px] font-semibold text-[#00ff41] tabular-nums">+$418.91</div>
           </div>
           <div className="p-3.5 border-r border-[#1f1f1f]">
-            <div className="text-[9px] text-[#555] tracking-[0.12em] uppercase mb-1.5">Monthly</div>
+            <div className="text-[9px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Monthly</div>
             <div className="text-[14px] font-semibold text-[#00e5ff] tabular-nums">+$1,820</div>
           </div>
           <div className="p-3.5">
-            <div className="text-[9px] text-[#555] tracking-[0.12em] uppercase mb-1.5">Unrealized</div>
+            <div className="text-[9px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Unrealized</div>
             <div className="text-[14px] font-semibold text-[#c8c8c8] tabular-nums">+$2,486</div>
           </div>
         </div>
 
         {/* Footer chains */}
-        <div className="flex items-center gap-6 px-4 py-2.5 text-[9px] text-[#555]">
+        <div className="flex items-center gap-6 px-4 py-2.5 text-[9px] text-[#888]">
           <div className="flex items-center gap-1.5">
             <div className="w-[5px] h-[5px] bg-[#00e5ff]" />
             <span>EVM</span>

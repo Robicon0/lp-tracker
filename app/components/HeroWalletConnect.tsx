@@ -146,7 +146,7 @@ export default function HeroWalletConnect() {
     <div className="space-y-4">
       {/* CONNECT WALLET */}
       <div>
-        <div className="text-[10px] text-[#555] tracking-[0.12em] uppercase mb-2.5">
+        <div className="text-[10px] text-[#888] tracking-[0.12em] uppercase mb-2.5">
           {"// connect wallet"}
         </div>
         <div
@@ -190,7 +190,7 @@ export default function HeroWalletConnect() {
 
       {/* OR PASTE ANY ADDRESS */}
       <div>
-        <div className="text-[10px] text-[#555] tracking-[0.12em] uppercase mb-2.5">
+        <div className="text-[10px] text-[#888] tracking-[0.12em] uppercase mb-2.5">
           {"// or paste any address"}
         </div>
         <form
@@ -198,7 +198,7 @@ export default function HeroWalletConnect() {
           className="flex border border-[#2e2e2e] max-w-[480px] focus-within:border-[#00ff41]/60 transition-colors"
         >
           <span
-            className="bg-[#111] text-[#00ff41] px-3.5 py-2.5 text-xs border-r border-[#2e2e2e] select-none flex-shrink-0"
+            className="bg-[#111] text-[#00ff41] px-3.5 py-2.5 text-[12px] border-r border-[#2e2e2e] select-none flex-shrink-0"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             {">_"}
@@ -210,12 +210,12 @@ export default function HeroWalletConnect() {
             spellCheck={false}
             autoComplete="off"
             placeholder="0x... or sol1... or 0x(sui)..."
-            className="flex-1 bg-[#0a0a0a] text-[#e8e8e8] px-3.5 py-2.5 text-xs outline-none placeholder:text-[#555] min-w-0"
+            className="flex-1 bg-[#0a0a0a] text-[#e8e8e8] px-3.5 py-2.5 text-[12px] outline-none placeholder:text-[#888] min-w-0"
             style={{ fontFamily: "var(--font-jetbrains-mono)", letterSpacing: "0.04em" }}
           />
           <button
             type="submit"
-            className="bg-[#111] text-[#555] hover:text-[#00ff41] hover:bg-[rgba(0,255,65,0.06)] border-l border-[#2e2e2e] px-4 py-2.5 text-[11px] tracking-[0.08em] uppercase transition-colors whitespace-nowrap"
+            className="bg-[#111] text-[#888] hover:text-[#00ff41] hover:bg-[rgba(0,255,65,0.06)] border-l border-[#2e2e2e] px-4 py-2.5 text-[11px] tracking-[0.08em] uppercase transition-colors whitespace-nowrap"
           >
             SCAN
           </button>
@@ -245,7 +245,7 @@ export default function HeroWalletConnect() {
       {showSolanaModal && (
         <TerminalModal title="CONNECT_SOLANA_WALLET" onClose={() => setShowSolanaModal(false)}>
           {solanaWallets.length === 0 ? (
-            <p className="text-xs text-[#555] leading-relaxed">
+            <p className="text-xs text-[#888] leading-relaxed">
               No Solana wallet detected. Install Phantom, Backpack, or Solflare.
             </p>
           ) : (
@@ -267,7 +267,7 @@ export default function HeroWalletConnect() {
       {showSuiModal && (
         <TerminalModal title="CONNECT_SUI_WALLET" onClose={() => setShowSuiModal(false)}>
           {suiWallets.length === 0 ? (
-            <p className="text-xs text-[#555] leading-relaxed">
+            <p className="text-xs text-[#888] leading-relaxed">
               No Sui wallet detected. Install Phantom, Suiet, or Slush.
             </p>
           ) : (
@@ -349,7 +349,7 @@ function ChainButton({
         <span
           style={{
             fontSize: 9,
-            color: "#7a7a7a",
+            color: "#888",
             fontWeight: 400,
             letterSpacing: "0.04em",
           }}
@@ -373,7 +373,7 @@ function ChainButton({
         aria-hidden
       />
       <span>{label}</span>
-      <span style={{ fontSize: 9, color: "#555", fontWeight: 400, letterSpacing: "0.06em" }}>
+      <span style={{ fontSize: 9, color: "#888", fontWeight: 400, letterSpacing: "0.06em" }}>
         {sublabel}
       </span>
     </button>
