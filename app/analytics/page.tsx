@@ -506,6 +506,66 @@ export default function Analytics() {
     return { totalAllTime, totalWindow, series, protocols };
   }, [eventsMap, positions, rangeCutoff, activeRange, walletLevelFees]);
 
+  // ── Lifetime fees collected (drives LP P&L "Total Fees Collected" card) ─
+  // useLpPnl.feesCollected only sums fees from OPEN positions that are still
+  // in the positions list, so it misses two real fee streams:
+  //   1. Closed positions whose NFT/object still exists (status === "Closed")
+  //      — their per-position scan returns events but useLpPnl filters them out.
+  //   2. Fully destroyed Bluefin positions (Sui object gone) — only the wallet-
+  //      scope scan (useWalletLevelFees) can see those events.
+  // This memo aggregates fees from every source the analytics page already has,
+  // dedupes per-position-vs-wallet-scope overlaps by (protocol, txHash, amounts),
+  // and exposes the lifetime total so the card matches reality.
+  const lifetimeFeesCollected = useMemo(() => {
+    const seen = new Set<string>();
+    const buildKey = (
+      protocol: string,
+      e: { txHash?: string; timestamp: number; amount0: number; amount1: number },
+    ) => {
+      if (e.txHash) return `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`;
+      return `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
+    };
+
+    const posById = new Map(positions.map((p) => [p.id, p]));
+    let total = 0;
+
+    const accept = (
+      protocol: string,
+      e: {
+        type: string;
+        timestamp: number;
+        amount0: number;
+        amount1: number;
+        usdAtTime: number | null;
+        price0AtTime?: number | null;
+        price1AtTime?: number | null;
+        txHash?: string;
+      },
+    ) => {
+      if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
+      let usd = e.usdAtTime ?? 0;
+      // Mirror computePositionPnL's fallback: if route emits per-token prices
+      // but not usdAtTime, value the claim at those historical prices.
+      if ((!Number.isFinite(usd) || usd <= 0) && e.price0AtTime != null && e.price1AtTime != null) {
+        usd = e.amount0 * e.price0AtTime + e.amount1 * e.price1AtTime;
+      }
+      if (!Number.isFinite(usd) || usd <= 0) return;
+      const key = buildKey(protocol, e);
+      if (seen.has(key)) return;
+      seen.add(key);
+      total += usd;
+    };
+
+    for (const [posId, events] of eventsMap.entries()) {
+      const pos = posById.get(posId);
+      if (!pos) continue;
+      for (const e of events) accept(pos.protocol, e);
+    }
+    for (const t of walletLevelFees) accept(t.protocol, t.event);
+
+    return total;
+  }, [eventsMap, positions, walletLevelFees]);
+
   // ── Daily income calc ──────────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
     const activeLp = positions.filter((p) => p.apy > 0 && p.value > 0);
@@ -990,7 +1050,7 @@ export default function Analytics() {
             {[
               { label: "Total Initial Value", value: fmt$(lpPnl.initialValue), color: "text-white", foot: "at deposit prices" },
               { label: "Current Value",       value: fmt$(lpPnl.currentValue), color: "text-white", foot: "live" },
-              { label: "Total Fees Collected", value: fmt$(lpPnl.feesCollected), color: "text-emerald-300", foot: "claimed lifetime" },
+              { label: "Total Fees Collected", value: fmt$(lifetimeFeesCollected), color: "text-emerald-300", foot: "claimed lifetime" },
               { label: "Total Fees Unclaimed", value: fmt$(lpPnl.feesUnclaimed), color: "text-emerald-300", foot: "pending on-chain" },
               {
                 label: "Total Impermanent Loss",
@@ -1000,7 +1060,7 @@ export default function Analytics() {
                 tooltip: (() => {
                   // hodlValue derived from the identity ilUSD = currentValue - hodlValue
                   const hodlValue = lpPnl.currentValue - lpPnl.ilUSD;
-                  const totalFees = lpPnl.feesCollected + lpPnl.feesUnclaimed;
+                  const totalFees = lifetimeFeesCollected + lpPnl.feesUnclaimed;
                   const x = fmt$(lpPnl.currentValue); // current LP value
                   const y = fmt$(hodlValue);          // HODL value
                   const z = fmt$(Math.abs(lpPnl.ilUSD)); // |IL|
