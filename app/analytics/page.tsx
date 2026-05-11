@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useEffect, useState } from "react";
-import Navbar from "../Navbar";
+import { useMemo, useEffect, useState, type CSSProperties } from "react";
+import Link from "next/link";
+import TerminalNavbar from "../components/TerminalNavbar";
+import AnalyticsSidebar, { type AnalyticsSection } from "../components/AnalyticsSidebar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
-import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
 import { useLpPnl } from "../hooks/useLpPnl";
@@ -14,8 +15,6 @@ import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import {
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -24,78 +23,96 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
-  LineChart,
-  Line,
   Area,
   AreaChart,
 } from "recharts";
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// ── Terminal palette (matches analytics.html exactly) ─────────────────────────
+const C = {
+  bg:         "#000000",
+  bg1:        "#060606",
+  bg2:        "#0a0a0a",
+  bg3:        "#101010",
+  bg4:        "#161616",
+  border:     "#1c1c1c",
+  borderHi:   "#262626",
+  text:       "#a8a8a8",
+  textMid:    "#d0d0d0",
+  textBright: "#ffffff",
+  textWhite:  "#ffffff",
+  green:      "#00ff41",
+  greenDim:   "#00cc33",
+  greenFaint: "rgba(0,255,65,0.06)",
+  greenGlow:  "rgba(0,255,65,0.18)",
+  cyan:       "#00d4ff",
+  cyanFaint:  "rgba(0,212,255,0.07)",
+  red:        "#ff3355",
+  redFaint:   "rgba(255,51,85,0.07)",
+  amber:      "#ffaa00",
+  purple:     "#9945ff",
+  blue:       "#3d9fff",
+} as const;
+
+const FONT = "'JetBrains Mono','Courier New',monospace";
+
+const SCANLINE_BG =
+  "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 4px)";
 
 const PROTOCOL_COLORS: Record<string, string> = {
-  Aerodrome:    "#22c55e",
-  "Uniswap V3": "#a855f7",
-  Velodrome:    "#3b82f6",
-  Orca:         "#f59e0b",
-  Raydium:      "#ef4444",
-  Cetus:        "#06b6d4",
-  Bluefin:      "#0ea5e9",
-  Momentum:     "#84cc16",
-  HyperSwap:    "#f97316",
-  KittenSwap:   "#ec4899",
-  ProjectX:     "#8b5cf6",
-  PRJX:         "#8b5cf6",
-  PancakeSwap:  "#fbbf24",
-  Dolomite:     "#6366f1",
-  "Jupiter Lend": "#9333ea",
-  AlphaFi:      "#14b8a6",
-  Suilend:      "#0891b2",
-  HyperLend:    "#10b981",
-  "AAVE V3":    "#b6509e",
+  Aerodrome:      C.green,
+  "Uniswap V3":   C.cyan,
+  Velodrome:      C.blue,
+  Orca:           C.amber,
+  Raydium:        C.red,
+  Cetus:          C.cyan,
+  Bluefin:        C.blue,
+  Momentum:       C.green,
+  HyperSwap:      C.amber,
+  KittenSwap:     C.purple,
+  ProjectX:       C.purple,
+  PRJX:           C.purple,
+  PancakeSwap:    C.amber,
+  Dolomite:       "#6366f1",
+  "Jupiter Lend": C.purple,
+  AlphaFi:        "#14b8a6",
+  Suilend:        C.cyan,
+  HyperLend:      C.green,
+  HypurrFi:       C.amber,
+  Kamino:         C.purple,
+  "AAVE V3":      "#b6509e",
 };
 
 const CHAIN_COLORS: Record<string, string> = {
-  Base:        "#0052ff",
-  Ethereum:    "#627eea",
-  Arbitrum:    "#2d9cdb",
+  Base:        C.blue,
+  Ethereum:    C.cyan,
+  Arbitrum:    C.green,
   Optimism:    "#ff0420",
-  Polygon:     "#8247e5",
+  Polygon:     C.purple,
   Avalanche:   "#e84142",
-  Solana:      "#9945ff",
-  Sui:         "#6fbcf0",
+  Solana:      C.purple,
+  Sui:         C.blue,
   HyperEVM:    "#00d4aa",
-  "BNB Chain": "#f0b90b",
+  "BNB Chain": C.amber,
 };
 
-const PIE_COLORS = ["#10B981", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316", "#84CC16", "#6366F1"];
+const PIE_COLORS = [C.green, C.cyan, C.blue, C.amber, C.purple, C.red, "#14b8a6", "#ec4899", "#6366f1", "#84cc16"];
 
 const TIME_RANGES = [
   { key: "1D",   ms: 1   * 24 * 3_600_000, label: "24h",     xFmt: (d: Date) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
   { key: "7D",   ms: 7   * 24 * 3_600_000, label: "7 days",  xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
   { key: "30D",  ms: 30  * 24 * 3_600_000, label: "30 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
   { key: "90D",  ms: 90  * 24 * 3_600_000, label: "90 days", xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
-  { key: "180D", ms: 180 * 24 * 3_600_000, label: "180 days",xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
   { key: "1Y",   ms: 365 * 24 * 3_600_000, label: "1 year",  xFmt: (d: Date) => d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }) },
 ] as const;
 
-// ── Tooltip style ────────────────────────────────────────────────────────────
-
-const tooltipStyle = {
-  backgroundColor: "#0a1f17",
-  border: "1px solid rgba(16,185,129,0.2)",
-  borderRadius: "8px",
-  padding: "8px 12px",
-  color: "#FFFFFF",
-  fontSize: "12px",
-};
-const tooltipLabelStyle = { color: "#FFFFFF" };
-const tooltipItemStyle = { color: "#FFFFFF" };
+type RangeKey = typeof TIME_RANGES[number]["key"];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
 const fmt$ = (n: number, dec = 2) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
+
+const fmt$Signed = (n: number, dec = 2) =>
+  `${n >= 0 ? "+" : "-"}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 
 const fmtCompact = (n: number) => {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -103,164 +120,18 @@ const fmtCompact = (n: number) => {
   return fmt$(n, 0);
 };
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const dollarFormatter = (value: any) => [fmt$(Number(value)), "Value"];
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-// Custom legend for pie charts
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const PieLegend = (props: any) => {
-  const { payload } = props;
-  const total = payload.reduce((sum: number, entry: any) => sum + entry.payload.value, 0);
-  return (
-    <div className="flex flex-wrap justify-center gap-x-3 gap-y-1.5 mt-3">
-      {payload.map((entry: any, index: number) => {
-        const pct = total > 0 ? ((entry.payload.value / total) * 100).toFixed(0) : "0";
-        return (
-          <div key={index} className="flex items-center space-x-1.5 text-xs">
-            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
-            <span className="text-gray-400">{entry.value} <span className="text-gray-500">{pct}%</span></span>
-          </div>
-        );
-      })}
-    </div>
-  );
+const tooltipStyle: CSSProperties = {
+  background: C.bg1,
+  border: `1px solid ${C.borderHi}`,
+  padding: "8px 12px",
+  color: C.textBright,
+  fontSize: 11,
+  fontFamily: FONT,
 };
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-// ── ExposureCard — donut + right-side hover-synced legend ────────────────────
-// Reused for Chain Exposure and Protocol Exposure. Renders the donut on the
-// left (with center text) and an interactive legend on the right where each
-// row stays in sync with donut slice hover. Hovering either side highlights
-// the same slice. Auto-handles any list length so new chains/protocols added
-// in the future appear automatically with no code changes.
-
-type ExposureRow = { name: string; value: number };
-
-interface ExposureCardProps {
-  title: string;
-  warning?: string | null;
-  data: ExposureRow[];
-  colorOf: (name: string, i: number) => string;
-  centerPrimary: string;
-  centerSecondary: string;
-  valueFmt: (v: number) => string;
-}
-
-function ExposureCard({
-  title, warning, data, colorOf, centerPrimary, centerSecondary, valueFmt,
-}: ExposureCardProps) {
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  const total = data.reduce((s, r) => s + r.value, 0);
-  const colored = data.map((r, i) => ({ ...r, color: colorOf(r.name, i) }));
-
-  return (
-    <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold">{title}</h2>
-        {warning && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-medium">
-            {warning}
-          </span>
-        )}
-      </div>
-      {data.length === 0 ? (
-        <div className="flex items-center justify-center h-[260px] text-gray-600 text-sm">No data</div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-4 items-center">
-          <div className="relative" style={{ height: 220 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={colored}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={92}
-                  innerRadius={62}
-                  dataKey="value"
-                  paddingAngle={2}
-                  stroke="#0a1a12"
-                  strokeWidth={2}
-                  onMouseEnter={(_, i) => setActiveIdx(i)}
-                  onMouseLeave={() => setActiveIdx(null)}
-                >
-                  {colored.map((entry, i) => (
-                    <Cell
-                      key={entry.name}
-                      fill={entry.color}
-                      opacity={activeIdx == null || activeIdx === i ? 1 : 0.35}
-                    />
-                  ))}
-                </Pie>
-                {/* External tooltip popup intentionally omitted — slice info
-                    is mirrored into the donut center on hover and listed in
-                    the right-side legend, so duplicating the numbers in a
-                    floating popup just clutters the chart. */}
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-3 text-center">
-              {activeIdx != null && colored[activeIdx] ? (
-                <>
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500 truncate max-w-full">
-                    {colored[activeIdx].name}
-                  </p>
-                  <p className="text-base sm:text-lg font-bold text-white truncate max-w-full">
-                    {valueFmt(colored[activeIdx].value)}
-                  </p>
-                  <p className="text-[10px] text-gray-500">
-                    {total > 0 ? ((colored[activeIdx].value / total) * 100).toFixed(1) : "0"}%
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-lg sm:text-xl font-bold text-white truncate max-w-full">{centerPrimary}</p>
-                  <p className="text-[11px] text-gray-500 mt-0.5 truncate max-w-full">{centerSecondary}</p>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Right-side legend */}
-          <div className="flex flex-col gap-1 max-h-[240px] overflow-y-auto pr-1">
-            {colored.map((row, i) => {
-              const pct = total > 0 ? (row.value / total) * 100 : 0;
-              const isActive = activeIdx === i;
-              return (
-                <button
-                  type="button"
-                  key={row.name}
-                  onMouseEnter={() => setActiveIdx(i)}
-                  onMouseLeave={() => setActiveIdx(null)}
-                  onFocus={() => setActiveIdx(i)}
-                  onBlur={() => setActiveIdx(null)}
-                  className={`flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md text-left transition-colors ${
-                    isActive ? "bg-emerald-900/30" : "hover:bg-emerald-900/15"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: row.color }} />
-                    <span className="text-sm text-white truncate" title={row.name}>{row.name}</span>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-emerald-300">{pct.toFixed(1)}%</p>
-                    <p className="text-[10px] text-gray-500">{valueFmt(row.value)}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Sort config for position table ───────────────────────────────────────────
-
 type SortKey = "value" | "apy" | "daily" | "fees" | "protocol" | "chain";
 type SortDir = "asc" | "desc";
-
-// ── Main Component ───────────────────────────────────────────────────────────
 
 // Fallback AAVE V3 supply APYs (used only when live rate fetch fails)
 const FALLBACK_AAVE_SUPPLY_APY: Record<string, number> = {
@@ -289,8 +160,293 @@ function getATokenChain(symbol: string): string | null {
   return null;
 }
 
+function tokenInitials(pair: string): string {
+  const parts = pair.split("/").map((s) => s.trim());
+  return `${(parts[0] ?? "?").slice(0, 2)}${(parts[1] ?? "?").slice(0, 1)}`.toUpperCase();
+}
+
+// ── ChainTag — small color-coded badge ───────────────────────────────────────
+function ChainTag({ chain }: { chain: string }) {
+  const color = CHAIN_COLORS[chain] ?? C.text;
+  return (
+    <span
+      style={{
+        fontSize: 8,
+        padding: "1px 6px",
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        border: `1px solid ${color}44`,
+        background: `${color}11`,
+        color,
+        fontWeight: 700,
+        fontFamily: FONT,
+      }}
+    >
+      {chain}
+    </span>
+  );
+}
+
+// ── ExposureCard — donut + right-side legend (terminal aesthetic) ────────────
+type ExposureRow = { name: string; value: number };
+
+interface ExposureCardProps {
+  title: string;
+  warning?: string | null;
+  data: ExposureRow[];
+  colorOf: (name: string, i: number) => string;
+  centerPrimary: string;
+  centerSecondary: string;
+  valueFmt: (v: number) => string;
+}
+
+function ExposureCard({
+  title, warning, data, colorOf, centerPrimary, centerSecondary, valueFmt,
+}: ExposureCardProps) {
+  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const total = data.reduce((s, r) => s + r.value, 0);
+  const colored = data.map((r, i) => ({ ...r, color: colorOf(r.name, i) }));
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${C.border}`,
+        background: C.bg1,
+        padding: "24px 28px",
+        fontFamily: FONT,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+        <div
+          style={{
+            fontSize: 9,
+            letterSpacing: "0.2em",
+            textTransform: "uppercase",
+            color: C.textMid,
+          }}
+        >
+          <span style={{ color: C.green }}>// </span>{title}
+        </div>
+        {warning && (
+          <span
+            style={{
+              fontSize: 8,
+              padding: "2px 8px",
+              border: `1px solid ${C.amber}44`,
+              background: `${C.amber}11`,
+              color: C.amber,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+            }}
+          >
+            {warning}
+          </span>
+        )}
+      </div>
+
+      {data.length === 0 ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: C.text, fontSize: 11 }}>
+          No data
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+          <div style={{ width: 160, height: 160, flexShrink: 0, position: "relative" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={colored}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={75}
+                  innerRadius={50}
+                  dataKey="value"
+                  paddingAngle={2}
+                  stroke={C.bg}
+                  strokeWidth={2}
+                  onMouseEnter={(_, i) => setActiveIdx(i)}
+                  onMouseLeave={() => setActiveIdx(null)}
+                >
+                  {colored.map((entry, i) => (
+                    <Cell
+                      key={entry.name}
+                      fill={entry.color}
+                      opacity={activeIdx == null || activeIdx === i ? 1 : 0.3}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                padding: "0 8px",
+                textAlign: "center",
+              }}
+            >
+              {activeIdx != null && colored[activeIdx] ? (
+                <>
+                  <span style={{ fontSize: 8, letterSpacing: "0.15em", textTransform: "uppercase", color: C.text }}>
+                    {colored[activeIdx].name}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                    {valueFmt(colored[activeIdx].value)}
+                  </span>
+                  <span style={{ fontSize: 8, color: C.text }}>
+                    {total > 0 ? ((colored[activeIdx].value / total) * 100).toFixed(1) : "0"}%
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                    {centerPrimary}
+                  </span>
+                  <span style={{ fontSize: 8, color: C.text, letterSpacing: "0.15em", textTransform: "uppercase", marginTop: 2 }}>
+                    {centerSecondary}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div style={{ flex: 1, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto" }}>
+            {colored.map((row, i) => {
+              const pct = total > 0 ? (row.value / total) * 100 : 0;
+              const isActive = activeIdx === i;
+              return (
+                <button
+                  type="button"
+                  key={row.name}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onMouseLeave={() => setActiveIdx(null)}
+                  onFocus={() => setActiveIdx(i)}
+                  onBlur={() => setActiveIdx(null)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "4px 6px",
+                    fontFamily: FONT,
+                    fontSize: 11,
+                    background: isActive ? C.greenFaint : "transparent",
+                    border: "none",
+                    borderLeft: `2px solid ${isActive ? row.color : "transparent"}`,
+                    color: C.textMid,
+                    cursor: "default",
+                    textAlign: "left",
+                    width: "100%",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      background: row.color,
+                      flexShrink: 0,
+                      boxShadow: `0 0 4px ${row.color}88`,
+                    }}
+                  />
+                  <span style={{ flex: 1, letterSpacing: "0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {row.name}
+                  </span>
+                  <span style={{ minWidth: 36, textAlign: "right", color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                    {pct.toFixed(1)}%
+                  </span>
+                  <span style={{ minWidth: 60, textAlign: "right", color: C.text, fontSize: 9, fontVariantNumeric: "tabular-nums" }}>
+                    {valueFmt(row.value)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Section frame ────────────────────────────────────────────────────────────
+function SectionFrame({
+  id, title, sub, action, children,
+}: {
+  id?: string;
+  title: string;
+  sub?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      id={id}
+      style={{
+        border: `1px solid ${C.border}`,
+        background: C.bg1,
+        marginBottom: 20,
+        fontFamily: FONT,
+        animation: "_fadeUp 0.45s ease both",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "18px 26px",
+          borderBottom: `1px solid ${C.border}`,
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.textWhite, letterSpacing: "0.04em" }}>
+            <span style={{ color: C.green }}>// </span>{title}
+          </div>
+          {sub && <div style={{ fontSize: 10, color: C.text, marginTop: 4, letterSpacing: "0.04em" }}>{sub}</div>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ── Range pill (chart tab) ───────────────────────────────────────────────────
+function RangePill({
+  k, active, onClick,
+}: { k: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="ct-tab"
+      data-active={active ? "true" : "false"}
+      onClick={onClick}
+      style={{
+        fontFamily: FONT,
+        fontSize: 9,
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        padding: "5px 12px",
+        border: `1px solid ${active ? C.greenDim : C.border}`,
+        background: active ? C.greenFaint : "transparent",
+        color: active ? C.green : C.text,
+        cursor: "pointer",
+        borderRight: "none",
+      }}
+    >
+      {k}
+    </button>
+  );
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 export default function Analytics() {
-  const { positions, isLoading, dataUpdatedAt } = usePositions();
+  const { positions, isLoading } = usePositions();
   const { positions: externalLendingPositions } = useLendingPositions();
   const { tokens: rawWalletTokens } = useWalletTokens();
   const { rates: aaveRates, prices: aavePrices } = useAaveV3Rates(rawWalletTokens);
@@ -302,6 +458,7 @@ export default function Analytics() {
       return { ...t, price: live, usdValue: t.balance * live };
     });
   }, [rawWalletTokens, aavePrices]);
+
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets } = useWatchedWallets();
@@ -309,9 +466,8 @@ export default function Analytics() {
   useEffect(() => setMounted(true), []);
   const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
 
-  // ── Build AAVE lending positions from wallet tokens ─────────────────────────
+  // ── AAVE lending positions ─────────────────────────────────────────────────
   const lendingPositions: ExternalLendingPosition[] = useMemo(() => {
-    // AAVE aTokens (supply) + debt tokens (borrow) grouped by chain
     const aaveByChain = new Map<string, {
       supplied: number; supplyApy: number;
       borrowed: number; borrowApy: number;
@@ -320,11 +476,9 @@ export default function Analytics() {
       if (!t.isLending && !t.isDebt) continue;
       const chain = getATokenChain(t.symbol) ?? t.chain;
       const prev = aaveByChain.get(chain) ?? { supplied: 0, supplyApy: 0, borrowed: 0, borrowApy: 0 };
-
       const addr = t.contractAddress?.toLowerCase();
       const live = addr ? aaveRates[addr] : undefined;
       const fallbackSupply = FALLBACK_AAVE_SUPPLY_APY[getAaveUnderlying(t.symbol)] ?? 0;
-
       if (t.isLending) {
         const tokenApy = live?.supplyApy ?? fallbackSupply;
         const newSupplied = prev.supplied + t.usdValue;
@@ -340,10 +494,8 @@ export default function Analytics() {
           : 0;
         prev.borrowed = newBorrowed;
       }
-
       aaveByChain.set(chain, prev);
     }
-
     const aavePositions: ExternalLendingPosition[] = [...aaveByChain.entries()]
       .filter(([, v]) => v.supplied > 0 || v.borrowed > 0)
       .map(([chain, v]) => ({
@@ -357,21 +509,22 @@ export default function Analytics() {
         borrowedAssets: [],
         manageUrl: "https://app.aave.com",
       }));
-
     return [...aavePositions, ...externalLendingPositions];
   }, [walletTokens, aaveRates, externalLendingPositions]);
 
-  // ── Actual performance data from on-chain activity ────────────────────────
+  // ── Activity data ──────────────────────────────────────────────────────────
   const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
   const { events: walletLevelFees } = useWalletLevelFees(positions);
   const lpPnl = useLpPnl(positions);
 
-  // ── Sort state ─────────────────────────────────────────────────────────────
+  // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  // ── Actual APR card toggle ───────────────────────────────────────────────
   const [aprView, setAprView] = useState<"daily" | "weekly" | "monthly" | "yearly">("yearly");
+  const [rangeKey, setRangeKey] = useState<RangeKey>("30D");
+  const [incomePeriod, setIncomePeriod] = useState<"D" | "M" | "Y">("D");
+  const [chainPeriod, setChainPeriod] = useState<"1D" | "7D" | "30D">("1D");
+  const [activeSection, setActiveSection] = useState<AnalyticsSection>("overview");
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -382,50 +535,29 @@ export default function Analytics() {
     }
   };
 
-  // ── Portfolio history ──────────────────────────────────────────────────────
+  function handleSectionChange(id: AnalyticsSection) {
+    setActiveSection(id);
+    if (typeof document !== "undefined") {
+      const el = document.getElementById(`section-${id}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  // ── Portfolio totals ──────────────────────────────────────────────────────
   const totalLpValue = positions.reduce((s, p) => s + p.value, 0);
   const totalLpFees  = positions.reduce((s, p) => s + p.fees, 0);
   const totalLendingValue = lendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
   const totalPortfolioValue = totalLpValue + totalLendingValue;
 
-  const portfolioHistory = usePortfolioHistory(totalLpValue, positions.length, dataUpdatedAt);
-  const [rangeKey, setRangeKey] = useState<typeof TIME_RANGES[number]["key"]>("30D");
   const activeRange   = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
   const rangeCutoff   = Date.now() - activeRange.ms;
-  const rangedHistory = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
-  const effectiveHistory = rangedHistory.length >= 2 ? rangedHistory : portfolioHistory;
-  const effectiveFirst   = effectiveHistory[0];
-  const pnlDollar = effectiveFirst ? totalLpValue - effectiveFirst.totalValue : 0;
-  const pnlPct    = effectiveFirst && effectiveFirst.totalValue > 0
-    ? (pnlDollar / effectiveFirst.totalValue) * 100
-    : 0;
-  const pnlLabel = (() => {
-    if (!effectiveFirst) return activeRange.label;
-    const coverage = Date.now() - effectiveFirst.timestamp;
-    if (coverage < activeRange.ms * 0.5)
-      return `since ${new Date(effectiveFirst.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-    return activeRange.label;
-  })();
-  const chartData = effectiveHistory.map((s) => ({
-    label: activeRange.xFmt(new Date(s.timestamp)),
-    value: s.totalValue,
-    ts: s.timestamp,
-  }));
 
-  // ── Fee income — aggregate from on-chain fee_claim / reward_claim events ───
-  // Any position whose protocol is supported by `useAllPositionsActivity`
-  // contributes; protocol + chain are read from `positions`, not hardcoded, so
-  // new protocols automatically appear with no code change.
+  // ── Fee income — aggregated from on-chain fee_claim / reward_claim ─────────
   const feeIncome = useMemo(() => {
     interface FlatFee { ts: number; usd: number; protocol: string; chain: string; dedupeKey: string; }
     const flat: FlatFee[] = [];
     const posById = new Map(positions.map((p) => [p.id, p]));
 
-    // Key used to suppress the same on-chain fee claim showing up twice
-    // (once from the per-position scan, once from the wallet-scope scan).
-    // txHash alone is not enough — a single tx can settle multiple fee
-    // claims — so also hash the amounts. If txHash is missing, fall back
-    // to (protocol, ts, amount0, amount1) so the dedupe still works.
     const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) => {
       if (e.txHash) return `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`;
       return `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
@@ -453,11 +585,8 @@ export default function Analytics() {
       if (!pos) continue;
       for (const e of events) push(pos.protocol, pos.chain, e);
     }
-    // Wallet-scope events — captures fees from destroyed positions that
-    // no longer appear in `positions`. Tagged with their own protocol/chain.
     for (const t of walletLevelFees) push(t.protocol, t.chain, t.event);
 
-    // Dedupe — keep only first occurrence per dedupeKey.
     const seen = new Set<string>();
     const deduped = flat.filter((f) => {
       if (seen.has(f.dedupeKey)) return false;
@@ -465,16 +594,13 @@ export default function Analytics() {
       return true;
     });
     deduped.sort((a, b) => a.ts - b.ts);
-    const flatDeduped = deduped;
-    // Replace flat with deduped for the rest of the computation.
     flat.length = 0;
-    flat.push(...flatDeduped);
+    flat.push(...deduped);
 
     const totalAllTime = flat.reduce((s, f) => s + f.usd, 0);
     const inWindow = flat.filter((f) => f.ts >= rangeCutoff);
     const totalWindow = inWindow.reduce((s, f) => s + f.usd, 0);
 
-    // Cumulative series within the active range (starts at 0, ends at totalWindow).
     const now = Date.now();
     const series: { label: string; ts: number; value: number }[] = [];
     series.push({ ts: rangeCutoff, label: activeRange.xFmt(new Date(rangeCutoff)), value: 0 });
@@ -487,7 +613,6 @@ export default function Analytics() {
       series.push({ ts: now, label: activeRange.xFmt(new Date(now)), value: running });
     }
 
-    // Protocol breakdown — in-window fees, grouped by protocol+chain.
     const byKey = new Map<string, { protocol: string; chain: string; usd: number }>();
     for (const f of inWindow) {
       const k = `${f.protocol}::${f.chain}`;
@@ -497,43 +622,44 @@ export default function Analytics() {
     }
     const protocols = Array.from(byKey.values())
       .filter((p) => p.usd > 0)
-      .map((p) => ({
-        ...p,
-        pct: totalWindow > 0 ? (p.usd / totalWindow) * 100 : 0,
-      }))
+      .map((p) => ({ ...p, pct: totalWindow > 0 ? (p.usd / totalWindow) * 100 : 0 }))
       .sort((a, b) => b.usd - a.usd);
 
-    return { totalAllTime, totalWindow, series, protocols };
+    // Recent fee claims for the Earning Flows section
+    const recent = [...flat].sort((a, b) => b.ts - a.ts).slice(0, 8);
+
+    // Peak day + daily avg + hourly within range
+    const hoursInWindow = activeRange.ms / 3_600_000;
+    const daysInWindow = activeRange.ms / 86_400_000;
+    const hourlyRate = totalWindow / Math.max(hoursInWindow, 1);
+    const dailyAvg = totalWindow / Math.max(daysInWindow, 1);
+    const annualizedAtRate = hourlyRate * 24 * 365;
+
+    const byDay = new Map<string, number>();
+    for (const f of inWindow) {
+      const d = new Date(f.ts).toISOString().slice(0, 10);
+      byDay.set(d, (byDay.get(d) ?? 0) + f.usd);
+    }
+    const peakDay = Math.max(0, ...Array.from(byDay.values()));
+
+    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay };
   }, [eventsMap, positions, rangeCutoff, activeRange, walletLevelFees]);
 
-  // ── Daily income calc ──────────────────────────────────────────────────────
+  // ── Daily income ───────────────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
     const activeLp = positions.filter((p) => p.apy > 0 && p.value > 0);
     const yearlyLp = activeLp.reduce((s, p) => s + (p.value * p.apy) / 100, 0);
-
     let yearlyLending = 0;
     for (const lp of lendingPositions) {
       if (lp.supplyApy != null && lp.totalSupplied > 0) {
         yearlyLending += (lp.totalSupplied * lp.supplyApy) / 100;
       }
     }
-
-    return {
-      dailyLpIncome: yearlyLp / 365,
-      dailyLendingIncome: yearlyLending / 365,
-    };
+    return { dailyLpIncome: yearlyLp / 365, dailyLendingIncome: yearlyLending / 365 };
   }, [positions, lendingPositions]);
 
   const totalDailyIncome = dailyLpIncome + dailyLendingIncome;
 
-  // ── Income by Source — D/M/Y toggle ─────────────────────────────────────
-  // D = today, M = this month (last 30d), Y = this year (last 365d).
-  // LP fees show ACCRUED income for the period using each position's APY —
-  // this includes uncollected fees, so the number is non-zero even on days
-  // with no claim. Lending uses the current-APY projection too. The math is
-  // protocol-agnostic — every active position contributes, automatically.
-  const [incomePeriod, setIncomePeriod] = useState<"D" | "M" | "Y">("D");
-  const [chainPeriod, setChainPeriod] = useState<"1D" | "7D" | "30D">("1D");
   const incomeWindow = useMemo(() => {
     const periodDays = incomePeriod === "D" ? 1 : incomePeriod === "M" ? 30 : 365;
     const lpAccrued = dailyLpIncome * periodDays;
@@ -541,7 +667,7 @@ export default function Analytics() {
     return { lpAccrued, lendingProjected, total: lpAccrued + lendingProjected };
   }, [incomePeriod, dailyLpIncome, dailyLendingIncome]);
 
-  // ── Weighted average actual APR across all active LP positions ─────────────
+  // ── Actual APR (value-weighted) ────────────────────────────────────────────
   const actualAPRData = useMemo(() => {
     const activeWithValue = positions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activeWithValue.length === 0) return { apr: 0, totalValue: 0 };
@@ -559,19 +685,11 @@ export default function Analytics() {
   }, [positions, perfMap]);
 
   // ── Portfolio health score ─────────────────────────────────────────────────
-  // Weighted composite (out of 100):
-  //   40% positions in range | 25% fee performance vs 20% APR benchmark
-  //   20% chain diversification | 15% IL level (lower = better)
   const healthScore = useMemo(() => {
     const activePositions = positions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activePositions.length === 0) return null;
-
-    // (1) In-range — 40%
     const inRangeCount = activePositions.filter((p) => p.status === "In Range").length;
-    const inRangePct = inRangeCount / activePositions.length;
-    const inRangeScore = inRangePct * 40;
-
-    // (2) Fee performance — 25%. Value-weighted actual APR vs 20% benchmark.
+    const inRangeScore = (inRangeCount / activePositions.length) * 40;
     let aprWeightedSum = 0;
     let aprTotalVal = 0;
     for (const p of activePositions) {
@@ -584,21 +702,16 @@ export default function Analytics() {
     }
     const avgAPR = aprTotalVal > 0 ? aprWeightedSum / aprTotalVal : 0;
     const feeScore = Math.max(0, Math.min(1, avgAPR / 20)) * 25;
-
-    // (3) Chain diversification — 20%. 1 chain ≈ 60%, 2 ≈ 85%, 3+ = 100%.
     const chains = new Set(activePositions.map((p) => p.chain));
     const chainFraction = chains.size >= 3 ? 1 : chains.size === 2 ? 0.85 : 0.6;
     const chainScore = chainFraction * 20;
-
-    // (4) IL level — 15%. 0% IL = full 15; -5% = 0.
     const ilPct = lpPnl.initialValue > 0 ? (lpPnl.ilUSD / lpPnl.initialValue) * 100 : 0;
     const ilMagnitude = Math.abs(Math.min(0, ilPct));
     const ilScore = Math.max(0, 1 - ilMagnitude / 5) * 15;
-
     return Math.round(inRangeScore + feeScore + chainScore + ilScore);
   }, [positions, perfMap, lpPnl.initialValue, lpPnl.ilUSD]);
 
-  // ── Chain breakdown (LP + lending combined) ────────────────────────────────
+  // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {
     const m: Record<string, number> = {};
     for (const p of positions) {
@@ -610,7 +723,6 @@ export default function Analytics() {
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [positions, lendingPositions]);
 
-  // ── Protocol breakdown (LP + lending combined) ─────────────────────────────
   const protocolExposure = useMemo(() => {
     const m: Record<string, number> = {};
     for (const p of positions) {
@@ -622,9 +734,6 @@ export default function Analytics() {
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [positions, lendingPositions]);
 
-  // ── Income by chain (LP only — only chains with active LP positions) ──────
-  // Lending APRs are excluded here so the section reflects fee-earning chains
-  // exclusively. Sorted desc by daily income; total row appended.
   const incomeByChain = useMemo(() => {
     const m: Record<string, number> = {};
     for (const p of positions) {
@@ -633,19 +742,13 @@ export default function Analytics() {
         const daily = (p.value * p.apy) / 100 / 365;
         m[p.chain] = (m[p.chain] ?? 0) + daily;
       } else if (!(p.chain in m)) {
-        // Chain has an active position but APY is unknown — record at $0 so
-        // it shows up in the list rather than being silently dropped.
         m[p.chain] = 0;
       }
     }
-    return Object.entries(m)
-      .map(([chain, daily]) => ({ chain, daily }))
-      .sort((a, b) => b.daily - a.daily);
+    return Object.entries(m).map(([chain, daily]) => ({ chain, daily })).sort((a, b) => b.daily - a.daily);
   }, [positions]);
 
-  // ── Sorted position table (uses actual APR when available) ─────────────────
-  // Only show active positions (In Range / Out of Range) — closed positions
-  // with $0 value are excluded from the analytics performance table.
+  // ── Sorted position table ──────────────────────────────────────────────────
   const sortedPositions = useMemo(() => {
     const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1 };
     const items = positions
@@ -658,11 +761,9 @@ export default function Analytics() {
         return { ...p, displayAPR, displayDaily, isEstimated };
       });
     return [...items].sort((a, b) => {
-      // Status primary
       const sa = STATUS_ORDER[a.status] ?? 1;
       const sb = STATUS_ORDER[b.status] ?? 1;
       if (sa !== sb) return sa - sb;
-      // User key secondary
       let cmp = 0;
       switch (sortKey) {
         case "value":    cmp = a.value - b.value; break;
@@ -676,7 +777,6 @@ export default function Analytics() {
     });
   }, [positions, sortKey, sortDir, perfMap]);
 
-  // ── Top/bottom performers (by actual APR when available) ──────────────────
   const { topPerformers, bottomPerformers } = useMemo(() => {
     const active = positions.filter((p) => p.value > 0).map((p) => {
       const perf = perfMap.get(p.id);
@@ -685,13 +785,9 @@ export default function Analytics() {
       return { ...p, displayAPR, isEstimated };
     }).filter((p) => p.displayAPR > 0);
     const sorted = [...active].sort((a, b) => b.displayAPR - a.displayAPR);
-    return {
-      topPerformers: sorted.slice(0, 3),
-      bottomPerformers: sorted.slice(-3).reverse(),
-    };
+    return { topPerformers: sorted.slice(0, 3), bottomPerformers: sorted.slice(-3).reverse() };
   }, [positions, perfMap]);
 
-  // ── Concentration warnings ─────────────────────────────────────────────────
   const chainWarning = useMemo(() => {
     if (chainExposure.length === 0 || totalPortfolioValue === 0) return null;
     const top = chainExposure[0];
@@ -706,15 +802,29 @@ export default function Analytics() {
     return pct > 50 ? `${pct.toFixed(0)}% in ${top.name}` : null;
   }, [protocolExposure, totalPortfolioValue]);
 
-  // ── Loading / empty states ─────────────────────────────────────────────────
+  // ── Active protocol / chain sets for sidebar ───────────────────────────────
+  const activeProtocols = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of positions) if (p.value > 0) s.add(p.protocol);
+    for (const lp of lendingPositions) if (lp.totalSupplied > 0) s.add(lp.protocol);
+    return s;
+  }, [positions, lendingPositions]);
 
+  const activeChains = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of positions) if (p.value > 0) s.add(p.chain);
+    for (const lp of lendingPositions) if (lp.totalSupplied > 0) s.add(lp.chain);
+    return s;
+  }, [positions, lendingPositions]);
+
+  // ── Loading / empty states ─────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="p-8 pt-24 bg-[#060d08] text-white min-h-screen">
-        <Navbar />
-        <div className="max-w-7xl mx-auto">
-          <h1 className="text-3xl font-bold">Analytics</h1>
-          <p className="text-gray-500 mt-2">Loading positions...</p>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
+        <TerminalNavbar />
+        <div style={{ padding: 40 }}>
+          <h1 style={{ fontSize: 28, color: C.textWhite }}>Analytics</h1>
+          <p style={{ color: C.text, marginTop: 8 }}>Loading positions…</p>
         </div>
       </div>
     );
@@ -722,773 +832,1187 @@ export default function Analytics() {
 
   if (mounted && !hasWallet) {
     return (
-      <div className="p-8 pt-24 bg-[#060d08] text-white min-h-screen">
-        <Navbar />
-        <div className="max-w-7xl mx-auto flex flex-col items-center justify-center py-32 text-center">
-          <div className="w-16 h-16 mb-6 rounded-2xl bg-emerald-950/50 border border-emerald-400/15 flex items-center justify-center">
-            <svg className="w-8 h-8 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, display: "flex", flexDirection: "column" }}>
+        <TerminalNavbar />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 40 }}>
+          <div
+            style={{
+              width: 64, height: 64, marginBottom: 24,
+              background: C.greenFaint,
+              border: `1px solid ${C.greenDim}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: C.green, fontSize: 26,
+            }}
+          >
+            ◎
           </div>
-          <h1 className="text-3xl font-bold mb-3">Portfolio Analytics</h1>
-          <p className="text-gray-500 max-w-sm">Connect a wallet to view analytics and performance data for your DeFi positions.</p>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, marginBottom: 10, letterSpacing: "-0.02em" }}>
+            Portfolio Analytics
+          </h1>
+          <p style={{ color: C.text, maxWidth: 360, fontSize: 12 }}>
+            Connect a wallet to view analytics and performance data for your DeFi positions.
+          </p>
         </div>
       </div>
     );
   }
 
   const SortIcon = ({ col }: { col: SortKey }) => (
-    <span className="ml-1 text-[10px]">
-      {sortKey === col ? (sortDir === "desc" ? "\u25BC" : "\u25B2") : "\u25BC"}
+    <span style={{ marginLeft: 4, fontSize: 8 }}>
+      {sortKey === col ? (sortDir === "desc" ? "▼" : "▲") : "▼"}
     </span>
   );
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="px-4 sm:px-8 pb-4 sm:pb-8 pt-20 sm:pt-24 bg-[#060d08] text-white min-h-screen">
-      <Navbar />
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 mt-2">
-          <h1 className="text-3xl font-bold">Analytics</h1>
-          <p className="text-gray-500 mt-1 text-sm">Portfolio insights and performance metrics</p>
-        </div>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: "100vh",
+        background: C.bg,
+        color: C.text,
+        fontFamily: FONT,
+        fontSize: 12,
+        lineHeight: 1.5,
+        overflowX: "hidden",
+      }}
+    >
+      <style>{`
+        @keyframes _spin   { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+        @keyframes _pulse  { 0%,100%{opacity:1} 50%{opacity:0.25} }
+        @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
+        .a-row:hover td { background: rgba(255,255,255,0.012); }
+        .ct-tab { transition: color 0.1s, background 0.1s, border-color 0.1s; }
+        .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
+        .icon-btn { transition: all 0.12s; }
+        .icon-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; }
+        .sort-th { transition: color 0.1s; }
+        .sort-th:hover { color: ${C.textMid}; }
+        .analyze-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; background: ${C.cyanFaint}; }
+        .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+        .scroll-thin::-webkit-scrollbar-thumb { background: ${C.borderHi}; }
+      `}</style>
 
-        {/* ── SECTION 1: Portfolio Overview ─────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
-          {/* Total Portfolio Value */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
-            <p className="text-gray-500 text-xs font-medium mb-1">Total Portfolio</p>
-            <p className="text-xl sm:text-2xl font-bold text-white">{fmtCompact(totalPortfolioValue)}</p>
-            <div className="flex items-center gap-2 mt-1.5">
-              <span className="text-[10px] text-gray-600">LP {fmtCompact(totalLpValue)}</span>
-              {totalLendingValue > 0 && (
-                <span className="text-[10px] text-gray-600">Lending {fmtCompact(totalLendingValue)}</span>
-              )}
+      <div
+        aria-hidden
+        style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG }}
+      />
+
+      <TerminalNavbar />
+
+      <div style={{ display: "flex", flex: 1, minHeight: "calc(100vh - 52px)" }}>
+        <AnalyticsSidebar
+          activeSection={activeSection}
+          onSectionChange={handleSectionChange}
+          activeProtocols={activeProtocols}
+          activeChains={activeChains}
+        />
+
+        <main className="scroll-thin" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
+
+          {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
+          <section
+            id="section-overview"
+            style={{
+              padding: "26px 32px 22px",
+              borderBottom: `1px solid ${C.border}`,
+              animation: "_fadeUp 0.4s ease both",
+            }}
+          >
+            <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 10, opacity: 0.7 }}>
+              <span style={{ color: C.green, opacity: 1 }}>// </span>
+              analytics · performance insights &amp; attribution
             </div>
-          </div>
+            <div style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", marginBottom: 6 }}>
+              Analytics
+            </div>
+            <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.04em" }}>
+              Portfolio insights and performance metrics across all chains
+            </div>
+          </section>
 
-          {/* Total Daily Income */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
-            <p className="text-gray-500 text-xs font-medium mb-1">Daily Income</p>
-            <p className="text-xl sm:text-2xl font-bold text-emerald-400">
-              {totalDailyIncome > 0 ? fmt$(totalDailyIncome) : "$0.00"}
-            </p>
-            <p className="text-[10px] text-gray-600 mt-1.5">
-              {totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions"}
-            </p>
-          </div>
+          {/* ── CONTENT ─────────────────────────────────────────────────── */}
+          <div style={{ padding: "20px 32px 32px" }}>
 
-          {/* Unclaimed Fees */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
-            <p className="text-gray-500 text-xs font-medium mb-1">Unclaimed Fees</p>
-            <p className="text-xl sm:text-2xl font-bold text-white">{fmt$(totalLpFees)}</p>
-            <p className="text-[10px] text-gray-600 mt-1.5">
-              {positions.filter((p) => p.fees > 0).length} positions with fees
-            </p>
-          </div>
-
-          {/* Actual APR */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-gray-500 text-xs font-medium">Actual APR</p>
-              <div className="flex bg-emerald-950/40 rounded-md overflow-hidden">
-                {(["daily", "weekly", "monthly", "yearly"] as const).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setAprView(v)}
-                    className={`px-1.5 py-0.5 text-[9px] font-medium transition-colors ${
-                      aprView === v
-                        ? "bg-emerald-600 text-white"
-                        : "text-gray-500 hover:text-gray-300"
-                    }`}
-                  >
-                    {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
-                  </button>
-                ))}
+            {/* TOP STATS STRIP — 5 cells */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(5, 1fr)",
+                border: `1px solid ${C.border}`,
+                background: C.bg1,
+                marginBottom: 20,
+              }}
+            >
+              {/* Total Portfolio */}
+              <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Total Portfolio
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                  {fmtCompact(totalPortfolioValue)}
+                </div>
+                <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                  LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}
+                </div>
               </div>
-            </div>
-            {(() => {
-              const apr = actualAPRData.apr;
-              const displayRate = aprView === "daily" ? apr / 365 : aprView === "weekly" ? apr / 52 : aprView === "monthly" ? apr / 12 : apr;
-              const yearlyDollar = (actualAPRData.totalValue * apr) / 100;
-              const dollarIncome = aprView === "daily" ? yearlyDollar / 365
-                : aprView === "weekly" ? yearlyDollar / 52
-                : aprView === "monthly" ? yearlyDollar / 12
-                : yearlyDollar;
-              const periodLabel = aprView === "daily" ? "/day" : aprView === "weekly" ? "/week" : aprView === "monthly" ? "/mo" : "/year";
-              return (
-                <>
-                  <p className={`text-xl sm:text-2xl font-bold ${apr > 0 ? "text-emerald-400" : "text-gray-600"}`}>
-                    {apr > 0 ? `${displayRate.toFixed(displayRate < 1 ? 3 : 1)}%` : "--"}
-                  </p>
-                  <p className="text-[10px] text-gray-600 mt-1.5">
-                    {apr > 0 ? `${fmt$(dollarIncome)}${periodLabel}` : "No active positions"}
-                  </p>
-                </>
-              );
-            })()}
-          </div>
 
-          {/* Health Score */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-5">
-            <p className="text-gray-500 text-xs font-medium mb-1">Health Score</p>
-            <div className="flex items-baseline gap-2">
-              <p className={`text-xl sm:text-2xl font-bold ${
-                healthScore == null ? "text-gray-600"
-                : healthScore >= 70 ? "text-emerald-400"
-                : healthScore >= 40 ? "text-amber-400"
-                : "text-red-400"
-              }`}>
-                {healthScore != null ? healthScore : "--"}
-              </p>
-              <span className="text-xs text-gray-600">/100</span>
-            </div>
-            <p className="text-[10px] text-gray-600 mt-1.5">
-              {healthScore != null
-                ? healthScore >= 70 ? "Well diversified" : healthScore >= 40 ? "Moderate risk" : "High concentration"
-                : "No data"}
-            </p>
-          </div>
-        </div>
-
-        {/* ── SECTION 2: Fee Income Chart ───────────────────────────────────── */}
-        <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-lg font-bold">Fee Income</h2>
-              <div className="mt-1">
-                <span className="text-2xl font-bold text-emerald-300">
-                  {fmt$(feeIncome.totalWindow)}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">fees earned in last {activeRange.label} — all chains</p>
-              <p className="text-[11px] text-gray-600 mt-0.5">Lifetime: {fmt$(feeIncome.totalAllTime)}</p>
-            </div>
-            <div className="flex gap-1">
-              {TIME_RANGES.map((r) => (
-                <button
-                  key={r.key}
-                  onClick={() => setRangeKey(r.key)}
-                  className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                    rangeKey === r.key
-                      ? "bg-emerald-600 text-white"
-                      : "bg-emerald-950/40 text-gray-400 hover:text-white"
-                  }`}
+              {/* Daily Income */}
+              <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Daily Income
+                </div>
+                <div
+                  style={{
+                    fontSize: 22, fontWeight: 700,
+                    color: totalDailyIncome > 0 ? C.green : C.text,
+                    fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                    textShadow: totalDailyIncome > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                  }}
                 >
-                  {r.key}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {feeIncome.series.length >= 2 && feeIncome.totalWindow > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={feeIncome.series}>
-                <defs>
-                  <linearGradient id="feeGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#0f2e1f" />
-                <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} />
-                <YAxis
-                  tick={{ fill: "#6b7280", fontSize: 10 }}
-                  tickFormatter={(v) => fmtCompact(v)}
-                  axisLine={false}
-                  tickLine={false}
-                  width={55}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  itemStyle={tooltipItemStyle}
-                  labelStyle={tooltipLabelStyle}
-                  formatter={(value: number | undefined) => [fmt$(value ?? 0), "Cumulative fees"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  fill="url(#feeGrad)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: "#10b981" }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm">
-              {activityLoading
-                ? "Loading on-chain fee history…"
-                : `No fee claims in the last ${activeRange.label}`}
-            </div>
-          )}
-
-          {/* Protocol breakdown */}
-          <div className="mt-5">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] uppercase tracking-wider text-gray-500">
-                By Protocol
-              </p>
-              {feeIncome.protocols.length > 0 && (
-                <p className="text-[11px] text-gray-600">scroll to see all →</p>
-              )}
-            </div>
-            {feeIncome.protocols.length > 0 ? (
-              <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollbarWidth: "thin" }}>
-                {feeIncome.protocols.map((p) => {
-                  const color = PROTOCOL_COLORS[p.protocol] ?? "#10b981";
-                  return (
-                    <div
-                      key={`${p.protocol}::${p.chain}`}
-                      className="flex-shrink-0 bg-[#0a2e1a]/40 border border-emerald-400/10 rounded-lg p-3"
-                      style={{ width: 190, borderLeft: `3px solid ${color}` }}
-                    >
-                      <p className="text-sm font-semibold text-white truncate" title={p.protocol}>
-                        {p.protocol}
-                      </p>
-                      <p className="text-[11px] text-gray-500 mt-0.5 truncate" title={p.chain}>
-                        {p.chain}
-                      </p>
-                      <p className="text-lg font-bold text-emerald-300 mt-2">{fmt$(p.usd)}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">
-                        {p.pct.toFixed(1)}% of {activeRange.label}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-600">
-                No fee claims in the last {activeRange.label}.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* ── SECTION 2.5: LP Profit & Loss (on-chain) ──────────────────────── */}
-        <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                LP Profit &amp; Loss
-                {lpPnl.isLoading && (
-                  <span
-                    className="inline-block w-3 h-3 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 animate-spin"
-                    aria-label="Loading"
-                  />
-                )}
-              </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Aggregated from on-chain deposit &amp; fee events across all LP positions
-                {lpPnl.isLoading && lpPnl.included > 0 && (
-                  <span className="text-gray-600"> — loading {lpPnl.included} of {lpPnl.included + lpPnl.excluded + lpPnl.errored + (lpPnl.isLoading ? 1 : 0)}…</span>
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-            {[
-              { label: "Total Initial Value", value: fmt$(lpPnl.initialValue), color: "text-white", foot: "at deposit prices" },
-              { label: "Current Value",       value: fmt$(lpPnl.currentValue), color: "text-white", foot: "live" },
-              { label: "Total Fees Collected", value: fmt$(lpPnl.feesCollected), color: "text-emerald-300", foot: "claimed lifetime" },
-              { label: "Total Fees Unclaimed", value: fmt$(lpPnl.feesUnclaimed), color: "text-emerald-300", foot: "pending on-chain" },
-              {
-                label: "Total Impermanent Loss",
-                value: `${-lpPnl.ilUSD > 0 ? "+" : ""}${fmt$(-lpPnl.ilUSD)}`,
-                color: -lpPnl.ilUSD > 0 ? "text-red-400" : "text-emerald-400",
-                foot: "Σ(HODL − Current), open only",
-                tooltip: (() => {
-                  // hodlValue derived from the identity ilUSD = currentValue - hodlValue
-                  const hodlValue = lpPnl.currentValue - lpPnl.ilUSD;
-                  const totalFees = lpPnl.feesCollected + lpPnl.feesUnclaimed;
-                  const x = fmt$(lpPnl.currentValue); // current LP value
-                  const y = fmt$(hodlValue);          // HODL value
-                  const z = fmt$(Math.abs(lpPnl.ilUSD)); // |IL|
-                  const w = fmt$(totalFees);          // fees earned
-                  if (lpPnl.ilUSD >= 0) {
-                    return `Your current LP value (${x}) is higher than your HODL value (${y}) by ${z}. The AMM rebalancing has worked in your favour. Combined with ${w} fees earned your total return is strong.\n\nFormula: IL = Current LP Value − HODL Value`;
-                  }
-                  const offset = totalFees >= Math.abs(lpPnl.ilUSD) ? "fully" : "partially";
-                  return `Your current LP value (${x}) is lower than your HODL value (${y}) by ${z}. This is your impermanent loss. Your fees earned (${w}) ${offset} offset this loss. IL may recover if prices return to entry levels.\n\nFormula: IL = Current LP Value − HODL Value`;
-                })(),
-              },
-              {
-                label: "Net P&L",
-                value: `${lpPnl.netPnl >= 0 ? "+" : ""}${fmt$(lpPnl.netPnl)}`,
-                color: lpPnl.netPnl >= 0 ? "text-emerald-400" : "text-red-400",
-                foot: `${lpPnl.netPnlPct >= 0 ? "+" : ""}${lpPnl.netPnlPct.toFixed(2)}%`,
-                footColor: lpPnl.netPnl >= 0 ? "text-emerald-500" : "text-red-500",
-              },
-            ].map((card) => {
-              const showSkeleton = lpPnl.isLoading && lpPnl.included === 0;
-              return (
-                <div key={card.label} className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/5 relative">
-                  <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                    <span>{card.label}</span>
-                    {card.tooltip && (
-                      <span className="group relative inline-flex items-center">
-                        <button
-                          type="button"
-                          aria-label={`About ${card.label}`}
-                          tabIndex={0}
-                          className="w-4 h-4 rounded-full border border-emerald-400/40 text-emerald-400/80 text-[10px] leading-none flex items-center justify-center hover:border-emerald-400 hover:text-emerald-300 focus:border-emerald-400 focus:text-emerald-300 focus:outline-none cursor-help"
-                        >
-                          ⓘ
-                        </button>
-                        <span
-                          role="tooltip"
-                          className="pointer-events-none absolute left-0 top-full mt-2 z-30 w-64 sm:w-72 whitespace-pre-wrap text-[11px] leading-relaxed bg-[#0a1f17] border border-emerald-400/30 rounded-lg p-3 text-emerald-50/90 shadow-2xl opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
-                        >
-                          {card.tooltip}
-                        </span>
-                      </span>
-                    )}
-                  </p>
-                  {showSkeleton ? (
-                    <div className="h-[22px] w-20 rounded bg-emerald-900/30 animate-pulse" />
-                  ) : (
-                    <p className={`text-lg font-bold ${card.color}`}>{card.value}</p>
-                  )}
-                  <p className={`text-[10px] mt-0.5 ${card.footColor ?? "text-gray-600"}`}>{card.foot}</p>
+                  {totalDailyIncome > 0 ? `+${fmt$(totalDailyIncome)}` : "$0.00"}
                 </div>
-              );
-            })}
-          </div>
-
-          {lpPnl.excluded > 0 && (
-            <p className="text-[11px] text-gray-600 mt-3">
-              {lpPnl.excluded} position{lpPnl.excluded === 1 ? "" : "s"} excluded — entry data unavailable.
-            </p>
-          )}
-          {lpPnl.errored > 0 && (
-            <div className="mt-3 bg-red-950/30 border border-red-400/20 rounded-lg px-3 py-2">
-              <p className="text-[12px] text-red-300 font-medium">
-                Couldn&apos;t load {lpPnl.errored} position{lpPnl.errored === 1 ? "" : "s"}
-                {lpPnl.errorReasons.length > 0 && (
-                  <> — {lpPnl.errorReasons.slice(0, 3).join(", ")}</>
-                )}
-              </p>
-              <p className="text-[11px] text-red-300/70 mt-0.5">
-                The RPC didn&apos;t respond in 30s. Totals below are for the positions that did load. Refreshing the page will retry.
-              </p>
-            </div>
-          )}
-          {lpPnl.isLoading && lpPnl.included === 0 && lpPnl.errored === 0 && (
-            <p className="text-[11px] text-gray-600 mt-3">Loading on-chain history…</p>
-          )}
-        </div>
-
-        {/* ── SECTION 3: Income Breakdown ───────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
-          {/* Income by Source — donut center + D/M/Y toggle */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <div className="flex items-start justify-between mb-4 gap-3">
-              <div>
-                <h2 className="text-lg font-bold">Income by Source</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {incomePeriod === "D" ? "Today" : incomePeriod === "M" ? "This month" : "This year"}
-                </p>
+                <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                  {totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions"}
+                </div>
               </div>
-              <div className="flex gap-1">
-                {(["D", "M", "Y"] as const).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setIncomePeriod(k)}
-                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                      incomePeriod === k
-                        ? "bg-emerald-600 text-white"
-                        : "bg-emerald-950/40 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            {incomeWindow.total > 0 ? (
-              <>
-                <div className="relative">
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={[
-                          ...(incomeWindow.lpAccrued > 0
-                            ? [{ name: "LP Fees", value: parseFloat(incomeWindow.lpAccrued.toFixed(2)), color: "#10b981" }]
-                            : []),
-                          ...(incomeWindow.lendingProjected > 0
-                            ? [{ name: "Lending Interest", value: parseFloat(incomeWindow.lendingProjected.toFixed(2)), color: "#3b82f6" }]
-                            : []),
-                        ]}
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={88}
-                        innerRadius={62}
-                        dataKey="value"
-                        paddingAngle={2}
+              {/* Unclaimed Fees */}
+              <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Unclaimed Fees
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                  {fmt$(totalLpFees)}
+                </div>
+                <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                  {positions.filter((p) => p.fees > 0).length} positions with fees
+                </div>
+              </div>
+
+              {/* Actual APR — with D/W/M/Y toggle */}
+              <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                    Actual APR
+                  </span>
+                  <div style={{ display: "flex" }}>
+                    {(["daily", "weekly", "monthly", "yearly"] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setAprView(v)}
+                        className="ct-tab"
+                        data-active={aprView === v ? "true" : "false"}
+                        style={{
+                          fontFamily: FONT,
+                          fontSize: 8,
+                          padding: "2px 6px",
+                          border: `1px solid ${aprView === v ? C.greenDim : C.border}`,
+                          background: aprView === v ? C.greenFaint : "transparent",
+                          color: aprView === v ? C.green : C.text,
+                          cursor: "pointer",
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                          borderRight: "none",
+                        }}
                       >
-                        {(incomeWindow.lpAccrued > 0 ? [{ color: "#10b981" }] : [])
-                          .concat(incomeWindow.lendingProjected > 0 ? [{ color: "#3b82f6" }] : [])
-                          .map((c, i) => <Cell key={i} fill={c.color} />)}
-                      </Pie>
-                      {/* External tooltip removed — totals & per-source figures are
-                          already shown in the donut center and the source cards
-                          below; a floating popup just duplicates them. */}
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4 text-center">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Total</p>
-                    <p className="text-xl font-bold text-white truncate max-w-full">{fmt$(incomeWindow.total)}</p>
-                    <p className="text-[10px] text-gray-500">
-                      {incomePeriod === "D" ? "today" : incomePeriod === "M" ? "this month" : "this year"}
-                    </p>
+                        {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
+                      </button>
+                    ))}
                   </div>
                 </div>
+                {(() => {
+                  const apr = actualAPRData.apr;
+                  const displayRate = aprView === "daily" ? apr / 365
+                    : aprView === "weekly" ? apr / 52
+                    : aprView === "monthly" ? apr / 12
+                    : apr;
+                  const yearlyDollar = (actualAPRData.totalValue * apr) / 100;
+                  const dollarIncome = aprView === "daily" ? yearlyDollar / 365
+                    : aprView === "weekly" ? yearlyDollar / 52
+                    : aprView === "monthly" ? yearlyDollar / 12
+                    : yearlyDollar;
+                  const periodLabel = aprView === "daily" ? "/day"
+                    : aprView === "weekly" ? "/week"
+                    : aprView === "monthly" ? "/mo"
+                    : "/year";
+                  return (
+                    <>
+                      <div style={{
+                        fontSize: 22, fontWeight: 700,
+                        color: apr > 0 ? C.green : C.text,
+                        fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                        textShadow: apr > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                      }}>
+                        {apr > 0 ? `${displayRate.toFixed(displayRate < 1 ? 3 : 1)}%` : "--"}
+                      </div>
+                      <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                        {apr > 0 ? `${fmt$(dollarIncome)}${periodLabel}` : "No active positions"}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
 
-                {/* Source cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                  <div className="bg-[#0a2e1a]/40 rounded-lg p-3 border border-emerald-400/15"
-                       style={{ borderLeft: "3px solid #10b981" }}>
-                    <p className="text-xs text-gray-400">LP Fees</p>
-                    <p className="text-lg font-bold text-emerald-300">{fmt$(incomeWindow.lpAccrued)}</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">accrued on-chain</p>
-                  </div>
-                  <div className="bg-[#0a1a3a]/40 rounded-lg p-3 border border-blue-400/15"
-                       style={{ borderLeft: "3px solid #3b82f6" }}>
-                    <p className="text-xs text-gray-400">Lending Interest</p>
-                    <p className="text-lg font-bold text-blue-300">{fmt$(incomeWindow.lendingProjected)}</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">estimated at current APY</p>
-                  </div>
+              {/* Health Score */}
+              <div style={{ padding: "18px 22px" }}>
+                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Health Score
                 </div>
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-[260px] text-gray-600 text-sm">
-                No income in this period
-              </div>
-            )}
-          </div>
-
-          {/* Daily Income by Chain — period toggle + gradient bars + total row */}
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6">
-            <div className="flex items-start justify-between mb-4 gap-3">
-              <div>
-                <h2 className="text-lg font-bold">Daily Income by Chain</h2>
-                <p className="text-[11px] text-gray-500 mt-0.5">est. from current pool APYs</p>
-              </div>
-              <div className="flex gap-1">
-                {(["1D", "7D", "30D"] as const).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setChainPeriod(k)}
-                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                      chainPeriod === k
-                        ? "bg-emerald-600 text-white"
-                        : "bg-emerald-950/40 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {k}
-                  </button>
-                ))}
+                <div style={{ fontSize: 22, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                  {healthScore != null ? healthScore : "--"}
+                  <span style={{ fontSize: 12, color: C.text, marginLeft: 4 }}>/100</span>
+                </div>
+                <div style={{ width: "100%", height: 2, background: C.border, marginTop: 10 }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${healthScore != null ? Math.max(0, Math.min(100, healthScore)) : 0}%`,
+                      background: `linear-gradient(90deg, ${C.green}, ${C.cyan})`,
+                      transition: "width 1.2s ease",
+                    }}
+                  />
+                </div>
               </div>
             </div>
-            {incomeByChain.length > 0 ? (
-              <>
-                <div className="flex flex-col gap-2.5">
-                  {(() => {
-                    const days = chainPeriod === "1D" ? 1 : chainPeriod === "7D" ? 7 : 30;
-                    const periodLabel = chainPeriod === "1D" ? "today" : `in ${chainPeriod.toLowerCase()}`;
-                    const rows = [...incomeByChain]
-                      .map((c) => ({ chain: c.chain, period: c.daily * days, daily: c.daily }))
-                      .sort((a, b) => b.period - a.period);
-                    const max = Math.max(...rows.map((r) => r.period), 0.0001);
-                    return rows.map((row) => {
-                      const pct = max > 0 ? (row.period / max) * 100 : 0;
-                      const color = CHAIN_COLORS[row.chain] ?? "#10b981";
-                      return (
-                        <div key={row.chain} className="bg-[#0a2e1a]/30 rounded-lg p-2.5 border border-emerald-400/5">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-                              <span className="text-sm font-medium text-white">{row.chain}</span>
+
+            {/* ── FEE INCOME ────────────────────────────────────────────── */}
+            <SectionFrame
+              id="section-fee-income"
+              title="Fee Income"
+              sub="Cumulative fees collected across all LP positions"
+            >
+              {/* sub-metric strip */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                  borderBottom: `1px solid ${C.border}`,
+                }}
+              >
+                {[
+                  { label: `In Last ${activeRange.label}`, val: fmt$(feeIncome.totalWindow), green: true,  sub: `${feeIncome.protocols.length} protocols`, subUp: feeIncome.totalWindow > 0 },
+                  { label: "Hourly Rate",                  val: fmt$(feeIncome.hourlyRate, 3), green: false, sub: "avg over period",     subUp: false },
+                  { label: "Annualized",                   val: fmt$(feeIncome.annualizedAtRate, 0), green: true, sub: "at current rate",    subUp: false },
+                  { label: "Lifetime",                     val: fmt$(feeIncome.totalAllTime), green: false, sub: "since inception",     subUp: false },
+                ].map((c, i, arr) => (
+                  <div
+                    key={c.label}
+                    style={{
+                      padding: "16px 26px",
+                      borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                    }}
+                  >
+                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+                      {c.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 22, fontWeight: 700,
+                        color: c.green ? C.green : C.textBright,
+                        fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                        textShadow: c.green ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                      }}
+                    >
+                      {c.val}
+                    </div>
+                    <div style={{ fontSize: 9, marginTop: 6, letterSpacing: "0.06em", color: c.subUp ? C.green : C.text }}>
+                      {c.sub}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* chart + controls */}
+              <div style={{ padding: "18px 26px 22px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 14, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex" }}>
+                    {TIME_RANGES.map((r, i) => (
+                      <span key={r.key} style={{ borderRight: i === TIME_RANGES.length - 1 ? `1px solid ${rangeKey === r.key ? C.greenDim : C.border}` : undefined }}>
+                        <RangePill k={r.key} active={rangeKey === r.key} onClick={() => setRangeKey(r.key)} />
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 22, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 8 }}>Peak Day</span>
+                      <span style={{ fontWeight: 700, color: C.green, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                        {fmt$(feeIncome.peakDay)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 8 }}>Avg/Day</span>
+                      <span style={{ fontWeight: 700, color: C.textBright, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                        {fmt$(feeIncome.dailyAvg)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 8 }}>Projected 12M</span>
+                      <span style={{ fontWeight: 700, color: C.green, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                        {fmtCompact(feeIncome.annualizedAtRate)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {feeIncome.series.length >= 2 && feeIncome.totalWindow > 0 ? (
+                  <div style={{ width: "100%", height: 200 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={feeIncome.series}>
+                        <defs>
+                          <linearGradient id="feeGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={C.green} stopOpacity={0.24} />
+                            <stop offset="60%" stopColor={C.green} stopOpacity={0.06} />
+                            <stop offset="100%" stopColor={C.green} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="4 8" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 9, fontFamily: FONT }} axisLine={false} tickLine={false} />
+                        <YAxis
+                          tick={{ fill: C.text, fontSize: 9, fontFamily: FONT }}
+                          tickFormatter={(v) => fmtCompact(v)}
+                          axisLine={false}
+                          tickLine={false}
+                          width={48}
+                        />
+                        <Tooltip
+                          contentStyle={tooltipStyle}
+                          itemStyle={{ color: C.textBright }}
+                          labelStyle={{ color: C.text }}
+                          formatter={(value: number | undefined) => [fmt$(value ?? 0), "Cumulative"]}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="value"
+                          stroke={C.green}
+                          strokeWidth={1.5}
+                          fill="url(#feeGrad)"
+                          dot={false}
+                          activeDot={{ r: 4, fill: C.green, stroke: C.green }}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: C.text, fontSize: 11 }}>
+                    {activityLoading ? "Loading on-chain fee history…" : `No fee claims in the last ${activeRange.label}`}
+                  </div>
+                )}
+
+                {/* Protocol breakdown row */}
+                {feeIncome.protocols.length > 0 && (
+                  <div style={{ marginTop: 18 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <span style={{ fontSize: 9, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                        By Protocol
+                      </span>
+                      <span style={{ fontSize: 9, color: C.text }}>scroll →</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }} className="scroll-thin">
+                      {feeIncome.protocols.map((p) => {
+                        const color = PROTOCOL_COLORS[p.protocol] ?? C.green;
+                        return (
+                          <div
+                            key={`${p.protocol}::${p.chain}`}
+                            style={{
+                              flexShrink: 0,
+                              width: 190,
+                              padding: "12px 14px",
+                              background: C.bg2,
+                              border: `1px solid ${C.border}`,
+                              borderLeft: `3px solid ${color}`,
+                            }}
+                          >
+                            <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                              {p.protocol}
                             </div>
-                            <div className="text-right">
-                              <p className="text-sm font-semibold text-emerald-300">
-                                {fmt$(row.period)}<span className="text-[10px] text-gray-500 font-normal"> {periodLabel}</span>
-                              </p>
-                              <p className="text-[10px] text-gray-500">{fmt$(row.daily * 30)}/mo</p>
+                            <div style={{ fontSize: 9, color: C.text, marginTop: 3, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                              {p.chain}
+                            </div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 10, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$(p.usd)}
+                            </div>
+                            <div style={{ fontSize: 9, color: C.text, marginTop: 3 }}>
+                              {p.pct.toFixed(1)}% of {activeRange.label}
                             </div>
                           </div>
-                          <div className="h-1.5 rounded-full bg-emerald-950/50 overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </SectionFrame>
+
+            {/* ── LP P&L ────────────────────────────────────────────────── */}
+            <SectionFrame
+              id="section-lp-pnl"
+              title="LP Profit & Loss"
+              sub="Aggregated from on-chain deposit & fee events across all LP positions"
+              action={
+                lpPnl.isLoading ? (
+                  <span
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      fontSize: 9, color: C.green, letterSpacing: "0.14em", textTransform: "uppercase",
+                    }}
+                  >
+                    <span
+                      className="spin-icon"
+                      style={{
+                        width: 10, height: 10,
+                        border: `2px solid ${C.greenFaint}`,
+                        borderTopColor: C.green,
+                      }}
+                    />
+                    Loading
+                  </span>
+                ) : null
+              }
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(6, 1fr)",
+                }}
+              >
+                {[
+                  { label: "Total Deposited", val: fmt$(lpPnl.initialValue),   color: C.textBright, sub: "at deposit prices" },
+                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "mark-to-market" },
+                  { label: "Fees Collected",  val: `+${fmt$(lpPnl.feesCollected)}`, color: C.green, sub: "claimed lifetime" },
+                  { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "pending on-chain" },
+                  {
+                    label: "Imperm. Loss",
+                    val: fmt$Signed(-lpPnl.ilUSD),
+                    color: -lpPnl.ilUSD > 0 ? C.red : C.green,
+                    sub: "Σ(HODL − Current), open only",
+                  },
+                  {
+                    label: "Net P&L",
+                    val: fmt$Signed(lpPnl.netPnl),
+                    color: lpPnl.netPnl >= 0 ? C.cyan : C.red,
+                    sub: `${lpPnl.netPnlPct >= 0 ? "+" : ""}${lpPnl.netPnlPct.toFixed(2)}%`,
+                  },
+                ].map((c, i, arr) => (
+                  <div
+                    key={c.label}
+                    style={{
+                      padding: "16px 20px",
+                      borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                    }}
+                  >
+                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10 }}>
+                      {c.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 17, fontWeight: 700,
+                        color: c.color,
+                        fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                        textShadow: c.color === C.green ? "0 0 12px rgba(0,255,65,0.22)" : "none",
+                      }}
+                    >
+                      {c.val}
+                    </div>
+                    <div style={{ fontSize: 9, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
+                      {c.sub}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {lpPnl.errored > 0 && (
+                <div
+                  style={{
+                    margin: "0 26px 18px",
+                    border: `1px solid ${C.red}33`,
+                    background: C.redFaint,
+                    padding: "10px 14px",
+                  }}
+                >
+                  <div style={{ fontSize: 11, color: C.red, fontWeight: 700 }}>
+                    Couldn&apos;t load {lpPnl.errored} position{lpPnl.errored === 1 ? "" : "s"}
+                    {lpPnl.errorReasons.length > 0 && <> — {lpPnl.errorReasons.slice(0, 3).join(", ")}</>}
+                  </div>
+                  <div style={{ fontSize: 10, color: `${C.red}99`, marginTop: 2 }}>
+                    The RPC didn&apos;t respond in 30s. Totals shown are for the positions that did load.
+                  </div>
+                </div>
+              )}
+            </SectionFrame>
+
+            {/* ── INCOME BY SOURCE + DAILY INCOME BY CHAIN ──────────────── */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+              {/* Income by Source */}
+              <div style={{ border: `1px solid ${C.border}`, background: C.bg1, padding: "22px 26px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                  <div style={{ fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: C.textMid }}>
+                    <span style={{ color: C.green }}>// </span>
+                    Income by Source · {incomePeriod === "D" ? "Today" : incomePeriod === "M" ? "Month" : "Year"}
+                  </div>
+                  <div style={{ display: "flex" }}>
+                    {(["D", "M", "Y"] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setIncomePeriod(k)}
+                        className="ct-tab"
+                        data-active={incomePeriod === k ? "true" : "false"}
+                        style={{
+                          fontFamily: FONT,
+                          fontSize: 9,
+                          padding: "4px 10px",
+                          border: `1px solid ${incomePeriod === k ? C.greenDim : C.border}`,
+                          background: incomePeriod === k ? C.greenFaint : "transparent",
+                          color: incomePeriod === k ? C.green : C.text,
+                          cursor: "pointer",
+                          letterSpacing: "0.12em",
+                          textTransform: "uppercase",
+                          borderRight: "none",
+                        }}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {incomeWindow.total > 0 ? (
+                  <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+                    <div style={{ width: 150, height: 150, flexShrink: 0, position: "relative" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={[
+                              ...(incomeWindow.lpAccrued > 0 ? [{ name: "LP Fees", value: incomeWindow.lpAccrued, color: C.green }] : []),
+                              ...(incomeWindow.lendingProjected > 0 ? [{ name: "Lending", value: incomeWindow.lendingProjected, color: C.cyan }] : []),
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={70}
+                            innerRadius={48}
+                            dataKey="value"
+                            paddingAngle={2}
+                            stroke={C.bg}
+                            strokeWidth={2}
+                          >
+                            {([
+                              ...(incomeWindow.lpAccrued > 0 ? [{ color: C.green as string }] : []),
+                              ...(incomeWindow.lendingProjected > 0 ? [{ color: C.cyan as string }] : []),
+                            ]).map((c, i) => (
+                              <Cell key={i} fill={c.color} />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div
+                        style={{
+                          position: "absolute", inset: 0,
+                          display: "flex", flexDirection: "column",
+                          alignItems: "center", justifyContent: "center",
+                          pointerEvents: "none", textAlign: "center",
+                        }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                          {fmt$(incomeWindow.total)}
+                        </span>
+                        <span style={{ fontSize: 8, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 2 }}>
+                          {incomePeriod === "D" ? "Daily" : incomePeriod === "M" ? "Monthly" : "Yearly"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
+                      {[
+                        { name: "LP Fees", val: incomeWindow.lpAccrued, color: C.green, pct: incomeWindow.total > 0 ? (incomeWindow.lpAccrued / incomeWindow.total) * 100 : 0 },
+                        { name: "Lending Interest", val: incomeWindow.lendingProjected, color: C.cyan, pct: incomeWindow.total > 0 ? (incomeWindow.lendingProjected / incomeWindow.total) * 100 : 0 },
+                      ].map((d) => (
+                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11 }}>
+                          <span style={{ width: 7, height: 7, background: d.color, flexShrink: 0, boxShadow: `0 0 5px ${d.color}88` }} />
+                          <span style={{ color: C.textMid, flex: 1, letterSpacing: "0.04em" }}>{d.name}</span>
+                          <span style={{ fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>{fmt$(d.val)}</span>
+                          <span style={{ color: C.text, fontSize: 9, minWidth: 32, textAlign: "right" }}>{d.pct.toFixed(0)}%</span>
+                        </div>
+                      ))}
+                      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 2, display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                        <span style={{ color: C.text, letterSpacing: "0.18em", textTransform: "uppercase" }}>Total</span>
+                        <span style={{ color: C.green, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmt$(incomeWindow.total)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.text, fontSize: 11 }}>
+                    No income in this period
+                  </div>
+                )}
+              </div>
+
+              {/* Daily Income by Chain */}
+              <div style={{ border: `1px solid ${C.border}`, background: C.bg1, padding: "22px 26px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                  <div style={{ fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: C.textMid }}>
+                    <span style={{ color: C.green }}>// </span>
+                    Income by Chain
+                  </div>
+                  <div style={{ display: "flex" }}>
+                    {(["1D", "7D", "30D"] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setChainPeriod(k)}
+                        className="ct-tab"
+                        data-active={chainPeriod === k ? "true" : "false"}
+                        style={{
+                          fontFamily: FONT,
+                          fontSize: 9,
+                          padding: "4px 10px",
+                          border: `1px solid ${chainPeriod === k ? C.greenDim : C.border}`,
+                          background: chainPeriod === k ? C.greenFaint : "transparent",
+                          color: chainPeriod === k ? C.green : C.text,
+                          cursor: "pointer",
+                          letterSpacing: "0.12em",
+                          textTransform: "uppercase",
+                          borderRight: "none",
+                        }}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {incomeByChain.length > 0 ? (
+                  (() => {
+                    const days = chainPeriod === "1D" ? 1 : chainPeriod === "7D" ? 7 : 30;
+                    const rows = [...incomeByChain].map((c) => ({ chain: c.chain, period: c.daily * days, daily: c.daily })).sort((a, b) => b.period - a.period);
+                    const max = Math.max(...rows.map((r) => r.period), 0.0001);
+                    const totalDaily = incomeByChain.reduce((s, c) => s + c.daily, 0);
+                    return (
+                      <>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          {rows.map((row) => {
+                            const pct = max > 0 ? (row.period / max) * 100 : 0;
+                            const color = CHAIN_COLORS[row.chain] ?? C.green;
+                            return (
+                              <div
+                                key={row.chain}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 12,
+                                  padding: "10px 0",
+                                  borderBottom: `1px solid ${C.border}`,
+                                  fontSize: 11,
+                                }}
+                              >
+                                <span style={{ width: 6, height: 6, background: color, flexShrink: 0, boxShadow: `0 0 4px ${color}88` }} />
+                                <span style={{ color: C.textMid, minWidth: 70, letterSpacing: "0.04em" }}>{row.chain}</span>
+                                <div style={{ flex: 1, height: 3, background: C.border, position: "relative" }}>
+                                  <div
+                                    style={{
+                                      height: "100%",
+                                      width: `${Math.max(pct, 2)}%`,
+                                      background: color,
+                                      boxShadow: `0 0 4px ${color}66`,
+                                      transition: "width 1.2s ease",
+                                    }}
+                                  />
+                                </div>
+                                <span style={{ fontWeight: 700, color: C.textBright, minWidth: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                  {fmt$(row.period)}
+                                </span>
+                                <span style={{ fontSize: 9, color: C.text, minWidth: 50, textAlign: "right" }}>
+                                  {fmt$(row.daily * 30, 0)}/mo
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, fontSize: 10, borderTop: `1px solid ${C.border}`, marginTop: 6 }}>
+                          <span style={{ color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", fontSize: 9 }}>
+                            Total / mo
+                          </span>
+                          <span style={{ color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                            {fmt$(totalDaily * 30)}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.text, fontSize: 11 }}>
+                    No active LP positions
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── POSITION PERFORMANCE ──────────────────────────────────── */}
+            <SectionFrame
+              id="section-performance"
+              title="Position Performance"
+              sub="APR, fees collected, daily income and status per position"
+            >
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT }}>
+                  <thead>
+                    <tr style={{ background: C.bg2 }}>
+                      <th
+                        style={{
+                          padding: "12px 16px 12px 26px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "left",
+                        }}
+                      >
+                        Position
+                      </th>
+                      <th
+                        className="sort-th"
+                        onClick={() => handleSort("protocol")}
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "left", cursor: "pointer",
+                        }}
+                      >
+                        Protocol <SortIcon col="protocol" />
+                      </th>
+                      <th
+                        className="sort-th"
+                        onClick={() => handleSort("chain")}
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "left", cursor: "pointer",
+                        }}
+                      >
+                        Chain <SortIcon col="chain" />
+                      </th>
+                      <th
+                        className="sort-th"
+                        onClick={() => handleSort("value")}
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "right", cursor: "pointer",
+                        }}
+                      >
+                        Value <SortIcon col="value" />
+                      </th>
+                      <th
+                        className="sort-th"
+                        onClick={() => handleSort("apy")}
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "right", cursor: "pointer",
+                        }}
+                      >
+                        APR <SortIcon col="apy" />
+                      </th>
+                      <th
+                        className="sort-th"
+                        onClick={() => handleSort("daily")}
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "right", cursor: "pointer",
+                        }}
+                      >
+                        Daily <SortIcon col="daily" />
+                      </th>
+                      <th
+                        className="sort-th"
+                        onClick={() => handleSort("fees")}
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "right", cursor: "pointer",
+                        }}
+                      >
+                        Fees <SortIcon col="fees" />
+                      </th>
+                      <th
+                        style={{
+                          padding: "12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "center",
+                        }}
+                      >
+                        Status
+                      </th>
+                      <th
+                        style={{
+                          padding: "12px 26px 12px 16px",
+                          fontSize: 9, fontWeight: 400, color: C.text,
+                          letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`,
+                          textAlign: "right",
+                        }}
+                      />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedPositions.map((p) => {
+                      const protoColor = PROTOCOL_COLORS[p.protocol] ?? C.text;
+                      const aprColor = p.displayAPR >= 20 ? C.green : p.displayAPR >= 5 ? C.amber : p.displayAPR > 0 ? C.red : C.text;
+                      return (
+                        <tr key={p.id} className="a-row" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <td style={{ padding: "12px 16px 12px 26px", verticalAlign: "middle" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div
+                                style={{
+                                  width: 28, height: 28,
+                                  border: `1px solid ${C.borderHi}`,
+                                  background: C.bg2,
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  fontSize: 8, fontWeight: 700, color: C.textMid,
+                                  letterSpacing: "0.04em",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {tokenInitials(p.pair)}
+                              </div>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright }}>{p.pair}</div>
+                            </div>
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                            <span
                               style={{
-                                width: `${Math.max(pct, 2)}%`,
-                                background: `linear-gradient(90deg, ${color}33 0%, ${color} 100%)`,
+                                fontSize: 9,
+                                padding: "2px 8px",
+                                background: `${protoColor}11`,
+                                border: `1px solid ${protoColor}33`,
+                                color: protoColor,
+                                letterSpacing: "0.1em",
+                                textTransform: "uppercase",
+                                fontWeight: 700,
                               }}
-                            />
+                            >
+                              {p.protocol}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                            <ChainTag chain={p.chain} />
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                            {fmt$(p.value)}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: aprColor, fontVariantNumeric: "tabular-nums" }}>
+                            {p.displayAPR > 0 ? `${p.displayAPR.toFixed(1)}%` : "--"}
+                            {p.isEstimated && p.displayAPR > 0 && (
+                              <span style={{ fontSize: 8, color: C.text, marginLeft: 4 }}>est.</span>
+                            )}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                            {p.displayDaily > 0 ? fmt$(p.displayDaily) : "--"}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
+                            {p.fees > 0 ? fmt$(p.fees) : "--"}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                            <span
+                              style={{
+                                fontSize: 9,
+                                padding: "2px 8px",
+                                background:
+                                  p.status === "In Range" ? `${C.green}15`
+                                    : p.status === "Out of Range" ? `${C.amber}15`
+                                    : `${C.text}15`,
+                                border: `1px solid ${
+                                  p.status === "In Range" ? `${C.green}55`
+                                    : p.status === "Out of Range" ? `${C.amber}55`
+                                    : `${C.text}55`
+                                }`,
+                                color:
+                                  p.status === "In Range" ? C.green
+                                    : p.status === "Out of Range" ? C.amber
+                                    : C.text,
+                                letterSpacing: "0.1em",
+                                textTransform: "uppercase",
+                                fontWeight: 700,
+                              }}
+                            >
+                              {p.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 26px 12px 16px", textAlign: "right" }}>
+                            <Link
+                              href={`/dashboard/position/${p.id}`}
+                              className="analyze-btn"
+                              style={{
+                                fontFamily: FONT,
+                                fontSize: 8,
+                                fontWeight: 600,
+                                letterSpacing: "0.14em",
+                                textTransform: "uppercase",
+                                padding: "6px 12px",
+                                border: `1px solid ${C.borderHi}`,
+                                background: "transparent",
+                                color: C.text,
+                                textDecoration: "none",
+                                whiteSpace: "nowrap",
+                                transition: "all 0.15s",
+                                display: "inline-block",
+                              }}
+                            >
+                              Analyze →
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {sortedPositions.length === 0 && (
+                      <tr>
+                        <td colSpan={9} style={{ padding: 32, textAlign: "center", color: C.text, fontSize: 11 }}>
+                          No active LP positions
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Lending positions summary rows */}
+              {lendingPositions.length > 0 && (
+                <div style={{ borderTop: `1px solid ${C.border}`, padding: "16px 26px" }}>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 12 }}>
+                    Lending Positions
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {lendingPositions.map((lp) => {
+                      const color = PROTOCOL_COLORS[lp.protocol] ?? C.text;
+                      return (
+                        <div
+                          key={lp.protocol + lp.chain}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            background: C.bg2,
+                            border: `1px solid ${C.border}`,
+                            borderLeft: `3px solid ${color}`,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                              {lp.protocol}
+                            </span>
+                            <ChainTag chain={lp.chain} />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 11, fontFamily: FONT, fontVariantNumeric: "tabular-nums" }}>
+                            <span style={{ color: C.textBright, fontWeight: 700 }}>{fmt$(lp.totalSupplied)}</span>
+                            <span style={{ color: lp.supplyApy != null && lp.supplyApy > 0 ? C.green : C.text, fontWeight: 700 }}>
+                              {lp.supplyApy != null ? `${lp.supplyApy.toFixed(1)}%` : "--"}
+                            </span>
+                            {lp.totalBorrowed > 0 && (
+                              <span style={{ color: C.red, fontWeight: 700 }}>-{fmt$(lp.totalBorrowed)}</span>
+                            )}
                           </div>
                         </div>
                       );
-                    });
-                  })()}
+                    })}
+                  </div>
                 </div>
-                {/* Total row */}
-                {(() => {
-                  const days = chainPeriod === "1D" ? 1 : chainPeriod === "7D" ? 7 : 30;
-                  const periodLabel = chainPeriod === "1D" ? "today" : `in ${chainPeriod.toLowerCase()}`;
-                  const totalDaily = incomeByChain.reduce((s, c) => s + c.daily, 0);
-                  return (
-                    <div className="mt-3 pt-3 border-t border-emerald-400/10 flex items-center justify-between">
-                      <span className="text-xs uppercase tracking-wider text-gray-500">Total</span>
-                      <div className="text-right">
-                        <p className="text-base font-bold text-white">
-                          {fmt$(totalDaily * days)}
-                          <span className="text-xs text-gray-500 font-normal"> {periodLabel}</span>
-                        </p>
-                        <p className="text-[11px] text-gray-500">{fmt$(totalDaily * 30)}/mo</p>
+              )}
+            </SectionFrame>
+
+            {/* ── EARNING FLOWS (recent fee claims) ──────────────────────── */}
+            {feeIncome.recent.length > 0 && (
+              <SectionFrame title="Earning Flows" sub="Recent on-chain fee claim events">
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {feeIncome.recent.map((e, i) => {
+                    const color = PROTOCOL_COLORS[e.protocol] ?? C.green;
+                    const mins = Math.max(1, Math.floor((Date.now() - e.ts) / 60_000));
+                    const timeStr = mins < 60 ? `${mins}m ago`
+                      : mins < 60 * 24 ? `${Math.floor(mins / 60)}h ago`
+                      : `${Math.floor(mins / (60 * 24))}d ago`;
+                    return (
+                      <div
+                        key={`${e.dedupeKey}_${i}`}
+                        className="a-row"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 26px",
+                          borderBottom: `1px solid ${C.border}`,
+                          fontSize: 11,
+                        }}
+                      >
+                        <span style={{ width: 6, height: 6, background: color, flexShrink: 0, boxShadow: `0 0 5px ${color}88` }} />
+                        <span style={{ minWidth: 100, color: C.textMid, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700 }}>
+                          {e.protocol}
+                        </span>
+                        <ChainTag chain={e.chain} />
+                        <span style={{ flex: 1, color: C.text, fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                          Fee Claim
+                        </span>
+                        <span style={{ fontWeight: 700, color: C.green, minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                          +{fmt$(e.usd)}
+                        </span>
+                        <span style={{ fontSize: 9, color: C.text, minWidth: 64, textAlign: "right" }}>{timeStr}</span>
                       </div>
-                    </div>
-                  );
-                })()}
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-[200px] text-gray-600 text-sm">
-                No active LP positions
-              </div>
+                    );
+                  })}
+                </div>
+              </SectionFrame>
             )}
-          </div>
-        </div>
 
-        {/* ── SECTION 4: Position Performance Table ────────────────────────── */}
-        <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-bold mb-4">Position Performance</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-emerald-400/10">
-                  <th className="text-left py-2.5 px-2 text-gray-500 font-medium text-xs">Position</th>
-                  <th
-                    className="text-left py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300"
-                    onClick={() => handleSort("protocol")}
-                  >Protocol<SortIcon col="protocol" /></th>
-                  <th
-                    className="text-left py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300"
-                    onClick={() => handleSort("chain")}
-                  >Chain<SortIcon col="chain" /></th>
-                  <th
-                    className="text-right py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300"
-                    onClick={() => handleSort("value")}
-                  >Value<SortIcon col="value" /></th>
-                  <th
-                    className="text-right py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300"
-                    onClick={() => handleSort("apy")}
-                  >APR<SortIcon col="apy" /></th>
-                  <th
-                    className="text-right py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300 hidden sm:table-cell"
-                    onClick={() => handleSort("daily")}
-                  >Daily<SortIcon col="daily" /></th>
-                  <th
-                    className="text-right py-2.5 px-2 text-gray-500 font-medium text-xs cursor-pointer hover:text-gray-300 hidden sm:table-cell"
-                    onClick={() => handleSort("fees")}
-                  >Fees<SortIcon col="fees" /></th>
-                  <th className="text-center py-2.5 px-2 text-gray-500 font-medium text-xs">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedPositions.map((p) => {
-                  // Performance color based on actual/estimated APR
-                  const perfColor = p.displayAPR >= 20 ? "text-emerald-400"
-                    : p.displayAPR >= 5 ? "text-amber-400"
-                    : p.displayAPR > 0 ? "text-red-400"
-                    : "text-gray-600";
-
-                  return (
-                    <tr key={p.id} className="border-b border-emerald-400/5 hover:bg-emerald-950/20 transition-colors">
-                      <td className="py-2.5 px-2">
-                        <span className="text-white font-medium text-xs sm:text-sm">{p.pair}</span>
-                      </td>
-                      <td className="py-2.5 px-2">
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-md"
-                          style={{
-                            backgroundColor: `${PROTOCOL_COLORS[p.protocol] ?? "#6b7280"}15`,
-                            color: PROTOCOL_COLORS[p.protocol] ?? "#9ca3af",
-                          }}
-                        >
-                          {p.protocol}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-2">
-                        <span className="text-xs text-gray-400">{p.chain}</span>
-                      </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-white">
-                        {fmt$(p.value)}
-                      </td>
-                      <td className={`py-2.5 px-2 text-right font-mono text-xs ${perfColor}`}>
-                        {p.displayAPR > 0 ? `${p.displayAPR.toFixed(1)}%` : "--"}
-                        {p.isEstimated && p.displayAPR > 0 && (
-                          <span className="text-[9px] text-gray-600 ml-0.5">est.</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-gray-400 hidden sm:table-cell">
-                        {p.displayDaily > 0 ? (
-                          <>
-                            {fmt$(p.displayDaily)}
-                            {p.isEstimated && <span className="text-[9px] text-gray-600 ml-0.5">est.</span>}
-                          </>
-                        ) : "--"}
-                      </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-gray-400 hidden sm:table-cell">
-                        {p.fees > 0 ? fmt$(p.fees) : "--"}
-                      </td>
-                      <td className="py-2.5 px-2 text-center">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                          p.status === "In Range" ? "bg-emerald-500/15 text-emerald-400"
-                          : p.status === "Out of Range" ? "bg-amber-500/15 text-amber-400"
-                          : "bg-gray-500/15 text-gray-500"
-                        }`}>
-                          {p.status}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {sortedPositions.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-600 text-sm">No LP positions found</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Lending positions summary rows */}
-          {lendingPositions.length > 0 && (
-            <>
-              <div className="border-t border-emerald-400/10 mt-4 pt-4">
-                <h3 className="text-sm font-semibold text-gray-400 mb-3">Lending Positions</h3>
-                <div className="space-y-2">
-                  {lendingPositions.map((lp) => (
-                    <div
-                      key={lp.protocol + lp.chain}
-                      className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-emerald-950/20 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-md"
-                          style={{
-                            backgroundColor: `${PROTOCOL_COLORS[lp.protocol] ?? "#6b7280"}15`,
-                            color: PROTOCOL_COLORS[lp.protocol] ?? "#9ca3af",
-                          }}
-                        >
-                          {lp.protocol}
-                        </span>
-                        <span className="text-xs text-gray-500">{lp.chain}</span>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs">
-                        <span className="text-white font-mono">{fmt$(lp.totalSupplied)}</span>
-                        <span className={`font-mono ${lp.supplyApy != null && lp.supplyApy > 0 ? "text-emerald-400" : "text-gray-600"}`}>
-                          {lp.supplyApy != null ? `${lp.supplyApy.toFixed(1)}%` : "--"}
-                        </span>
-                        {lp.totalBorrowed > 0 && (
-                          <span className="text-red-400 font-mono">-{fmt$(lp.totalBorrowed)}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* ── SECTION 5: Risk Analysis — Chain + Protocol exposure ─────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
-          <ExposureCard
-            title="Chain Exposure"
-            warning={chainWarning}
-            data={chainExposure}
-            colorOf={(name, i) => CHAIN_COLORS[name] ?? PIE_COLORS[i % PIE_COLORS.length]}
-            centerPrimary={fmt$(totalPortfolioValue)}
-            centerSecondary={`${chainExposure.length} chain${chainExposure.length === 1 ? "" : "s"}`}
-            valueFmt={(v) => fmt$(v)}
-          />
-          <ExposureCard
-            title="Protocol Exposure"
-            warning={protocolWarning}
-            data={protocolExposure}
-            colorOf={(name, i) => PROTOCOL_COLORS[name] ?? PIE_COLORS[i % PIE_COLORS.length]}
-            centerPrimary={String(protocolExposure.length)}
-            centerSecondary="active"
-            valueFmt={(v) => fmt$(v)}
-          />
-        </div>
-
-        {/* ── SECTION 6: Top & Bottom Performers ───────────────────────────── */}
-        {(topPerformers.length > 0 || bottomPerformers.length > 0) && (
-          <div className="bg-[#0a1a12] border border-emerald-400/10 rounded-xl p-4 sm:p-6 mb-12">
-            <h2 className="text-lg font-bold mb-1">Performance Rankings</h2>
-            <p className="text-[10px] text-gray-600 mb-4">Ranked by actual APR from claimed fees{activityLoading ? " (loading...)" : ""}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {/* Top Performers */}
-              <div>
-                <h3 className="text-xs font-semibold text-emerald-400 mb-3 uppercase tracking-wider">Top Performers</h3>
-                <div className="space-y-2">
-                  {topPerformers.map((p, i) => (
-                    <div key={p.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-emerald-950/20">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-bold text-emerald-600 w-5">#{i + 1}</span>
-                        <div>
-                          <p className="text-sm font-medium text-white">{p.pair}</p>
-                          <p className="text-[10px] text-gray-500">{p.protocol} / {p.chain}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-emerald-400">
-                          {p.displayAPR.toFixed(1)}%
-                          {p.isEstimated && <span className="text-[9px] text-gray-600 ml-0.5 font-normal">est.</span>}
-                        </p>
-                        <p className="text-[10px] text-gray-500">{fmt$(p.value)}</p>
-                      </div>
-                    </div>
-                  ))}
-                  {topPerformers.length === 0 && (
-                    <p className="text-gray-600 text-xs">No active positions</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Bottom Performers */}
-              <div>
-                <h3 className="text-xs font-semibold text-red-400 mb-3 uppercase tracking-wider">Lowest Yield</h3>
-                <div className="space-y-2">
-                  {bottomPerformers.map((p, i) => (
-                    <div key={p.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-red-950/10">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-bold text-red-600 w-5">#{topPerformers.length - i}</span>
-                        <div>
-                          <p className="text-sm font-medium text-white">{p.pair}</p>
-                          <p className="text-[10px] text-gray-500">{p.protocol} / {p.chain}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-red-400">
-                          {p.displayAPR.toFixed(1)}%
-                          {p.isEstimated && <span className="text-[9px] text-gray-600 ml-0.5 font-normal">est.</span>}
-                        </p>
-                        <p className="text-[10px] text-gray-500">{fmt$(p.value)}</p>
-                      </div>
-                    </div>
-                  ))}
-                  {bottomPerformers.length === 0 && (
-                    <p className="text-gray-600 text-xs">No active positions</p>
-                  )}
-                </div>
-              </div>
+            {/* ── EXPOSURE — Chain + Protocol donuts ────────────────────── */}
+            <div id="section-exposure" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+              <ExposureCard
+                title="Chain Exposure"
+                warning={chainWarning}
+                data={chainExposure}
+                colorOf={(name, i) => CHAIN_COLORS[name] ?? PIE_COLORS[i % PIE_COLORS.length]}
+                centerPrimary={fmtCompact(totalPortfolioValue)}
+                centerSecondary={`${chainExposure.length} chain${chainExposure.length === 1 ? "" : "s"}`}
+                valueFmt={(v) => fmt$(v)}
+              />
+              <ExposureCard
+                title="Protocol Exposure"
+                warning={protocolWarning}
+                data={protocolExposure}
+                colorOf={(name, i) => PROTOCOL_COLORS[name] ?? PIE_COLORS[i % PIE_COLORS.length]}
+                centerPrimary={String(protocolExposure.length)}
+                centerSecondary="active"
+                valueFmt={(v) => fmt$(v)}
+              />
             </div>
-          </div>
-        )}
-      </div>
+
+            {/* ── PERFORMANCE RANKINGS ──────────────────────────────────── */}
+            {(topPerformers.length > 0 || bottomPerformers.length > 0) && (
+              <SectionFrame
+                title="Performance Rankings"
+                sub={`Ranked by actual APR from claimed fees${activityLoading ? " (loading…)" : ""}`}
+              >
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+                  {/* Top */}
+                  <div style={{ padding: "22px 26px", borderRight: `1px solid ${C.border}` }}>
+                    <div
+                      style={{
+                        fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase",
+                        color: C.textMid, marginBottom: 16,
+                      }}
+                    >
+                      <span style={{ color: C.green, marginRight: 6 }}>▲</span>
+                      Top Performers
+                    </div>
+                    {topPerformers.map((p, i) => (
+                      <div
+                        key={p.id}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 14,
+                          padding: "10px 0",
+                          borderBottom: i === topPerformers.length - 1 ? "none" : `1px solid ${C.border}`,
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.text, minWidth: 24, letterSpacing: "0.1em" }}>
+                          #{i + 1}
+                        </span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                            {p.pair}
+                          </div>
+                          <div style={{ fontSize: 10, color: C.text, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                            {p.protocol} · {p.chain}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: 14, fontWeight: 700, color: C.green,
+                              fontVariantNumeric: "tabular-nums",
+                              textShadow: "0 0 10px rgba(0,255,65,0.25)",
+                            }}
+                          >
+                            {p.displayAPR.toFixed(1)}%
+                            {p.isEstimated && <span style={{ fontSize: 8, color: C.text, marginLeft: 4, fontWeight: 400 }}>est.</span>}
+                          </div>
+                          <div style={{ fontSize: 9, color: C.text, marginTop: 2 }}>{fmt$(p.value)}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {topPerformers.length === 0 && (
+                      <p style={{ color: C.text, fontSize: 11 }}>No active positions</p>
+                    )}
+                  </div>
+
+                  {/* Bottom */}
+                  <div style={{ padding: "22px 26px" }}>
+                    <div
+                      style={{
+                        fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase",
+                        color: C.textMid, marginBottom: 16,
+                      }}
+                    >
+                      <span style={{ color: C.red, marginRight: 6 }}>▼</span>
+                      Lowest Yield
+                    </div>
+                    {bottomPerformers.map((p, i) => (
+                      <div
+                        key={p.id}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 14,
+                          padding: "10px 0",
+                          borderBottom: i === bottomPerformers.length - 1 ? "none" : `1px solid ${C.border}`,
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.text, minWidth: 24, letterSpacing: "0.1em" }}>
+                          #{i + 1}
+                        </span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                            {p.pair}
+                          </div>
+                          <div style={{ fontSize: 10, color: C.text, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                            {p.protocol} · {p.chain}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: 14, fontWeight: 700,
+                              color: p.displayAPR < 5 ? C.red : C.amber,
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            {p.displayAPR.toFixed(1)}%
+                            {p.isEstimated && <span style={{ fontSize: 8, color: C.text, marginLeft: 4, fontWeight: 400 }}>est.</span>}
+                          </div>
+                          <div style={{ fontSize: 9, color: C.text, marginTop: 2 }}>{fmt$(p.value)}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {bottomPerformers.length === 0 && (
+                      <p style={{ color: C.text, fontSize: 11 }}>No active positions</p>
+                    )}
+                  </div>
+                </div>
+              </SectionFrame>
+            )}
+
+          </div>{/* /content */}
+        </main>
+      </div>{/* /layout */}
     </div>
   );
 }
