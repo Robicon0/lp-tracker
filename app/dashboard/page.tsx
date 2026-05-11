@@ -103,10 +103,10 @@ const C = {
   border:     "#1c1c1c",
   borderHi:   "#262626",
   borderGlow: "#2e2e2e",
-  text:       "#8a8a8a",
-  textMid:    "#b4b4b4",
-  textBright: "#e8e8e8",
-  textWhite:  "#f5f5f5",
+  text:       "#7a7a7a",
+  textMid:    "#aaaaaa",
+  textBright: "#e0e0e0",
+  textWhite:  "#f0f0f0",
   green:      "#00ff41",
   green2:     "#00e535",
   greenDim:   "#00b82a",
@@ -599,9 +599,9 @@ export default function Dashboard() {
 
             <div
               style={{
-                fontSize: 9,
+                fontSize: 8,
                 color: C.text,
-                letterSpacing: "0.22em",
+                letterSpacing: "0.18em",
                 textTransform: "uppercase",
                 marginBottom: 10,
                 opacity: 0.6,
@@ -749,13 +749,13 @@ export default function Dashboard() {
                   </div>
                   <div
                     style={{
-                      fontSize: 16,
+                      fontSize: 20,
                       fontWeight: 700,
                       letterSpacing: "-0.01em",
                       color:
                         s.cls === "green" ? C.green :
                         s.cls === "white" ? C.textWhite : C.textMid,
-                      textShadow: s.cls === "green" ? "0 0 16px rgba(0,255,65,0.3)" : "none",
+                      textShadow: s.cls === "green" ? "0 0 20px rgba(0,255,65,0.2)" : "none",
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
