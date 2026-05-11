@@ -86,19 +86,19 @@ export default function AnalyticsSidebar({
     borderBottom: `1px solid ${C.border}`,
   };
   const labelStyle: CSSProperties = {
-    fontSize: 8,
+    fontSize: 9,
     letterSpacing: "0.22em",
     textTransform: "uppercase",
     color: C.text,
-    padding: "0 18px 10px",
+    padding: "0 20px 14px",
     opacity: 0.5,
   };
   const itemBase: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: 10,
-    padding: "8px 18px",
-    fontSize: 11,
+    gap: 12,
+    padding: "9px 20px",
+    fontSize: 12.5,
     color: C.textMid,
     cursor: "pointer",
     textDecoration: "none",
