@@ -104,7 +104,7 @@ export default function WatchedPage() {
                         </button>
                         <button
                           onClick={() => setEditingKey(null)}
-                          className="text-gray-500 hover:text-gray-300 text-sm"
+                          className="text-gray-300 hover:text-gray-300 text-sm"
                         >
                           Cancel
                         </button>

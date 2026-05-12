@@ -440,14 +440,14 @@ export default function PositionDetail() {
             )}
             <div>
               <h1 className="text-2xl font-extrabold text-white">{pos.pair}</h1>
-              <p className="text-gray-400 text-sm mt-1">{pos.protocol} &bull; {pos.chain}</p>
+              <p className="text-gray-300 text-sm mt-1">{pos.protocol} &bull; {pos.chain}</p>
             </div>
           </div>
           <span className={`px-4 py-2 rounded-full text-sm font-bold ${
             pos.status === "In Range"
               ? "bg-emerald-950 text-emerald-400 border border-emerald-400/30"
               : pos.status === "Closed"
-              ? "bg-gray-800/50 text-gray-400 border border-gray-600/30"
+              ? "bg-gray-800/50 text-gray-300 border border-gray-600/30"
               : "bg-red-950/50 text-red-400 border border-red-400/30"
           }`}>
             {pos.status}
@@ -471,27 +471,27 @@ export default function PositionDetail() {
               <button onClick={() => setAprExpanded(v => !v)} className="text-left w-full">
                 <div className="flex items-center gap-1">
                   <span className="text-2xl font-extrabold text-white">~{aprMetrics.aprYearly.toFixed(1)}%</span>
-                  <span className="text-gray-400 text-xs">/yr</span>
-                  <svg className={`w-3 h-3 text-gray-400 ml-auto transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <span className="text-gray-300 text-xs">/yr</span>
+                  <svg className={`w-3 h-3 text-gray-300 ml-auto transition-transform duration-200 ${aprExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </div>
                 {aprExpanded && (
                   <div className="mt-2 grid grid-cols-2 gap-1">
                     <div className="bg-emerald-900/30 rounded p-1.5 text-center">
-                      <p className="text-xs text-gray-400">Yearly</p>
+                      <p className="text-xs text-gray-300">Yearly</p>
                       <p className="text-xs font-bold text-emerald-300">~{aprMetrics.aprYearly.toFixed(1)}%</p>
                     </div>
                     <div className="bg-blue-900/30 rounded p-1.5 text-center">
-                      <p className="text-xs text-gray-400">Monthly</p>
+                      <p className="text-xs text-gray-300">Monthly</p>
                       <p className="text-xs font-bold text-blue-300">~{aprMetrics.aprMonthly.toFixed(2)}%</p>
                     </div>
                     <div className="bg-purple-900/30 rounded p-1.5 text-center">
-                      <p className="text-xs text-gray-400">Weekly</p>
+                      <p className="text-xs text-gray-300">Weekly</p>
                       <p className="text-xs font-bold text-purple-300">~{aprMetrics.aprWeekly.toFixed(2)}%</p>
                     </div>
                     <div className="bg-emerald-900/20 rounded p-1.5 text-center">
-                      <p className="text-xs text-gray-400">Daily</p>
+                      <p className="text-xs text-gray-300">Daily</p>
                       <p className="text-xs font-bold text-white/60">~{aprMetrics.aprDaily.toFixed(3)}%</p>
                     </div>
                   </div>
@@ -545,7 +545,7 @@ export default function PositionDetail() {
               <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Assets</h2>
 
               {activityLoading && (
-                <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
+                <div className="flex items-center gap-1 text-gray-300 text-sm py-4">
                   <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                   Scanning on-chain history…
                 </div>
@@ -574,26 +574,26 @@ export default function PositionDetail() {
 
               return (
                 <div>
-                  <div className="grid grid-cols-4 gap-1 text-xs text-gray-400 mb-1.5 px-1">
+                  <div className="grid grid-cols-4 gap-1 text-xs text-gray-300 mb-1.5 px-1">
                     <span></span>
                     <span className="text-right">{sym0}</span>
                     <span className="text-right">{sym1}</span>
                     <span className="text-right">USD</span>
                   </div>
                   <div className="grid grid-cols-4 gap-1 py-2 border-b border-emerald-500/10 px-1 items-center">
-                    <span className="text-sm text-gray-400">Invested</span>
+                    <span className="text-sm text-gray-300">Invested</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(inv0)}</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(inv1)}</span>
                     <span className="text-right text-sm font-bold text-white">{fmtUSD(investedUSD)}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-1 py-2 border-b border-emerald-500/10 px-1 items-center">
-                    <span className="text-sm text-gray-400">Current</span>
+                    <span className="text-sm text-gray-300">Current</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(cur0)}</span>
                     <span className="text-right font-mono text-sm font-bold text-white">{fmtAmt(cur1)}</span>
                     <span className="text-right text-sm font-bold text-white">{fmtUSD(currentUSD)}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-1 py-2 px-1 items-center">
-                    <span className="text-sm text-gray-400">Gain / Loss</span>
+                    <span className="text-sm text-gray-300">Gain / Loss</span>
                     <span className={`text-right font-mono text-sm font-bold ${gainLoss0 >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {sign(gainLoss0)}{fmtAmt(Math.abs(gainLoss0))}
                     </span>
@@ -605,7 +605,7 @@ export default function PositionDetail() {
                     </span>
                   </div>
                   {activity.events.length === 0 && (
-                    <p className="text-gray-400/50 text-xs mt-2">
+                    <p className="text-gray-300/50 text-xs mt-2">
                       No on-chain events found · NFT manager address may need updating
                     </p>
                   )}
@@ -614,7 +614,7 @@ export default function PositionDetail() {
             })()}
 
               {!activityLoading && !activity && (
-                <p className="text-sm text-gray-400">Could not load activity data.</p>
+                <p className="text-sm text-gray-300">Could not load activity data.</p>
               )}
             </div>
           )}
@@ -624,50 +624,50 @@ export default function PositionDetail() {
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Position Details</h2>
             <div className="space-y-0">
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                <span className="text-sm text-gray-400">Trading Pair</span>
+                <span className="text-sm text-gray-300">Trading Pair</span>
                 <span className="text-sm font-bold text-white">{pos.pair}</span>
               </div>
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                <span className="text-sm text-gray-400">Protocol</span>
+                <span className="text-sm text-gray-300">Protocol</span>
                 <span className="text-sm font-bold text-white">{pos.protocol}</span>
               </div>
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                <span className="text-sm text-gray-400">Blockchain</span>
+                <span className="text-sm text-gray-300">Blockchain</span>
                 <span className="text-sm font-bold text-white">{pos.chain}</span>
               </div>
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                <span className="text-sm text-gray-400">Status</span>
-                <span className={`text-sm font-bold ${pos.status === "In Range" ? "text-emerald-400" : pos.status === "Closed" ? "text-gray-400" : "text-red-400"}`}>
+                <span className="text-sm text-gray-300">Status</span>
+                <span className={`text-sm font-bold ${pos.status === "In Range" ? "text-emerald-400" : pos.status === "Closed" ? "text-gray-300" : "text-red-400"}`}>
                   {pos.status}
                 </span>
               </div>
               {hasFeeTier && (
                 <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                  <span className="text-sm text-gray-400">Fee Tier</span>
+                  <span className="text-sm text-gray-300">Fee Tier</span>
                   <span className="text-sm font-bold text-white">{pos.feeTier}%</span>
                 </div>
               )}
               {hasTickRange && (
                 <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                  <span className="text-sm text-gray-400">Price Range</span>
+                  <span className="text-sm text-gray-300">Price Range</span>
                   <span className="text-sm font-bold text-white">
                     {tickRangeLabel ?? `${pos.tickLower} → ${pos.tickUpper}`}
                   </span>
                 </div>
               )}
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                <span className="text-sm text-gray-400">
+                <span className="text-sm text-gray-300">
                   Est. Daily Fees
-                  <span className="text-gray-400/50 text-xs ml-1">(pool APY × value)</span>
+                  <span className="text-gray-300/50 text-xs ml-1">(pool APY × value)</span>
                 </span>
                 <span className="text-sm font-bold text-white">
                   {pos.apy > 0 ? `$${estimatedDailyFees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-2">
-                <span className="text-sm text-gray-400">
+                <span className="text-sm text-gray-300">
                   Est. Monthly Yield
-                  <span className="text-gray-400/50 text-xs ml-1">(pool APY × value)</span>
+                  <span className="text-gray-300/50 text-xs ml-1">(pool APY × value)</span>
                 </span>
                 <span className="text-sm font-bold text-emerald-400">
                   {pos.apy > 0 ? `$${estimatedMonthlyYield.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
@@ -685,37 +685,37 @@ export default function PositionDetail() {
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                    <span className="text-sm text-gray-400">Entry price (est.)</span>
+                    <span className="text-sm text-gray-300">Entry price (est.)</span>
                     <span className="text-sm font-bold text-white">
                       {formatPrice(ilData.entryPriceUSD)} / {ilData.entryPriceLabel}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                    <span className="text-sm text-gray-400">HODL value</span>
+                    <span className="text-sm text-gray-300">HODL value</span>
                     <span className="text-sm font-bold text-white">
                       ${ilData.hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                    <span className="text-sm text-gray-400">Current value</span>
+                    <span className="text-sm text-gray-300">Current value</span>
                     <span className="text-sm font-bold text-white">
                       ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
-                    <span className="text-sm text-gray-400">IL ($)</span>
+                    <span className="text-sm text-gray-300">IL ($)</span>
                     <span className={`text-sm font-bold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
                       {ilData.ilUSD < 0 ? "−" : "+"}${Math.abs(ilData.ilUSD).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between py-2">
-                    <span className="text-sm text-gray-400">IL (%)</span>
+                    <span className="text-sm text-gray-300">IL (%)</span>
                     <span className={`text-sm font-bold ${ilData.ilUSD < 0 ? "text-red-400" : "text-emerald-400"}`}>
                       {ilData.ilUSD >= 0 ? "+" : ""}{ilData.ilPct.toFixed(2)}%
                     </span>
                   </div>
                 </div>
-                <p className="text-gray-400/40 text-xs mt-3">
+                <p className="text-gray-300/40 text-xs mt-3">
                   Estimated from range midpoint · tick {ilData.entryTick} — not your actual entry
                 </p>
               </div>
@@ -726,15 +726,15 @@ export default function PositionDetail() {
                 <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Unclaimed Fees</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
-                    <span className="text-sm text-gray-400">{pos.token0Symbol}</span>
+                    <span className="text-sm text-gray-300">{pos.token0Symbol}</span>
                     <span className="text-sm font-bold text-white">{pos.fees0!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
-                    <span className="text-sm text-gray-400">{pos.token1Symbol}</span>
+                    <span className="text-sm text-gray-300">{pos.token1Symbol}</span>
                     <span className="text-sm font-bold text-white">{pos.fees1!.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
-                    <span className="text-sm text-gray-400">Total (USD)</span>
+                    <span className="text-sm text-gray-300">Total (USD)</span>
                     <span className="text-sm font-bold text-emerald-400">
                       ${pos.fees.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
@@ -758,7 +758,7 @@ export default function PositionDetail() {
 
           if (activityLoading) {
             return cardWrap(
-              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+              <div className="flex items-center gap-2 text-gray-300 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Reconstructing position from on-chain history…
               </div>
@@ -767,7 +767,7 @@ export default function PositionDetail() {
 
           if (!activity) {
             return cardWrap(
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-300">
                 Entry data unavailable — P&amp;L cannot be computed.
               </p>
             );
@@ -783,7 +783,7 @@ export default function PositionDetail() {
 
           if (!result.ok) {
             return cardWrap(
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-300">
                 Entry data unavailable — no on-chain deposit event found for this position. P&amp;L cannot be computed.
               </p>
             );
@@ -799,27 +799,27 @@ export default function PositionDetail() {
               {/* Row 1: 5 P&L cards (Initial / Current / Fees Collected / Fees Unclaimed / Net P&L) */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 mb-2">
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Initial Value</p>
+                  <p className="text-xs text-gray-300 mb-1">Initial Value</p>
                   <p className="text-base font-extrabold text-white">${fmtUSD(d.initialValue)}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">at deposit time</p>
+                  <p className="text-[10px] text-gray-300 mt-0.5">at deposit time</p>
                 </div>
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Current Value</p>
+                  <p className="text-xs text-gray-300 mb-1">Current Value</p>
                   <p className="text-base font-extrabold text-white">${fmtUSD(d.currentValue)}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">live</p>
+                  <p className="text-[10px] text-gray-300 mt-0.5">live</p>
                 </div>
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Fees Collected</p>
+                  <p className="text-xs text-gray-300 mb-1">Fees Collected</p>
                   <p className="text-base font-extrabold text-emerald-400">${fmtUSD(d.feesCollected)}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">claimed on-chain</p>
+                  <p className="text-[10px] text-gray-300 mt-0.5">claimed on-chain</p>
                 </div>
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Fees Unclaimed</p>
+                  <p className="text-xs text-gray-300 mb-1">Fees Unclaimed</p>
                   <p className="text-base font-extrabold text-emerald-300">${fmtUSD(d.feesUnclaimed)}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">ready to claim</p>
+                  <p className="text-[10px] text-gray-300 mt-0.5">ready to claim</p>
                 </div>
                 <div className={`rounded-lg p-3 text-center ${pnlPositive ? "bg-emerald-500/20" : "bg-red-500/20"}`}>
-                  <p className="text-xs text-gray-400 mb-1">Net P&amp;L</p>
+                  <p className="text-xs text-gray-300 mb-1">Net P&amp;L</p>
                   <p className={`text-base font-extrabold ${pnlPositive ? "text-emerald-300" : "text-red-300"}`}>
                     {pnlPositive ? "+" : "−"}${fmtUSD(Math.abs(d.netPnlUSD))}
                   </p>
@@ -832,12 +832,12 @@ export default function PositionDetail() {
               {/* Row 2: Impermanent Loss — HODL value, IL ($/%), fees offset */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">HODL Value</p>
+                  <p className="text-xs text-gray-300 mb-1">HODL Value</p>
                   <p className="text-base font-extrabold text-white">${fmtUSD(d.hodlValue)}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">if you just held</p>
+                  <p className="text-[10px] text-gray-300 mt-0.5">if you just held</p>
                 </div>
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Impermanent Loss</p>
+                  <p className="text-xs text-gray-300 mb-1">Impermanent Loss</p>
                   <p className={`text-base font-extrabold ${ilNegative ? "text-red-400" : "text-emerald-400"}`}>
                     {ilNegative ? "−" : "+"}${fmtUSD(Math.abs(d.ilUSD))}
                   </p>
@@ -846,17 +846,17 @@ export default function PositionDetail() {
                   </p>
                 </div>
                 <div className={`rounded-lg p-3 text-center ${d.feesOffsetIL ? "bg-emerald-500/20" : "bg-red-500/20"}`}>
-                  <p className="text-xs text-gray-400 mb-1">Fees vs IL</p>
+                  <p className="text-xs text-gray-300 mb-1">Fees vs IL</p>
                   <p className={`text-base font-extrabold ${d.feesOffsetIL ? "text-emerald-300" : "text-red-300"}`}>
                     {d.feesOffsetIL ? "Offset ✓" : "Not yet"}
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">
+                  <p className="text-[10px] text-gray-300 mt-0.5">
                     ${fmtUSD(d.feesCollected + d.feesUnclaimed)} fees vs ${fmtUSD(Math.abs(d.ilUSD))} IL
                   </p>
                 </div>
               </div>
 
-              <p className="text-gray-400/40 text-xs mt-3">
+              <p className="text-gray-300/40 text-xs mt-3">
                 Based on {d.depositCount} on-chain deposit{d.depositCount === 1 ? "" : "s"}.
                 Entry price ratio {pos.token0Symbol}/{pos.token1Symbol}: {(d.entryPrice0 / (d.entryPrice1 || 1)).toFixed(6)} →
                 current ratio: {((pos.price0 ?? 0) / (pos.price1 || 1)).toFixed(6)}.
@@ -878,11 +878,11 @@ export default function PositionDetail() {
           let body;
           if (activityLoading) {
             body = (
-              <p className="text-xs text-gray-500">Loading deposit history…</p>
+              <p className="text-xs text-gray-300">Loading deposit history…</p>
             );
           } else if (!hasDepositData) {
             body = (
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-300">
                 Deposit data unavailable — cannot compute IL without an on-chain deposit event.
               </p>
             );
@@ -903,21 +903,21 @@ export default function PositionDetail() {
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-1">
                   <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                    <p className="text-xs text-gray-400 mb-1">HODL Value</p>
+                    <p className="text-xs text-gray-300 mb-1">HODL Value</p>
                     <p className="text-base font-extrabold text-white">
                       ${hodlValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">if you just held</p>
+                    <p className="text-[10px] text-gray-300 mt-0.5">if you just held</p>
                   </div>
                   <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                    <p className="text-xs text-gray-400 mb-1">LP Value</p>
+                    <p className="text-xs text-gray-300 mb-1">LP Value</p>
                     <p className="text-base font-extrabold text-white">
                       ${lpValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">current position</p>
+                    <p className="text-[10px] text-gray-300 mt-0.5">current position</p>
                   </div>
                   <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                    <p className="text-xs text-gray-400 mb-1">Impermanent Loss</p>
+                    <p className="text-xs text-gray-300 mb-1">Impermanent Loss</p>
                     <p className={`text-base font-extrabold ${il < 0 ? "text-red-400" : "text-emerald-400"}`}>
                       {il < 0 ? "−" : "+"}${Math.abs(il).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
@@ -926,14 +926,14 @@ export default function PositionDetail() {
                     </p>
                   </div>
                   <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                    <p className="text-xs text-gray-400 mb-1">Fees Earned</p>
+                    <p className="text-xs text-gray-300 mb-1">Fees Earned</p>
                     <p className="text-base font-extrabold text-emerald-400">
                       +${feesEarned.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">claimed + uncollected</p>
+                    <p className="text-[10px] text-gray-300 mt-0.5">claimed + uncollected</p>
                   </div>
                   <div className={`rounded-lg p-3 text-center ${netPositive ? "bg-emerald-500/20" : "bg-red-500/20"}`}>
-                    <p className="text-xs text-gray-400 mb-1">Net vs HODL</p>
+                    <p className="text-xs text-gray-300 mb-1">Net vs HODL</p>
                     <p className={`text-base font-extrabold ${netPositive ? "text-emerald-300" : "text-red-300"}`}>
                       {netPositive ? "+" : "−"}${Math.abs(netVsHodl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
@@ -942,7 +942,7 @@ export default function PositionDetail() {
                     </p>
                   </div>
                 </div>
-                <p className="text-gray-400/40 text-xs mt-3">
+                <p className="text-gray-300/40 text-xs mt-3">
                   Based on {deposits.length} on-chain deposit{deposits.length === 1 ? "" : "s"} ({orig0.toLocaleString("en-US", { maximumFractionDigits: 4 })} {pos.token0Symbol} + {orig1.toLocaleString("en-US", { maximumFractionDigits: 4 })} {pos.token1Symbol}) valued at current prices.
                 </p>
               </>
@@ -964,7 +964,7 @@ export default function PositionDetail() {
             <div className="grid grid-cols-3 gap-1">
               {pos.poolTvl != null && (
                 <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Pool TVL</p>
+                  <p className="text-xs text-gray-300 mb-1">Pool TVL</p>
                   <p className="text-lg font-extrabold text-white">
                     ${pos.poolTvl >= 1_000_000
                       ? `${(pos.poolTvl / 1_000_000).toFixed(1)}M`
@@ -972,12 +972,12 @@ export default function PositionDetail() {
                       ? `${(pos.poolTvl / 1_000).toFixed(0)}K`
                       : pos.poolTvl.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">all fee tiers</p>
+                  <p className="text-xs text-gray-300 mt-0.5">all fee tiers</p>
                 </div>
               )}
               {pos.pool24hVolume != null && (
                 <div className="bg-blue-900/20 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">24h Volume</p>
+                  <p className="text-xs text-gray-300 mb-1">24h Volume</p>
                   <p className="text-lg font-extrabold text-white">
                     ${pos.pool24hVolume >= 1_000_000
                       ? `${(pos.pool24hVolume / 1_000_000).toFixed(1)}M`
@@ -985,16 +985,16 @@ export default function PositionDetail() {
                       ? `${(pos.pool24hVolume / 1_000).toFixed(0)}K`
                       : pos.pool24hVolume.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">DefiLlama</p>
+                  <p className="text-xs text-gray-300 mt-0.5">DefiLlama</p>
                 </div>
               )}
               {pos.pool24hVolume != null && pos.feeTier != null && (
                 <div className="bg-emerald-900/20 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-400 mb-1">Est. 24h Fees</p>
+                  <p className="text-xs text-gray-300 mb-1">Est. 24h Fees</p>
                   <p className="text-lg font-extrabold text-emerald-300">
                     ${(pos.pool24hVolume * pos.feeTier / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">{pos.feeTier}% fee tier</p>
+                  <p className="text-xs text-gray-300 mt-0.5">{pos.feeTier}% fee tier</p>
                 </div>
               )}
             </div>
@@ -1024,7 +1024,7 @@ export default function PositionDetail() {
                       className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
                         pnlRange === r
                           ? "bg-emerald-600 text-white"
-                          : "bg-emerald-950/40 text-gray-400 hover:text-white"
+                          : "bg-emerald-950/40 text-gray-300 hover:text-white"
                       }`}
                     >
                       {r.toUpperCase()}
@@ -1034,38 +1034,38 @@ export default function PositionDetail() {
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
                 <div className="bg-[#0a1a12] rounded p-2">
-                  <p className="text-[10px] text-gray-500">Initial Value</p>
+                  <p className="text-[10px] text-gray-300">Initial Value</p>
                   <p className="text-sm font-bold text-white">
                     ${initial.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="bg-[#0a1a12] rounded p-2">
-                  <p className="text-[10px] text-gray-500">Current Value</p>
+                  <p className="text-[10px] text-gray-300">Current Value</p>
                   <p className="text-sm font-bold text-white">
                     ${current.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="bg-[#0a1a12] rounded p-2">
-                  <p className="text-[10px] text-gray-500">Total Fees Claimed</p>
+                  <p className="text-[10px] text-gray-300">Total Fees Claimed</p>
                   <p className="text-sm font-bold text-emerald-300">
                     ${claimed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="bg-[#0a1a12] rounded p-2">
-                  <p className="text-[10px] text-gray-500">Net P&amp;L</p>
+                  <p className="text-[10px] text-gray-300">Net P&amp;L</p>
                   <p className={`text-sm font-bold ${netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {netPnl >= 0 ? "+" : ""}${netPnl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="bg-[#0a1a12] rounded p-2">
-                  <p className="text-[10px] text-gray-500">P&amp;L %</p>
+                  <p className="text-[10px] text-gray-300">P&amp;L %</p>
                   <p className={`text-sm font-bold ${netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {netPnlPct >= 0 ? "+" : ""}{netPnlPct.toFixed(2)}%
                   </p>
                 </div>
               </div>
               {!dbPosConfigured ? (
-                <div className="flex items-center justify-center h-[140px] text-gray-600 text-xs text-center px-4">
+                <div className="flex items-center justify-center h-[140px] text-gray-400 text-xs text-center px-4">
                   Database not configured. Set <code className="text-emerald-400">POSTGRES_URL</code> in env to enable position-level P&amp;L tracking.
                 </div>
               ) : chart.length >= 2 ? (
@@ -1113,7 +1113,7 @@ export default function PositionDetail() {
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="flex items-center justify-center h-[140px] text-gray-600 text-xs text-center px-4">
+                <div className="flex items-center justify-center h-[140px] text-gray-400 text-xs text-center px-4">
                   Tracking started. P&amp;L data will appear after the next snapshot.
                 </div>
               )}
@@ -1125,10 +1125,10 @@ export default function PositionDetail() {
         {isActivityProtocol && (
           <div className="bg-[#0a2e1a]/60 p-4 mb-3">
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Actual Performance</h2>
-            <p className="text-xs text-gray-400/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
+            <p className="text-xs text-gray-300/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
             {activityLoading && (
-              <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
+              <div className="flex items-center gap-1 text-gray-300 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Calculating…
               </div>
@@ -1169,49 +1169,49 @@ export default function PositionDetail() {
                   {/* Row 1: TOTAL CLAIMED | TOTAL UNCOLLECTED | TOTAL LIFETIME */}
                   <div className="grid grid-cols-3 gap-1">
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Total Claimed</p>
+                      <p className="text-xs text-gray-300 mb-1">Total Claimed</p>
                       <p className="text-xl font-extrabold text-emerald-400">{fmtUSD(claimedUSD)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">
+                      <p className="text-xs text-gray-300 mt-0.5">
                         {feeClaims.length > 0
                           ? `${feeClaims.length} collection${feeClaims.length !== 1 ? 's' : ''}`
                           : 'no claims yet'}
                       </p>
                     </div>
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Total Uncollected</p>
+                      <p className="text-xs text-gray-300 mb-1">Total Uncollected</p>
                       <p className="text-xl font-extrabold text-white">{fmtUSD(uncollectedUSD)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">pending</p>
+                      <p className="text-xs text-gray-300 mt-0.5">pending</p>
                     </div>
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Total Lifetime</p>
+                      <p className="text-xs text-gray-300 mb-1">Total Lifetime</p>
                       <p className="text-xl font-extrabold text-white">{fmtUSD(lifetimeUSD)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">claimed + pending</p>
+                      <p className="text-xs text-gray-300 mt-0.5">claimed + pending</p>
                     </div>
                   </div>
 
                   {/* Row 2: ACTUAL APR | ESTIMATED APR | TRACKING AGE */}
                   <div className="grid grid-cols-3 gap-1">
                     <div className="bg-emerald-900/20 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Actual APR</p>
+                      <p className="text-xs text-gray-300 mb-1">Actual APR</p>
                       {actualAPR != null
                         ? <p className="text-xl font-extrabold text-emerald-400">~{actualAPR.toFixed(1)}%</p>
                         : <p className="text-xl font-extrabold text-white/30">{feeClaims.length === 0 ? 'No claims' : '<1d'}</p>
                       }
-                      <p className="text-xs text-gray-500 mt-0.5">from real claims</p>
+                      <p className="text-xs text-gray-300 mt-0.5">from real claims</p>
                     </div>
                     <div className="bg-blue-900/20 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Estimated APR</p>
+                      <p className="text-xs text-gray-300 mb-1">Estimated APR</p>
                       {estimatedAPR != null
                         ? <p className="text-xl font-extrabold text-blue-300">~{estimatedAPR.toFixed(1)}%</p>
                         : <p className="text-xl font-extrabold text-white/30">—</p>
                       }
-                      <p className="text-xs text-gray-500 mt-0.5">pool APY</p>
+                      <p className="text-xs text-gray-300 mt-0.5">pool APY</p>
                     </div>
                     <div className="bg-emerald-900/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Tracking Age</p>
+                      <p className="text-xs text-gray-300 mb-1">Tracking Age</p>
                       <p className="text-xl font-extrabold text-white">{daysLabel}</p>
                       {firstTs > 0 && (
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <p className="text-xs text-gray-300 mt-0.5">
                           since {new Date(firstTs * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
                         </p>
                       )}
@@ -1221,18 +1221,18 @@ export default function PositionDetail() {
                   {/* Row 3: ACTUAL DAILY INCOME | FEE INCOME % */}
                   <div className="grid grid-cols-2 gap-1">
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Actual Daily Income</p>
+                      <p className="text-xs text-gray-300 mb-1">Actual Daily Income</p>
                       {actualDailyIncome != null
                         ? (
                           <p className="text-lg font-bold text-white">
-                            {fmtUSD(actualDailyIncome)}<span className="text-gray-400 text-sm font-normal">/day</span>
+                            {fmtUSD(actualDailyIncome)}<span className="text-gray-300 text-sm font-normal">/day</span>
                           </p>
                         )
                         : <p className="text-lg font-bold text-white/30">—</p>
                       }
                     </div>
                     <div className="bg-emerald-500/10 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Fee Income (% of position)</p>
+                      <p className="text-xs text-gray-300 mb-1">Fee Income (% of position)</p>
                       <p className="text-lg font-bold text-white">{feeIncomePct.toFixed(3)}%</p>
                     </div>
                   </div>
@@ -1241,7 +1241,7 @@ export default function PositionDetail() {
             })()}
 
             {!activityLoading && !activity && (
-              <p className="text-sm text-gray-400">Could not load activity data.</p>
+              <p className="text-sm text-gray-300">Could not load activity data.</p>
             )}
           </div>
         )}
@@ -1250,10 +1250,10 @@ export default function PositionDetail() {
         {isActivityProtocol && (
           <div className="bg-[#0a2e1a]/60 p-4 mb-3">
             <h2 className="text-sm font-extrabold text-yellow-400 mb-1">📋 FEE CLAIMS LOG</h2>
-            <p className="text-xs text-gray-400/60 mb-4">Collected fees only · deposits and withdrawals shown in Activity History below</p>
+            <p className="text-xs text-gray-300/60 mb-4">Collected fees only · deposits and withdrawals shown in Activity History below</p>
 
             {activityLoading && (
-              <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
+              <div className="flex items-center gap-1 text-gray-300 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Scanning blockchain for fee history…
               </div>
@@ -1292,7 +1292,7 @@ export default function PositionDetail() {
 
               if (feeClaims.length === 0) {
                 return (
-                  <p className="text-sm text-gray-400 py-2">
+                  <p className="text-sm text-gray-300 py-2">
                     No fee claims detected yet. Claims will appear here after you collect fees.
                   </p>
                 );
@@ -1303,7 +1303,7 @@ export default function PositionDetail() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="text-xs text-gray-400 border-b border-emerald-500/10">
+                        <tr className="text-xs text-gray-300 border-b border-emerald-500/10">
                           <th className="text-left py-2 pr-4 font-normal">Date</th>
                           <th className="text-left py-2 pr-4 font-normal">Type</th>
                           <th className="text-right py-2 pr-4 font-normal">{sym0}</th>
@@ -1315,7 +1315,7 @@ export default function PositionDetail() {
                       <tbody>
                         {feeClaims.map((ev, i) => (
                           <tr key={i} className="border-b border-emerald-500/10 hover:bg-[rgba(6,78,59,0.2)]">
-                            <td className="py-2 pr-4 text-xs text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
+                            <td className="py-2 pr-4 text-xs text-gray-300 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
                             <td className="py-2 pr-4">
                               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                                 ev.type === 'reward_claim'
@@ -1347,7 +1347,7 @@ export default function PositionDetail() {
                     </table>
                   </div>
                   <div className="mt-3 pt-3 border-t border-emerald-500/10 flex justify-between items-center">
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-300">
                       {feeClaims.length} collection{feeClaims.length !== 1 ? 's' : ''}
                     </span>
                     <span className="text-sm font-bold text-emerald-400">
@@ -1359,7 +1359,7 @@ export default function PositionDetail() {
             })()}
 
             {!activityLoading && !activity && (
-              <p className="text-sm text-gray-400">Could not load fee claim data.</p>
+              <p className="text-sm text-gray-300">Could not load fee claim data.</p>
             )}
           </div>
         )}
@@ -1370,14 +1370,14 @@ export default function PositionDetail() {
             <h2 className="text-sm font-extrabold text-emerald-300 mb-3">Activity History</h2>
 
             {activityLoading && (
-              <div className="flex items-center gap-1 text-gray-400 text-sm py-4">
+              <div className="flex items-center gap-1 text-gray-300 text-sm py-4">
                 <div className="w-4 h-4 border border-emerald-400/50 border-t-transparent rounded-full animate-spin" />
                 Scanning on-chain history…
               </div>
             )}
 
             {!activityLoading && activity && activity.events.length === 0 && (
-              <p className="text-sm text-gray-400">No on-chain events found for this position.</p>
+              <p className="text-sm text-gray-300">No on-chain events found for this position.</p>
             )}
 
             {!activityLoading && activity && activity.events.length > 0 && (() => {
@@ -1420,7 +1420,7 @@ export default function PositionDetail() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-xs text-gray-400 border-b border-emerald-500/10">
+                      <tr className="text-xs text-gray-300 border-b border-emerald-500/10">
                         <th className="text-left py-2 pr-4 font-normal">Date</th>
                         <th className="text-left py-2 pr-4 font-normal">Action</th>
                         <th className="text-right py-2 pr-4 font-normal">{sym0}</th>
@@ -1433,20 +1433,20 @@ export default function PositionDetail() {
                     <tbody>
                       {activity.events.map((ev, i) => (
                         <tr key={i} className="border-b border-emerald-500/10 hover:bg-[rgba(6,78,59,0.2)]">
-                          <td className="py-2 pr-4 text-sm text-gray-400 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
-                          <td className={`py-2 pr-4 text-sm font-bold ${ACTION_COLORS[ev.type] ?? 'text-gray-400'}`}>
+                          <td className="py-2 pr-4 text-sm text-gray-300 whitespace-nowrap">{fmtDate(ev.timestamp)}</td>
+                          <td className={`py-2 pr-4 text-sm font-bold ${ACTION_COLORS[ev.type] ?? 'text-gray-300'}`}>
                             {ACTION_LABELS[ev.type] ?? ev.type}
                           </td>
                           <td className="py-2 pr-4 text-right font-mono text-sm font-bold text-white">
                             {ev.type === 'reward_claim'
-                              ? <span>{fmtAmt(ev.amount0)}<span className="text-gray-400 font-normal text-xs ml-1">{ev.rewardSymbol}</span></span>
+                              ? <span>{fmtAmt(ev.amount0)}<span className="text-gray-300 font-normal text-xs ml-1">{ev.rewardSymbol}</span></span>
                               : fmtAmt(ev.amount0)}
                           </td>
                           <td className="py-2 pr-4 text-right font-mono text-sm font-bold text-white">
                             {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
                           </td>
                           <td className="py-2 pr-4 text-right text-sm font-bold text-white">{fmtUSD(ev.usdAtTime)}</td>
-                          <td className="py-2 pr-4 text-right text-sm text-gray-400">
+                          <td className="py-2 pr-4 text-right text-sm text-gray-300">
                             {(ev.type === 'fee_claim' || ev.type === 'reward_claim') ? fmtUSD(ev.cumulativeFeeUSD) : '—'}
                           </td>
                           <td className="py-2 text-right">
@@ -1464,18 +1464,18 @@ export default function PositionDetail() {
             })()}
 
             {!activityLoading && !activity && (
-              <p className="text-sm text-gray-400">Could not load activity data.</p>
+              <p className="text-sm text-gray-300">Could not load activity data.</p>
             )}
 
             {/* Solana / Sui scanning note */}
             {(pos.protocol === 'Orca' || pos.protocol === 'Raydium') && (
-              <p className="text-xs text-gray-500 mt-3 border-t border-emerald-500/10 pt-3">
+              <p className="text-xs text-gray-300 mt-3 border-t border-emerald-500/10 pt-3">
                 Note: Fully closed Solana positions have their NFT burned on-chain and cannot be recovered.
                 Fee snapshots are saved locally each visit to track future claims.
               </p>
             )}
             {(pos.protocol === 'Cetus' || pos.protocol === 'Bluefin' || pos.protocol === 'Momentum') && (
-              <p className="text-xs text-gray-500 mt-3 border-t border-emerald-500/10 pt-3">
+              <p className="text-xs text-gray-300 mt-3 border-t border-emerald-500/10 pt-3">
                 Note: Fully closed Sui positions have their object destroyed on-chain and cannot be recovered.
                 Fee snapshots are saved locally each visit to track future claims.
               </p>
