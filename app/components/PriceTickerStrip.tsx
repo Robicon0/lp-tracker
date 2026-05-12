@@ -26,20 +26,23 @@ export const TICKER_CG_IDS: Record<string, string> = {
   BNB: "binancecoin",
 };
 
+// Placeholder USD prices — ticker is purely decorative on the landing page.
+// Values are picked at plausible mid-2026 USD levels so they don't read as
+// stale/low (which previously looked like AUD).
 const TICKERS: { sym: string; price: string; chg: string; up: boolean }[] = [
-  { sym: "BTC",   price: "94,210.00", chg: "+1.08%", up: true  },
-  { sym: "WBTC",  price: "94,180.00", chg: "+1.05%", up: true  },
-  { sym: "CBBTC", price: "94,200.00", chg: "+1.07%", up: true  },
-  { sym: "ETH",   price: "3,182.40",  chg: "+2.14%", up: true  },
-  { sym: "SOL",   price: "182.50",    chg: "+4.71%", up: true  },
-  { sym: "SUI",   price: "3.84",      chg: "-1.22%", up: false },
-  { sym: "ARB",   price: "1.18",      chg: "-0.54%", up: false },
-  { sym: "AERO",  price: "0.94",      chg: "+3.20%", up: true  },
-  { sym: "UNI",   price: "11.42",     chg: "+0.88%", up: true  },
-  { sym: "TAO",   price: "480.00",    chg: "-2.10%", up: false },
-  { sym: "ZCASH", price: "42.50",     chg: "+5.80%", up: true  },
-  { sym: "HYPE",  price: "28.40",     chg: "+6.40%", up: true  },
-  { sym: "BNB",   price: "678.00",    chg: "+0.95%", up: true  },
+  { sym: "BTC",   price: "128,500.00", chg: "+1.42%", up: true  },
+  { sym: "WBTC",  price: "128,470.00", chg: "+1.38%", up: true  },
+  { sym: "CBBTC", price: "128,490.00", chg: "+1.40%", up: true  },
+  { sym: "ETH",   price: "4,820.00",   chg: "+2.85%", up: true  },
+  { sym: "SOL",   price: "258.40",     chg: "+4.20%", up: true  },
+  { sym: "SUI",   price: "5.84",       chg: "-1.14%", up: false },
+  { sym: "ARB",   price: "1.92",       chg: "-0.62%", up: false },
+  { sym: "AERO",  price: "1.68",       chg: "+3.10%", up: true  },
+  { sym: "UNI",   price: "15.40",      chg: "+1.20%", up: true  },
+  { sym: "TAO",   price: "720.00",     chg: "-2.40%", up: false },
+  { sym: "ZCASH", price: "72.40",      chg: "+6.20%", up: true  },
+  { sym: "HYPE",  price: "44.80",      chg: "+5.80%", up: true  },
+  { sym: "BNB",   price: "852.00",     chg: "+0.84%", up: true  },
 ];
 
 export default function PriceTickerStrip() {
@@ -78,7 +81,7 @@ export default function PriceTickerStrip() {
         <div className="flex-1 overflow-hidden flex items-center pl-8">
           <div
             className="flex gap-10 whitespace-nowrap"
-            style={{ animation: "defidesh-ticker 25s linear infinite" }}
+            style={{ animation: "defidesh-ticker 50s linear infinite" }}
           >
             {doubled.map((t, i) => (
               <div key={i} className="text-[14px] flex gap-2 items-center">
