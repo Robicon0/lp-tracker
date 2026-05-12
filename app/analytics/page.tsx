@@ -125,7 +125,7 @@ const tooltipStyle: CSSProperties = {
   border: `1px solid ${C.borderHi}`,
   padding: "8px 12px",
   color: C.textBright,
-  fontSize: 11,
+  fontSize: 14,
   fontFamily: FONT,
 };
 
@@ -171,7 +171,7 @@ function ChainTag({ chain }: { chain: string }) {
   return (
     <span
       style={{
-        fontSize: 8,
+        fontSize: 10,
         padding: "1px 6px",
         letterSpacing: "0.12em",
         textTransform: "uppercase",
@@ -219,7 +219,7 @@ function ExposureCard({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
         <div
           style={{
-            fontSize: 9,
+            fontSize: 11,
             letterSpacing: "0.2em",
             textTransform: "uppercase",
             color: C.textMid,
@@ -230,7 +230,7 @@ function ExposureCard({
         {warning && (
           <span
             style={{
-              fontSize: 8,
+              fontSize: 10,
               padding: "2px 8px",
               border: `1px solid ${C.amber}44`,
               background: `${C.amber}11`,
@@ -246,7 +246,7 @@ function ExposureCard({
       </div>
 
       {data.length === 0 ? (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: C.text, fontSize: 11 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: C.text, fontSize: 14 }}>
           No data
         </div>
       ) : (
@@ -292,22 +292,22 @@ function ExposureCard({
             >
               {activeIdx != null && colored[activeIdx] ? (
                 <>
-                  <span style={{ fontSize: 8, letterSpacing: "0.15em", textTransform: "uppercase", color: C.text }}>
+                  <span style={{ fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", color: C.text }}>
                     {colored[activeIdx].name}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                     {valueFmt(colored[activeIdx].value)}
                   </span>
-                  <span style={{ fontSize: 8, color: C.text }}>
+                  <span style={{ fontSize: 10, color: C.text }}>
                     {total > 0 ? ((colored[activeIdx].value / total) * 100).toFixed(1) : "0"}%
                   </span>
                 </>
               ) : (
                 <>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                     {centerPrimary}
                   </span>
-                  <span style={{ fontSize: 8, color: C.text, letterSpacing: "0.15em", textTransform: "uppercase", marginTop: 2 }}>
+                  <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.15em", textTransform: "uppercase", marginTop: 2 }}>
                     {centerSecondary}
                   </span>
                 </>
@@ -333,7 +333,7 @@ function ExposureCard({
                     gap: 10,
                     padding: "4px 6px",
                     fontFamily: FONT,
-                    fontSize: 11.5,
+                    fontSize: 14.5,
                     background: isActive ? C.greenFaint : "transparent",
                     border: "none",
                     borderLeft: `2px solid ${isActive ? row.color : "transparent"}`,
@@ -358,7 +358,7 @@ function ExposureCard({
                   <span style={{ minWidth: 36, textAlign: "right", color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                     {pct.toFixed(1)}%
                   </span>
-                  <span style={{ minWidth: 60, textAlign: "right", color: C.text, fontSize: 9, fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ minWidth: 60, textAlign: "right", color: C.text, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
                     {valueFmt(row.value)}
                   </span>
                 </button>
@@ -404,10 +404,10 @@ function SectionFrame({
         }}
       >
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.textWhite, letterSpacing: "0.04em" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.textWhite, letterSpacing: "0.04em" }}>
             <span style={{ color: C.green }}>// </span>{title}
           </div>
-          {sub && <div style={{ fontSize: 11, color: C.text, marginTop: 4, letterSpacing: "0.04em" }}>{sub}</div>}
+          {sub && <div style={{ fontSize: 14, color: C.text, marginTop: 4, letterSpacing: "0.04em" }}>{sub}</div>}
         </div>
         {action}
       </div>
@@ -428,7 +428,7 @@ function RangePill({
       onClick={onClick}
       style={{
         fontFamily: FONT,
-        fontSize: 9,
+        fontSize: 11,
         letterSpacing: "0.12em",
         textTransform: "uppercase",
         padding: "5px 12px",
@@ -841,7 +841,7 @@ export default function Analytics() {
               background: C.greenFaint,
               border: `1px solid ${C.greenDim}`,
               display: "flex", alignItems: "center", justifyContent: "center",
-              color: C.green, fontSize: 26,
+              color: C.green, fontSize: 32,
             }}
           >
             ◎
@@ -849,7 +849,7 @@ export default function Analytics() {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, marginBottom: 10, letterSpacing: "-0.02em" }}>
             Portfolio Analytics
           </h1>
-          <p style={{ color: C.text, maxWidth: 360, fontSize: 12 }}>
+          <p style={{ color: C.text, maxWidth: 360, fontSize: 15 }}>
             Connect a wallet to view analytics and performance data for your DeFi positions.
           </p>
         </div>
@@ -858,7 +858,7 @@ export default function Analytics() {
   }
 
   const SortIcon = ({ col }: { col: SortKey }) => (
-    <span style={{ marginLeft: 4, fontSize: 8 }}>
+    <span style={{ marginLeft: 4, fontSize: 10 }}>
       {sortKey === col ? (sortDir === "desc" ? "▼" : "▲") : "▼"}
     </span>
   );
@@ -873,7 +873,7 @@ export default function Analytics() {
         background: C.bg,
         color: C.text,
         fontFamily: FONT,
-        fontSize: 13.5,
+        fontSize: 16.5,
         lineHeight: 1.55,
         overflowX: "hidden",
       }}
@@ -921,13 +921,13 @@ export default function Analytics() {
               animation: "_fadeUp 0.4s ease both",
             }}
           >
-            <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
               // <span style={{ color: C.green }}>analytics</span> · performance insights &amp; attribution
             </div>
             <div style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", marginBottom: 6 }}>
               Analytics
             </div>
-            <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.04em" }}>
+            <div style={{ fontSize: 15, color: C.text, letterSpacing: "0.04em" }}>
               Portfolio insights and performance metrics across all chains
             </div>
           </section>
@@ -947,25 +947,25 @@ export default function Analytics() {
             >
               {/* Total Portfolio */}
               <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Total Portfolio
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                   {fmtCompact(totalPortfolioValue)}
                 </div>
-                <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
                   LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}
                 </div>
               </div>
 
               {/* Daily Income */}
               <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Daily Income
                 </div>
                 <div
                   style={{
-                    fontSize: 22, fontWeight: 700,
+                    fontSize: 28, fontWeight: 700,
                     color: totalDailyIncome > 0 ? C.green : C.text,
                     fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                     textShadow: totalDailyIncome > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
@@ -973,20 +973,20 @@ export default function Analytics() {
                 >
                   {totalDailyIncome > 0 ? `+${fmt$(totalDailyIncome)}` : "$0.00"}
                 </div>
-                <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
                   {totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions"}
                 </div>
               </div>
 
               {/* Unclaimed Fees */}
               <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Unclaimed Fees
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                   {fmt$(totalLpFees)}
                 </div>
-                <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
                   {positions.filter((p) => p.fees > 0).length} positions with fees
                 </div>
               </div>
@@ -994,7 +994,7 @@ export default function Analytics() {
               {/* Actual APR — with D/W/M/Y toggle */}
               <div style={{ padding: "18px 22px", borderRight: `1px solid ${C.border}` }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase" }}>
                     Actual APR
                   </span>
                   <div style={{ display: "flex" }}>
@@ -1007,7 +1007,7 @@ export default function Analytics() {
                         data-active={aprView === v ? "true" : "false"}
                         style={{
                           fontFamily: FONT,
-                          fontSize: 8,
+                          fontSize: 10,
                           padding: "2px 6px",
                           border: `1px solid ${aprView === v ? C.greenDim : C.border}`,
                           background: aprView === v ? C.greenFaint : "transparent",
@@ -1041,14 +1041,14 @@ export default function Analytics() {
                   return (
                     <>
                       <div style={{
-                        fontSize: 22, fontWeight: 700,
+                        fontSize: 28, fontWeight: 700,
                         color: apr > 0 ? C.green : C.text,
                         fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                         textShadow: apr > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
                       }}>
                         {apr > 0 ? `${displayRate.toFixed(displayRate < 1 ? 3 : 1)}%` : "--"}
                       </div>
-                      <div style={{ fontSize: 9, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
+                      <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
                         {apr > 0 ? `${fmt$(dollarIncome)}${periodLabel}` : "No active positions"}
                       </div>
                     </>
@@ -1058,12 +1058,12 @@ export default function Analytics() {
 
               {/* Health Score */}
               <div style={{ padding: "18px 22px" }}>
-                <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Health Score
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                <div style={{ fontSize: 28, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                   {healthScore != null ? healthScore : "--"}
-                  <span style={{ fontSize: 12, color: C.text, marginLeft: 4 }}>/100</span>
+                  <span style={{ fontSize: 15, color: C.text, marginLeft: 4 }}>/100</span>
                 </div>
                 <div style={{ width: "100%", height: 2, background: C.border, marginTop: 10 }}>
                   <div
@@ -1105,12 +1105,12 @@ export default function Analytics() {
                       borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
                     }}
                   >
-                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
                       {c.label}
                     </div>
                     <div
                       style={{
-                        fontSize: 22, fontWeight: 700,
+                        fontSize: 28, fontWeight: 700,
                         color: c.green ? C.green : C.textBright,
                         fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                         textShadow: c.green ? "0 0 18px rgba(0,255,65,0.22)" : "none",
@@ -1118,7 +1118,7 @@ export default function Analytics() {
                     >
                       {c.val}
                     </div>
-                    <div style={{ fontSize: 9, marginTop: 6, letterSpacing: "0.06em", color: c.subUp ? C.green : C.text }}>
+                    <div style={{ fontSize: 11, marginTop: 6, letterSpacing: "0.06em", color: c.subUp ? C.green : C.text }}>
                       {c.sub}
                     </div>
                   </div>
@@ -1137,20 +1137,20 @@ export default function Analytics() {
                   </div>
                   <div style={{ marginLeft: "auto", display: "flex", gap: 22, flexWrap: "wrap" }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 8 }}>Peak Day</span>
-                      <span style={{ fontWeight: 700, color: C.green, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 10 }}>Peak Day</span>
+                      <span style={{ fontWeight: 700, color: C.green, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
                         {fmt$(feeIncome.peakDay)}
                       </span>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 8 }}>Avg/Day</span>
-                      <span style={{ fontWeight: 700, color: C.textBright, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 10 }}>Avg/Day</span>
+                      <span style={{ fontWeight: 700, color: C.textBright, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
                         {fmt$(feeIncome.dailyAvg)}
                       </span>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 8 }}>Projected 12M</span>
-                      <span style={{ fontWeight: 700, color: C.green, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                      <span style={{ color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: 10 }}>Projected 12M</span>
+                      <span style={{ fontWeight: 700, color: C.green, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
                         {fmtCompact(feeIncome.annualizedAtRate)}
                       </span>
                     </div>
@@ -1169,9 +1169,9 @@ export default function Analytics() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="4 8" stroke="rgba(255,255,255,0.04)" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 9, fontFamily: FONT }} axisLine={false} tickLine={false} />
+                        <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 11, fontFamily: FONT }} axisLine={false} tickLine={false} />
                         <YAxis
-                          tick={{ fill: C.text, fontSize: 9, fontFamily: FONT }}
+                          tick={{ fill: C.text, fontSize: 11, fontFamily: FONT }}
                           tickFormatter={(v) => fmtCompact(v)}
                           axisLine={false}
                           tickLine={false}
@@ -1196,7 +1196,7 @@ export default function Analytics() {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: C.text, fontSize: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: C.text, fontSize: 14 }}>
                     {activityLoading ? "Loading on-chain fee history…" : `No fee claims in the last ${activeRange.label}`}
                   </div>
                 )}
@@ -1205,10 +1205,10 @@ export default function Analytics() {
                 {feeIncome.protocols.length > 0 && (
                   <div style={{ marginTop: 18 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                      <span style={{ fontSize: 9, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                      <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase" }}>
                         By Protocol
                       </span>
-                      <span style={{ fontSize: 9, color: C.text }}>scroll →</span>
+                      <span style={{ fontSize: 11, color: C.text }}>scroll →</span>
                     </div>
                     <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }} className="scroll-thin">
                       {feeIncome.protocols.map((p) => {
@@ -1225,16 +1225,16 @@ export default function Analytics() {
                               borderLeft: `3px solid ${color}`,
                             }}
                           >
-                            <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
                               {p.protocol}
                             </div>
-                            <div style={{ fontSize: 9, color: C.text, marginTop: 3, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                            <div style={{ fontSize: 11, color: C.text, marginTop: 3, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                               {p.chain}
                             </div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 10, fontVariantNumeric: "tabular-nums" }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color, marginTop: 10, fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(p.usd)}
                             </div>
-                            <div style={{ fontSize: 9, color: C.text, marginTop: 3 }}>
+                            <div style={{ fontSize: 11, color: C.text, marginTop: 3 }}>
                               {p.pct.toFixed(1)}% of {activeRange.label}
                             </div>
                           </div>
@@ -1256,7 +1256,7 @@ export default function Analytics() {
                   <span
                     style={{
                       display: "inline-flex", alignItems: "center", gap: 6,
-                      fontSize: 9, color: C.green, letterSpacing: "0.14em", textTransform: "uppercase",
+                      fontSize: 11, color: C.green, letterSpacing: "0.14em", textTransform: "uppercase",
                     }}
                   >
                     <span
@@ -1303,12 +1303,12 @@ export default function Analytics() {
                       borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
                     }}
                   >
-                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10 }}>
                       {c.label}
                     </div>
                     <div
                       style={{
-                        fontSize: 17, fontWeight: 700,
+                        fontSize: 21, fontWeight: 700,
                         color: c.color,
                         fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                         textShadow: c.color === C.green ? "0 0 12px rgba(0,255,65,0.22)" : "none",
@@ -1316,7 +1316,7 @@ export default function Analytics() {
                     >
                       {c.val}
                     </div>
-                    <div style={{ fontSize: 9, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
+                    <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
                       {c.sub}
                     </div>
                   </div>
@@ -1331,11 +1331,11 @@ export default function Analytics() {
                     padding: "10px 14px",
                   }}
                 >
-                  <div style={{ fontSize: 11, color: C.red, fontWeight: 700 }}>
+                  <div style={{ fontSize: 14, color: C.red, fontWeight: 700 }}>
                     Couldn&apos;t load {lpPnl.errored} position{lpPnl.errored === 1 ? "" : "s"}
                     {lpPnl.errorReasons.length > 0 && <> — {lpPnl.errorReasons.slice(0, 3).join(", ")}</>}
                   </div>
-                  <div style={{ fontSize: 10, color: `${C.red}99`, marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: `${C.red}99`, marginTop: 2 }}>
                     The RPC didn&apos;t respond in 30s. Totals shown are for the positions that did load.
                   </div>
                 </div>
@@ -1347,7 +1347,7 @@ export default function Analytics() {
               {/* Income by Source */}
               <div style={{ border: `1px solid ${C.border}`, background: C.bg1, padding: "22px 26px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-                  <div style={{ fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: C.textMid }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: C.textMid }}>
                     <span style={{ color: C.green }}>// </span>
                     Income by Source · {incomePeriod === "D" ? "Today" : incomePeriod === "M" ? "Month" : "Year"}
                   </div>
@@ -1361,7 +1361,7 @@ export default function Analytics() {
                         data-active={incomePeriod === k ? "true" : "false"}
                         style={{
                           fontFamily: FONT,
-                          fontSize: 9,
+                          fontSize: 11,
                           padding: "4px 10px",
                           border: `1px solid ${incomePeriod === k ? C.greenDim : C.border}`,
                           background: incomePeriod === k ? C.greenFaint : "transparent",
@@ -1414,10 +1414,10 @@ export default function Analytics() {
                           pointerEvents: "none", textAlign: "center",
                         }}
                       >
-                        <span style={{ fontSize: 13, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                           {fmt$(incomeWindow.total)}
                         </span>
-                        <span style={{ fontSize: 8, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 2 }}>
+                        <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 2 }}>
                           {incomePeriod === "D" ? "Daily" : incomePeriod === "M" ? "Monthly" : "Yearly"}
                         </span>
                       </div>
@@ -1428,21 +1428,21 @@ export default function Analytics() {
                         { name: "LP Fees", val: incomeWindow.lpAccrued, color: C.green, pct: incomeWindow.total > 0 ? (incomeWindow.lpAccrued / incomeWindow.total) * 100 : 0 },
                         { name: "Lending Interest", val: incomeWindow.lendingProjected, color: C.cyan, pct: incomeWindow.total > 0 ? (incomeWindow.lendingProjected / incomeWindow.total) * 100 : 0 },
                       ].map((d) => (
-                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11.5 }}>
+                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14.5 }}>
                           <span style={{ width: 7, height: 7, background: d.color, flexShrink: 0, boxShadow: `0 0 5px ${d.color}88` }} />
                           <span style={{ color: C.textMid, flex: 1, letterSpacing: "0.04em" }}>{d.name}</span>
                           <span style={{ fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>{fmt$(d.val)}</span>
-                          <span style={{ color: C.text, fontSize: 9, minWidth: 32, textAlign: "right" }}>{d.pct.toFixed(0)}%</span>
+                          <span style={{ color: C.text, fontSize: 11, minWidth: 32, textAlign: "right" }}>{d.pct.toFixed(0)}%</span>
                         </div>
                       ))}
-                      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 2, display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 2, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                         <span style={{ color: C.text, letterSpacing: "0.18em", textTransform: "uppercase" }}>Total</span>
                         <span style={{ color: C.green, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmt$(incomeWindow.total)}</span>
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.text, fontSize: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.text, fontSize: 14 }}>
                     No income in this period
                   </div>
                 )}
@@ -1451,7 +1451,7 @@ export default function Analytics() {
               {/* Daily Income by Chain */}
               <div style={{ border: `1px solid ${C.border}`, background: C.bg1, padding: "22px 26px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-                  <div style={{ fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: C.textMid }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: C.textMid }}>
                     <span style={{ color: C.green }}>// </span>
                     Income by Chain
                   </div>
@@ -1465,7 +1465,7 @@ export default function Analytics() {
                         data-active={chainPeriod === k ? "true" : "false"}
                         style={{
                           fontFamily: FONT,
-                          fontSize: 9,
+                          fontSize: 11,
                           padding: "4px 10px",
                           border: `1px solid ${chainPeriod === k ? C.greenDim : C.border}`,
                           background: chainPeriod === k ? C.greenFaint : "transparent",
@@ -1501,7 +1501,7 @@ export default function Analytics() {
                                   display: "flex", alignItems: "center", gap: 14,
                                   padding: "11px 0",
                                   borderBottom: `1px solid ${C.border}`,
-                                  fontSize: 11.5,
+                                  fontSize: 14.5,
                                 }}
                               >
                                 <span style={{ width: 6, height: 6, background: color, flexShrink: 0, boxShadow: `0 0 4px ${color}88` }} />
@@ -1520,15 +1520,15 @@ export default function Analytics() {
                                 <span style={{ fontWeight: 700, color: C.textBright, minWidth: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                                   {fmt$(row.period)}
                                 </span>
-                                <span style={{ fontSize: 9, color: C.text, minWidth: 50, textAlign: "right" }}>
+                                <span style={{ fontSize: 11, color: C.text, minWidth: 50, textAlign: "right" }}>
                                   {fmt$(row.daily * 30, 0)}/mo
                                 </span>
                               </div>
                             );
                           })}
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, fontSize: 10, borderTop: `1px solid ${C.border}`, marginTop: 6 }}>
-                          <span style={{ color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", fontSize: 9 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, fontSize: 12, borderTop: `1px solid ${C.border}`, marginTop: 6 }}>
+                          <span style={{ color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", fontSize: 11 }}>
                             Total / mo
                           </span>
                           <span style={{ color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
@@ -1539,7 +1539,7 @@ export default function Analytics() {
                     );
                   })()
                 ) : (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.text, fontSize: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.text, fontSize: 14 }}>
                     No active LP positions
                   </div>
                 )}
@@ -1559,7 +1559,7 @@ export default function Analytics() {
                       <th
                         style={{
                           padding: "12px 16px 12px 26px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "left",
@@ -1572,7 +1572,7 @@ export default function Analytics() {
                         onClick={() => handleSort("protocol")}
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "left", cursor: "pointer",
@@ -1585,7 +1585,7 @@ export default function Analytics() {
                         onClick={() => handleSort("chain")}
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "left", cursor: "pointer",
@@ -1598,7 +1598,7 @@ export default function Analytics() {
                         onClick={() => handleSort("value")}
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "right", cursor: "pointer",
@@ -1611,7 +1611,7 @@ export default function Analytics() {
                         onClick={() => handleSort("apy")}
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "right", cursor: "pointer",
@@ -1624,7 +1624,7 @@ export default function Analytics() {
                         onClick={() => handleSort("daily")}
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "right", cursor: "pointer",
@@ -1637,7 +1637,7 @@ export default function Analytics() {
                         onClick={() => handleSort("fees")}
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "right", cursor: "pointer",
@@ -1648,7 +1648,7 @@ export default function Analytics() {
                       <th
                         style={{
                           padding: "12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "center",
@@ -1659,7 +1659,7 @@ export default function Analytics() {
                       <th
                         style={{
                           padding: "12px 26px 12px 16px",
-                          fontSize: 9, fontWeight: 400, color: C.text,
+                          fontSize: 11, fontWeight: 400, color: C.text,
                           letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`,
                           textAlign: "right",
@@ -1681,20 +1681,20 @@ export default function Analytics() {
                                   border: `1px solid ${C.borderHi}`,
                                   background: C.bg2,
                                   display: "flex", alignItems: "center", justifyContent: "center",
-                                  fontSize: 8, fontWeight: 700, color: C.textMid,
+                                  fontSize: 10, fontWeight: 700, color: C.textMid,
                                   letterSpacing: "0.04em",
                                   flexShrink: 0,
                                 }}
                               >
                                 {tokenInitials(p.pair)}
                               </div>
-                              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>{p.pair}</div>
+                              <div style={{ fontSize: 15.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>{p.pair}</div>
                             </div>
                           </td>
                           <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
                             <span
                               style={{
-                                fontSize: 9,
+                                fontSize: 11,
                                 padding: "2px 8px",
                                 background: `${protoColor}11`,
                                 border: `1px solid ${protoColor}33`,
@@ -1710,25 +1710,25 @@ export default function Analytics() {
                           <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
                             <ChainTag chain={p.chain} />
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 12.5, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                             {fmt$(p.value)}
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 12.5, fontWeight: 700, color: aprColor, fontVariantNumeric: "tabular-nums" }}>
+                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: aprColor, fontVariantNumeric: "tabular-nums" }}>
                             {p.displayAPR > 0 ? `${p.displayAPR.toFixed(1)}%` : "--"}
                             {p.isEstimated && p.displayAPR > 0 && (
-                              <span style={{ fontSize: 8, color: C.text, marginLeft: 4 }}>est.</span>
+                              <span style={{ fontSize: 10, color: C.text, marginLeft: 4 }}>est.</span>
                             )}
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 12.5, fontWeight: 700, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
                             {p.displayDaily > 0 ? fmt$(p.displayDaily) : "--"}
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 12.5, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
+                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
                             {p.fees > 0 ? fmt$(p.fees) : "--"}
                           </td>
                           <td style={{ padding: "12px 16px", textAlign: "center" }}>
                             <span
                               style={{
-                                fontSize: 9,
+                                fontSize: 11,
                                 padding: "2px 8px",
                                 background:
                                   p.status === "In Range" ? `${C.green}15`
@@ -1757,7 +1757,7 @@ export default function Analytics() {
                               className="analyze-btn"
                               style={{
                                 fontFamily: FONT,
-                                fontSize: 8,
+                                fontSize: 10,
                                 fontWeight: 600,
                                 letterSpacing: "0.14em",
                                 textTransform: "uppercase",
@@ -1779,7 +1779,7 @@ export default function Analytics() {
                     })}
                     {sortedPositions.length === 0 && (
                       <tr>
-                        <td colSpan={9} style={{ padding: 32, textAlign: "center", color: C.text, fontSize: 11 }}>
+                        <td colSpan={9} style={{ padding: 32, textAlign: "center", color: C.text, fontSize: 14 }}>
                           No active LP positions
                         </td>
                       </tr>
@@ -1791,7 +1791,7 @@ export default function Analytics() {
               {/* Lending positions summary rows */}
               {lendingPositions.length > 0 && (
                 <div style={{ borderTop: `1px solid ${C.border}`, padding: "16px 26px" }}>
-                  <div style={{ fontSize: 9, fontWeight: 600, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 12 }}>
                     Lending Positions
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1811,12 +1811,12 @@ export default function Analytics() {
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                               {lp.protocol}
                             </span>
                             <ChainTag chain={lp.chain} />
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 11, fontFamily: FONT, fontVariantNumeric: "tabular-nums" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 14, fontFamily: FONT, fontVariantNumeric: "tabular-nums" }}>
                             <span style={{ color: C.textBright, fontWeight: 700 }}>{fmt$(lp.totalSupplied)}</span>
                             <span style={{ color: lp.supplyApy != null && lp.supplyApy > 0 ? C.green : C.text, fontWeight: 700 }}>
                               {lp.supplyApy != null ? `${lp.supplyApy.toFixed(1)}%` : "--"}
@@ -1853,21 +1853,21 @@ export default function Analytics() {
                           gap: 14,
                           padding: "12px 28px",
                           borderBottom: `1px solid ${C.border}`,
-                          fontSize: 11.5,
+                          fontSize: 14.5,
                         }}
                       >
                         <span style={{ width: 6, height: 6, background: color, flexShrink: 0, boxShadow: `0 0 5px ${color}88` }} />
-                        <span style={{ minWidth: 100, color: C.textMid, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700 }}>
+                        <span style={{ minWidth: 100, color: C.textMid, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700 }}>
                           {e.protocol}
                         </span>
                         <ChainTag chain={e.chain} />
-                        <span style={{ flex: 1, color: C.text, fontSize: 8, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                        <span style={{ flex: 1, color: C.text, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                           Fee Claim
                         </span>
                         <span style={{ fontWeight: 700, color: C.green, minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                           +{fmt$(e.usd)}
                         </span>
-                        <span style={{ fontSize: 9, color: C.text, minWidth: 64, textAlign: "right", letterSpacing: "0.04em" }}>{timeStr}</span>
+                        <span style={{ fontSize: 11, color: C.text, minWidth: 64, textAlign: "right", letterSpacing: "0.04em" }}>{timeStr}</span>
                       </div>
                     );
                   })}
@@ -1908,7 +1908,7 @@ export default function Analytics() {
                   <div style={{ padding: "22px 26px", borderRight: `1px solid ${C.border}` }}>
                     <div
                       style={{
-                        fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase",
+                        fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase",
                         color: C.textMid, marginBottom: 16,
                       }}
                     >
@@ -1924,34 +1924,34 @@ export default function Analytics() {
                           borderBottom: i === topPerformers.length - 1 ? "none" : `1px solid ${C.border}`,
                         }}
                       >
-                        <span style={{ fontSize: 10, fontWeight: 700, color: C.text, minWidth: 24, letterSpacing: "0.1em" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: C.text, minWidth: 24, letterSpacing: "0.1em" }}>
                           #{i + 1}
                         </span>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                          <div style={{ fontSize: 15.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
                             {p.pair}
                           </div>
-                          <div style={{ fontSize: 11, color: C.text, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                          <div style={{ fontSize: 14, color: C.text, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.1em" }}>
                             {p.protocol} · {p.chain}
                           </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
                           <div
                             style={{
-                              fontSize: 14, fontWeight: 700, color: C.green,
+                              fontSize: 17, fontWeight: 700, color: C.green,
                               fontVariantNumeric: "tabular-nums",
                               textShadow: "0 0 10px rgba(0,255,65,0.25)",
                             }}
                           >
                             {p.displayAPR.toFixed(1)}%
-                            {p.isEstimated && <span style={{ fontSize: 8, color: C.text, marginLeft: 4, fontWeight: 400 }}>est.</span>}
+                            {p.isEstimated && <span style={{ fontSize: 10, color: C.text, marginLeft: 4, fontWeight: 400 }}>est.</span>}
                           </div>
-                          <div style={{ fontSize: 9, color: C.text, marginTop: 3, letterSpacing: "0.04em" }}>{fmt$(p.value)}</div>
+                          <div style={{ fontSize: 11, color: C.text, marginTop: 3, letterSpacing: "0.04em" }}>{fmt$(p.value)}</div>
                         </div>
                       </div>
                     ))}
                     {topPerformers.length === 0 && (
-                      <p style={{ color: C.text, fontSize: 11 }}>No active positions</p>
+                      <p style={{ color: C.text, fontSize: 14 }}>No active positions</p>
                     )}
                   </div>
 
@@ -1959,7 +1959,7 @@ export default function Analytics() {
                   <div style={{ padding: "22px 26px" }}>
                     <div
                       style={{
-                        fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase",
+                        fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase",
                         color: C.textMid, marginBottom: 16,
                       }}
                     >
@@ -1975,34 +1975,34 @@ export default function Analytics() {
                           borderBottom: i === bottomPerformers.length - 1 ? "none" : `1px solid ${C.border}`,
                         }}
                       >
-                        <span style={{ fontSize: 10, fontWeight: 700, color: C.text, minWidth: 24, letterSpacing: "0.1em" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: C.text, minWidth: 24, letterSpacing: "0.1em" }}>
                           #{i + 1}
                         </span>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                          <div style={{ fontSize: 15.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
                             {p.pair}
                           </div>
-                          <div style={{ fontSize: 11, color: C.text, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                          <div style={{ fontSize: 14, color: C.text, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.1em" }}>
                             {p.protocol} · {p.chain}
                           </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
                           <div
                             style={{
-                              fontSize: 14, fontWeight: 700,
+                              fontSize: 17, fontWeight: 700,
                               color: p.displayAPR < 5 ? C.red : C.amber,
                               fontVariantNumeric: "tabular-nums",
                             }}
                           >
                             {p.displayAPR.toFixed(1)}%
-                            {p.isEstimated && <span style={{ fontSize: 8, color: C.text, marginLeft: 4, fontWeight: 400 }}>est.</span>}
+                            {p.isEstimated && <span style={{ fontSize: 10, color: C.text, marginLeft: 4, fontWeight: 400 }}>est.</span>}
                           </div>
-                          <div style={{ fontSize: 9, color: C.text, marginTop: 3, letterSpacing: "0.04em" }}>{fmt$(p.value)}</div>
+                          <div style={{ fontSize: 11, color: C.text, marginTop: 3, letterSpacing: "0.04em" }}>{fmt$(p.value)}</div>
                         </div>
                       </div>
                     ))}
                     {bottomPerformers.length === 0 && (
-                      <p style={{ color: C.text, fontSize: 11 }}>No active positions</p>
+                      <p style={{ color: C.text, fontSize: 14 }}>No active positions</p>
                     )}
                   </div>
                 </div>

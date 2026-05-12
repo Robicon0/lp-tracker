@@ -81,7 +81,7 @@ export default function AnalyticsSidebar({
     borderBottom: `1px solid ${C.border}`,
   };
   const labelStyle: CSSProperties = {
-    fontSize: 9,
+    fontSize: 11,
     letterSpacing: "0.22em",
     textTransform: "uppercase",
     color: C.text,
@@ -93,7 +93,7 @@ export default function AnalyticsSidebar({
     alignItems: "center",
     gap: 12,
     padding: "9px 20px",
-    fontSize: 12.5,
+    fontSize: 15.5,
     color: C.textMid,
     cursor: "pointer",
     textDecoration: "none",
@@ -114,7 +114,7 @@ export default function AnalyticsSidebar({
     fontWeight: 700,
   };
   const iconStyle: CSSProperties = {
-    fontSize: 11,
+    fontSize: 14,
     width: 14,
     textAlign: "center",
     flexShrink: 0,

@@ -155,7 +155,7 @@ export default function WalletPage() {
         {!isConnected && !solanaAddress && !suiAddress ? (
           <div className="mt-8 bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-8 text-center">
             <p className="text-emerald-300/70 text-lg">Connect a wallet to view balances</p>
-            <p className="text-emerald-400/40 text-sm mt-2">Use &quot;Connect EVM&quot;, &quot;Connect Phantom&quot;, or &quot;Connect Sui&quot; in the navbar</p>
+            <p className="text-emerald-400/40 text-base mt-2">Use &quot;Connect EVM&quot;, &quot;Connect Phantom&quot;, or &quot;Connect Sui&quot; in the navbar</p>
           </div>
         ) : (
           <div className="mt-8 space-y-6">
@@ -163,8 +163,8 @@ export default function WalletPage() {
             {address && (
               <div className="space-y-3">
                 <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-4">
-                  <p className="text-emerald-300/70 text-xs mb-1">EVM Wallet</p>
-                  <p className="text-white font-mono text-sm">{address}</p>
+                  <p className="text-emerald-300/70 text-sm mb-1">EVM Wallet</p>
+                  <p className="text-white font-mono text-base">{address}</p>
                 </div>
                 {loading ? (
                   <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
@@ -176,13 +176,13 @@ export default function WalletPage() {
                 ) : chainBalances.map((cb) => (
                   <div key={cb.chain} className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl overflow-hidden">
                     <div className="px-4 py-3 border-b border-emerald-400/10 bg-emerald-900/20">
-                      <span className="text-white font-semibold text-sm">{cb.chain}</span>
+                      <span className="text-white font-semibold text-base">{cb.chain}</span>
                     </div>
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-emerald-400/10">
-                          <th className="text-left text-emerald-300/70 text-xs font-medium px-4 py-3">Token</th>
-                          <th className="text-right text-emerald-300/70 text-xs font-medium px-4 py-3">Balance</th>
+                          <th className="text-left text-emerald-300/70 text-sm font-medium px-4 py-3">Token</th>
+                          <th className="text-right text-emerald-300/70 text-sm font-medium px-4 py-3">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -192,12 +192,12 @@ export default function WalletPage() {
                               <div className="flex items-center space-x-3">
                                 <span className="text-lg">⟠</span>
                                 <div>
-                                  <p className="text-white font-medium text-sm">{cb.nativeSymbol}</p>
-                                  <p className="text-emerald-400/40 text-xs">{cb.chain} native</p>
+                                  <p className="text-white font-medium text-base">{cb.nativeSymbol}</p>
+                                  <p className="text-emerald-400/40 text-sm">{cb.chain} native</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-white text-sm">{cb.nativeBalance}</td>
+                            <td className="px-4 py-3 text-right text-white text-base">{cb.nativeBalance}</td>
                           </tr>
                         )}
                         {cb.tokens.map((token, i) => (
@@ -207,22 +207,22 @@ export default function WalletPage() {
                                 {token.logo ? (
                                   <img src={token.logo} alt={token.symbol} className="w-6 h-6 rounded-full" />
                                 ) : (
-                                  <div className="w-6 h-6 bg-emerald-900/40 rounded-full flex items-center justify-center text-xs text-emerald-300">
+                                  <div className="w-6 h-6 bg-emerald-900/40 rounded-full flex items-center justify-center text-sm text-emerald-300">
                                     {token.symbol.charAt(0)}
                                   </div>
                                 )}
                                 <div>
-                                  <p className="text-white font-medium text-sm">{token.symbol}</p>
-                                  <p className="text-emerald-400/40 text-xs">{token.name}</p>
+                                  <p className="text-white font-medium text-base">{token.symbol}</p>
+                                  <p className="text-emerald-400/40 text-sm">{token.name}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-white text-sm">{token.balance}</td>
+                            <td className="px-4 py-3 text-right text-white text-base">{token.balance}</td>
                           </tr>
                         ))}
                         {cb.nativeBalance === "0.0000" && cb.tokens.length === 0 && (
                           <tr>
-                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-sm">No tokens found on {cb.chain}</td>
+                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-base">No tokens found on {cb.chain}</td>
                           </tr>
                         )}
                       </tbody>
@@ -236,8 +236,8 @@ export default function WalletPage() {
             {solanaAddress && (
               <div className="space-y-3">
                 <div className="bg-emerald-950/30 border border-purple-800/50 rounded-xl p-4">
-                  <p className="text-purple-400 text-xs mb-1">Solana Wallet (Phantom)</p>
-                  <p className="text-white font-mono text-sm">{solanaAddress}</p>
+                  <p className="text-purple-400 text-sm mb-1">Solana Wallet (Phantom)</p>
+                  <p className="text-white font-mono text-base">{solanaAddress}</p>
                 </div>
                 {solanaLoading ? (
                   <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
@@ -249,13 +249,13 @@ export default function WalletPage() {
                 ) : solanaBalances ? (
                   <div className="bg-emerald-950/30 border border-purple-800/40 rounded-xl overflow-hidden">
                     <div className="px-4 py-3 border-b border-purple-800/40 bg-purple-900/10">
-                      <span className="text-purple-300 font-semibold text-sm">Solana</span>
+                      <span className="text-purple-300 font-semibold text-base">Solana</span>
                     </div>
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-emerald-400/10">
-                          <th className="text-left text-emerald-300/70 text-xs font-medium px-4 py-3">Token</th>
-                          <th className="text-right text-emerald-300/70 text-xs font-medium px-4 py-3">Balance</th>
+                          <th className="text-left text-emerald-300/70 text-sm font-medium px-4 py-3">Token</th>
+                          <th className="text-right text-emerald-300/70 text-sm font-medium px-4 py-3">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -265,33 +265,33 @@ export default function WalletPage() {
                               <div className="flex items-center space-x-3">
                                 <span className="text-lg">◎</span>
                                 <div>
-                                  <p className="text-white font-medium text-sm">SOL</p>
-                                  <p className="text-emerald-400/40 text-xs">Solana native</p>
+                                  <p className="text-white font-medium text-base">SOL</p>
+                                  <p className="text-emerald-400/40 text-sm">Solana native</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-white text-sm">{solanaBalances.solBalance}</td>
+                            <td className="px-4 py-3 text-right text-white text-base">{solanaBalances.solBalance}</td>
                           </tr>
                         )}
                         {solanaBalances.tokens.map((token, i) => (
                           <tr key={i} className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
-                                <div className="w-6 h-6 bg-purple-900/40 rounded-full flex items-center justify-center text-xs text-purple-300">
+                                <div className="w-6 h-6 bg-purple-900/40 rounded-full flex items-center justify-center text-sm text-purple-300">
                                   {token.symbol.charAt(0)}
                                 </div>
                                 <div>
-                                  <p className="text-white font-medium text-sm">{token.symbol}</p>
-                                  <p className="text-emerald-400/40 text-xs">{token.name}</p>
+                                  <p className="text-white font-medium text-base">{token.symbol}</p>
+                                  <p className="text-emerald-400/40 text-sm">{token.name}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-white text-sm">{token.balance}</td>
+                            <td className="px-4 py-3 text-right text-white text-base">{token.balance}</td>
                           </tr>
                         ))}
                         {solanaBalances.solBalance === "0.0000" && solanaBalances.tokens.length === 0 && (
                           <tr>
-                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-sm">No tokens found on Solana</td>
+                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-base">No tokens found on Solana</td>
                           </tr>
                         )}
                       </tbody>
@@ -305,8 +305,8 @@ export default function WalletPage() {
             {suiAddress && (
               <div className="space-y-3">
                 <div className="bg-emerald-950/30 border border-cyan-800/50 rounded-xl p-4">
-                  <p className="text-cyan-400 text-xs mb-1">Sui Wallet</p>
-                  <p className="text-white font-mono text-sm">{suiAddress}</p>
+                  <p className="text-cyan-400 text-sm mb-1">Sui Wallet</p>
+                  <p className="text-white font-mono text-base">{suiAddress}</p>
                 </div>
                 {suiLoading ? (
                   <div className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-6">
@@ -318,13 +318,13 @@ export default function WalletPage() {
                 ) : suiBalances ? (
                   <div className="bg-emerald-950/30 border border-cyan-800/40 rounded-xl overflow-hidden">
                     <div className="px-4 py-3 border-b border-cyan-800/40 bg-cyan-900/10">
-                      <span className="text-cyan-300 font-semibold text-sm">Sui</span>
+                      <span className="text-cyan-300 font-semibold text-base">Sui</span>
                     </div>
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-emerald-400/10">
-                          <th className="text-left text-emerald-300/70 text-xs font-medium px-4 py-3">Token</th>
-                          <th className="text-right text-emerald-300/70 text-xs font-medium px-4 py-3">Balance</th>
+                          <th className="text-left text-emerald-300/70 text-sm font-medium px-4 py-3">Token</th>
+                          <th className="text-right text-emerald-300/70 text-sm font-medium px-4 py-3">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -334,33 +334,33 @@ export default function WalletPage() {
                               <div className="flex items-center space-x-3">
                                 <span className="text-lg">🌊</span>
                                 <div>
-                                  <p className="text-white font-medium text-sm">SUI</p>
-                                  <p className="text-emerald-400/40 text-xs">Sui native</p>
+                                  <p className="text-white font-medium text-base">SUI</p>
+                                  <p className="text-emerald-400/40 text-sm">Sui native</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-white text-sm">{suiBalances.suiBalance}</td>
+                            <td className="px-4 py-3 text-right text-white text-base">{suiBalances.suiBalance}</td>
                           </tr>
                         )}
                         {suiBalances.tokens.map((token, i) => (
                           <tr key={i} className="border-b border-emerald-400/10 hover:bg-emerald-950/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center space-x-3">
-                                <div className="w-6 h-6 bg-cyan-900/40 rounded-full flex items-center justify-center text-xs text-cyan-300">
+                                <div className="w-6 h-6 bg-cyan-900/40 rounded-full flex items-center justify-center text-sm text-cyan-300">
                                   {token.symbol.charAt(0)}
                                 </div>
                                 <div>
-                                  <p className="text-white font-medium text-sm">{token.symbol}</p>
-                                  <p className="text-emerald-400/40 text-xs">{token.name}</p>
+                                  <p className="text-white font-medium text-base">{token.symbol}</p>
+                                  <p className="text-emerald-400/40 text-sm">{token.name}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-white text-sm">{token.balance}</td>
+                            <td className="px-4 py-3 text-right text-white text-base">{token.balance}</td>
                           </tr>
                         ))}
                         {suiBalances.suiBalance === "0.0000" && suiBalances.tokens.length === 0 && (
                           <tr>
-                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-sm">No tokens found on Sui</td>
+                            <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-base">No tokens found on Sui</td>
                           </tr>
                         )}
                       </tbody>

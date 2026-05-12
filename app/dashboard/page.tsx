@@ -517,7 +517,7 @@ export default function Dashboard() {
         background: C.bg,
         color: C.text,
         fontFamily: FONT,
-        fontSize: 12,
+        fontSize: 15,
         lineHeight: 1.5,
         overflowX: "hidden",
       }}
@@ -599,7 +599,7 @@ export default function Dashboard() {
 
             <div
               style={{
-                fontSize: 8,
+                fontSize: 10,
                 color: C.text,
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
@@ -643,14 +643,14 @@ export default function Dashboard() {
                       alignItems: "center",
                       gap: 8,
                       marginTop: 10,
-                      fontSize: 12,
+                      fontSize: 15,
                       color: chartPnlDollar >= 0 ? C.green : C.red,
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
-                    <span style={{ fontSize: 14 }}>{chartPnlDollar >= 0 ? "↑" : "↓"}</span>
+                    <span style={{ fontSize: 17 }}>{chartPnlDollar >= 0 ? "↑" : "↓"}</span>
                     <span>{chartPnlDollar >= 0 ? "+" : "-"}{fmt$(Math.abs(chartPnlDollar))}</span>
-                    <span style={{ color: C.text, fontSize: 10, marginLeft: 4, opacity: 0.6 }}>
+                    <span style={{ color: C.text, fontSize: 12, marginLeft: 4, opacity: 0.6 }}>
                       {chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(1)}% ({activeRange.label.replace("in last ", "")})
                     </span>
                   </div>
@@ -668,7 +668,7 @@ export default function Dashboard() {
                     border: `1px solid ${C.borderHi}`,
                     color: C.text,
                     padding: "9px 20px",
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: 600,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
@@ -692,7 +692,7 @@ export default function Dashboard() {
                     border: `1px solid ${C.borderHi}`,
                     color: C.text,
                     padding: "9px 20px",
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: 600,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
@@ -744,12 +744,12 @@ export default function Dashboard() {
                     gap: 5,
                   }}
                 >
-                  <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6 }}>
+                  <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6 }}>
                     {s.label}
                   </div>
                   <div
                     style={{
-                      fontSize: 20,
+                      fontSize: 25,
                       fontWeight: 700,
                       letterSpacing: "-0.01em",
                       color:
@@ -761,7 +761,7 @@ export default function Dashboard() {
                   >
                     {s.val}
                   </div>
-                  <div style={{ fontSize: 9, color: C.text, opacity: 0.5 }}>{s.sub}</div>
+                  <div style={{ fontSize: 11, color: C.text, opacity: 0.5 }}>{s.sub}</div>
                 </div>
               ))}
             </div>
@@ -781,7 +781,7 @@ export default function Dashboard() {
               <PaneHead title="wallets" linkLabel="+ Add wallet" onLinkClick={() => setShowManageWallets(true)} />
 
               {!hasWallet && mounted && (
-                <div style={{ fontSize: 11, color: C.text, opacity: 0.5, padding: "12px 0" }}>
+                <div style={{ fontSize: 14, color: C.text, opacity: 0.5, padding: "12px 0" }}>
                   No wallet connected — use ▸ Wallets above.
                 </div>
               )}
@@ -802,22 +802,22 @@ export default function Dashboard() {
                 >
                   <div style={{ width: 2, height: 36, background: w.color, flexShrink: 0 }} />
                   <div style={{ flex: 1, overflow: "hidden" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: C.textBright, letterSpacing: "0.02em" }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.textBright, letterSpacing: "0.02em" }}>
                       {w.name}
                     </div>
-                    <div style={{ fontSize: 9, color: C.text, marginTop: 2, fontStyle: "italic", opacity: 0.6 }}>
+                    <div style={{ fontSize: 11, color: C.text, marginTop: 2, fontStyle: "italic", opacity: 0.6 }}>
                       {w.addr.slice(0, 6)}…{w.addr.slice(-4)}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontSize: 11, color: C.textMid, opacity: 0.7 }}>
+                    <div style={{ fontSize: 14, color: C.textMid, opacity: 0.7 }}>
                       {w.type === "browser" ? "● Connected" : "Watched"}
                     </div>
-                    <div style={{ fontSize: 9, color: C.text, marginTop: 2, opacity: 0.5 }}>
+                    <div style={{ fontSize: 11, color: C.text, marginTop: 2, opacity: 0.5 }}>
                       {w.sub}
                     </div>
                   </div>
-                  <div style={{ color: C.borderGlow, fontSize: 12 }}>▸</div>
+                  <div style={{ color: C.borderGlow, fontSize: 15 }}>▸</div>
                 </div>
               ))}
             </div>
@@ -835,7 +835,7 @@ export default function Dashboard() {
               <div
                 style={{
                   marginBottom: 6,
-                  fontSize: 9,
+                  fontSize: 11,
                   color: C.text,
                   opacity: 0.4,
                   letterSpacing: "0.1em",
@@ -872,10 +872,10 @@ export default function Dashboard() {
                       alignItems: "center",
                       padding: "8px 0",
                       borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
-                      fontSize: 10,
+                      fontSize: 12,
                     }}
                   >
-                    <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 9, opacity: 0.6 }}>
+                    <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11, opacity: 0.6 }}>
                       {r.label}
                     </span>
                     <span style={{ fontWeight: 600, color: r.c, fontVariantNumeric: "tabular-nums" }}>
@@ -903,7 +903,7 @@ export default function Dashboard() {
                 <div
                   style={{
                     marginBottom: 6,
-                    fontSize: 9,
+                    fontSize: 11,
                     color: C.text,
                     opacity: 0.4,
                     letterSpacing: "0.1em",
@@ -928,7 +928,7 @@ export default function Dashboard() {
                 </div>
                 <div style={{ marginTop: 20 }}>
                   {topLending.length === 0 ? (
-                    <div style={{ fontSize: 11, color: C.text, opacity: 0.5, padding: "8px 0" }}>
+                    <div style={{ fontSize: 14, color: C.text, opacity: 0.5, padding: "8px 0" }}>
                       {hasWallet ? "No lending positions" : "Connect a wallet to see lending"}
                     </div>
                   ) : (
@@ -941,10 +941,10 @@ export default function Dashboard() {
                           alignItems: "center",
                           padding: "8px 0",
                           borderBottom: i < topLending.length - 1 ? `1px solid ${C.border}` : "none",
-                          fontSize: 10,
+                          fontSize: 12,
                         }}
                       >
-                        <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 9, opacity: 0.6 }}>
+                        <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11, opacity: 0.6 }}>
                           {p.protocol}{" "}
                           <span style={{ opacity: 0.4 }}>({p.chain})</span>
                         </span>
@@ -994,7 +994,7 @@ export default function Dashboard() {
                             border: `1px solid ${C.border}`,
                             borderRadius: 0,
                             color: C.textBright,
-                            fontSize: 11,
+                            fontSize: 14,
                             fontFamily: FONT,
                           }}
                           itemStyle={{ color: C.textBright }}
@@ -1014,10 +1014,10 @@ export default function Dashboard() {
                         pointerEvents: "none",
                       }}
                     >
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.textBright }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: C.textBright }}>
                         {protocolBreakdown.length}
                       </div>
-                      <div style={{ fontSize: 8, color: C.text, letterSpacing: "0.2em", opacity: 0.5 }}>
+                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.2em", opacity: 0.5 }}>
                         POOLS
                       </div>
                     </div>
@@ -1028,14 +1028,14 @@ export default function Dashboard() {
                       const pct = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
                       const colour = getProtocolColor(entry.name);
                       return (
-                        <div key={entry.name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10 }}>
+                        <div key={entry.name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
                           <div
                             style={{
                               width: 7, height: 7, background: colour, flexShrink: 0,
                               boxShadow: `0 0 6px ${colour}66`,
                             }}
                           />
-                          <div style={{ color: C.text, minWidth: 90, fontSize: 10 }}>{entry.name}</div>
+                          <div style={{ color: C.text, minWidth: 90, fontSize: 12 }}>{entry.name}</div>
                           <div style={{ flex: 1, height: 2, background: C.border, margin: "0 4px" }}>
                             <div style={{ height: "100%", width: `${pct}%`, background: colour, transition: "width 1s ease" }} />
                           </div>
@@ -1045,13 +1045,13 @@ export default function Dashboard() {
                               fontWeight: 700,
                               minWidth: 36,
                               textAlign: "right",
-                              fontSize: 11,
+                              fontSize: 14,
                               fontVariantNumeric: "tabular-nums",
                             }}
                           >
                             {pct.toFixed(0)}%
                           </div>
-                          <div style={{ color: C.text, fontSize: 9, minWidth: 56, textAlign: "right", opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>
+                          <div style={{ color: C.text, fontSize: 11, minWidth: 56, textAlign: "right", opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>
                             {fmt$(entry.value, 0)}
                           </div>
                         </div>
@@ -1065,18 +1065,18 @@ export default function Dashboard() {
                 <PaneHead title="chain_distribution" />
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {chainGrouped.length === 0 ? (
-                    <div style={{ color: C.text, fontSize: 11, opacity: 0.5 }}>No chain data yet.</div>
+                    <div style={{ color: C.text, fontSize: 14, opacity: 0.5 }}>No chain data yet.</div>
                   ) : chainGrouped.map((c) => {
                     const colour = CHAIN_DISPLAY[c.name].color;
                     return (
                       <div key={c.name}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, fontSize: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
                           <div style={{ color: C.textMid, display: "flex", alignItems: "center", gap: 6 }}>
                             <div style={{ width: 6, height: 6, background: colour, flexShrink: 0, boxShadow: `0 0 5px ${colour}88` }} />
                             <span>{c.name}</span>
-                            <span style={{ fontSize: 9, opacity: 0.4, marginLeft: 4 }}>{c.chains}</span>
+                            <span style={{ fontSize: 11, opacity: 0.4, marginLeft: 4 }}>{c.chains}</span>
                           </div>
-                          <div style={{ color: C.textBright, fontWeight: 700, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                          <div style={{ color: C.textBright, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
                             {c.pct.toFixed(0)}%
                           </div>
                         </div>
@@ -1088,7 +1088,7 @@ export default function Dashboard() {
                             }}
                           />
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 9, fontVariantNumeric: "tabular-nums" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
                           <span style={{ color: C.text, opacity: 0.5 }}>VALUE</span>
                           <span style={{ color: C.text, opacity: 0.7 }}>{fmt$(c.value, 0)}</span>
                         </div>
@@ -1110,7 +1110,7 @@ export default function Dashboard() {
               <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20, flexWrap: "wrap" }}>
                 <div
                   style={{
-                    fontSize: 8,
+                    fontSize: 10,
                     letterSpacing: "0.22em",
                     textTransform: "uppercase",
                     color: C.text,
@@ -1133,7 +1133,7 @@ export default function Dashboard() {
                         style={{
                           padding: "4px 12px",
                           fontFamily: FONT,
-                          fontSize: 9,
+                          fontSize: 11,
                           letterSpacing: "0.12em",
                           textTransform: "uppercase",
                           border: `1px solid ${active ? C.greenDim : C.border}`,
@@ -1155,7 +1155,7 @@ export default function Dashboard() {
                     display: "flex",
                     alignItems: "center",
                     gap: 20,
-                    fontSize: 9,
+                    fontSize: 11,
                   }}
                 >
                   {chartPnlAvailable && (
@@ -1168,10 +1168,10 @@ export default function Dashboard() {
 
               {portfolioHistory.length < 2 ? (
                 <div style={{ textAlign: "center", padding: "32px 0" }}>
-                  <div style={{ fontSize: 12, color: C.text, opacity: 0.5 }}>
+                  <div style={{ fontSize: 15, color: C.text, opacity: 0.5 }}>
                     Tracking started — chart appears after the next refresh.
                   </div>
-                  <div style={{ fontSize: 10, color: C.text, marginTop: 4, letterSpacing: "0.06em", opacity: 0.4 }}>
+                  <div style={{ fontSize: 12, color: C.text, marginTop: 4, letterSpacing: "0.06em", opacity: 0.4 }}>
                     A data point is saved on every 60-second refresh.
                   </div>
                 </div>
@@ -1186,9 +1186,9 @@ export default function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="4 6" stroke="rgba(255,255,255,0.03)" />
-                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.2)", fontSize: 9, fontFamily: FONT }}
+                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.2)", fontSize: 11, fontFamily: FONT }}
                       axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: "rgba(255,255,255,0.18)", fontSize: 9, fontFamily: FONT }}
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.18)", fontSize: 11, fontFamily: FONT }}
                       axisLine={false} tickLine={false} width={64}
                       tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
                     <Tooltip
@@ -1269,7 +1269,7 @@ export default function Dashboard() {
                 />
                 <div
                   style={{
-                    fontSize: 8,
+                    fontSize: 10,
                     color: C.text,
                     letterSpacing: "0.18em",
                     textTransform: "uppercase",
@@ -1281,7 +1281,7 @@ export default function Dashboard() {
                 </div>
                 <div
                   style={{
-                    fontSize: 22,
+                    fontSize: 28,
                     fontWeight: 700,
                     letterSpacing: "-0.02em",
                     marginBottom: 4,
@@ -1297,7 +1297,7 @@ export default function Dashboard() {
                 >
                   {m.val}
                 </div>
-                <div style={{ fontSize: 9, color: C.text, opacity: 0.45 }}>{m.sub}</div>
+                <div style={{ fontSize: 11, color: C.text, opacity: 0.45 }}>{m.sub}</div>
               </div>
             ))}
           </div>
@@ -1328,7 +1328,7 @@ export default function Dashboard() {
                     onClick={() => setStatusFilter(s)}
                     style={{
                       fontFamily: FONT,
-                      fontSize: 10,
+                      fontSize: 12,
                       letterSpacing: "0.08em",
                       padding: "5px 14px",
                       marginRight: 6,
@@ -1341,7 +1341,7 @@ export default function Dashboard() {
                     }}
                   >
                     {s === "All" ? "All Positions" : s}{" "}
-                    <span style={{ opacity: active ? 0.8 : 0.4, marginLeft: 4, fontSize: 9 }}>
+                    <span style={{ opacity: active ? 0.8 : 0.4, marginLeft: 4, fontSize: 11 }}>
                       ({count})
                     </span>
                   </button>
@@ -1356,7 +1356,7 @@ export default function Dashboard() {
                     border: `1px solid ${C.borderHi}`,
                     color: C.text,
                     padding: "5px 14px",
-                    fontSize: 9,
+                    fontSize: 11,
                     fontWeight: 600,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
@@ -1390,7 +1390,7 @@ export default function Dashboard() {
                     className="filter-pill"
                     style={{
                       fontFamily: FONT,
-                      fontSize: 9,
+                      fontSize: 11,
                       letterSpacing: "0.1em",
                       textTransform: "uppercase",
                       padding: "4px 12px",
@@ -1419,30 +1419,30 @@ export default function Dashboard() {
                     display: "block",
                   }}
                 />
-                <div style={{ fontSize: 12, letterSpacing: "0.08em" }}>Fetching your positions…</div>
+                <div style={{ fontSize: 15, letterSpacing: "0.08em" }}>Fetching your positions…</div>
               </div>
             ) : filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: "64px 28px", color: C.text }}>
                 {!hasWallet ? (
                   <>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
                       NO_WALLET_CONNECTED
                     </div>
-                    <div style={{ color: C.text, fontSize: 11, opacity: 0.6 }}>
+                    <div style={{ color: C.text, fontSize: 14, opacity: 0.6 }}>
                       Connect a wallet to track LP positions across EVM, Solana, and Sui.
                     </div>
                   </>
                 ) : allPositions.length === 0 ? (
                   <>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
                       NO_POSITIONS_FOUND
                     </div>
-                    <div style={{ color: C.text, fontSize: 11, opacity: 0.6 }}>
+                    <div style={{ color: C.text, fontSize: 14, opacity: 0.6 }}>
                       No LP positions were found for your connected wallet(s).
                     </div>
                   </>
                 ) : (
-                  <div style={{ fontSize: 11, opacity: 0.5 }}>No positions match this filter.</div>
+                  <div style={{ fontSize: 14, opacity: 0.5 }}>No positions match this filter.</div>
                 )}
               </div>
             ) : (
@@ -1456,7 +1456,7 @@ export default function Dashboard() {
                           style={{
                             padding: i === 0 ? "10px 16px 10px 28px" : "10px 16px 10px 0",
                             textAlign: i === 0 ? "left" : "right",
-                            fontSize: 8,
+                            fontSize: 10,
                             fontWeight: 400,
                             color: C.text,
                             letterSpacing: "0.16em",
@@ -1541,17 +1541,17 @@ export default function Dashboard() {
                                 );
                               })()}
                               <div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
                                   {pos.pair}
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-                                  <span style={{ fontSize: 9, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                                  <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
                                     {pos.protocol}
                                   </span>
                                   {chainTok && (
                                     <span
                                       style={{
-                                        fontSize: 8,
+                                        fontSize: 10,
                                         padding: "1px 6px",
                                         letterSpacing: "0.1em",
                                         textTransform: "uppercase",
@@ -1571,11 +1571,11 @@ export default function Dashboard() {
 
                           {/* Value */}
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(pos.value)}
                             </div>
                             {dailyEarnings !== null && (
-                              <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                              <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
                                 ${dailyEarnings.toFixed(2)}/day
                               </div>
                             )}
@@ -1585,15 +1585,15 @@ export default function Dashboard() {
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
                             {pos.apy > 0 ? (
                               <>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: C.green, textShadow: "0 0 10px rgba(0,255,65,0.25)", fontVariantNumeric: "tabular-nums" }}>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px rgba(0,255,65,0.25)", fontVariantNumeric: "tabular-nums" }}>
                                   {pos.apy.toFixed(1)}%
                                 </div>
-                                <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                                <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
                                   base
                                 </div>
                               </>
                             ) : (
-                              <div style={{ fontSize: 11, color: C.text, opacity: 0.5 }}>N/A</div>
+                              <div style={{ fontSize: 14, color: C.text, opacity: 0.5 }}>N/A</div>
                             )}
                           </td>
 
@@ -1603,7 +1603,7 @@ export default function Dashboard() {
                               <>
                                 <div
                                   style={{
-                                    fontSize: 12,
+                                    fontSize: 15,
                                     fontWeight: 700,
                                     color: pnlUsd >= 0 ? C.green : C.red,
                                     fontVariantNumeric: "tabular-nums",
@@ -1613,29 +1613,29 @@ export default function Dashboard() {
                                   {pnlUsd >= 0 ? "+" : "-"}{fmt$(Math.abs(pnlUsd))}
                                 </div>
                                 {pnlPct !== null && Number.isFinite(pnlPct) && (
-                                  <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.55, fontVariantNumeric: "tabular-nums" }}>
+                                  <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.55, fontVariantNumeric: "tabular-nums" }}>
                                     {pnlUsd >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%
                                   </div>
                                 )}
                               </>
                             ) : pos.fees > 0 ? (
                               <>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: C.green, fontVariantNumeric: "tabular-nums" }}>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: C.green, fontVariantNumeric: "tabular-nums" }}>
                                   +{fmt$(pos.fees)}
                                 </div>
-                                <div style={{ fontSize: 9, color: C.text, marginTop: 3, opacity: 0.45 }}>
+                                <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.45 }}>
                                   fees only
                                 </div>
                               </>
                             ) : (
-                              <div style={{ fontSize: 12, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>—</div>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>—</div>
                             )}
                           </td>
 
                           {/* Health */}
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: hColour, fontVariantNumeric: "tabular-nums" }}>
+                              <span style={{ fontSize: 14, fontWeight: 700, color: hColour, fontVariantNumeric: "tabular-nums" }}>
                                 {health}%
                               </span>
                               <div style={{ width: 56, height: 2, background: C.border }}>
@@ -1663,7 +1663,7 @@ export default function Dashboard() {
                               }}
                               style={{
                                 fontFamily: FONT,
-                                fontSize: 9,
+                                fontSize: 11,
                                 fontWeight: 600,
                                 letterSpacing: "0.1em",
                                 textTransform: "uppercase",
@@ -1694,10 +1694,10 @@ export default function Dashboard() {
             style={{ padding: "24px 28px", borderTop: `1px solid ${C.border}` }}
           >
             <PaneHead title="alerts" />
-            <div style={{ fontSize: 11, color: C.text, padding: "8px 0", letterSpacing: "0.04em" }}>
+            <div style={{ fontSize: 14, color: C.text, padding: "8px 0", letterSpacing: "0.04em" }}>
               ◇ No active alerts.
             </div>
-            <div style={{ fontSize: 10, color: C.text, opacity: 0.5, marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: C.text, opacity: 0.5, marginTop: 4 }}>
               Coming soon — out-of-range warnings, IL thresholds, and price-drop notifications.
             </div>
           </div>
@@ -1709,7 +1709,7 @@ export default function Dashboard() {
               padding: "10px 28px",
               display: "flex",
               gap: 24,
-              fontSize: 9,
+              fontSize: 11,
               letterSpacing: "0.1em",
               textTransform: "uppercase",
               color: C.text,
@@ -1763,7 +1763,7 @@ export default function Dashboard() {
                 zIndex: 10,
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.green, letterSpacing: "0.16em", textTransform: "uppercase" }}>
                 MANAGE_WALLETS
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1775,7 +1775,7 @@ export default function Dashboard() {
                     border: `1px solid ${C.border}`,
                     color: C.textMid,
                     cursor: "pointer",
-                    fontSize: 14,
+                    fontSize: 17,
                     padding: "2px 8px",
                     fontFamily: FONT,
                   }}
@@ -1794,7 +1794,7 @@ export default function Dashboard() {
                     border: `1px solid ${C.border}`,
                     color: C.textMid,
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: 15,
                     padding: "2px 8px",
                     fontFamily: FONT,
                   }}
@@ -1807,7 +1807,7 @@ export default function Dashboard() {
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 22 }}>
               {/* Add New Wallet */}
               <div style={{ border: `1px solid ${C.border}`, padding: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                   ▸ Add New Wallet
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1823,7 +1823,7 @@ export default function Dashboard() {
                       border: `1px solid ${C.border}`,
                       color: C.textBright,
                       padding: "9px 11px",
-                      fontSize: 12,
+                      fontSize: 15,
                       outline: "none",
                       boxSizing: "border-box",
                       fontFamily: FONT,
@@ -1841,14 +1841,14 @@ export default function Dashboard() {
                       border: `1px solid ${C.border}`,
                       color: C.textBright,
                       padding: "9px 11px",
-                      fontSize: 12,
+                      fontSize: 15,
                       outline: "none",
                       boxSizing: "border-box",
                       fontFamily: FONT,
                     }}
                   />
                   {addWalletError && (
-                    <div style={{ color: C.red, fontSize: 11 }}>{addWalletError}</div>
+                    <div style={{ color: C.red, fontSize: 14 }}>{addWalletError}</div>
                   )}
                   <button
                     onClick={handleAddWatchedWallet}
@@ -1859,7 +1859,7 @@ export default function Dashboard() {
                       border: `1px solid ${addWalletAddress.trim() ? C.green : C.border}`,
                       color: addWalletAddress.trim() ? "#000" : C.text,
                       padding: "9px",
-                      fontSize: 11,
+                      fontSize: 14,
                       fontWeight: 700,
                       letterSpacing: "0.1em",
                       textTransform: "uppercase",
@@ -1870,8 +1870,8 @@ export default function Dashboard() {
                     ▸ Add Wallet
                   </button>
                   <div style={{ background: C.greenFaint, border: `1px solid ${C.green}`, padding: "9px 12px", display: "flex", alignItems: "flex-start", gap: 10 }}>
-                    <span style={{ color: C.green, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
-                    <div style={{ fontSize: 11, color: C.textBright, lineHeight: 1.6 }}>
+                    <span style={{ color: C.green, fontSize: 16, flexShrink: 0, marginTop: 1 }}>✓</span>
+                    <div style={{ fontSize: 14, color: C.textBright, lineHeight: 1.6 }}>
                       <strong style={{ color: C.green }}>READ_ONLY.</strong>{" "}
                       No private keys, no signing — DefiDesh only reads public chain data.
                     </div>
@@ -1881,7 +1881,7 @@ export default function Dashboard() {
 
               {/* Connect Browser Wallet */}
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                   ▸ Connect Browser Wallet
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1932,14 +1932,14 @@ export default function Dashboard() {
 
                 return (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.green, marginBottom: 12, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                       ▸ Your Wallets
                     </div>
                     {groups.map((group) => (
                       <div key={group.label} style={{ marginBottom: 14 }}>
                         <div
                           style={{
-                            fontSize: 9, color: group.color, fontWeight: 700,
+                            fontSize: 11, color: group.color, fontWeight: 700,
                             textTransform: "uppercase", letterSpacing: "0.16em", marginBottom: 6,
                           }}
                         >
@@ -1982,7 +1982,7 @@ export default function Dashboard() {
                                           border: `1px solid ${C.border}`,
                                           color: C.textBright,
                                           padding: "3px 8px",
-                                          fontSize: 11,
+                                          fontSize: 14,
                                           outline: "none",
                                           flex: 1,
                                           fontFamily: FONT,
@@ -1996,14 +1996,14 @@ export default function Dashboard() {
                                         }}
                                         style={{
                                           color: C.green, background: "none", border: "none",
-                                          cursor: "pointer", fontSize: 11, whiteSpace: "nowrap", fontFamily: FONT,
+                                          cursor: "pointer", fontSize: 14, whiteSpace: "nowrap", fontFamily: FONT,
                                         }}
                                       >
                                         SAVE
                                       </button>
                                       <button
                                         onClick={() => setEditingWallet(null)}
-                                        style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 12 }}
+                                        style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 15 }}
                                       >
                                         ✕
                                       </button>
@@ -2011,13 +2011,13 @@ export default function Dashboard() {
                                   ) : (
                                     <div>
                                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                                        <span style={{ fontSize: 12, fontWeight: 600, color: C.textBright }}>
+                                        <span style={{ fontSize: 15, fontWeight: 600, color: C.textBright }}>
                                           {w.label || (w.type === "browser" ? group.label : "Watched")}
                                         </span>
                                         {w.type === "watched" && (
                                           <button
                                             onClick={() => { setEditingWallet(w.addr); setEditLabelValue(w.label ?? ""); }}
-                                            style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
+                                            style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: 0 }}
                                             title="Edit label"
                                           >
                                             ✎
@@ -2025,7 +2025,7 @@ export default function Dashboard() {
                                         )}
                                         <span
                                           style={{
-                                            fontSize: 9,
+                                            fontSize: 11,
                                             color: w.type === "browser" ? C.green : C.text,
                                             background: w.type === "browser" ? C.greenFaint : "transparent",
                                             border: `1px solid ${w.type === "browser" ? C.green : C.border}`,
@@ -2039,12 +2039,12 @@ export default function Dashboard() {
                                         </span>
                                       </div>
                                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                        <span style={{ fontSize: 10, color: C.text, fontFamily: FONT }}>
+                                        <span style={{ fontSize: 12, color: C.text, fontFamily: FONT }}>
                                           {w.addr.slice(0, 8)}…{w.addr.slice(-6)}
                                         </span>
                                         <button
                                           onClick={() => navigator.clipboard.writeText(w.addr)}
-                                          style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0 }}
+                                          style={{ color: C.text, background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: 0 }}
                                           title="Copy address"
                                         >
                                           ⧉
@@ -2054,7 +2054,7 @@ export default function Dashboard() {
                                   )}
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                                  <span style={{ color: C.green, fontSize: 12 }}>✓</span>
+                                  <span style={{ color: C.green, fontSize: 15 }}>✓</span>
                                   {w.type === "watched" ? (
                                     <button
                                       onClick={() => {
@@ -2065,7 +2065,7 @@ export default function Dashboard() {
                                       style={{
                                         color: C.red, background: C.redFaint,
                                         border: `1px solid ${C.red}`, padding: "2px 7px",
-                                        fontSize: 11, cursor: "pointer", fontFamily: FONT,
+                                        fontSize: 14, cursor: "pointer", fontFamily: FONT,
                                       }}
                                     >
                                       🗑
@@ -2081,7 +2081,7 @@ export default function Dashboard() {
                                       style={{
                                         color: C.red, background: C.redFaint,
                                         border: `1px solid ${C.red}`, padding: "2px 7px",
-                                        fontSize: 11, cursor: "pointer", fontFamily: FONT,
+                                        fontSize: 14, cursor: "pointer", fontFamily: FONT,
                                       }}
                                     >
                                       ✕
@@ -2113,10 +2113,10 @@ export default function Dashboard() {
                       color: C.textBright, fontFamily: FONT, textAlign: "left",
                     }}
                   >
-                    <span style={{ fontSize: 12, color: C.green }}>▸</span>
+                    <span style={{ fontSize: 15, color: C.green }}>▸</span>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: C.textBright }}>{connector.name}</div>
-                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.06em" }}>Browser extension</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: C.textBright }}>{connector.name}</div>
+                      <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.06em" }}>Browser extension</div>
                     </div>
                   </button>
                 ))}
@@ -2126,7 +2126,7 @@ export default function Dashboard() {
             {showSolanaWalletList && (
               <SubPickerOverlay title="CHOOSE_SOLANA_WALLET" onClose={() => setShowSolanaWalletList(false)} accent={C.purple}>
                 {solanaWallets.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.text, textAlign: "center", padding: 8 }}>
+                  <div style={{ fontSize: 15, color: C.text, textAlign: "center", padding: 8 }}>
                     No Solana wallet detected. Install Phantom, Backpack, or Solflare.
                   </div>
                 ) : (
@@ -2144,7 +2144,7 @@ export default function Dashboard() {
                       {w.adapter.icon && (
                         <img src={w.adapter.icon} alt={w.adapter.name} style={{ width: 22, height: 22 }} />
                       )}
-                      <span style={{ fontSize: 12 }}>{w.adapter.name}</span>
+                      <span style={{ fontSize: 15 }}>{w.adapter.name}</span>
                     </button>
                   ))
                 )}
@@ -2154,7 +2154,7 @@ export default function Dashboard() {
             {showSuiWalletList && (
               <SubPickerOverlay title="CHOOSE_SUI_WALLET" onClose={() => setShowSuiWalletList(false)} accent={C.blue}>
                 {modalSuiWallets.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.text, textAlign: "center", padding: 8 }}>
+                  <div style={{ fontSize: 15, color: C.text, textAlign: "center", padding: 8 }}>
                     No Sui wallet detected. Install Phantom, Suiet, or Slush.
                   </div>
                 ) : (
@@ -2170,7 +2170,7 @@ export default function Dashboard() {
                       }}
                     >
                       {w.icon && <img src={w.icon} alt={w.name} style={{ width: 22, height: 22 }} />}
-                      <span style={{ fontSize: 12 }}>{w.name}</span>
+                      <span style={{ fontSize: 15 }}>{w.name}</span>
                     </button>
                   ))
                 )}
@@ -2198,7 +2198,7 @@ function PaneHead({
     >
       <div
         style={{
-          fontSize: 8,
+          fontSize: 10,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
           color: C.text,
@@ -2208,7 +2208,7 @@ function PaneHead({
           gap: 8,
         }}
       >
-        <span style={{ color: C.green, opacity: 1, fontSize: 9 }}>//</span>
+        <span style={{ color: C.green, opacity: 1, fontSize: 11 }}>//</span>
         {title}
       </div>
       {linkLabel && (
@@ -2217,7 +2217,7 @@ function PaneHead({
           onClick={onLinkClick}
           className="pane-link"
           style={{
-            fontSize: 9,
+            fontSize: 11,
             color: linkColor ?? C.text,
             letterSpacing: "0.1em",
             cursor: "pointer",
@@ -2237,10 +2237,10 @@ function PaneHead({
 function ChartMeta({ label, value, colour }: { label: string; value: string; colour: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-      <div style={{ color: C.text, opacity: 0.5, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 9 }}>
+      <div style={{ color: C.text, opacity: 0.5, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11 }}>
         {label}
       </div>
-      <div style={{ fontWeight: 700, color: colour, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ fontWeight: 700, color: colour, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
         {value}
       </div>
     </div>
@@ -2264,7 +2264,7 @@ function ConnectedRow({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             color: tagColor,
             fontWeight: 700,
             letterSpacing: "0.14em",
@@ -2274,12 +2274,12 @@ function ConnectedRow({
         >
           {tagLabel}
         </span>
-        <span style={{ fontSize: 11, color: C.textBright, fontFamily: FONT }}>
+        <span style={{ fontSize: 14, color: C.textBright, fontFamily: FONT }}>
           {addr.slice(0, 8)}…{addr.slice(-6)}
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ color: C.green, fontSize: 11, fontWeight: 600, letterSpacing: "0.08em" }}>● CONNECTED</span>
+        <span style={{ color: C.green, fontSize: 14, fontWeight: 600, letterSpacing: "0.08em" }}>● CONNECTED</span>
         <button
           onClick={onDisconnect}
           style={{
@@ -2287,7 +2287,7 @@ function ConnectedRow({
             border: `1px solid ${C.red}`,
             color: C.red,
             padding: "2px 8px",
-            fontSize: 10,
+            fontSize: 12,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
             cursor: "pointer",
@@ -2323,7 +2323,7 @@ function ConnectButton({
     >
       <span
         style={{
-          fontSize: 10,
+          fontSize: 12,
           color: tagColor,
           fontWeight: 700,
           letterSpacing: "0.14em",
@@ -2333,7 +2333,7 @@ function ConnectButton({
       >
         {tagLabel}
       </span>
-      <span style={{ fontSize: 12 }}>{label}</span>
+      <span style={{ fontSize: 15 }}>{label}</span>
     </button>
   );
 }
@@ -2363,14 +2363,14 @@ function SubPickerOverlay({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: accent, letterSpacing: "0.16em", textTransform: "uppercase" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: accent, letterSpacing: "0.16em", textTransform: "uppercase" }}>
             {title}
           </div>
           <button
             onClick={onClose}
             style={{
               color: C.textMid, background: "none", border: `1px solid ${C.border}`,
-              cursor: "pointer", fontSize: 11, padding: "1px 8px",
+              cursor: "pointer", fontSize: 14, padding: "1px 8px",
             }}
           >
             [X]

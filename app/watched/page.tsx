@@ -58,7 +58,7 @@ export default function WatchedPage() {
       <Navbar />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-8">
-          <Link href="/dashboard" className="text-emerald-400/40 hover:text-emerald-300 transition-colors text-sm">
+          <Link href="/dashboard" className="text-emerald-400/40 hover:text-emerald-300 transition-colors text-base">
             ← Dashboard
           </Link>
           <h1 className="text-3xl font-bold">Watched Wallets</h1>
@@ -78,10 +78,10 @@ export default function WatchedPage() {
                 : w.address;
               return (
                 <div key={key} className="bg-emerald-950/30 border border-emerald-400/15 rounded-xl p-4 flex items-center gap-4">
-                  <span className="text-xs font-mono bg-emerald-900/20 text-emerald-300/70 px-2 py-1 rounded shrink-0">
+                  <span className="text-sm font-mono bg-emerald-900/20 text-emerald-300/70 px-2 py-1 rounded shrink-0">
                     {CHAIN_LABELS[w.chain]}
                   </span>
-                  <span className="font-mono text-sm text-gray-300 shrink-0">{short}</span>
+                  <span className="font-mono text-base text-gray-300 shrink-0">{short}</span>
                   <div className="flex-1">
                     {editingKey === key ? (
                       <div className="flex gap-2">
@@ -94,17 +94,17 @@ export default function WatchedPage() {
                             if (e.key === "Escape") setEditingKey(null);
                           }}
                           placeholder="Nickname"
-                          className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-400"
+                          className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded px-2 py-1 text-base focus:outline-none focus:border-emerald-400"
                         />
                         <button
                           onClick={() => commitEdit(w.address, w.chain)}
-                          className="text-emerald-400 hover:text-emerald-300 text-sm"
+                          className="text-emerald-400 hover:text-emerald-300 text-base"
                         >
                           Save
                         </button>
                         <button
                           onClick={() => setEditingKey(null)}
-                          className="text-gray-300 hover:text-gray-300 text-sm"
+                          className="text-gray-300 hover:text-gray-300 text-base"
                         >
                           Cancel
                         </button>
@@ -112,7 +112,7 @@ export default function WatchedPage() {
                     ) : (
                       <button
                         onClick={() => startEdit(key, w.label ?? "")}
-                        className="text-emerald-400/40 hover:text-emerald-300 text-sm transition-colors text-left"
+                        className="text-emerald-400/40 hover:text-emerald-300 text-base transition-colors text-left"
                       >
                         {w.label ? (
                           <span className="text-emerald-300/80">{w.label}</span>
@@ -124,7 +124,7 @@ export default function WatchedPage() {
                   </div>
                   <button
                     onClick={() => removeWallet(w.address, w.chain)}
-                    className="text-red-500 hover:text-red-400 text-sm transition-colors shrink-0"
+                    className="text-red-500 hover:text-red-400 text-base transition-colors shrink-0"
                   >
                     Remove
                   </button>
@@ -145,12 +145,12 @@ export default function WatchedPage() {
                 onChange={(e) => { setAddInput(e.target.value); setAddError(""); }}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 placeholder="Paste wallet address"
-                className="flex-1 bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
+                className="flex-1 bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400"
               />
               <select
                 value={addChain}
                 onChange={(e) => { setAddChain(e.target.value as WatchedWalletChain); setAddError(""); }}
-                className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400 shrink-0"
+                className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400 shrink-0"
               >
                 <option value="evm">EVM</option>
                 <option value="solana">Solana</option>
@@ -163,12 +163,12 @@ export default function WatchedPage() {
               value={addLabel}
               onChange={(e) => setAddLabel(e.target.value)}
               placeholder="Nickname (optional)"
-              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
+              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400"
             />
-            {addError && <p className="text-red-400 text-xs">{addError}</p>}
+            {addError && <p className="text-red-400 text-sm">{addError}</p>}
             <button
               onClick={handleAdd}
-              className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors self-start"
+              className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-base font-medium transition-colors self-start"
             >
               Add Wallet
             </button>

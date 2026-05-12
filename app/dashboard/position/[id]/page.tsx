@@ -199,12 +199,12 @@ function Section({
     <section style={{ borderBottom: `1px solid ${C.border}`, animation: "_fadeUp 0.45s ease both" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "24px 40px 0", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-          <span style={{ fontSize: 11, color: C.green, letterSpacing: "0.1em" }}>{icon}</span>
+          <span style={{ fontSize: 14, color: C.green, letterSpacing: "0.1em" }}>{icon}</span>
           <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+            <div style={{ fontSize: 15.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.18em", textTransform: "uppercase" }}>
               {title}
             </div>
-            {sub && <div style={{ fontSize: 11, color: C.text, opacity: 0.55, marginTop: 4 }}>{sub}</div>}
+            {sub && <div style={{ fontSize: 14, color: C.text, opacity: 0.55, marginTop: 4 }}>{sub}</div>}
           </div>
         </div>
         {right && <div style={{ marginRight: 0 }}>{right}</div>}
@@ -433,7 +433,7 @@ export default function PositionDetail() {
             animation: "_spin 1s linear infinite",
           }} />
           <style>{`@keyframes _spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
-          <p style={{ color: C.text, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase" }}>Loading position…</p>
+          <p style={{ color: C.text, fontSize: 14, letterSpacing: "0.12em", textTransform: "uppercase" }}>Loading position…</p>
         </div>
       </div>
     );
@@ -445,15 +445,15 @@ export default function PositionDetail() {
       <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
         <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: C.textWhite, marginBottom: 12, letterSpacing: "-0.01em" }}>
+          <h2 style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, marginBottom: 12, letterSpacing: "-0.01em" }}>
             Position not found
           </h2>
-          <p style={{ color: C.text, marginBottom: 24, fontSize: 12 }}>
+          <p style={{ color: C.text, marginBottom: 24, fontSize: 15 }}>
             This position could not be located. It may have been closed or the data hasn&apos;t loaded yet.
           </p>
           <Link href="/dashboard" style={{
             border: `1px solid ${C.greenDim}`, background: C.greenFaint, color: C.green,
-            padding: "10px 18px", textDecoration: "none", fontSize: 11,
+            padding: "10px 18px", textDecoration: "none", fontSize: 14,
             fontFamily: FONT, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600,
           }}>
             ← Back to Dashboard
@@ -535,11 +535,11 @@ export default function PositionDetail() {
   // Helpers for inline styles
   const cellPadding = "20px 24px";
   const labelStyle: CSSProperties = {
-    fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+    fontSize: 12, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
     marginBottom: 10, opacity: 0.6, fontFamily: FONT,
   };
   const subStyle: CSSProperties = {
-    fontSize: 10, color: C.text, marginTop: 5, opacity: 0.6, letterSpacing: "0.04em",
+    fontSize: 12, color: C.text, marginTop: 5, opacity: 0.6, letterSpacing: "0.04em",
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -551,7 +551,7 @@ export default function PositionDetail() {
       background: C.bg,
       color: C.text,
       fontFamily: FONT,
-      fontSize: 13,
+      fontSize: 16,
       lineHeight: 1.5,
       overflowX: "hidden",
     }}>
@@ -582,7 +582,7 @@ export default function PositionDetail() {
           display: "flex", alignItems: "center", gap: 14,
         }}>
           <Link href="/dashboard" style={{
-            fontSize: 11, color: C.text, textDecoration: "none",
+            fontSize: 14, color: C.text, textDecoration: "none",
             letterSpacing: "0.08em", textTransform: "uppercase",
             transition: "color 0.15s",
           }}
@@ -591,8 +591,8 @@ export default function PositionDetail() {
           >
             ← Back to Dashboard
           </Link>
-          <span style={{ color: C.borderHi, fontSize: 10 }}>›</span>
-          <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em" }}>
+          <span style={{ color: C.borderHi, fontSize: 12 }}>›</span>
+          <span style={{ fontSize: 14, color: C.text, letterSpacing: "0.06em" }}>
             <span style={{ color: C.green }}>// position_detail</span> · {pos.id}
           </span>
         </div>
@@ -611,7 +611,7 @@ export default function PositionDetail() {
             opacity: 0.4,
           }} />
           <div style={{
-            fontSize: 10, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase",
+            fontSize: 12, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase",
             marginBottom: 14, opacity: 0.6,
           }}>
             <span style={{ color: C.green, opacity: 1 }}>// liquidity_position</span> · {pos.protocol.toLowerCase().replace(/ /g, "_")} · {pos.chain.toLowerCase().replace(/ /g, "_")}_network
@@ -630,7 +630,7 @@ export default function PositionDetail() {
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
                   {/* Protocol tag */}
                   <span style={{
-                    fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                    fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase",
                     padding: "4px 12px", border: `1px solid ${C.cyan}4d`, background: C.cyanFaint,
                     color: C.cyan, fontWeight: 600,
                   }}>
@@ -638,7 +638,7 @@ export default function PositionDetail() {
                   </span>
                   {/* Status tag */}
                   <span style={{
-                    fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                    fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase",
                     padding: "4px 12px", fontWeight: 600,
                     display: "flex", alignItems: "center", gap: 6,
                     border: `1px solid ${
@@ -662,7 +662,7 @@ export default function PositionDetail() {
                   {/* Fee tier tag */}
                   {pos.feeTier != null && (
                     <span style={{
-                      fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                      fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase",
                       padding: "4px 12px", border: `1px solid ${C.borderHi}`, background: C.bg2,
                       color: C.textMid, fontWeight: 600,
                     }}>
@@ -671,7 +671,7 @@ export default function PositionDetail() {
                   )}
                 </div>
                 {/* Sub meta row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, fontSize: 11, color: C.text, letterSpacing: "0.06em", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, fontSize: 14, color: C.text, letterSpacing: "0.06em", flexWrap: "wrap" }}>
                   <span style={{ color: chainColor(pos.chain), textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 600 }}>
                     ◆ {pos.chain}
                   </span>
@@ -701,7 +701,7 @@ export default function PositionDetail() {
                 <a href={manageUrl} target="_blank" rel="noopener noreferrer"
                   className="btn-primary"
                   style={{
-                    fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                    fontFamily: FONT, fontSize: 14, fontWeight: 600,
                     letterSpacing: "0.1em", textTransform: "uppercase",
                     padding: "10px 18px",
                     border: `1px solid ${C.greenDim}`, background: C.greenFaint,
@@ -728,7 +728,7 @@ export default function PositionDetail() {
               <span style={{ width: 5, height: 5, background: C.green }} />
               Total Value
             </div>
-            <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite, fontVariantNumeric: "tabular-nums" }}>
+            <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite, fontVariantNumeric: "tabular-nums" }}>
               {fmt$(pos.value)}
             </div>
             <div style={{ ...subStyle, opacity: 0.7 }}>live mark-to-market</div>
@@ -740,7 +740,7 @@ export default function PositionDetail() {
               Uncollected Fees
             </div>
             <div style={{
-              fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em",
+              fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em",
               color: pos.fees > 0 ? C.green : C.text,
               textShadow: pos.fees > 0 ? "0 0 20px rgba(0,255,65,0.25)" : "none",
               fontVariantNumeric: "tabular-nums",
@@ -758,7 +758,7 @@ export default function PositionDetail() {
               Estimated APR
             </div>
             <div style={{
-              fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em",
+              fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em",
               color: hasApr ? C.cyan : C.text,
               textShadow: hasApr ? "0 0 16px rgba(0,212,255,0.2)" : "none",
               fontVariantNumeric: "tabular-nums",
@@ -775,21 +775,21 @@ export default function PositionDetail() {
             </div>
             {hasApr ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
                   <span style={{ color: C.text, opacity: 0.6 }}>Daily</span>
                   <span style={{ color: C.green, fontWeight: 600 }}>+{fmt$(dailyUSD!)}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
                   <span style={{ color: C.text, opacity: 0.6 }}>Monthly</span>
                   <span style={{ color: C.green, fontWeight: 600 }}>+{fmt$(monthlyUSD!)}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
                   <span style={{ color: C.text, opacity: 0.6 }}>Yearly</span>
                   <span style={{ color: C.green, fontWeight: 600 }}>+{fmt$(yearlyUSD!)}</span>
                 </div>
               </div>
             ) : (
-              <div style={{ fontSize: 16, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
+              <div style={{ fontSize: 20, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
             )}
           </div>
         </div>
@@ -815,19 +815,19 @@ export default function PositionDetail() {
                     borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
                   }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                      <span style={{ fontSize: 11, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{sym}</span>
+                      <span style={{ fontSize: 14, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{sym}</span>
                       <span style={{
-                        fontSize: 9, color: C.text, letterSpacing: "0.1em",
+                        fontSize: 11, color: C.text, letterSpacing: "0.1em",
                         padding: "2px 8px", border: `1px solid ${C.borderHi}`, textTransform: "uppercase",
                       }}>
                         {label} · {pct}%
                       </span>
                     </div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                    <div style={{ fontSize: 30, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
                       {amount != null ? amount.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "—"}
                     </div>
                     {amount != null && price && (
-                      <div style={{ fontSize: 11, color: C.text, marginTop: 4, opacity: 0.7 }}>
+                      <div style={{ fontSize: 14, color: C.text, marginTop: 4, opacity: 0.7 }}>
                         {fmt$(myUsd)} · @ {fmtPrice(price)}
                       </div>
                     )}
@@ -842,7 +842,7 @@ export default function PositionDetail() {
               display: "flex", alignItems: "center", justifyContent: "space-between",
               background: C.bg1,
             }}>
-              <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em" }}>
+              <span style={{ fontSize: 14, color: C.text, letterSpacing: "0.06em" }}>
                 Combined Liquidity Position
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -852,13 +852,13 @@ export default function PositionDetail() {
                   const pct0 = ((pos.amount0 ?? 0) * (pos.price0 ?? 0) / total * 100).toFixed(1);
                   const pct1 = ((pos.amount1 ?? 0) * (pos.price1 ?? 0) / total * 100).toFixed(1);
                   return (
-                    <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                    <span style={{ fontSize: 12, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
                       {pct0} / {pct1} split
                     </span>
                   );
                 })()}
                 <span style={{
-                  fontSize: 14, fontWeight: 700, color: C.green,
+                  fontSize: 17, fontWeight: 700, color: C.green,
                   textShadow: "0 0 12px rgba(0,255,65,0.2)",
                   fontVariantNumeric: "tabular-nums",
                 }}>
@@ -880,7 +880,7 @@ export default function PositionDetail() {
               <a href={manageUrl} target="_blank" rel="noopener noreferrer"
                 className="btn-primary"
                 style={{
-                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  fontFamily: FONT, fontSize: 14, fontWeight: 600,
                   letterSpacing: "0.1em", textTransform: "uppercase",
                   padding: "10px 18px", marginRight: 40, marginTop: 0,
                   border: `1px solid ${C.greenDim}`, background: C.greenFaint,
@@ -912,19 +912,19 @@ export default function PositionDetail() {
                     borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
                   }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                      <span style={{ fontSize: 11, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{sym}</span>
+                      <span style={{ fontSize: 14, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{sym}</span>
                       <span style={{
-                        fontSize: 9, color: C.text, letterSpacing: "0.1em",
+                        fontSize: 11, color: C.text, letterSpacing: "0.1em",
                         padding: "2px 8px", border: `1px solid ${C.borderHi}`, textTransform: "uppercase",
                       }}>
                         {pct}%
                       </span>
                     </div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                    <div style={{ fontSize: 30, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
                       {fee != null ? fee.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "—"}
                     </div>
                     {fee != null && price && (
-                      <div style={{ fontSize: 11, color: C.text, marginTop: 4, opacity: 0.7 }}>
+                      <div style={{ fontSize: 14, color: C.text, marginTop: 4, opacity: 0.7 }}>
                         {fmt$(myUsd)}
                       </div>
                     )}
@@ -938,13 +938,13 @@ export default function PositionDetail() {
               display: "flex", alignItems: "center", justifyContent: "space-between",
               background: C.bg1,
             }}>
-              <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em" }}>Total Uncollected</span>
+              <span style={{ fontSize: 14, color: C.text, letterSpacing: "0.06em" }}>Total Uncollected</span>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                <span style={{ fontSize: 12, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
                   ready to collect
                 </span>
                 <span style={{
-                  fontSize: 14, fontWeight: 700, color: C.green,
+                  fontSize: 17, fontWeight: 700, color: C.green,
                   textShadow: "0 0 12px rgba(0,255,65,0.2)",
                   fontVariantNumeric: "tabular-nums",
                 }}>
@@ -975,7 +975,7 @@ export default function PositionDetail() {
                 }}>
                   <div style={labelStyle}>{c.label}</div>
                   <div style={{
-                    fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em",
+                    fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em",
                     color: c.color,
                     textShadow: c.color === C.green ? "0 0 14px rgba(0,255,65,0.2)" : "none",
                     fontVariantNumeric: "tabular-nums",
@@ -991,11 +991,11 @@ export default function PositionDetail() {
               <div style={{ padding: cellPadding, borderRight: `1px solid ${C.border}` }}>
                 <div style={labelStyle}>Actual Daily Income</div>
                 <div style={{
-                  fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: C.green,
+                  fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: C.green,
                   textShadow: "0 0 14px rgba(0,255,65,0.2)", fontVariantNumeric: "tabular-nums",
                 }}>
                   {activityLoading ? "…" : actualDailyIncome != null
-                    ? <>{fmt$(actualDailyIncome)}<span style={{ fontSize: 13, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>/day</span></>
+                    ? <>{fmt$(actualDailyIncome)}<span style={{ fontSize: 16, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>/day</span></>
                     : "—"}
                 </div>
                 <div style={subStyle}>trailing 30d average</div>
@@ -1003,7 +1003,7 @@ export default function PositionDetail() {
               <div style={{ padding: cellPadding }}>
                 <div style={labelStyle}>Fee Income Rate</div>
                 <div style={{
-                  fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite,
+                  fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite,
                   fontVariantNumeric: "tabular-nums",
                 }}>
                   {feeIncomePct.toFixed(3)}%
@@ -1038,8 +1038,8 @@ export default function PositionDetail() {
                         { lbl: "Total", val: fmt$(lifetimeUSD), color: C.green },
                       ].map((m) => (
                         <div key={m.lbl} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                          <span style={{ color: C.text, opacity: 0.5, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 9 }}>{m.lbl}</span>
-                          <span style={{ fontWeight: 700, color: m.color, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{m.val}</span>
+                          <span style={{ color: C.text, opacity: 0.5, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 11 }}>{m.lbl}</span>
+                          <span style={{ fontWeight: 700, color: m.color, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>{m.val}</span>
                         </div>
                       ));
                     })()}
@@ -1047,12 +1047,12 @@ export default function PositionDetail() {
                 </div>
                 {/* Chart */}
                 {(activityLoading || activityPending) ? (
-                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: C.text, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: C.text, fontSize: 14, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                     <div style={{ width: 14, height: 14, border: `2px solid ${C.green}`, borderTopColor: "transparent", animation: "_spin 1s linear infinite" }} />
                     Loading…
                   </div>
                 ) : !feeChartData || feeChartData.noClaimsYet || feeChartData.chartData.length < 2 ? (
-                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: C.text, fontSize: 12 }}>
+                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: C.text, fontSize: 15 }}>
                     No fee claims yet
                   </div>
                 ) : (
@@ -1067,14 +1067,14 @@ export default function PositionDetail() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="4 8" stroke="rgba(255,255,255,0.025)" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 10, fontFamily: FONT }} axisLine={false} tickLine={false} />
+                        <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 12, fontFamily: FONT }} axisLine={false} tickLine={false} />
                         <YAxis
-                          tick={{ fill: C.text, fontSize: 10, fontFamily: FONT }}
+                          tick={{ fill: C.text, fontSize: 12, fontFamily: FONT }}
                           tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
                           axisLine={false} tickLine={false} width={50}
                         />
                         <Tooltip
-                          contentStyle={{ background: C.bg1, border: `1px solid ${C.borderHi}`, padding: "8px 12px", color: C.textBright, fontSize: 11, fontFamily: FONT }}
+                          contentStyle={{ background: C.bg1, border: `1px solid ${C.borderHi}`, padding: "8px 12px", color: C.textBright, fontSize: 14, fontFamily: FONT }}
                           itemStyle={{ color: C.textBright }}
                           labelStyle={{ color: C.text }}
                           formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(2)}`, "Cumulative Fees"]}
@@ -1085,7 +1085,7 @@ export default function PositionDetail() {
                   </div>
                 )}
                 {feeChartData && !feeChartData.noClaimsYet && feeChartData.chartData.length >= 2 && (
-                  <div style={{ textAlign: "center", fontSize: 10, color: C.text, opacity: 0.5, marginTop: 12, letterSpacing: "0.08em" }}>
+                  <div style={{ textAlign: "center", fontSize: 12, color: C.text, opacity: 0.5, marginTop: 12, letterSpacing: "0.08em" }}>
                     ● markers indicate fee claim events · {feeChartData.chartData.length - 1} claims since {new Date(feeChartData.openTs).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                   </div>
                 )}
@@ -1098,20 +1098,20 @@ export default function PositionDetail() {
         <Section icon="[⤓]" title="Fee Claims History" sub="On-chain claim transactions for this position">
           <div style={{ padding: "0 40px 24px" }}>
             {(activityLoading || activityPending) ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.text, fontSize: 12, padding: "12px 0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.text, fontSize: 15, padding: "12px 0" }}>
                 <div style={{ width: 14, height: 14, border: `2px solid ${C.green}`, borderTopColor: "transparent", animation: "_spin 1s linear infinite", flexShrink: 0 }} />
                 Scanning blockchain for fee history…
               </div>
             ) : !isActivityProtocol ? (
-              <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+              <p style={{ fontSize: 15, color: C.text, opacity: 0.55 }}>
                 Activity data not available for {pos.protocol} — on-chain fee history scanning is not yet supported.
               </p>
             ) : activityError ? (
-              <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+              <p style={{ fontSize: 15, color: C.text, opacity: 0.55 }}>
                 Could not load fee claim data. The blockchain scan may have timed out — try refreshing.
               </p>
             ) : feeClaims.length === 0 ? (
-              <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+              <p style={{ fontSize: 15, color: C.text, opacity: 0.55 }}>
                 No fee claims detected yet. Claims will appear here after you collect fees on-chain.
               </p>
             ) : (
@@ -1121,27 +1121,27 @@ export default function PositionDetail() {
                     <thead>
                       <tr style={{ background: C.bg1 }}>
                         <th style={{
-                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          padding: "12px 20px", fontSize: 12, fontWeight: 400,
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "left",
                         }}>Date (UTC)</th>
                         <th style={{
-                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          padding: "12px 20px", fontSize: 12, fontWeight: 400,
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
                         }}>{t0}</th>
                         <th style={{
-                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          padding: "12px 20px", fontSize: 12, fontWeight: 400,
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
                         }}>{t1}</th>
                         <th style={{
-                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          padding: "12px 20px", fontSize: 12, fontWeight: 400,
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
                         }}>Total USD</th>
                         <th style={{
-                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          padding: "12px 20px", fontSize: 12, fontWeight: 400,
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
                         }}>Tx</th>
@@ -1152,22 +1152,22 @@ export default function PositionDetail() {
                         const usd = ev.usdAtTime ?? (ev.amount0 * (pos.price0 ?? 0) + ev.amount1 * (pos.price1 ?? 0));
                         return (
                           <tr key={i} className="pos-row" style={{ borderBottom: i === feeClaims.length - 1 ? "none" : `1px solid ${C.border}` }}>
-                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.textMid, whiteSpace: "nowrap" as const }}>{fmtDate(ev.timestamp)}</td>
-                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.textMid, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+                            <td style={{ padding: "11px 20px", fontSize: 15, color: C.textMid, whiteSpace: "nowrap" as const }}>{fmtDate(ev.timestamp)}</td>
+                            <td style={{ padding: "11px 20px", fontSize: 15, color: C.textMid, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
                               {ev.type === 'reward_claim'
                                 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
                                 ? `${fmtAmt(ev.amount0)} ${(ev as any).rewardSymbol ?? ''}`
                                 : fmtAmt(ev.amount0)}
                             </td>
-                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.textMid, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+                            <td style={{ padding: "11px 20px", fontSize: 15, color: C.textMid, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
                               {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
                             </td>
-                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.green, fontWeight: 600, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                            <td style={{ padding: "11px 20px", fontSize: 15, color: C.green, fontWeight: 600, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(usd)}
                             </td>
                             <td style={{ padding: "11px 20px", textAlign: "right" }}>
                               <a className="tx-link" href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
-                                style={{ color: C.cyan, fontSize: 11, textDecoration: "none", transition: "opacity 0.15s" }}>
+                                style={{ color: C.cyan, fontSize: 14, textDecoration: "none", transition: "opacity 0.15s" }}>
                                 {shortHash(ev.txHash)} ↗
                               </a>
                             </td>
@@ -1181,8 +1181,8 @@ export default function PositionDetail() {
                   padding: "12px 20px", borderTop: `1px solid ${C.border}`,
                   display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg1,
                 }}>
-                  <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.04em" }}>{feeClaims.length} collection{feeClaims.length !== 1 ? "s" : ""}</span>
-                  <span style={{ fontSize: 13, color: C.green, fontWeight: 700 }}>
+                  <span style={{ fontSize: 14, color: C.text, letterSpacing: "0.04em" }}>{feeClaims.length} collection{feeClaims.length !== 1 ? "s" : ""}</span>
+                  <span style={{ fontSize: 16, color: C.green, fontWeight: 700 }}>
                     <span style={{ color: C.text, fontWeight: 400, marginRight: 6, opacity: 0.6 }}>Total Claimed:</span>
                     {fmt$(claimedUSD)}
                   </span>
@@ -1201,7 +1201,7 @@ export default function PositionDetail() {
             right={
               <span style={{
                 marginRight: 40,
-                fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase",
                 padding: "4px 12px", fontWeight: 600,
                 display: "inline-flex", alignItems: "center", gap: 6,
                 border: `1px solid ${isClosed ? C.borderHi : posStatus === "In Range" ? C.greenDim : C.amber}`,
@@ -1228,15 +1228,15 @@ export default function PositionDetail() {
                 {/* Price labels */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginBottom: 14 }}>
                   <div>
-                    <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Min Price</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
+                    <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Min Price</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
                       {minPriceUSD != null ? fmtPrice(minPriceUSD) : "—"}
                     </div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                    <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Current Price</div>
+                    <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Current Price</div>
                     <div style={{
-                      fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em",
+                      fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em",
                       color: isClosed ? C.text : posStatus === "In Range" ? C.green : C.amber,
                       textShadow: !isClosed && posStatus === "In Range" ? "0 0 12px rgba(0,255,65,0.3)" : "none",
                     }}>
@@ -1244,8 +1244,8 @@ export default function PositionDetail() {
                     </div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Max Price</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
+                    <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Max Price</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
                       {maxPriceUSD != null ? fmtPrice(maxPriceUSD) : "—"}
                     </div>
                   </div>
@@ -1274,7 +1274,7 @@ export default function PositionDetail() {
                 </div>
                 {/* Ticks */}
                 {minPriceUSD != null && maxPriceUSD != null && (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.text, letterSpacing: "0.1em", opacity: 0.4, marginTop: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.text, letterSpacing: "0.1em", opacity: 0.4, marginTop: 18 }}>
                     {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
                       <span key={i}>{fmtPrice(minPriceUSD + (maxPriceUSD - minPriceUSD) * t)}</span>
                     ))}
@@ -1283,20 +1283,20 @@ export default function PositionDetail() {
                 {/* Stats row */}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}`, flexWrap: "wrap", gap: 16 }}>
                   <div>
-                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Range Width</div>
-                    <div style={{ fontSize: 12, color: C.textBright, fontWeight: 600 }}>{rangeWidthPct ?? "—"}%</div>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Range Width</div>
+                    <div style={{ fontSize: 15, color: C.textBright, fontWeight: 600 }}>{rangeWidthPct ?? "—"}%</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Distance to Lower</div>
-                    <div style={{ fontSize: 12, color: C.textBright, fontWeight: 600 }}>{distLower != null ? `${distLower}%` : "—"}</div>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Distance to Lower</div>
+                    <div style={{ fontSize: 15, color: C.textBright, fontWeight: 600 }}>{distLower != null ? `${distLower}%` : "—"}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Distance to Upper</div>
-                    <div style={{ fontSize: 12, color: C.textBright, fontWeight: 600 }}>{distUpper != null ? `+${distUpper}%` : "—"}</div>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Distance to Upper</div>
+                    <div style={{ fontSize: 15, color: C.textBright, fontWeight: 600 }}>{distUpper != null ? `+${distUpper}%` : "—"}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Position Age</div>
-                    <div style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>{daysLabel}</div>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Position Age</div>
+                    <div style={{ fontSize: 15, color: C.green, fontWeight: 600 }}>{daysLabel}</div>
                   </div>
                 </div>
               </div>
@@ -1322,7 +1322,7 @@ export default function PositionDetail() {
                   {hasApr ? (
                     <>
                       <div style={{
-                        fontSize: 24, fontWeight: 700, color: C.green,
+                        fontSize: 30, fontWeight: 700, color: C.green,
                         textShadow: "0 0 14px rgba(0,255,65,0.2)", letterSpacing: "-0.02em",
                         fontVariantNumeric: "tabular-nums",
                       }}>
@@ -1331,7 +1331,7 @@ export default function PositionDetail() {
                       <div style={subStyle}>{amt != null ? fmt$(amt) : "—"} / {unit}</div>
                     </>
                   ) : (
-                    <div style={{ fontSize: 16, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
+                    <div style={{ fontSize: 20, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
                   )}
                 </div>
               ))}
@@ -1344,15 +1344,15 @@ export default function PositionDetail() {
           <Section icon="[Σ]" title="On-Chain P&L & Impermanent Loss" sub="Performance versus a simple hold-the-tokens strategy">
             <div style={{ padding: "0 40px 24px" }}>
               {(activityLoading || activityPending) ? (
-                <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                <p style={{ fontSize: 15, color: C.text, opacity: 0.55 }}>
                   Reconstructing position from on-chain history…
                 </p>
               ) : !activity ? (
-                <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                <p style={{ fontSize: 15, color: C.text, opacity: 0.55 }}>
                   Entry data unavailable — P&amp;L cannot be computed.
                 </p>
               ) : !pnl ? (
-                <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                <p style={{ fontSize: 15, color: C.text, opacity: 0.55 }}>
                   Entry data unavailable — no on-chain deposit event found for this position. P&amp;L cannot be computed.
                 </p>
               ) : (
@@ -1378,7 +1378,7 @@ export default function PositionDetail() {
                       }}>
                         <div style={labelStyle}>{c.label}</div>
                         <div style={{
-                          fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em",
+                          fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em",
                           color: c.color,
                           textShadow: c.color === C.green ? "0 0 14px rgba(0,255,65,0.2)" : "none",
                           fontVariantNumeric: "tabular-nums",
@@ -1404,7 +1404,7 @@ export default function PositionDetail() {
                       opacity: 0.6,
                     }} />
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <div style={{ fontSize: 11, color: C.green, letterSpacing: "0.2em", textTransform: "uppercase", fontWeight: 600 }}>
+                      <div style={{ fontSize: 14, color: C.green, letterSpacing: "0.2em", textTransform: "uppercase", fontWeight: 600 }}>
                         Net P&amp;L
                       </div>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
@@ -1418,37 +1418,37 @@ export default function PositionDetail() {
                           {pnlPositive ? "+" : "−"}{fmt$(Math.abs(pnl.netPnlUSD))}
                         </div>
                         <div style={{
-                          fontSize: 14, fontWeight: 600,
+                          fontSize: 17, fontWeight: 600,
                           color: pnlPositive ? C.green : C.red,
                           opacity: 0.8,
                         }}>
                           {pnlPositive ? "+" : ""}{pnl.netPnlPct.toFixed(2)}%
                         </div>
                       </div>
-                      <div style={{ fontSize: 11, color: C.text, opacity: 0.7, letterSpacing: "0.02em", lineHeight: 1.6 }}>
+                      <div style={{ fontSize: 14, color: C.text, opacity: 0.7, letterSpacing: "0.02em", lineHeight: 1.6 }}>
                         {pnl.isClosed
                           ? `(${fmt$(pnl.closingValue)} closing + ${fmt$(pnl.feesCollected)} fees) − ${fmt$(pnl.initialValue)} initial`
                           : `(${fmt$(pnl.currentValue)} current + ${fmt$(pnl.feesCollected)} fees + ${fmt$(pnl.feesUnclaimed)} unclaimed) − ${fmt$(pnl.initialValue)} initial`}
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", paddingLeft: 32, borderLeft: `1px solid ${C.border}` }}>
-                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7 }}>HODL Value</div>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7 }}>HODL Value</div>
+                      <div style={{ fontSize: 25, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
                         {fmt$(pnl.hodlValue)}
                       </div>
-                      <div style={{ fontSize: 9, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                      <div style={{ fontSize: 11, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                         if you just held
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", paddingLeft: 32, borderLeft: `1px solid ${C.border}` }}>
-                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7 }}>Fees vs IL</div>
+                      <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7 }}>Fees vs IL</div>
                       <div style={{
-                        fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em",
+                        fontSize: 25, fontWeight: 700, letterSpacing: "-0.02em",
                         color: pnl.feesOffsetIL ? C.cyan : C.red,
                       }}>
                         {pnl.feesOffsetIL ? "Offset ✓" : "Not offset ✗"}
                       </div>
-                      <div style={{ fontSize: 9, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                      <div style={{ fontSize: 11, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                         {fmt$(totalFees)} fees vs {fmt$(Math.abs(pnl.ilUSD))} IL
                       </div>
                     </div>
@@ -1474,16 +1474,16 @@ export default function PositionDetail() {
                 }}>
                   <div style={labelStyle}>{label}</div>
                   {poolStatsLoading ? (
-                    <div style={{ fontSize: 16, color: C.text, opacity: 0.4 }}>…</div>
+                    <div style={{ fontSize: 20, color: C.text, opacity: 0.4 }}>…</div>
                   ) : value != null ? (
                     <>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontSize: 25, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
                         {fmtLarge(value)}
                       </div>
                       <div style={subStyle}>{sub}</div>
                     </>
                   ) : (
-                    <div style={{ fontSize: 13, color: C.text, opacity: 0.5, fontStyle: "italic" }}>Data unavailable</div>
+                    <div style={{ fontSize: 16, color: C.text, opacity: 0.5, fontStyle: "italic" }}>Data unavailable</div>
                   )}
                 </div>
               ))}
@@ -1498,10 +1498,10 @@ export default function PositionDetail() {
           borderTop: `1px solid ${C.border}`, background: C.bg1, gap: 12, flexWrap: "wrap",
         }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.5 }}>
+            <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.5 }}>
               Position ID
             </div>
-            <div style={{ fontSize: 11, color: C.textMid, fontFamily: FONT, letterSpacing: "0.02em", wordBreak: "break-all" }}>
+            <div style={{ fontSize: 14, color: C.textMid, fontFamily: FONT, letterSpacing: "0.02em", wordBreak: "break-all" }}>
               {pos.id}
             </div>
           </div>
@@ -1509,7 +1509,7 @@ export default function PositionDetail() {
             <Link href="/dashboard"
               className="btn-neutral"
               style={{
-                fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                fontFamily: FONT, fontSize: 14, fontWeight: 600,
                 letterSpacing: "0.1em", textTransform: "uppercase",
                 padding: "10px 18px",
                 border: `1px solid ${C.borderHi}`, background: "transparent",
@@ -1523,7 +1523,7 @@ export default function PositionDetail() {
               <a href={manageUrl} target="_blank" rel="noopener noreferrer"
                 className="btn-primary"
                 style={{
-                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  fontFamily: FONT, fontSize: 14, fontWeight: 600,
                   letterSpacing: "0.1em", textTransform: "uppercase",
                   padding: "10px 18px",
                   border: `1px solid ${C.greenDim}`, background: C.greenFaint,

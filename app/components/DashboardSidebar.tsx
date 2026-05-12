@@ -154,7 +154,7 @@ export default function DashboardSidebar({
   };
 
   const labelStyle: CSSProperties = {
-    fontSize: 8,
+    fontSize: 10,
     letterSpacing: "0.22em",
     textTransform: "uppercase",
     color: C.text,
@@ -167,7 +167,7 @@ export default function DashboardSidebar({
     alignItems: "center",
     gap: 9,
     padding: "7px 18px",
-    fontSize: 11,
+    fontSize: 14,
     color: C.text,
     cursor: "pointer",
     textDecoration: "none",
@@ -190,7 +190,7 @@ export default function DashboardSidebar({
   };
 
   const iconStyle: CSSProperties = {
-    fontSize: 10,
+    fontSize: 12,
     width: 14,
     textAlign: "center",
     flexShrink: 0,
@@ -198,7 +198,7 @@ export default function DashboardSidebar({
 
   const badgeStyle = (active: boolean): CSSProperties => ({
     marginLeft: "auto",
-    fontSize: 8,
+    fontSize: 10,
     background: active ? C.greenFaint : C.bg4,
     border: `1px solid ${active ? C.greenDim : C.border}`,
     padding: "1px 6px",
@@ -451,7 +451,7 @@ export default function DashboardSidebar({
                 borderBottom: `1px solid ${C.purple}`,
               }}
             >
-              <span style={{ color: C.purple, fontSize: 11, letterSpacing: "0.12em", fontWeight: 700 }}>
+              <span style={{ color: C.purple, fontSize: 14, letterSpacing: "0.12em", fontWeight: 700 }}>
                 CONNECT_SOLANA_WALLET
               </span>
               <button
@@ -461,7 +461,7 @@ export default function DashboardSidebar({
                   background: "transparent",
                   border: "none",
                   color: C.purple,
-                  fontSize: 11,
+                  fontSize: 14,
                   letterSpacing: "0.2em",
                   cursor: "pointer",
                   fontFamily: FONT,
@@ -472,7 +472,7 @@ export default function DashboardSidebar({
             </div>
             <div style={{ padding: 16 }}>
               {installedSolanaWallets.length === 0 ? (
-                <p style={{ fontSize: 12, color: C.text, lineHeight: 1.5 }}>
+                <p style={{ fontSize: 15, color: C.text, lineHeight: 1.5 }}>
                   No Solana wallet detected. Install Phantom, Backpack, or Solflare.
                 </p>
               ) : (
@@ -490,7 +490,7 @@ export default function DashboardSidebar({
                         border: `1px solid ${C.borderHi}`,
                         color: C.textMid,
                         fontFamily: FONT,
-                        fontSize: 12,
+                        fontSize: 15,
                         letterSpacing: "0.04em",
                         cursor: "pointer",
                         transition: "all 0.12s",
@@ -523,7 +523,7 @@ function WalletItem({ color, chain }: { color: string; chain: string }) {
     alignItems: "center",
     gap: 9,
     padding: "7px 18px",
-    fontSize: 11,
+    fontSize: 14,
     color: C.text,
     textDecoration: "none",
     letterSpacing: "0.02em",
@@ -533,7 +533,7 @@ function WalletItem({ color, chain }: { color: string; chain: string }) {
   };
   return (
     <div style={itemStyle}>
-      <span style={{ fontSize: 10, width: 14, textAlign: "center", color, opacity: 1, flexShrink: 0 }}>
+      <span style={{ fontSize: 12, width: 14, textAlign: "center", color, opacity: 1, flexShrink: 0 }}>
         ◆
       </span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

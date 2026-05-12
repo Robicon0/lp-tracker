@@ -119,7 +119,7 @@ export default function WalletBalances() {
   if (!isConnected) {
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-        <p className="text-gray-300 text-sm">Connect your wallet to see real token balances.</p>
+        <p className="text-gray-300 text-base">Connect your wallet to see real token balances.</p>
       </div>
     );
   }
@@ -129,7 +129,7 @@ export default function WalletBalances() {
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
         <div className="flex items-center space-x-2">
           <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-          <span className="text-gray-300 text-sm">Fetching wallet balances...</span>
+          <span className="text-gray-300 text-base">Fetching wallet balances...</span>
         </div>
       </div>
     );
@@ -138,7 +138,7 @@ export default function WalletBalances() {
   if (error) {
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-        <p className="text-red-400 text-sm">{error}</p>
+        <p className="text-red-400 text-base">{error}</p>
       </div>
     );
   }
@@ -154,7 +154,7 @@ export default function WalletBalances() {
               <span className="text-xl">⟠</span>
               <div>
                 <p className="text-white font-medium">ETH</p>
-                <p className="text-gray-300 text-xs">Ethereum</p>
+                <p className="text-gray-300 text-sm">Ethereum</p>
               </div>
             </div>
             <p className="text-white font-medium">{ethBalance} ETH</p>
@@ -170,13 +170,13 @@ export default function WalletBalances() {
               {token.logo ? (
                 <img src={token.logo} alt={token.symbol} className="w-6 h-6 rounded-full" />
               ) : (
-                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs">
+                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-sm">
                   {token.symbol.charAt(0)}
                 </div>
               )}
               <div>
                 <p className="text-white font-medium">{token.symbol}</p>
-                <p className="text-gray-300 text-xs">{token.name}</p>
+                <p className="text-gray-300 text-sm">{token.name}</p>
               </div>
             </div>
             <p className="text-white font-medium">{token.balance} {token.symbol}</p>
@@ -184,7 +184,7 @@ export default function WalletBalances() {
         ))}
 
         {tokens.length === 0 && ethBalance && (
-          <p className="text-gray-300 text-sm">No ERC-20 tokens found on Ethereum mainnet.</p>
+          <p className="text-gray-300 text-base">No ERC-20 tokens found on Ethereum mainnet.</p>
         )}
       </div>
     </div>

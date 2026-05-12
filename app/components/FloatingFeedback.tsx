@@ -127,11 +127,11 @@ export default function FloatingFeedback() {
   };
   const labelRowStyle: CSSProperties = {
     display: "flex", alignItems: "baseline", gap: 10,
-    fontSize: 9, color: C.text, letterSpacing: "0.22em",
+    fontSize: 11, color: C.text, letterSpacing: "0.22em",
     textTransform: "uppercase", marginBottom: 10, opacity: 0.7,
   };
   const labelHintStyle: CSSProperties = {
-    marginLeft: "auto", opacity: 0.55, fontSize: 8, letterSpacing: "0.16em",
+    marginLeft: "auto", opacity: 0.55, fontSize: 10, letterSpacing: "0.16em",
   };
 
   return (
@@ -202,7 +202,7 @@ export default function FloatingFeedback() {
                 <span style={{ width: 8, height: 8, background: "rgba(255,170,0,0.5)", border: "1px solid rgba(255,170,0,0.5)" }} />
                 <span style={{ width: 8, height: 8, background: C.green, border: `1px solid ${C.green}`, boxShadow: `0 0 6px ${C.greenGlow}` }} />
               </div>
-              <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.1em", flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.1em", flex: 1, textAlign: "center" }}>
                 ~/defidesh/feedback.tx
                 <span style={{ color: C.green, animation: "_fbPulse 1.2s infinite", marginLeft: 4 }}>▋</span>
               </div>
@@ -218,7 +218,7 @@ export default function FloatingFeedback() {
                   border: "1px solid transparent",
                   color: C.text,
                   cursor: "pointer",
-                  fontSize: 12,
+                  fontSize: 15,
                   padding: 0,
                   fontFamily: FONT,
                   transition: "all 0.15s",
@@ -241,10 +241,10 @@ export default function FloatingFeedback() {
                   }}>
                     ✓
                   </div>
-                  <h3 style={{ fontSize: 16, color: C.textWhite, fontWeight: 700, marginBottom: 6, letterSpacing: "-0.01em" }}>
+                  <h3 style={{ fontSize: 20, color: C.textWhite, fontWeight: 700, marginBottom: 6, letterSpacing: "-0.01em" }}>
                     Transmission received.
                   </h3>
-                  <p style={{ fontSize: 11, color: C.textMid, letterSpacing: "0.04em" }}>
+                  <p style={{ fontSize: 14, color: C.textMid, letterSpacing: "0.04em" }}>
                     Logged — thanks for the signal.
                   </p>
                 </div>
@@ -252,19 +252,19 @@ export default function FloatingFeedback() {
                 <form onSubmit={handleSubmit}>
                   {/* $ echo > feedback */}
                   <div style={{
-                    fontSize: 11, color: C.green,
+                    fontSize: 14, color: C.green,
                     letterSpacing: "0.08em", marginBottom: 4,
                   }}>
                     <span style={{ opacity: 0.7 }}>$ </span>echo &gt; feedback
                   </div>
                   <div style={{
-                    fontSize: 22, fontWeight: 700, color: C.textWhite,
+                    fontSize: 28, fontWeight: 700, color: C.textWhite,
                     letterSpacing: "-0.02em", marginBottom: 6, lineHeight: 1.1,
                   }}>
                     Share your feedback
                   </div>
                   <div style={{
-                    fontSize: 11, color: C.textMid, opacity: 0.75,
+                    fontSize: 14, color: C.textMid, opacity: 0.75,
                     letterSpacing: "0.04em", marginBottom: 22,
                   }}>
                     Help us improve DefiDesh
@@ -273,7 +273,7 @@ export default function FloatingFeedback() {
                   {/* ── RATING ─────────────────────────────────────── */}
                   <div style={{ marginBottom: 20 }}>
                     <div style={labelRowStyle}>
-                      <span style={{ color: C.green, fontSize: 8, opacity: 0.9 }}>▍</span>
+                      <span style={{ color: C.green, fontSize: 10, opacity: 0.9 }}>▍</span>
                       <span>Rating</span>
                       <span style={labelHintStyle}>
                         {rating > 0 ? (
@@ -297,7 +297,7 @@ export default function FloatingFeedback() {
                             aria-label={`Rate ${n} out of 5`}
                             className={active ? "" : "fb-rate-hover"}
                             style={{
-                              fontFamily: FONT, fontSize: 14, fontWeight: 700,
+                              fontFamily: FONT, fontSize: 17, fontWeight: 700,
                               padding: "14px 0",
                               border: `1px solid ${active ? C.greenDim : C.borderHi}`,
                               background: active ? C.greenFaint : C.bg2,
@@ -325,7 +325,7 @@ export default function FloatingFeedback() {
                   {/* ── CATEGORY ───────────────────────────────────── */}
                   <div style={{ marginBottom: 20 }}>
                     <div style={labelRowStyle}>
-                      <span style={{ color: C.green, fontSize: 8, opacity: 0.9 }}>▍</span>
+                      <span style={{ color: C.green, fontSize: 10, opacity: 0.9 }}>▍</span>
                       <span>Category</span>
                       <span style={labelHintStyle}>pick any</span>
                     </div>
@@ -339,7 +339,7 @@ export default function FloatingFeedback() {
                             onClick={() => toggleCategory(c)}
                             className={active ? "" : "fb-cat-hover"}
                             style={{
-                              fontFamily: FONT, fontSize: 10,
+                              fontFamily: FONT, fontSize: 12,
                               letterSpacing: "0.08em",
                               padding: "9px 12px",
                               border: `1px solid ${active ? C.greenDim : C.borderHi}`,
@@ -355,7 +355,7 @@ export default function FloatingFeedback() {
                             <span style={{
                               color: active ? C.green : C.text,
                               opacity: active ? 1 : 0.5,
-                              fontSize: 9, letterSpacing: 0,
+                              fontSize: 11, letterSpacing: 0,
                             }}>
                               {active ? "[✓]" : "[ ]"}
                             </span>
@@ -369,7 +369,7 @@ export default function FloatingFeedback() {
                   {/* ── MESSAGE ────────────────────────────────────── */}
                   <div style={{ marginBottom: 20 }}>
                     <div style={labelRowStyle}>
-                      <span style={{ color: C.green, fontSize: 8, opacity: 0.9 }}>▍</span>
+                      <span style={{ color: C.green, fontSize: 10, opacity: 0.9 }}>▍</span>
                       <span>Tell us more</span>
                       <span style={labelHintStyle}>{message.length}/500</span>
                     </div>
@@ -384,7 +384,7 @@ export default function FloatingFeedback() {
                     >
                       <span aria-hidden style={{
                         position: "absolute", left: 12, top: 12,
-                        color: C.green, fontSize: 13, opacity: 0.75,
+                        color: C.green, fontSize: 16, opacity: 0.75,
                         pointerEvents: "none",
                       }}>
                         &gt;
@@ -396,7 +396,7 @@ export default function FloatingFeedback() {
                         placeholder="What's on your mind?"
                         style={{
                           width: "100%", minHeight: 88,
-                          fontFamily: FONT, fontSize: 12, lineHeight: 1.55,
+                          fontFamily: FONT, fontSize: 15, lineHeight: 1.55,
                           background: "transparent", border: "none",
                           color: C.textBright, padding: "12px 14px 12px 28px",
                           resize: "vertical", outline: "none",
@@ -413,7 +413,7 @@ export default function FloatingFeedback() {
                       onClick={() => !submitting && setOpen(false)}
                       className="fb-cancel-hover"
                       style={{
-                        fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                        fontFamily: FONT, fontSize: 12, fontWeight: 600,
                         letterSpacing: "0.14em", textTransform: "uppercase",
                         padding: "13px 16px", cursor: "pointer",
                         transition: "all 0.15s",
@@ -429,7 +429,7 @@ export default function FloatingFeedback() {
                       className="fb-submit-hover"
                       style={{
                         flex: 1,
-                        fontFamily: FONT, fontSize: 11, fontWeight: 700,
+                        fontFamily: FONT, fontSize: 14, fontWeight: 700,
                         letterSpacing: "0.16em", textTransform: "uppercase",
                         padding: "13px 18px",
                         cursor: canSubmit ? "pointer" : "not-allowed",

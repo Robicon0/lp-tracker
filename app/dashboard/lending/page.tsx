@@ -209,7 +209,7 @@ export default function LendingPage() {
         background: PAGE_BG,
         color: "#a0a0a0",
         fontFamily: "var(--font-jetbrains-mono)",
-        fontSize: 12,
+        fontSize: 15,
         lineHeight: 1.5,
       }}
     >
@@ -234,7 +234,7 @@ export default function LendingPage() {
         <Link
           href="/dashboard"
           className="inline-flex items-center gap-2 mb-5 text-[#a0a0a0] hover:text-[#00ff41] transition-colors no-underline"
-          style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase" }}
+          style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}
         >
           ← Back to Dashboard
         </Link>
@@ -243,7 +243,7 @@ export default function LendingPage() {
         <div
           className="mb-1.5"
           style={{
-            fontSize: 9,
+            fontSize: 11,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
             color: "#a0a0a0",
@@ -258,21 +258,21 @@ export default function LendingPage() {
         >
           Lending &amp; Borrowing Positions
         </h1>
-        <p className="mb-6" style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.6 }}>
+        <p className="mb-6" style={{ fontSize: 14, color: "#a0a0a0", opacity: 0.6 }}>
           Track your lending and borrowing across DeFi protocols
         </p>
 
         {/* Empty / loading states */}
         {!hasWallet && (
           <div className="text-center py-16">
-            <p style={{ fontSize: 12, color: "#a0a0a0", marginBottom: 20 }}>
+            <p style={{ fontSize: 15, color: "#a0a0a0", marginBottom: 20 }}>
               Connect a wallet to see your lending positions.
             </p>
             <Link
               href="/dashboard"
               className="inline-block border border-[#00992a] text-[#00ff41] px-5 py-2.5 no-underline hover:bg-[rgba(0,255,65,0.08)] transition-colors"
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
                 background: "rgba(0,255,65,0.06)",
@@ -296,12 +296,12 @@ export default function LendingPage() {
               }}
             />
             <style>{"@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }"}</style>
-            <span style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            <span style={{ fontSize: 14, letterSpacing: "0.1em", textTransform: "uppercase" }}>
               Scanning wallet for lending positions…
             </span>
             {loadingTimeout && (
               <p
-                style={{ fontSize: 11, color: "#ffaa00", marginTop: 12, letterSpacing: "0.04em" }}
+                style={{ fontSize: 14, color: "#ffaa00", marginTop: 12, letterSpacing: "0.04em" }}
               >
                 Taking longer than expected. Token prices may be temporarily unavailable.
               </p>
@@ -311,10 +311,10 @@ export default function LendingPage() {
 
         {hasWallet && !combinedLoading && !hasAnyPositions && (
           <div className="text-center py-16">
-            <p style={{ fontSize: 13, color: "#a0a0a0" }}>
+            <p style={{ fontSize: 16, color: "#a0a0a0" }}>
               No lending positions detected.
             </p>
-            <p style={{ fontSize: 10, color: "#444", marginTop: 6, letterSpacing: "0.05em" }}>
+            <p style={{ fontSize: 12, color: "#444", marginTop: 6, letterSpacing: "0.05em" }}>
               Supported: AAVE V3 (EVM), Dolomite, Jupiter Lend, Kamino, Suilend, AlphaFi, HyperLend, HypurrFi.
             </p>
           </div>
@@ -355,7 +355,7 @@ export default function LendingPage() {
                   "Jupiter Lend requires a free API key at portal.jup.ag — set JUPITER_API_KEY in .env.local to enable.",
                 ],
               ].map(([mark, text], i) => (
-                <div key={i} className="flex gap-2 items-start" style={{ fontSize: 10 }}>
+                <div key={i} className="flex gap-2 items-start" style={{ fontSize: 12 }}>
                   <span style={{ color: "#ffaa00", flexShrink: 0 }}>{mark}</span>
                   <span>{text}</span>
                 </div>
@@ -424,7 +424,7 @@ function TopStats({
           <div
             className="mb-2.5"
             style={{
-              fontSize: 8,
+              fontSize: 10,
               letterSpacing: "0.18em",
               textTransform: "uppercase",
               color: "#a0a0a0",
@@ -436,7 +436,7 @@ function TopStats({
           <div
             className="font-bold tabular-nums"
             style={{
-              fontSize: 24,
+              fontSize: 30,
               letterSpacing: "-0.02em",
               color: "#00ff41",
               textShadow: "0 0 22px rgba(0,255,65,0.22)",
@@ -444,7 +444,7 @@ function TopStats({
           >
             {s.value}
           </div>
-          <div className="mt-1.5" style={{ fontSize: 9, color: "#a0a0a0", opacity: 0.5 }}>
+          <div className="mt-1.5" style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.5 }}>
             {s.sub}
           </div>
         </div>
@@ -475,7 +475,7 @@ function MetricCell({
       <div
         className="mb-1.5"
         style={{
-          fontSize: 8,
+          fontSize: 10,
           letterSpacing: "0.18em",
           textTransform: "uppercase",
           color: "#a0a0a0",
@@ -486,7 +486,7 @@ function MetricCell({
       </div>
       <div
         className="font-bold tabular-nums"
-        style={{ fontSize: 16, letterSpacing: "-0.01em", color: colorMap[tone] }}
+        style={{ fontSize: 20, letterSpacing: "-0.01em", color: colorMap[tone] }}
       >
         {value}
       </div>
@@ -654,7 +654,7 @@ function CardHeader({
             border: "1px solid #262626",
             background: "#0d0d0d",
             color: "#00ff41",
-            fontSize: 11,
+            fontSize: 14,
             fontWeight: 700,
           }}
         >
@@ -663,14 +663,14 @@ function CardHeader({
         <div>
           <div
             className="font-bold"
-            style={{ fontSize: 14, color: "#f0f0f0", letterSpacing: "0.02em" }}
+            style={{ fontSize: 17, color: "#f0f0f0", letterSpacing: "0.02em" }}
           >
             {name}
           </div>
           <div
             className="inline-flex items-center mt-1.5 px-2"
             style={{
-              fontSize: 8,
+              fontSize: 10,
               color: "#00ff41",
               letterSpacing: "0.14em",
               textTransform: "uppercase",
@@ -688,7 +688,7 @@ function CardHeader({
         <div
           className="font-bold tabular-nums"
           style={{
-            fontSize: 22,
+            fontSize: 28,
             color: "#00ff41",
             letterSpacing: "-0.02em",
             textShadow: "0 0 18px rgba(0,255,65,0.2)",
@@ -699,7 +699,7 @@ function CardHeader({
         <div
           className="mt-0.5"
           style={{
-            fontSize: 8,
+            fontSize: 10,
             color: "#a0a0a0",
             letterSpacing: "0.18em",
             textTransform: "uppercase",
@@ -749,7 +749,7 @@ function AssetsBlock({
       <div
         className="mb-3 flex items-center gap-1.5"
         style={{
-          fontSize: 8,
+          fontSize: 10,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
           color: tone === "green" ? "#00ff41" : "#ff3355",
@@ -783,13 +783,13 @@ function AssetRow({
     <div className="flex items-center gap-3.5 py-2.5 border-b border-[#1c1c1c] last:border-b-0">
       <TokenIcon symbol={symbol} logo={logo} size={26} />
       <div>
-        <div className="font-bold" style={{ fontSize: 11, color: "#e0e0e0" }}>
+        <div className="font-bold" style={{ fontSize: 14, color: "#e0e0e0" }}>
           {symbol}
         </div>
         <div
           className="mt-0.5"
           style={{
-            fontSize: 9,
+            fontSize: 11,
             color: apyTone === "red" ? "#ff3355" : "#a0a0a0",
             letterSpacing: "0.06em",
             textTransform: "uppercase",
@@ -802,13 +802,13 @@ function AssetRow({
       <div className="text-right">
         <div
           className="font-bold tabular-nums"
-          style={{ fontSize: 12, color: valueTone === "red" ? "#ff3355" : "#f0f0f0" }}
+          style={{ fontSize: 15, color: valueTone === "red" ? "#ff3355" : "#f0f0f0" }}
         >
           {value}
         </div>
         <div
           className="mt-0.5"
-          style={{ fontSize: 9, color: "#a0a0a0", opacity: 0.55 }}
+          style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.55 }}
         >
           {amount}
         </div>
@@ -828,7 +828,7 @@ function ManageButton({ href, label }: { href: string; label: string }) {
         padding: 14,
         background: "rgba(0,255,65,0.06)",
         color: "#00ff41",
-        fontSize: 11,
+        fontSize: 14,
         fontWeight: 600,
         letterSpacing: "0.14em",
         textTransform: "uppercase",

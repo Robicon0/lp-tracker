@@ -150,14 +150,14 @@ function TokenRow({ token }: { token: TokenItem }) {
       <div className="flex-1 min-w-0">
         <div
           className="font-bold truncate"
-          style={{ fontSize: 12, color: "#e0e0e0", letterSpacing: "0.04em" }}
+          style={{ fontSize: 15, color: "#e0e0e0", letterSpacing: "0.04em" }}
         >
           {token.symbol}
         </div>
         <div
           className="mt-0.5 truncate"
           style={{
-            fontSize: 9,
+            fontSize: 11,
             color: "#a0a0a0",
             opacity: 0.5,
             letterSpacing: "0.06em",
@@ -171,7 +171,7 @@ function TokenRow({ token }: { token: TokenItem }) {
         <div
           className="tabular-nums"
           style={{
-            fontSize: 9,
+            fontSize: 11,
             fontWeight: 700,
             padding: "3px 8px",
             border: "1px solid",
@@ -188,7 +188,7 @@ function TokenRow({ token }: { token: TokenItem }) {
       ) : (
         <div
           style={{
-            fontSize: 9,
+            fontSize: 11,
             fontWeight: 700,
             padding: "3px 8px",
             border: "1px solid #262626",
@@ -205,23 +205,23 @@ function TokenRow({ token }: { token: TokenItem }) {
           <>
             <div
               className="font-bold tabular-nums"
-              style={{ fontSize: 13, color: "#f0f0f0" }}
+              style={{ fontSize: 16, color: "#f0f0f0" }}
             >
               {fmt$(token.usdValue)}
             </div>
             <div
               className="mt-0.5 tabular-nums"
-              style={{ fontSize: 9, color: "#a0a0a0", opacity: 0.55, letterSpacing: "0.04em" }}
+              style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.55, letterSpacing: "0.04em" }}
             >
               {fmtBalance(token.balance)} {token.symbol} @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
             </div>
           </>
         ) : (
           <>
-            <div style={{ fontSize: 13, color: "#a0a0a0", opacity: 0.4 }}>—</div>
+            <div style={{ fontSize: 16, color: "#a0a0a0", opacity: 0.4 }}>—</div>
             <div
               className="mt-0.5 tabular-nums"
-              style={{ fontSize: 9, color: "#a0a0a0", opacity: 0.55, letterSpacing: "0.04em" }}
+              style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.55, letterSpacing: "0.04em" }}
             >
               {fmtBalance(token.balance)} {token.symbol}
               <span className="ml-1.5" style={{ color: "#ff3355", opacity: 0.7 }}>
@@ -275,13 +275,13 @@ function ChainSection({
           />
           <span
             className="font-bold"
-            style={{ fontSize: 13, color: "#e0e0e0", letterSpacing: "0.04em" }}
+            style={{ fontSize: 16, color: "#e0e0e0", letterSpacing: "0.04em" }}
           >
             {title}
           </span>
           <span
             style={{
-              fontSize: 9,
+              fontSize: 11,
               color: "#a0a0a0",
               opacity: 0.55,
               letterSpacing: "0.12em",
@@ -294,7 +294,7 @@ function ChainSection({
         <div
           className="font-bold tabular-nums"
           style={{
-            fontSize: 18,
+            fontSize: 22,
             color: "#00ff41",
             textShadow: "0 0 14px rgba(0,255,65,0.18)",
           }}
@@ -394,7 +394,7 @@ export default function TokensPage() {
         background: "#050505",
         color: "#a0a0a0",
         fontFamily: "var(--font-jetbrains-mono)",
-        fontSize: 12,
+        fontSize: 15,
         lineHeight: 1.5,
       }}
     >
@@ -419,7 +419,7 @@ export default function TokensPage() {
         <Link
           href="/dashboard"
           className="inline-flex items-center gap-2 mb-5 text-[#a0a0a0] hover:text-[#00ff41] transition-colors no-underline"
-          style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase" }}
+          style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}
         >
           ← Back to Dashboard
         </Link>
@@ -428,7 +428,7 @@ export default function TokensPage() {
         <div
           className="mb-1.5"
           style={{
-            fontSize: 9,
+            fontSize: 11,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
             color: "#a0a0a0",
@@ -443,20 +443,20 @@ export default function TokensPage() {
         >
           Wallet Balances
         </h1>
-        <p className="mb-6" style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.6 }}>
+        <p className="mb-6" style={{ fontSize: 14, color: "#a0a0a0", opacity: 0.6 }}>
           Idle tokens across all connected wallets
         </p>
 
         {!hasWallet ? (
           <div className="text-center py-16">
-            <p style={{ fontSize: 12, color: "#a0a0a0", marginBottom: 20 }}>
+            <p style={{ fontSize: 15, color: "#a0a0a0", marginBottom: 20 }}>
               Connect a wallet to see your token holdings.
             </p>
             <Link
               href="/dashboard"
               className="inline-block border border-[#00992a] text-[#00ff41] px-5 py-2.5 no-underline hover:bg-[rgba(0,255,65,0.08)] transition-colors"
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
                 background: "rgba(0,255,65,0.06)",
@@ -481,7 +481,7 @@ export default function TokensPage() {
                   <div
                     className="mb-2.5"
                     style={{
-                      fontSize: 8,
+                      fontSize: 10,
                       letterSpacing: "0.2em",
                       textTransform: "uppercase",
                       color: "#a0a0a0",
@@ -513,7 +513,7 @@ export default function TokensPage() {
                 </div>
                 <div
                   style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     color: "#a0a0a0",
                     opacity: 0.6,
                     letterSpacing: "0.04em",
@@ -546,7 +546,7 @@ export default function TokensPage() {
                   <div
                     className="mb-1.5"
                     style={{
-                      fontSize: 8,
+                      fontSize: 10,
                       letterSpacing: "0.2em",
                       textTransform: "uppercase",
                       color: "#a0a0a0",
@@ -556,10 +556,10 @@ export default function TokensPage() {
                     By Chain
                   </div>
                   {chainBreakdown.length === 0 ? (
-                    <div style={{ fontSize: 10, color: "#a0a0a0", opacity: 0.5 }}>—</div>
+                    <div style={{ fontSize: 12, color: "#a0a0a0", opacity: 0.5 }}>—</div>
                   ) : (
                     chainBreakdown.slice(0, 5).map((c) => (
-                      <div key={c.chain} className="flex items-center gap-2" style={{ fontSize: 10 }}>
+                      <div key={c.chain} className="flex items-center gap-2" style={{ fontSize: 12 }}>
                         <div
                           style={{
                             width: 6,
@@ -596,7 +596,7 @@ export default function TokensPage() {
               <div className="flex-1 flex items-center px-3.5 border-r border-[#1c1c1c] min-w-[180px]">
                 <span
                   className="mr-2.5 text-[#00ff41]"
-                  style={{ fontSize: 11 }}
+                  style={{ fontSize: 14 }}
                 >
                   &gt;_
                 </span>
@@ -608,7 +608,7 @@ export default function TokensPage() {
                   className="flex-1 bg-transparent outline-none border-none"
                   style={{
                     fontFamily: "var(--font-jetbrains-mono)",
-                    fontSize: 11,
+                    fontSize: 14,
                     color: "#e0e0e0",
                     padding: "12px 0",
                   }}
@@ -632,12 +632,12 @@ export default function TokensPage() {
                   }}
                 />
                 <style>{"@keyframes wal-spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }"}</style>
-                <span style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                <span style={{ fontSize: 14, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                   Fetching token balances…
                 </span>
               </div>
             ) : grouped.evmGroups.length === 0 && grouped.nonEvmGroups.length === 0 ? (
-              <div className="text-center py-16" style={{ color: "#a0a0a0", fontSize: 12 }}>
+              <div className="text-center py-16" style={{ color: "#a0a0a0", fontSize: 15 }}>
                 No tokens found{search ? ` matching "${search}"` : ""}.
               </div>
             ) : (
@@ -669,7 +669,7 @@ export default function TokensPage() {
                             />
                             <span
                               style={{
-                                fontSize: 11,
+                                fontSize: 14,
                                 color: "#aaaaaa",
                                 fontWeight: 600,
                                 letterSpacing: "0.04em",
@@ -679,7 +679,7 @@ export default function TokensPage() {
                             </span>
                             <span
                               style={{
-                                fontSize: 9,
+                                fontSize: 11,
                                 color: "#a0a0a0",
                                 opacity: 0.55,
                                 letterSpacing: "0.1em",
@@ -691,7 +691,7 @@ export default function TokensPage() {
                           </div>
                           <span
                             className="font-bold tabular-nums"
-                            style={{ fontSize: 12, color: "#aaaaaa" }}
+                            style={{ fontSize: 15, color: "#aaaaaa" }}
                           >
                             {cg.total > 0 ? fmt$(cg.total) : "—"}
                           </span>
@@ -743,7 +743,7 @@ function ToggleBtn({
       className="flex items-center gap-1.5 px-4 border-r border-[#1c1c1c] last:border-r-0 transition-colors"
       style={{
         fontFamily: "var(--font-jetbrains-mono)",
-        fontSize: 9,
+        fontSize: 11,
         height: 42,
         letterSpacing: "0.12em",
         textTransform: "uppercase",

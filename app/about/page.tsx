@@ -86,7 +86,7 @@ const cardTopAccent: CSSProperties = {
 function H2({ children }: { children: React.ReactNode }) {
   return (
     <h2 style={{
-      fontSize: 18, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em",
+      fontSize: 22, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em",
       marginBottom: 16, display: "flex", alignItems: "center", gap: 10, fontFamily: FONT,
     }}>
       <span style={{
@@ -102,7 +102,7 @@ export default function About() {
   return (
     <div style={{
       background: C.bg, color: C.text, minHeight: "100vh",
-      fontFamily: FONT, fontSize: 13, lineHeight: 1.55, overflowX: "hidden",
+      fontFamily: FONT, fontSize: 16, lineHeight: 1.55, overflowX: "hidden",
     }}>
       <style>{`
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
@@ -127,7 +127,7 @@ export default function About() {
       }}>
         {/* Eyebrow + Title */}
         <div style={{
-          fontSize: 10, color: C.green, letterSpacing: "0.22em",
+          fontSize: 12, color: C.green, letterSpacing: "0.22em",
           textTransform: "uppercase", marginBottom: 14, opacity: 0.85,
         }}>
           <span style={{ opacity: 0.6 }}>// </span>About
@@ -138,7 +138,7 @@ export default function About() {
         }}>
           About DefiDesh
         </h1>
-        <p style={{ fontSize: 13, color: C.green, opacity: 0.85, maxWidth: 640 }}>
+        <p style={{ fontSize: 16, color: C.green, opacity: 0.85, maxWidth: 640 }}>
           A DeFi portfolio tracker for monitoring liquidity positions across multiple blockchains.
         </p>
 
@@ -146,7 +146,7 @@ export default function About() {
         <div style={{ ...cardStyle, animationDelay: "0.05s" }}>
           <div aria-hidden style={cardTopAccent} />
           <H2>What It Does</H2>
-          <p style={{ color: C.textMid, fontSize: 12.5, lineHeight: 1.75 }}>
+          <p style={{ color: C.textMid, fontSize: 15.5, lineHeight: 1.75 }}>
             <strong style={{ color: C.textBright, fontWeight: 600 }}>DefiDesh</strong>
             {" "}helps liquidity providers monitor their positions across decentralized exchanges
             like{" "}
@@ -173,7 +173,7 @@ export default function About() {
                   border: `1px solid ${C.borderHi}`,
                   background: C.bg2,
                   padding: "14px 16px",
-                  fontSize: 12,
+                  fontSize: 15,
                   color: ch.live ? C.textBright : C.text,
                   letterSpacing: "0.04em",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -189,7 +189,7 @@ export default function About() {
                 {!ch.live && (
                   <span style={{
                     marginLeft: 4,
-                    fontSize: 9, padding: "1px 7px",
+                    fontSize: 11, padding: "1px 7px",
                     border: `1px solid ${C.amber}66`,
                     color: C.amber,
                     background: "rgba(255,170,0,0.05)",
@@ -211,12 +211,12 @@ export default function About() {
             {FEATURES.map((f) => (
               <div key={f} style={{
                 display: "flex", alignItems: "flex-start", gap: 14,
-                fontSize: 12.5, color: C.textMid,
+                fontSize: 15.5, color: C.textMid,
               }}>
                 <span style={{
                   width: 16, height: 16, display: "inline-flex",
                   alignItems: "center", justifyContent: "center", flexShrink: 0,
-                  fontSize: 10, fontWeight: 700,
+                  fontSize: 12, fontWeight: 700,
                   border: `1px solid ${C.greenDim}`,
                   background: C.greenFaint, color: C.green,
                   boxShadow: `0 0 8px ${C.greenGlow}`,
@@ -244,7 +244,7 @@ export default function About() {
                   background: C.bg2,
                   padding: "12px 16px",
                   textAlign: "center",
-                  fontSize: 12,
+                  fontSize: 15,
                   color: C.textMid,
                   letterSpacing: "0.04em",
                 }}
@@ -259,7 +259,7 @@ export default function About() {
         <div style={{
           textAlign: "center",
           padding: "32px 0 8px",
-          fontSize: 10, color: C.text,
+          fontSize: 12, color: C.text,
           letterSpacing: "0.14em", textTransform: "uppercase",
           opacity: 0.5,
         }}>

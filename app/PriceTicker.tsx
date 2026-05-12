@@ -47,7 +47,7 @@ export default function PriceTicker() {
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-emerald-400/30 rounded-full animate-pulse" />
-            <span className="text-emerald-300/50 text-sm font-medium">Live Prices</span>
+            <span className="text-emerald-300/50 text-base font-medium">Live Prices</span>
           </div>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -67,7 +67,7 @@ export default function PriceTicker() {
   if (prices.length === 0) {
     return (
       <div className="bg-emerald-950/30 backdrop-blur-md border border-emerald-400/15 rounded-xl p-4 mb-6">
-        <p className="text-emerald-400/40 text-sm">Unable to load live prices. Will retry shortly.</p>
+        <p className="text-emerald-400/40 text-base">Unable to load live prices. Will retry shortly.</p>
       </div>
     );
   }
@@ -77,9 +77,9 @@ export default function PriceTicker() {
       <div className="flex justify-between items-center mb-3">
         <div className="flex items-center space-x-2">
           <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-          <span className="text-emerald-300/70 text-sm font-medium">Live Prices</span>
+          <span className="text-emerald-300/70 text-base font-medium">Live Prices</span>
         </div>
-        <span className="text-emerald-400/30 text-xs">Updated: {lastUpdated}</span>
+        <span className="text-emerald-400/30 text-sm">Updated: {lastUpdated}</span>
       </div>
       <div className="flex flex-wrap gap-3">
         {prices.map((coin) => {
@@ -91,11 +91,11 @@ export default function PriceTicker() {
               className="flex items-center space-x-2 bg-emerald-900/20 border border-emerald-400/10 rounded-lg px-3 py-2"
             >
               <img src={coin.image} alt={coin.symbol} className="w-5 h-5" />
-              <span className="text-emerald-50 text-sm font-medium uppercase">{coin.symbol}</span>
-              <span className="text-emerald-100/80 text-sm">
+              <span className="text-emerald-50 text-base font-medium uppercase">{coin.symbol}</span>
+              <span className="text-emerald-100/80 text-base">
                 ${coin.current_price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span className={`text-xs ${change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              <span className={`text-sm ${change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {change >= 0 ? "+" : ""}{change.toFixed(1)}%
               </span>
             </div>

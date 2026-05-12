@@ -298,16 +298,16 @@ export default function Navbar() {
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-emerald-950 border border-emerald-400/30 text-emerald-400 px-3 py-1.5 rounded-lg text-sm font-mono">
+                  <span className="bg-emerald-950 border border-emerald-400/30 text-emerald-400 px-3 py-1.5 rounded-lg text-base font-mono">
                     {truncateAddress(address)}
                   </span>
-                  <button onClick={handleEvmDisconnect} className="text-emerald-300/70 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={handleEvmDisconnect} className="text-emerald-300/70 hover:text-red-400 text-base transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
                   <button
                     onClick={() => setShowEvmModal(true)}
-                    className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-base font-medium transition-colors"
                   >
                     Connect EVM
                   </button>
@@ -317,16 +317,16 @@ export default function Navbar() {
               {/* Solana Wallet */}
               {mounted && solanaAddress ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-[#0a1f17] border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-sm font-mono whitespace-nowrap">
+                  <span className="bg-[#0a1f17] border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-base font-mono whitespace-nowrap">
                     ◎ {truncateAddress(solanaAddress)}
                   </span>
-                  <button onClick={handleSolanaDisconnect} className="text-emerald-300/70 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={handleSolanaDisconnect} className="text-emerald-300/70 hover:text-red-400 text-base transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
                   <button
                     onClick={() => setShowSolanaModal(true)}
-                    className="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-base font-medium transition-colors"
                   >
                     Connect Solana
                   </button>
@@ -336,16 +336,16 @@ export default function Navbar() {
               {/* Sui Wallet */}
               {mounted && suiAddress ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-[#0a1f17] border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-sm font-mono whitespace-nowrap">
+                  <span className="bg-[#0a1f17] border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-base font-mono whitespace-nowrap">
                     ◈ {truncateAddress(suiAddress)}
                   </span>
-                  <button onClick={handleSuiDisconnect} className="text-emerald-300/70 hover:text-red-400 text-sm transition-colors">✕</button>
+                  <button onClick={handleSuiDisconnect} className="text-emerald-300/70 hover:text-red-400 text-base transition-colors">✕</button>
                 </div>
               ) : (
                 mounted && (
                   <button
                     onClick={() => suiWallets.length > 0 ? setShowSuiModal(true) : undefined}
-                    className="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-base font-medium transition-colors"
                   >
                     Connect Sui
                   </button>
@@ -376,13 +376,13 @@ export default function Navbar() {
               {/* EVM — mobile */}
               {isConnected && address ? (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-green-400 text-sm font-mono">{truncateAddress(address)}</span>
-                  <button onClick={handleEvmDisconnect} className="text-red-400 text-sm">Disconnect EVM</button>
+                  <span className="text-green-400 text-base font-mono">{truncateAddress(address)}</span>
+                  <button onClick={handleEvmDisconnect} className="text-red-400 text-base">Disconnect EVM</button>
                 </div>
               ) : (
                 <button
                   onClick={() => { setShowEvmModal(true); setShowMobileMenu(false); }}
-                  className="w-full bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                  className="w-full bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-base font-medium"
                 >
                   Connect EVM
                 </button>
@@ -391,13 +391,13 @@ export default function Navbar() {
               {/* Solana — mobile */}
               {solanaAddress ? (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-purple-400 text-sm font-mono">◎ {truncateAddress(solanaAddress)}</span>
-                  <button onClick={handleSolanaDisconnect} className="text-red-400 text-sm">Disconnect Solana</button>
+                  <span className="text-purple-400 text-base font-mono">◎ {truncateAddress(solanaAddress)}</span>
+                  <button onClick={handleSolanaDisconnect} className="text-red-400 text-base">Disconnect Solana</button>
                 </div>
               ) : (
                 <button
                   onClick={() => { setShowSolanaModal(true); setShowMobileMenu(false); }}
-                  className="w-full bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                  className="w-full bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-base font-medium"
                 >
                   Connect Solana
                 </button>
@@ -406,13 +406,13 @@ export default function Navbar() {
               {/* Sui — mobile */}
               {suiAddress ? (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-cyan-400 text-sm font-mono">🌊 {truncateAddress(suiAddress)}</span>
-                  <button onClick={handleSuiDisconnect} className="text-red-400 text-sm">Disconnect Sui</button>
+                  <span className="text-cyan-400 text-base font-mono">🌊 {truncateAddress(suiAddress)}</span>
+                  <button onClick={handleSuiDisconnect} className="text-red-400 text-base">Disconnect Sui</button>
                 </div>
               ) : (
                 <button
                   onClick={() => { setShowSuiModal(true); setShowMobileMenu(false); }}
-                  className="w-full bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                  className="w-full bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-base font-medium"
                 >
                   Connect Sui
                 </button>
@@ -445,7 +445,7 @@ export default function Navbar() {
                     <img src={meta.logo} alt={meta.name} className="w-8 h-8 rounded-lg shrink-0" />
                     <div className="text-left">
                       <p className="text-white font-medium">{meta.name}</p>
-                      <p className="text-emerald-300/70 text-xs">{meta.description}</p>
+                      <p className="text-emerald-300/70 text-sm">{meta.description}</p>
                     </div>
                   </button>
                 );
@@ -465,7 +465,7 @@ export default function Navbar() {
               <button onClick={() => setShowSolanaModal(false)} className="text-emerald-300/70 hover:text-white">✕</button>
             </div>
             {solanaWallets.length === 0 ? (
-              <p className="text-emerald-300/70 text-sm text-center py-4">
+              <p className="text-emerald-300/70 text-base text-center py-4">
                 No Solana wallet detected. Install a Solana-compatible wallet (e.g. Phantom, Backpack, Solflare).
               </p>
             ) : (
@@ -481,7 +481,7 @@ export default function Navbar() {
                     )}
                     <div className="text-left">
                       <p className="text-white font-medium">{wallet.adapter.name}</p>
-                      <p className="text-emerald-300/70 text-xs">Connect with {wallet.adapter.name}</p>
+                      <p className="text-emerald-300/70 text-sm">Connect with {wallet.adapter.name}</p>
                     </div>
                   </button>
                 ))}
@@ -501,7 +501,7 @@ export default function Navbar() {
               <button onClick={() => setShowSuiModal(false)} className="text-emerald-300/70 hover:text-white">✕</button>
             </div>
             {suiWallets.length === 0 ? (
-              <p className="text-emerald-300/70 text-sm text-center py-4">
+              <p className="text-emerald-300/70 text-base text-center py-4">
                 No Sui wallet detected. Install a Sui-compatible wallet (e.g. Phantom, Suiet, Slush).
               </p>
             ) : (
@@ -515,7 +515,7 @@ export default function Navbar() {
                     {wallet.icon && <img src={wallet.icon} alt={wallet.name} className="w-8 h-8 rounded-lg" />}
                     <div className="text-left">
                       <p className="text-white font-medium">{wallet.name}</p>
-                      <p className="text-emerald-300/70 text-xs">Connect with {wallet.name}</p>
+                      <p className="text-emerald-300/70 text-sm">Connect with {wallet.name}</p>
                     </div>
                   </button>
                 ))}
