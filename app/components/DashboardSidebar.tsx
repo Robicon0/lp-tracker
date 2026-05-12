@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { WalletName } from "@solana/wallet-adapter-base";
@@ -131,8 +132,13 @@ export default function DashboardSidebar({
     disconnectSolana();
   };
 
+  // Filter to genuine Solana wallets only. MetaMask now registers itself as a
+  // Wallet Standard Solana wallet via its Solana Snap, but it's an EVM wallet
+  // and must never appear in this picker.
   const installedSolanaWallets = solanaWallets.filter(
-    (w) => w.readyState === WalletReadyState.Installed,
+    (w) =>
+      w.readyState === WalletReadyState.Installed &&
+      !w.adapter.name.toLowerCase().includes("metamask"),
   );
 
   const truncateAddr = (a: string) => a.slice(0, 4) + "…" + a.slice(-4);
@@ -416,16 +422,20 @@ export default function DashboardSidebar({
         </button>
       </div>
 
-      {/* Solana wallet picker — same pattern as Navbar.tsx but rendered inline
-          via a fixed-position overlay so it stays within the sidebar context. */}
-      {showSolanaModal && (
+      {/* Solana wallet picker — rendered into document.body via createPortal
+          so it escapes the <aside>'s sticky/overflow context. Without the
+          portal, the modal is clipped by any ancestor that creates a CSS
+          containing block, leaving [X] and the wallet buttons unclickable.
+          zIndex 100000 sits above TerminalNavbar (10000) and the
+          FloatingFeedback launcher (99998). */}
+      {showSolanaModal && typeof document !== "undefined" && createPortal(
         <div
           onClick={() => setShowSolanaModal(false)}
           style={{
             position: "fixed",
             inset: 0,
             background: "rgba(0,0,0,0.7)",
-            zIndex: 9999,
+            zIndex: 100000,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -511,7 +521,8 @@ export default function DashboardSidebar({
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </aside>
   );
