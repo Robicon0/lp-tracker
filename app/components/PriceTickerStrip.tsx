@@ -1,52 +1,108 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 const PROTOCOL_COUNT = 7;
 const CHAIN_COUNT = 3;
 
-// Canonical CoinGecko IDs for these tickers — kept here next to the symbols so
-// any future "make the ticker live" pass can pass these straight to
-// /api/prices?ids=... Note: WBTC and CBBTC use their own CG IDs here
-// ('wrapped-bitcoin' / 'coinbase-wrapped-btc') so the ticker shows true
-// per-wrapper prices. This deliberately differs from SYMBOL_TO_CG_ID in
-// app/hooks/useWalletTokens.ts which aliases them to 'bitcoin' for wallet
-// balance aggregation — see CLAUDE.md note on stripAavePrefix / priceOf.
-export const TICKER_CG_IDS: Record<string, string> = {
-  BTC: "bitcoin",
-  WBTC: "wrapped-bitcoin",
-  CBBTC: "coinbase-wrapped-btc",
-  ETH: "ethereum",
-  SOL: "solana",
-  SUI: "sui",
-  ARB: "arbitrum",
-  AERO: "aerodrome-finance",
-  UNI: "uniswap",
-  TAO: "bittensor",
-  ZCASH: "zcash",
-  HYPE: "hyperliquid",
-  BNB: "binancecoin",
-};
-
-// Placeholder USD prices — ticker is purely decorative on the landing page.
-// Values are picked at plausible mid-2026 USD levels so they don't read as
-// stale/low (which previously looked like AUD).
-const TICKERS: { sym: string; price: string; chg: string; up: boolean }[] = [
-  { sym: "BTC",   price: "128,500.00", chg: "+1.42%", up: true  },
-  { sym: "WBTC",  price: "128,470.00", chg: "+1.38%", up: true  },
-  { sym: "CBBTC", price: "128,490.00", chg: "+1.40%", up: true  },
-  { sym: "ETH",   price: "4,820.00",   chg: "+2.85%", up: true  },
-  { sym: "SOL",   price: "258.40",     chg: "+4.20%", up: true  },
-  { sym: "SUI",   price: "5.84",       chg: "-1.14%", up: false },
-  { sym: "ARB",   price: "1.92",       chg: "-0.62%", up: false },
-  { sym: "AERO",  price: "1.68",       chg: "+3.10%", up: true  },
-  { sym: "UNI",   price: "15.40",      chg: "+1.20%", up: true  },
-  { sym: "TAO",   price: "720.00",     chg: "-2.40%", up: false },
-  { sym: "ZCASH", price: "72.40",      chg: "+6.20%", up: true  },
-  { sym: "HYPE",  price: "44.80",      chg: "+5.80%", up: true  },
-  { sym: "BNB",   price: "852.00",     chg: "+0.84%", up: true  },
+// Symbol displayed in the ticker → CoinGecko ID used for live price lookup.
+// IMPORTANT: this component fetches LIVE prices from /api/prices on mount and
+// every 60s. NEVER hardcode prices here or anywhere in the ticker pipeline.
+// WBTC/CBBTC use their own per-wrapper CG IDs ('wrapped-bitcoin' /
+// 'coinbase-wrapped-btc') for accurate per-asset prices. This intentionally
+// differs from SYMBOL_TO_CG_ID in app/hooks/useWalletTokens.ts which aliases
+// every BTC wrapper to 'bitcoin' for wallet-balance aggregation (see CLAUDE.md).
+export const TICKER_TOKENS: { sym: string; id: string }[] = [
+  { sym: "BTC",   id: "bitcoin" },
+  { sym: "WBTC",  id: "wrapped-bitcoin" },
+  { sym: "CBBTC", id: "coinbase-wrapped-btc" },
+  { sym: "ETH",   id: "ethereum" },
+  { sym: "SOL",   id: "solana" },
+  { sym: "SUI",   id: "sui" },
+  { sym: "ARB",   id: "arbitrum" },
+  { sym: "AERO",  id: "aerodrome-finance" },
+  { sym: "UNI",   id: "uniswap" },
+  { sym: "TAO",   id: "bittensor" },
+  { sym: "ZCASH", id: "zcash" },
+  { sym: "HYPE",  id: "hyperliquid" },
+  { sym: "BNB",   id: "binancecoin" },
 ];
 
+type CoinPrice = { usd?: number; usd_24h_change?: number };
+type PriceMap = Record<string, CoinPrice>;
+
+const REFRESH_MS = 60_000;
+
+function formatPrice(usd: number): string {
+  if (usd >= 1) {
+    return usd.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  return usd.toLocaleString("en-US", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
+}
+
+function formatChange(chg: number): string {
+  const sign = chg >= 0 ? "+" : "";
+  return `${sign}${chg.toFixed(2)}%`;
+}
+
 export default function PriceTickerStrip() {
-  const doubled = [...TICKERS, ...TICKERS];
+  const [prices, setPrices] = useState<PriceMap>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = TICKER_TOKENS.map((t) => t.id).join(",");
+    const url = `/api/prices?endpoint=simple/price&ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
+
+    async function fetchPrices() {
+      try {
+        const res = await fetch(url);
+        if (!res.ok || cancelled) return;
+        const data: unknown = await res.json();
+        if (cancelled) return;
+        if (data && typeof data === "object" && !("error" in (data as object))) {
+          // Merge with previous state so a partial-failure response (a single
+          // missing token) doesn't drop tokens whose last known price we still
+          // hold. Matches the "show the last known price or skip" rule.
+          setPrices((prev) => ({ ...prev, ...(data as PriceMap) }));
+        }
+      } catch (err) {
+        console.error("[PriceTickerStrip] fetch error:", err);
+      }
+    }
+
+    fetchPrices();
+    const tid = setInterval(fetchPrices, REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(tid);
+    };
+  }, []);
+
+  // Skip tokens we have no price for yet. On initial mount this is empty so
+  // the strip renders zero items until the first fetch resolves (typically
+  // <500ms). Never substitute a hardcoded fallback.
+  const items = TICKER_TOKENS.flatMap((t) => {
+    const d = prices[t.id];
+    if (!d || typeof d.usd !== "number") return [];
+    const chg = typeof d.usd_24h_change === "number" ? d.usd_24h_change : null;
+    return [
+      {
+        sym: t.sym,
+        price: formatPrice(d.usd),
+        chg: chg === null ? null : formatChange(chg),
+        up: chg === null ? null : chg >= 0,
+      },
+    ];
+  });
+
+  const doubled = [...items, ...items];
+
   return (
     <>
       <style
@@ -87,11 +143,13 @@ export default function PriceTickerStrip() {
               <div key={i} className="text-[14px] flex gap-2 items-center">
                 <span className="text-[#888]">{t.sym}</span>
                 <span className="text-[#e8e8e8] tabular-nums">${t.price}</span>
-                <span
-                  className={`tabular-nums ${t.up ? "text-[#00ff41]" : "text-[#ff3366]"}`}
-                >
-                  {t.chg}
-                </span>
+                {t.chg !== null && (
+                  <span
+                    className={`tabular-nums ${t.up ? "text-[#00ff41]" : "text-[#ff3366]"}`}
+                  >
+                    {t.chg}
+                  </span>
+                )}
               </div>
             ))}
           </div>
