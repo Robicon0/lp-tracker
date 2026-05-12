@@ -132,14 +132,15 @@ export default function DashboardSidebar({
     disconnectSolana();
   };
 
-  // Filter to genuine Solana wallets only. MetaMask now registers itself as a
-  // Wallet Standard Solana wallet via its Solana Snap, but it's an EVM wallet
-  // and must never appear in this picker.
-  const installedSolanaWallets = solanaWallets.filter(
-    (w) =>
-      w.readyState === WalletReadyState.Installed &&
-      !w.adapter.name.toLowerCase().includes("metamask"),
-  );
+  // Curated allow-list — only show Phantom, Backpack, Solflare in the Solana
+  // picker. Wallet Standard surfaces non-Solana wallets like MetaMask Snap that
+  // would otherwise pollute the list. Keep this list in sync with
+  // SOLANA_ALLOWED_NAMES in app/components/HeroWalletConnect.tsx.
+  const installedSolanaWallets = solanaWallets.filter((w) => {
+    if (w.readyState !== WalletReadyState.Installed) return false;
+    const lower = w.adapter.name.toLowerCase();
+    return ["phantom", "backpack", "solflare"].some((n) => lower.includes(n));
+  });
 
   const truncateAddr = (a: string) => a.slice(0, 4) + "…" + a.slice(-4);
 
@@ -314,23 +315,19 @@ export default function DashboardSidebar({
       <div style={sectionWrap}>
         <div style={labelStyle}>Wallets</div>
 
-        {/* Wallet Balances link — navigates to /dashboard/tokens */}
+        {/* Wallet Balances — styled identically to the DASHBOARD nav items
+            (Overview / Positions / Cash Flow / Alerts) so it reads as a clean
+            sidebar nav item, not a standalone accent button. */}
         <Link
           href="/dashboard/tokens"
-          style={{
-            ...itemBase,
-            color: C.cyan,
-            opacity: 0.85,
-          }}
+          style={itemBase}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = C.green;
-            e.currentTarget.style.background = C.greenFaint;
-            e.currentTarget.style.opacity = "1";
+            e.currentTarget.style.color = C.textMid;
+            e.currentTarget.style.background = C.bg2;
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = C.cyan;
+            e.currentTarget.style.color = C.text;
             e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.opacity = "0.85";
           }}
         >
           <span style={iconStyle}>◫</span>
@@ -338,7 +335,7 @@ export default function DashboardSidebar({
         </Link>
 
         {evmAddr && (
-          <WalletItem color={walletColor("EVM")} chain="EVM" />
+          <WalletItem color={walletColor("EVM")} chain={`EVM · ${truncateAddr(evmAddr)}`} />
         )}
         {solAddr ? (
           // Connected: clicking the row disconnects (matches Navbar.tsx pattern)
@@ -390,7 +387,7 @@ export default function DashboardSidebar({
           </button>
         )}
         {suiAddr && (
-          <WalletItem color={walletColor("SUI")} chain="SUI" />
+          <WalletItem color={walletColor("SUI")} chain={`SUI · ${truncateAddr(suiAddr)}`} />
         )}
         {watchedWallets.map((w) => (
           <WalletItem

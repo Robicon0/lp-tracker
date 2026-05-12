@@ -22,6 +22,19 @@ const EVM_DISPLAY: { id: string; name: string }[] = [
   { id: "phantom", name: "Phantom" },
 ];
 
+// Curated allow-lists for the Solana and Sui wallet pickers — case-insensitive
+// substring match. Wallet Standard surfaces cross-chain wallets (MetaMask Snap
+// on Solana, Phantom on Sui, etc.) that we don't want polluting these pickers.
+// Keep these lists in sync with the matching list in
+// app/components/DashboardSidebar.tsx.
+const SOLANA_ALLOWED_NAMES = ["phantom", "backpack", "solflare"];
+const SUI_ALLOWED_NAMES = ["sui wallet", "slush", "backpack", "martian"];
+
+function matchesAllowList(name: string, allowed: string[]): boolean {
+  const lower = name.toLowerCase();
+  return allowed.some((n) => lower.includes(n));
+}
+
 function truncate(addr: string) {
   return addr.slice(0, 6) + "..." + addr.slice(-4);
 }
@@ -242,49 +255,59 @@ export default function HeroWalletConnect() {
         </TerminalModal>
       )}
 
-      {showSolanaModal && (
-        <TerminalModal title="CONNECT_SOLANA_WALLET" onClose={() => setShowSolanaModal(false)}>
-          {solanaWallets.length === 0 ? (
-            <p className="text-sm text-[#888] leading-relaxed">
-              No Solana wallet detected. Install Phantom, Backpack, or Solflare.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {solanaWallets.map((w) => (
-                <button
-                  key={w.adapter.name}
-                  onClick={() => handleSolanaConnect(w.adapter.name)}
-                  className="w-full border border-[#2e2e2e] hover:border-[#9945ff] hover:bg-[rgba(153,69,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
-                >
-                  ▸ {w.adapter.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </TerminalModal>
-      )}
+      {showSolanaModal && (() => {
+        const filtered = solanaWallets.filter((w) =>
+          matchesAllowList(w.adapter.name, SOLANA_ALLOWED_NAMES),
+        );
+        return (
+          <TerminalModal title="CONNECT_SOLANA_WALLET" onClose={() => setShowSolanaModal(false)}>
+            {filtered.length === 0 ? (
+              <p className="text-sm text-[#888] leading-relaxed">
+                No Solana wallet detected. Install Phantom, Backpack, or Solflare.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {filtered.map((w) => (
+                  <button
+                    key={w.adapter.name}
+                    onClick={() => handleSolanaConnect(w.adapter.name)}
+                    className="w-full border border-[#2e2e2e] hover:border-[#9945ff] hover:bg-[rgba(153,69,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
+                  >
+                    ▸ {w.adapter.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </TerminalModal>
+        );
+      })()}
 
-      {showSuiModal && (
-        <TerminalModal title="CONNECT_SUI_WALLET" onClose={() => setShowSuiModal(false)}>
-          {suiWallets.length === 0 ? (
-            <p className="text-sm text-[#888] leading-relaxed">
-              No Sui wallet detected. Install Phantom, Suiet, or Slush.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {suiWallets.map((w) => (
-                <button
-                  key={w.name}
-                  onClick={() => handleSuiConnect(w)}
-                  className="w-full border border-[#2e2e2e] hover:border-[#4da2ff] hover:bg-[rgba(77,162,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
-                >
-                  ▸ {w.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </TerminalModal>
-      )}
+      {showSuiModal && (() => {
+        const filtered = suiWallets.filter((w) =>
+          matchesAllowList(w.name, SUI_ALLOWED_NAMES),
+        );
+        return (
+          <TerminalModal title="CONNECT_SUI_WALLET" onClose={() => setShowSuiModal(false)}>
+            {filtered.length === 0 ? (
+              <p className="text-sm text-[#888] leading-relaxed">
+                No Sui wallet detected. Install Sui Wallet, Slush, Backpack, or Martian.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {filtered.map((w) => (
+                  <button
+                    key={w.name}
+                    onClick={() => handleSuiConnect(w)}
+                    className="w-full border border-[#2e2e2e] hover:border-[#4da2ff] hover:bg-[rgba(77,162,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
+                  >
+                    ▸ {w.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </TerminalModal>
+        );
+      })()}
     </div>
   );
 }
