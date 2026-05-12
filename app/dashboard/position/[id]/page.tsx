@@ -1,14 +1,14 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type CSSProperties } from "react";
 import Link from "next/link";
-import Navbar from "../../../Navbar";
+import TerminalNavbar from "../../../components/TerminalNavbar";
 import { usePositions } from "../../../contexts/PositionsContext";
 import type { AerodromePosition } from "../../../lib/aerodrome";
 import { getTokenLogo, TOKEN_COLORS } from "../../../lib/tokenLogos";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { usePositionActivity } from "../../../hooks/usePositionActivity";
 import { useBluefinActivity } from "../../../hooks/useBluefinActivity";
@@ -18,35 +18,68 @@ import { useHyperSwapActivity } from "../../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
 import { usePancakeSwapActivity } from "../../../hooks/usePancakeSwapActivity";
-import { computePositionPnL, type PositionPnLData } from "../../../lib/positionPnl";
+import { computePositionPnL } from "../../../lib/positionPnl";
+
+// ── Terminal palette (matches position.html exactly) ─────────────────────────
+const C = {
+  bg:         "#050505",
+  bg1:        "#090909",
+  bg2:        "#0d0d0d",
+  bg3:        "#121212",
+  bg4:        "#171717",
+  border:     "#1c1c1c",
+  borderHi:   "#262626",
+  text:       "#7a7a7a",
+  textMid:    "#b0b0b0",
+  textBright: "#e0e0e0",
+  textWhite:  "#f0f0f0",
+  green:      "#00ff41",
+  greenDim:   "#00992a",
+  greenFaint: "rgba(0,255,65,0.06)",
+  greenGlow:  "rgba(0,255,65,0.18)",
+  cyan:       "#00d4ff",
+  cyanFaint:  "rgba(0,212,255,0.07)",
+  red:        "#ff3355",
+  redFaint:   "rgba(255,51,85,0.07)",
+  amber:      "#ffaa00",
+  purple:     "#9945ff",
+  blue:       "#3d9fff",
+} as const;
+
+const FONT = "'JetBrains Mono','Courier New',monospace";
+
+const SCANLINE_BG =
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.012) 3px, rgba(0,0,0,0.012) 4px)";
 
 // ── Token logo circle ─────────────────────────────────────────────────────────
-function TokenCircle({ symbol, size = 32, style }: {
-  symbol: string; size?: number; style?: React.CSSProperties;
-}) {
+function TokenCircle({
+  symbol, size = 44, style,
+}: { symbol: string; size?: number; style?: CSSProperties }) {
   const [imgErr, setImgErr] = useState(false);
   const logoUrl = getTokenLogo(symbol);
-  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
-  const base: React.CSSProperties = {
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#3d3d3d";
+  const base: CSSProperties = {
     width: size, height: size, borderRadius: "50%",
-    border: "2px solid #060d08", flexShrink: 0, ...style,
+    border: `1px solid ${C.borderHi}`, flexShrink: 0, background: C.bg2, ...style,
   };
   if (logoUrl && !imgErr) {
     return <img src={logoUrl} alt={symbol} onError={() => setImgErr(true)}
       style={{ ...base, objectFit: "cover", display: "block" }} />;
   }
   return (
-    <div style={{ ...base, background: color,
+    <div style={{
+      ...base, background: color,
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.35, fontWeight: 700, color: "white" }}>
-      {symbol.charAt(0).toUpperCase()}
+      fontSize: size * 0.22, fontWeight: 700, color: C.textWhite, letterSpacing: "0.04em",
+    }}>
+      {symbol.length <= 4 ? symbol.toUpperCase() : symbol.slice(0, 4).toUpperCase()}
     </div>
   );
 }
 
-// ── Fee-snapshot localStorage helpers ────────────────────────────────────────
+// ── Fee-snapshot localStorage helpers (unchanged) ────────────────────────────
 const FEE_LS_KEY = "defidesh-fee-history";
-const MIN_SNAPSHOT_MS = 5 * 60 * 1000; // save at most once per 5 min
+const MIN_SNAPSHOT_MS = 5 * 60 * 1000;
 
 interface FeeSnapshot {
   timestamp: number;
@@ -143,301 +176,41 @@ function getCurrentPrice(pos: AerodromePosition): number | null {
   return pos.price0 ?? null;
 }
 
-function chainGradient(chain: string): string {
+function chainColor(chain: string): string {
   const map: Record<string, string> = {
-    Base:        "linear-gradient(135deg, #059669, #10b981)",
-    Ethereum:    "linear-gradient(135deg, #0d9488, #14b8a6)",
-    Solana:      "linear-gradient(135deg, #065f46, #047857)",
-    Sui:         "linear-gradient(135deg, #0d9488, #2dd4bf)",
-    Arbitrum:    "linear-gradient(135deg, #0891b2, #06b6d4)",
-    Optimism:    "linear-gradient(135deg, #dc2626, #b91c1c)",
-    Polygon:     "linear-gradient(135deg, #047857, #0d9488)",
-    HyperEVM:    "linear-gradient(135deg, #065f46, #059669)",
-    "BNB Chain": "linear-gradient(135deg, #92400e, #b45309)",
-    Avalanche:   "linear-gradient(135deg, #991b1b, #dc2626)",
+    Base: C.blue, Ethereum: C.cyan, Arbitrum: C.green, Optimism: "#ff0420",
+    Polygon: C.purple, Avalanche: "#e84142", Solana: C.purple, Sui: C.blue,
+    HyperEVM: "#00d4aa", "BNB Chain": C.amber,
   };
-  return map[chain] ?? "linear-gradient(135deg, #064e3b, #065f46)";
+  return map[chain] ?? C.green;
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-function Card({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div style={{
-      background: "rgba(255,255,255,0.03)",
-      border: "1px solid rgba(255,255,255,0.06)",
-      borderRadius: 14,
-      padding: 20,
-      ...style,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function SectionHeader({ icon, label }: { icon: string; label: string }) {
-  return (
-    <p style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 1,
-      color: "#6ee7b7", margin: "0 0 16px", display: "flex", alignItems: "center", gap: 6 }}>
-      <span>{icon}</span> {label}
-    </p>
-  );
-}
-
-function StatCard({
-  label, value, sub, valueColor = "white",
+// ── Section frame ────────────────────────────────────────────────────────────
+function Section({
+  icon, title, sub, right, children,
 }: {
-  label: string; value: string; sub?: string; valueColor?: string;
+  icon: string;
+  title: string;
+  sub?: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
 }) {
   return (
-    <Card>
-      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
-        color: "rgba(255,255,255,0.4)", margin: "0 0 8px" }}>{label}</p>
-      <p style={{ fontSize: 28, fontWeight: 700, color: valueColor, margin: 0,
-        letterSpacing: -0.5 }}>{value}</p>
-      {sub && (
-        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "4px 0 0" }}>{sub}</p>
-      )}
-    </Card>
-  );
-}
-
-// ── P&L Card Content ─────────────────────────────────────────────────────────
-function PnLCardContent({ d, closed, pnlPositive, ilNegative, totalFees, sym0, sym1, txUrl, cellStyle, lbl, val, sub }: {
-  d: PositionPnLData; closed: boolean; pnlPositive: boolean; ilNegative: boolean;
-  totalFees: number; sym0: string; sym1: string;
-  txUrl: (hash: string) => string;
-  cellStyle: React.CSSProperties; lbl: React.CSSProperties;
-  val: (c: string) => React.CSSProperties; sub: React.CSSProperties;
-}) {
-  const [showCalc, setShowCalc] = useState(false);
-
-  const fmtP = (n: number): string => {
-    if (n >= 1_000) return `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-    if (n >= 1)     return `$${n.toFixed(2)}`;
-    if (n >= 0.0001) return `$${n.toFixed(6)}`;
-    return `$${n.toExponential(2)}`;
-  };
-
-  const bannerGreen = d.feesOffsetIL;
-  const bannerBg = bannerGreen ? "rgba(16,185,129,0.10)" : "rgba(239,68,68,0.10)";
-  const bannerBorder = bannerGreen ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)";
-
-  return (
-    <>
-      {/* Row 1: 5 metric cards */}
-      <div className="detail-5col"
-        style={{ display: "grid", gridTemplateColumns: closed ? "repeat(4, 1fr)" : "repeat(5, 1fr)", gap: 10, marginBottom: 12 }}>
-        <div style={cellStyle}>
-          <p style={lbl}>Initial Value</p>
-          <p style={val("white")}>{fmt$(d.initialValue)}</p>
-          <p style={sub}>at deposit time</p>
-        </div>
-        <div style={cellStyle}>
-          <p style={lbl}>{closed ? "Closing Value" : "Current Value"}</p>
-          <p style={val("white")}>{fmt$(closed ? d.closingValue : d.currentValue)}</p>
-          <p style={sub}>{closed ? "at close time" : "live"}</p>
-        </div>
-        <div style={cellStyle}>
-          <p style={lbl}>Fees Collected</p>
-          <p style={val("#34d399")}>{fmt$(d.feesCollected)}</p>
-          <p style={sub}>claimed on-chain</p>
-        </div>
-        {!closed && (
-          <div style={cellStyle}>
-            <p style={lbl}>Fees Unclaimed</p>
-            <p style={val("#6ee7b7")}>{fmt$(d.feesUnclaimed)}</p>
-            <p style={sub}>ready to claim</p>
+    <section style={{ borderBottom: `1px solid ${C.border}`, animation: "_fadeUp 0.45s ease both" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "24px 40px 0", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+          <span style={{ fontSize: 11, color: C.green, letterSpacing: "0.1em" }}>{icon}</span>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+              {title}
+            </div>
+            {sub && <div style={{ fontSize: 11, color: C.text, opacity: 0.55, marginTop: 4 }}>{sub}</div>}
           </div>
-        )}
-        <div style={cellStyle}>
-          <p style={lbl}>Impermanent Loss</p>
-          <p style={val(ilNegative ? "#f87171" : "#34d399")}>
-            {ilNegative ? "−" : "+"}{fmt$(Math.abs(d.ilUSD))}
-          </p>
-          <p style={{ ...sub, color: ilNegative ? "rgba(248,113,113,0.7)" : "rgba(52,211,153,0.7)" }}>
-            {d.ilPct.toFixed(2)}%
-          </p>
         </div>
+        {right && <div style={{ marginRight: 0 }}>{right}</div>}
       </div>
-
-      {/* Row 2: Net P&L + HODL Value + Fees vs IL banner */}
-      <div style={{
-        background: bannerBg,
-        border: `1px solid ${bannerBorder}`,
-        borderRadius: 10,
-        padding: "16px 20px",
-        display: "flex",
-        alignItems: "center",
-        gap: 0,
-        marginBottom: 8,
-      }}>
-        {/* Section 1: Net P&L */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ ...lbl, textAlign: "left" }}>Net P&L</p>
-          <p style={{
-            fontSize: 26, fontWeight: 700, margin: "0 0 2px",
-            color: pnlPositive ? "#34d399" : "#f87171",
-          }}>
-            {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
-            <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 8, opacity: 0.8 }}>
-              {pnlPositive ? "+" : ""}{d.netPnlPct.toFixed(2)}%
-            </span>
-          </p>
-          <p style={{ ...sub, textAlign: "left" }}>
-            {closed
-              ? `(${fmt$(d.closingValue)} closing + ${fmt$(d.feesCollected)} fees) − ${fmt$(d.initialValue)} initial`
-              : `(${fmt$(d.currentValue)} current + ${fmt$(d.feesCollected)} fees + ${fmt$(d.feesUnclaimed)} unclaimed) − ${fmt$(d.initialValue)} initial`}
-          </p>
-        </div>
-
-        {/* Divider */}
-        <div style={{
-          width: 1, alignSelf: "stretch",
-          background: bannerGreen ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
-          margin: "0 16px",
-        }} />
-
-        {/* Section 2: HODL Value */}
-        <div style={{ flex: 0, minWidth: 140, textAlign: "center" }}>
-          <p style={lbl}>HODL Value</p>
-          <p style={{
-            fontSize: 20, fontWeight: 700, margin: "0 0 4px", color: "white",
-          }}>
-            {fmt$(d.hodlValue)}
-          </p>
-          <p style={sub}>{closed ? "if you held until today" : "if you just held"}</p>
-        </div>
-
-        {/* Divider */}
-        <div style={{
-          width: 1, alignSelf: "stretch",
-          background: bannerGreen ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)",
-          margin: "0 16px",
-        }} />
-
-        {/* Section 3: Fees vs IL */}
-        <div style={{ flex: 0, minWidth: 140, textAlign: "center" }}>
-          <p style={lbl}>Fees vs IL</p>
-          <p style={{
-            fontSize: 20, fontWeight: 700, margin: "0 0 4px",
-            color: bannerGreen ? "#34d399" : "#f87171",
-          }}>
-            {bannerGreen ? "Offset \u2713" : "Not offset \u2717"}
-          </p>
-          <p style={sub}>
-            {fmt$(totalFees)} fees vs {fmt$(Math.abs(d.ilUSD))} IL
-          </p>
-        </div>
-      </div>
-
-      {/* Collapsible: How this was calculated */}
-      <button
-        onClick={() => setShowCalc(!showCalc)}
-        style={{
-          background: "none", border: "none", cursor: "pointer",
-          fontSize: 11, color: "rgba(255,255,255,0.4)", padding: "6px 0",
-          display: "flex", alignItems: "center", gap: 4,
-        }}
-      >
-        <span style={{ transform: showCalc ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s", display: "inline-block" }}>
-          &#9656;
-        </span>
-        How this was calculated
-      </button>
-
-      {showCalc && (
-        <div style={{
-          background: "rgba(255,255,255,0.02)",
-          border: "1px solid rgba(255,255,255,0.06)",
-          borderRadius: 8, padding: 16, marginTop: 4,
-          fontSize: 12, lineHeight: 1.8, color: "rgba(255,255,255,0.55)",
-          fontFamily: "monospace",
-        }}>
-          <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-            Entry &amp; Current Prices
-          </p>
-          <p style={{ margin: 0 }}>
-            {sym0} entry: {fmtP(d.entryPrice0)} &rarr; current: {fmtP(d.currentPrice0)}
-          </p>
-          <p style={{ margin: "0 0 12px" }}>
-            {sym1} entry: {fmtP(d.entryPrice1)} &rarr; current: {fmtP(d.currentPrice1)}
-          </p>
-
-          {d.ilAvailable && (
-            <>
-              <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-                Original Deposits
-              </p>
-              <p style={{ margin: 0 }}>
-                {sym0}: {d.totalAmount0.toLocaleString(undefined, { maximumFractionDigits: 6 })} (entry {fmtP(d.entryPrice0)} &rarr; current {fmtP(d.currentPrice0)})
-              </p>
-              <p style={{ margin: "0 0 12px" }}>
-                {sym1}: {d.totalAmount1.toLocaleString(undefined, { maximumFractionDigits: 6 })} (entry {fmtP(d.entryPrice1)} &rarr; current {fmtP(d.currentPrice1)})
-              </p>
-
-              <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-                HODL Value (deposits at today&apos;s prices)
-              </p>
-              <p style={{ margin: "0 0 12px" }}>
-                HODL = ({d.totalAmount0.toLocaleString(undefined, { maximumFractionDigits: 6 })} &times; {fmtP(d.currentPrice0)}) + ({d.totalAmount1.toLocaleString(undefined, { maximumFractionDigits: 6 })} &times; {fmtP(d.currentPrice1)}) = {fmt$(d.hodlValue)}
-              </p>
-
-              <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-                Impermanent Loss (concentrated liquidity)
-              </p>
-              <p style={{ margin: 0 }}>
-                {closed ? "Closing" : "Current"} LP Value = {fmt$(closed ? d.closingValue : d.currentValue)}
-              </p>
-              <p style={{ margin: 0 }}>
-                IL % = ({fmt$(closed ? d.closingValue : d.currentValue)} / {fmt$(d.hodlValue)}) &minus; 1 = {d.ilPct.toFixed(4)}%
-              </p>
-              <p style={{ margin: 0 }}>
-                IL USD = {fmt$(d.hodlValue)} HODL &minus; {fmt$(closed ? d.closingValue : d.currentValue)} {closed ? "Closing" : "Current"} = {d.ilUSD < 0 ? "−" : "+"}{fmt$(Math.abs(d.ilUSD))}
-              </p>
-              <p style={{ margin: "0 0 12px", color: "rgba(255,255,255,0.4)", fontSize: 11 }}>
-                Identity: HODL + IL USD = {fmt$(d.hodlValue + d.ilUSD)} (matches LP Value exactly)
-              </p>
-            </>
-          )}
-
-          <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-            Net P&amp;L
-          </p>
-          {closed ? (
-            <p style={{ margin: "0 0 12px" }}>
-              ({fmt$(d.closingValue)} closing + {fmt$(d.feesCollected)} fees) &minus; {fmt$(d.initialValue)} initial = {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
-            </p>
-          ) : (
-            <p style={{ margin: "0 0 12px" }}>
-              ({fmt$(d.currentValue)} current + {fmt$(d.feesCollected)} fees + {fmt$(d.feesUnclaimed)} unclaimed) &minus; {fmt$(d.initialValue)} initial = {pnlPositive ? "+" : "−"}{fmt$(Math.abs(d.netPnlUSD))}
-            </p>
-          )}
-
-          <p style={{ margin: "0 0 8px", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontFamily: "inherit" }}>
-            On-Chain Deposits ({d.depositCount})
-          </p>
-          {d.depositTxHashes.length > 0 ? (
-            d.depositTxHashes.map((hash, i) => (
-              <p key={hash} style={{ margin: 0 }}>
-                #{i + 1}{" "}
-                <a
-                  href={txUrl(hash)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: "#6ee7b7", textDecoration: "none" }}
-                >
-                  {hash.slice(0, 10)}...{hash.slice(-8)}
-                </a>
-              </p>
-            ))
-          ) : (
-            <p style={{ margin: 0 }}>
-              {d.depositCount} deposit{d.depositCount === 1 ? "" : "s"} found on-chain (tx hashes unavailable)
-            </p>
-          )}
-        </div>
-      )}
-    </>
+      {children}
+    </section>
   );
 }
 
@@ -457,11 +230,9 @@ export default function PositionDetail() {
 
   const t0  = pos?.token0Symbol ?? "Token0";
   const t1  = pos?.token1Symbol ?? "Token1";
-  const d0  = pos?.token0Decimals ?? 18;
-  const d1  = pos?.token1Decimals ?? 6;
 
   // Price range
-  const hasRange   = pos != null && pos.tickLower != null && pos.tickUpper != null;
+  const hasRange    = pos != null && pos.tickLower != null && pos.tickUpper != null;
   const minPriceUSD = hasRange && pos ? tickToUSD(pos.tickLower!, pos) : null;
   const maxPriceUSD = hasRange && pos ? tickToUSD(pos.tickUpper!, pos) : null;
   const curPriceUSD = pos ? getCurrentPrice(pos) : null;
@@ -475,6 +246,13 @@ export default function PositionDetail() {
     ? ((maxPriceUSD - minPriceUSD) / minPriceUSD * 100).toFixed(2)
     : null;
 
+  const distLower = (minPriceUSD && curPriceUSD && curPriceUSD > 0)
+    ? ((minPriceUSD - curPriceUSD) / curPriceUSD * 100).toFixed(1)
+    : null;
+  const distUpper = (maxPriceUSD && curPriceUSD && curPriceUSD > 0)
+    ? ((maxPriceUSD - curPriceUSD) / curPriceUSD * 100).toFixed(1)
+    : null;
+
   // APR / cashflow
   const hasApr     = (pos?.apy ?? 0) > 0 && (pos?.value ?? 0) > 0;
   const dailyUSD   = hasApr ? pos!.value * pos!.apy / 100 / 365 : null;
@@ -486,8 +264,9 @@ export default function PositionDetail() {
   const hasAmounts = pos != null && (pos.amount0 != null || pos.amount1 != null);
   const hasFees    = pos != null && (pos.fees0 != null || pos.fees1 != null);
 
-  // ── Fee tracking ────────────────────────────────────────────────────────────
-  const [snapshots, setSnapshots] = useState<FeeSnapshot[]>([]);
+  // ── Fee tracking (unused chart historical fallback, retained for snapshot side-effect parity) ──
+  const [, setSnapshots] = useState<FeeSnapshot[]>([]);
+  void loadSnapshots;
 
   // ── Pool statistics (from DefiLlama) ────────────────────────────────────────
   const [poolStats, setPoolStats] = useState<{ tvlUsd: number | null; volumeUsd1d: number | null; feesUsd1d: number | null } | null>(null);
@@ -504,7 +283,7 @@ export default function PositionDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pos?.id]);
 
-  // Load history on mount; append new snapshot whenever fees change
+  // Snapshot fee history on every refresh (still used for legacy listeners)
   useEffect(() => {
     if (!pos) return;
     const snap: FeeSnapshot = {
@@ -608,7 +387,6 @@ export default function PositionDetail() {
     : pos?.protocol === 'Velodrome' ? velodromeActivityError
     : null;
   const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
-  // True when we expect data but it hasn't arrived yet (initial render before effect fires)
   const activityPending = isActivityProtocol && !activity && !activityError;
 
   // Build fee accumulation chart from on-chain activity fee_claim events.
@@ -635,7 +413,6 @@ export default function PositionDetail() {
       chartData.push({
         label: new Date(ev.timestamp * 1000).toLocaleDateString("en-US", {
           month: "short", day: "numeric",
-          ...(feeClaims.length <= 20 ? { hour: "numeric" as const } : {}),
         }),
         value: cumulative,
       });
@@ -644,37 +421,41 @@ export default function PositionDetail() {
     return { chartData, noClaimsYet: false, openTs };
   }, [activity]);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-
-  // Loading
+  // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading && !pos) {
     return (
-      <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
-        <Navbar />
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "96px 28px 28px", textAlign: "center" }}>
-          <div style={{ width: 32, height: 32, border: "2px solid #10b981",
-            borderTopColor: "transparent", borderRadius: "50%", margin: "0 auto 16px",
-            animation: "spin 1s linear infinite" }} />
-          <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
-          <p style={{ color: "rgba(255,255,255,0.4)" }}>Loading position…</p>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
+        <TerminalNavbar />
+        <div style={{ padding: 64, textAlign: "center" }}>
+          <div style={{
+            width: 32, height: 32, border: `2px solid ${C.green}`, borderTopColor: "transparent",
+            borderRadius: "50%", margin: "0 auto 16px",
+            animation: "_spin 1s linear infinite",
+          }} />
+          <style>{`@keyframes _spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
+          <p style={{ color: C.text, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase" }}>Loading position…</p>
         </div>
       </div>
     );
   }
 
-  // Not found
+  // ── Not found ──────────────────────────────────────────────────────────────
   if (!pos) {
     return (
-      <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
-        <Navbar />
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "96px 28px 28px", textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 24 }}>🔍</div>
-          <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>Position not found</h2>
-          <p style={{ color: "rgba(255,255,255,0.4)", marginBottom: 32 }}>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
+        <TerminalNavbar />
+        <div style={{ padding: 64, textAlign: "center" }}>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: C.textWhite, marginBottom: 12, letterSpacing: "-0.01em" }}>
+            Position not found
+          </h2>
+          <p style={{ color: C.text, marginBottom: 24, fontSize: 12 }}>
             This position could not be located. It may have been closed or the data hasn&apos;t loaded yet.
           </p>
-          <Link href="/dashboard" style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.3)",
-            color: "#6ee7b7", borderRadius: 10, padding: "10px 20px", textDecoration: "none", fontSize: 14 }}>
+          <Link href="/dashboard" style={{
+            border: `1px solid ${C.greenDim}`, background: C.greenFaint, color: C.green,
+            padding: "10px 18px", textDecoration: "none", fontSize: 11,
+            fontFamily: FONT, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600,
+          }}>
             ← Back to Dashboard
           </Link>
         </div>
@@ -682,470 +463,712 @@ export default function PositionDetail() {
     );
   }
 
-  const void_d0_d1 = [d0, d1]; void void_d0_d1; // suppress unused vars (used in build helpers)
+  // ── Derived activity metrics ───────────────────────────────────────────────
+  const feeClaims = activity?.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim') ?? [];
+  const deposits = activity?.events.filter(e => e.type === 'deposit') ?? [];
+  const claimedUSD = feeClaims.reduce((sum, e) => {
+    if (e.usdAtTime != null) return sum + e.usdAtTime;
+    return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
+  }, 0);
+  const uncollectedUSD = pos.fees;
+  const lifetimeUSD = claimedUSD + uncollectedUSD;
+  const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
+  const firstTs = firstDeposit?.timestamp ?? 0;
+  const nowTs = Math.floor(Date.now() / 1000);
+  const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+  const actualAPR = daysActive >= 1 && pos.value > 0 && claimedUSD > 0
+    ? (claimedUSD / pos.value) / (daysActive / 365) * 100
+    : null;
+  const actualDailyIncome = daysActive >= 1 && claimedUSD > 0 ? claimedUSD / daysActive : null;
+  const feeIncomePct = pos.value > 0 ? (lifetimeUSD / pos.value) * 100 : 0;
+  const daysLabel = daysActive >= 1 ? `${Math.floor(daysActive)}d` : (firstTs > 0 ? '<1d' : '—');
+  const openedDate = firstTs > 0 ? new Date(firstTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
 
+  // P&L
+  const pnlEvents = activity?.events.map((e) => ({
+    type: e.type as 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim',
+    timestamp: e.timestamp as number,
+    amount0: e.amount0 as number,
+    amount1: e.amount1 as number,
+    usdAtTime: (e.usdAtTime as number | null) ?? null,
+    price0AtTime: (e.price0AtTime as number | null) ?? null,
+    price1AtTime: (e.price1AtTime as number | null) ?? null,
+    txHash: e.txHash ?? undefined,
+  })) ?? [];
+  const pnlResult = isActivityProtocol && activity ? computePositionPnL({
+    currentValue: pos.value,
+    unclaimedFeesUSD: pos.fees ?? 0,
+    price0: pos.price0 ?? 0,
+    price1: pos.price1 ?? 0,
+    events: pnlEvents,
+    isClosed: pos.status === "Closed",
+  }) : null;
+  const pnl = pnlResult?.ok ? pnlResult.data : null;
+  const pnlPositive = pnl ? pnl.netPnlUSD >= 0 : false;
+  const ilNegative  = pnl ? pnl.ilUSD < 0 : false;
+  const totalFees   = pnl ? pnl.feesCollected + pnl.feesUnclaimed : 0;
+
+  // Tx URL builder
+  const txUrl = (hash: string): string => {
+    if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
+    if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
+    if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
+    if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
+    if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
+    if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
+    if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
+    if (pos.chain === 'BNB Chain') return `https://bscscan.com/tx/${hash}`;
+    return `https://basescan.org/tx/${hash}`;
+  };
+  const shortHash = (h: string) => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
+  const fmtDate = (ts: number) => !ts ? '—' : new Date(ts * 1000).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+  });
+  const fmtAmt = (n: number) => n === 0 ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 6 });
+
+  // ── Wallet truncation ──────────────────────────────────────────────────────
+  const truncWallet = pos.walletAddress
+    ? `${pos.walletAddress.slice(0, 6)}…${pos.walletAddress.slice(-4)}`
+    : null;
+
+  // Helpers for inline styles
+  const cellPadding = "20px 24px";
+  const labelStyle: CSSProperties = {
+    fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+    marginBottom: 10, opacity: 0.6, fontFamily: FONT,
+  };
+  const subStyle: CSSProperties = {
+    fontSize: 10, color: C.text, marginTop: 5, opacity: 0.6, letterSpacing: "0.04em",
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ background: "#060d08", minHeight: "100vh", color: "white" }}>
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      minHeight: "100vh",
+      background: C.bg,
+      color: C.text,
+      fontFamily: FONT,
+      fontSize: 13,
+      lineHeight: 1.5,
+      overflowX: "hidden",
+    }}>
       <style>{`
-        @keyframes _spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        @media (max-width:640px) {
-          .detail-4col  { grid-template-columns: 1fr 1fr !important; }
-          .detail-2col  { grid-template-columns: 1fr !important; }
-          .detail-3col  { grid-template-columns: 1fr 1fr !important; }
-        }
+        @keyframes _spin   { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+        @keyframes _pulse  { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes _scan   { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+        .pos-row:hover td { background: rgba(255,255,255,0.012); }
+        .btn-neutral:hover { border-color: ${C.text} !important; color: ${C.textBright} !important; background: ${C.bg2} !important; }
+        .btn-primary:hover { background: rgba(0,255,65,0.12) !important; box-shadow: 0 0 14px rgba(0,255,65,0.18); }
+        .tx-link:hover { opacity: 0.7; }
       `}</style>
-      <Navbar />
 
-      {/* Small gradient accent at top */}
-      <div style={{
-        background: "linear-gradient(135deg, #041a0a 0%, #071f12 40%, #060d08 100%)",
-        padding: "80px 28px 24px",
-        position: "relative",
-        overflow: "hidden",
-      }}>
-        <div style={{ position:"absolute", top:0, right:0, width:300, height:200,
-          background:"radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%)",
-          pointerEvents:"none" }} />
+      {/* Scanline overlay */}
+      <div aria-hidden style={{
+        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG,
+      }} />
 
-        <div style={{ maxWidth: 1200, margin: "0 auto", position: "relative" }}>
-          {/* Back button */}
-          <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 6,
-            fontSize: 13, color: "rgba(255,255,255,0.4)", textDecoration: "none", marginBottom: 20,
-            transition: "color 0.15s" }}>
+      <TerminalNavbar />
+
+      <main style={{ flex: 1, background: C.bg }}>
+
+        {/* ── BACK BAR ────────────────────────────────────────────────────── */}
+        <div style={{
+          padding: "14px 40px",
+          borderBottom: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center", gap: 14,
+        }}>
+          <Link href="/dashboard" style={{
+            fontSize: 11, color: C.text, textDecoration: "none",
+            letterSpacing: "0.08em", textTransform: "uppercase",
+            transition: "color 0.15s",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = C.textMid)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = C.text)}
+          >
             ← Back to Dashboard
           </Link>
+          <span style={{ color: C.borderHi, fontSize: 10 }}>›</span>
+          <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em" }}>
+            <span style={{ color: C.green }}>// position_detail</span> · {pos.id}
+          </span>
+        </div>
 
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-            flexWrap: "wrap", gap: 16 }}>
-            <div>
-              {/* Token pair logos + pair name */}
-              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
-                {/* Overlapping token circles */}
-                <div style={{ position: "relative", width: 60, height: 36, flexShrink: 0 }}>
-                  <TokenCircle symbol={t1} size={36}
-                    style={{ position: "absolute", right: 0, top: 0, zIndex: 1 }} />
-                  <TokenCircle symbol={t0} size={36}
-                    style={{ position: "absolute", left: 0, top: 0, zIndex: 2 }} />
-                </div>
-                <h1 style={{ fontSize: 28, fontWeight: 700, color: "white", margin: 0 }}>
+        {/* ── POSITION HEADER ─────────────────────────────────────────────── */}
+        <div style={{
+          padding: "32px 40px 28px",
+          borderBottom: `1px solid ${C.border}`,
+          background: `linear-gradient(180deg, ${C.bg1} 0%, ${C.bg} 100%)`,
+          position: "relative",
+          animation: "_fadeUp 0.4s ease both",
+        }}>
+          <div aria-hidden style={{
+            position: "absolute", top: 0, left: 0, right: 0, height: 1,
+            background: `linear-gradient(90deg, transparent, ${C.greenGlow} 30%, ${C.greenGlow} 70%, transparent)`,
+            opacity: 0.4,
+          }} />
+          <div style={{
+            fontSize: 10, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase",
+            marginBottom: 14, opacity: 0.6,
+          }}>
+            <span style={{ color: C.green, opacity: 1 }}>// liquidity_position</span> · {pos.protocol.toLowerCase().replace(/ /g, "_")} · {pos.chain.toLowerCase().replace(/ /g, "_")}_network
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+              {/* Overlapping token icons */}
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <TokenCircle symbol={t0} size={44} style={{ position: "relative", zIndex: 2 }} />
+                <TokenCircle symbol={t1} size={44} style={{ marginLeft: -14, position: "relative", zIndex: 1 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 30, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
                   {t0} / {t1}
-                </h1>
-              </div>
-
-              {/* Badges row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                <span style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-                  color: "rgba(255,255,255,0.7)", fontSize: 12, padding: "3px 10px", borderRadius: 20 }}>
-                  {pos.protocol}
-                </span>
-                {pos.feeTier != null && (
-                  <span style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-                    color: "rgba(255,255,255,0.7)", fontSize: 12, padding: "3px 10px", borderRadius: 20 }}>
-                    {pos.feeTier}% fee
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                  {/* Protocol tag */}
+                  <span style={{
+                    fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                    padding: "4px 12px", border: `1px solid ${C.cyan}4d`, background: C.cyanFaint,
+                    color: C.cyan, fontWeight: 600,
+                  }}>
+                    {pos.protocol}
                   </span>
-                )}
-                <span style={{
-                  background: isClosed ? "rgba(255,255,255,0.03)"
-                    : posStatus === "In Range" ? "rgba(52,211,153,0.1)"
-                    : "rgba(245,158,11,0.1)",
-                  border: `1px solid ${isClosed ? "rgba(255,255,255,0.06)"
-                    : posStatus === "In Range" ? "rgba(52,211,153,0.2)"
-                    : "rgba(245,158,11,0.2)"}`,
-                  color: isClosed ? "rgba(255,255,255,0.3)"
-                    : posStatus === "In Range" ? "#34d399"
-                    : "#f59e0b",
-                  fontSize: 12, padding: "3px 10px", borderRadius: 20,
-                }}>
-                  {posStatus === "In Range" ? "● In Range" : posStatus}
-                </span>
-              </div>
-
-              {/* Meta info */}
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                {pos.chain}
-                {pos.walletAddress && (
-                  <span style={{ marginLeft: 8 }}>
-                    · wallet …{pos.walletAddress.slice(-6)}
+                  {/* Status tag */}
+                  <span style={{
+                    fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                    padding: "4px 12px", fontWeight: 600,
+                    display: "flex", alignItems: "center", gap: 6,
+                    border: `1px solid ${
+                      isClosed ? C.borderHi : posStatus === "In Range" ? C.greenDim : C.amber
+                    }`,
+                    background: isClosed ? C.bg2
+                      : posStatus === "In Range" ? C.greenFaint
+                      : "rgba(255,170,0,0.06)",
+                    color: isClosed ? C.text
+                      : posStatus === "In Range" ? C.green
+                      : C.amber,
+                  }}>
+                    {!isClosed && posStatus === "In Range" && (
+                      <span style={{
+                        width: 6, height: 6, background: C.green,
+                        animation: "_pulse 2s infinite",
+                      }} />
+                    )}
+                    {posStatus}
                   </span>
-                )}
-                {/^\d+$/.test(pos.id) && (
-                  <span style={{ marginLeft: 8 }}>· NFT #{pos.id}</span>
-                )}
-              </p>
+                  {/* Fee tier tag */}
+                  {pos.feeTier != null && (
+                    <span style={{
+                      fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                      padding: "4px 12px", border: `1px solid ${C.borderHi}`, background: C.bg2,
+                      color: C.textMid, fontWeight: 600,
+                    }}>
+                      {pos.feeTier}% Tier
+                    </span>
+                  )}
+                </div>
+                {/* Sub meta row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, fontSize: 11, color: C.text, letterSpacing: "0.06em", flexWrap: "wrap" }}>
+                  <span style={{ color: chainColor(pos.chain), textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 600 }}>
+                    ◆ {pos.chain}
+                  </span>
+                  {truncWallet && (
+                    <>
+                      <span style={{ color: C.borderHi }}>·</span>
+                      <span>wallet <code style={{ color: C.textMid, fontFamily: FONT }}>{truncWallet}</code></span>
+                    </>
+                  )}
+                  {openedDate && (
+                    <>
+                      <span style={{ color: C.borderHi }}>·</span>
+                      <span>
+                        Opened <strong style={{ color: C.textMid, fontWeight: 600 }}>{openedDate}</strong>
+                        {daysLabel !== '—' && (
+                          <> · <span style={{ color: C.green }}>{daysLabel} active</span></>
+                        )}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
+            {/* Actions */}
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              {manageUrl && (
+                <a href={manageUrl} target="_blank" rel="noopener noreferrer"
+                  className="btn-primary"
+                  style={{
+                    fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                    letterSpacing: "0.1em", textTransform: "uppercase",
+                    padding: "10px 18px",
+                    border: `1px solid ${C.greenDim}`, background: C.greenFaint,
+                    color: C.green, textDecoration: "none",
+                    display: "flex", alignItems: "center", gap: 8,
+                    cursor: "pointer", transition: "all 0.15s",
+                  }}>
+                  ↗ Manage Position
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
 
-            {/* Manage Position button */}
-            {manageUrl && (
-              <a href={manageUrl} target="_blank" rel="noopener noreferrer"
-                style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.3)",
-                  color: "#6ee7b7", borderRadius: 10, padding: "10px 18px", textDecoration: "none",
-                  fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", alignSelf: "flex-start" }}>
-                Manage Position ↗
-              </a>
+        {/* ── TOP STAT STRIP (4 cells) ──────────────────────────────────── */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+          borderBottom: `1px solid ${C.border}`,
+          animation: "_fadeUp 0.5s ease 0.05s both",
+        }}>
+          {/* Total Value */}
+          <div style={{ padding: "24px 28px", borderRight: `1px solid ${C.border}`, position: "relative", background: C.bg }}>
+            <div style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 5, height: 5, background: C.green }} />
+              Total Value
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite, fontVariantNumeric: "tabular-nums" }}>
+              {fmt$(pos.value)}
+            </div>
+            <div style={{ ...subStyle, opacity: 0.7 }}>live mark-to-market</div>
+          </div>
+          {/* Uncollected Fees */}
+          <div style={{ padding: "24px 28px", borderRight: `1px solid ${C.border}`, background: C.bg }}>
+            <div style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 5, height: 5, background: C.green }} />
+              Uncollected Fees
+            </div>
+            <div style={{
+              fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em",
+              color: pos.fees > 0 ? C.green : C.text,
+              textShadow: pos.fees > 0 ? "0 0 20px rgba(0,255,65,0.25)" : "none",
+              fontVariantNumeric: "tabular-nums",
+            }}>
+              {fmt$(pos.fees)}
+            </div>
+            <div style={{ ...subStyle, color: pos.fees > 0 ? C.green : C.text }}>
+              {pos.fees > 0 ? "↑ ready to collect" : "no fees pending"}
+            </div>
+          </div>
+          {/* Estimated APR */}
+          <div style={{ padding: "24px 28px", borderRight: `1px solid ${C.border}`, background: C.bg }}>
+            <div style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 5, height: 5, background: C.green }} />
+              Estimated APR
+            </div>
+            <div style={{
+              fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em",
+              color: hasApr ? C.cyan : C.text,
+              textShadow: hasApr ? "0 0 16px rgba(0,212,255,0.2)" : "none",
+              fontVariantNumeric: "tabular-nums",
+            }}>
+              {hasApr ? `+${pos.apy.toFixed(1)}%` : "N/A"}
+            </div>
+            <div style={subStyle}>based on pool APY</div>
+          </div>
+          {/* Est. Cashflow (mini list) */}
+          <div style={{ padding: "24px 28px", background: C.bg }}>
+            <div style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 5, height: 5, background: C.green }} />
+              Est. Cashflow
+            </div>
+            {hasApr ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                  <span style={{ color: C.text, opacity: 0.6 }}>Daily</span>
+                  <span style={{ color: C.green, fontWeight: 600 }}>+{fmt$(dailyUSD!)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                  <span style={{ color: C.text, opacity: 0.6 }}>Monthly</span>
+                  <span style={{ color: C.green, fontWeight: 600 }}>+{fmt$(monthlyUSD!)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                  <span style={{ color: C.text, opacity: 0.6 }}>Yearly</span>
+                  <span style={{ color: C.green, fontWeight: 600 }}>+{fmt$(yearlyUSD!)}</span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 16, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
             )}
           </div>
         </div>
-      </div>
 
-      {/* ── Content ─────────────────────────────────────────────────────────── */}
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 28px 60px" }}>
-
-        {/* ── 2B: Value Summary Row ──────────────────────────────────────────── */}
-        <div className="detail-4col" style={{
-          display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16, marginBottom: 28,
-        }}>
-          <StatCard label="Total Value" value={fmt$(pos.value)} />
-          <StatCard
-            label="Uncollected Fees"
-            value={pos.fees > 0 ? fmt$(pos.fees) : "$0.00"}
-            sub={pos.fees > 0 ? "Ready to collect" : "No fees pending"}
-            valueColor="#34d399"
-          />
-          <StatCard
-            label="Estimated APR"
-            value={hasApr ? `+${pos.apy.toFixed(2)}%` : "N/A"}
-            sub={hasApr ? "Based on pool APY" : undefined}
-            valueColor="#6ee7b7"
-          />
-          {/* Cashflow card */}
-          <Card>
-            <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1,
-              color: "rgba(255,255,255,0.4)", margin: "0 0 8px" }}>Est. Cashflow</p>
-            {hasApr ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Daily</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#34d399" }}>+{fmt$(dailyUSD!)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Monthly</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#34d399" }}>+{fmt$(monthlyUSD!)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Yearly</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#34d399" }}>+{fmt$(yearlyUSD!)}</span>
-                </div>
-              </div>
-            ) : (
-              <p style={{ fontSize: 28, fontWeight: 700, color: "#6ee7b7", margin: 0 }}>N/A</p>
-            )}
-          </Card>
-        </div>
-
-        {/* ── 2C: Current Liquidity ─────────────────────────────────────────── */}
+        {/* ── CURRENT LIQUIDITY ────────────────────────────────────────── */}
         {hasAmounts && (
-          <Card style={{ marginBottom: 20 }}>
-            <SectionHeader icon="◎" label="Current Liquidity" />
-            <div className="detail-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Section icon="[◎]" title="Current Liquidity" sub="Token balances actively deposited in the pool">
+            <div style={{
+              margin: "0 40px",
+              display: "grid", gridTemplateColumns: "1fr 1fr",
+              border: `1px solid ${C.border}`,
+            }}>
               {[
-                { sym: t0, amount: pos.amount0, price: pos.price0 },
-                { sym: t1, amount: pos.amount1, price: pos.price1 },
-              ].map(({ sym, amount, price }) => (
-                <div key={sym} style={{ background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 16 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#6ee7b7", margin: "0 0 8px" }}>{sym}</p>
-                  <p style={{ fontSize: 22, fontWeight: 700, color: "white", margin: "0 0 4px" }}>
-                    {amount != null
-                      ? amount.toLocaleString("en-US", { maximumFractionDigits: 6 })
-                      : "—"}
-                  </p>
-                  {amount != null && price && (
-                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                      {fmt$(amount * price)}
-                    </p>
-                  )}
-                </div>
-              ))}
+                { sym: t0, amount: pos.amount0, price: pos.price0, label: "Token A" },
+                { sym: t1, amount: pos.amount1, price: pos.price1, label: "Token B" },
+              ].map(({ sym, amount, price, label }, i, arr) => {
+                const total = (pos.amount0 ?? 0) * (pos.price0 ?? 0) + (pos.amount1 ?? 0) * (pos.price1 ?? 0);
+                const myUsd = (amount ?? 0) * (price ?? 0);
+                const pct = total > 0 ? ((myUsd / total) * 100).toFixed(1) : "—";
+                return (
+                  <div key={sym} style={{
+                    padding: "22px 26px",
+                    borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{sym}</span>
+                      <span style={{
+                        fontSize: 9, color: C.text, letterSpacing: "0.1em",
+                        padding: "2px 8px", border: `1px solid ${C.borderHi}`, textTransform: "uppercase",
+                      }}>
+                        {label} · {pct}%
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                      {amount != null ? amount.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "—"}
+                    </div>
+                    {amount != null && price && (
+                      <div style={{ fontSize: 11, color: C.text, marginTop: 4, opacity: 0.7 }}>
+                        {fmt$(myUsd)} · @ {fmtPrice(price)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </Card>
+            {/* Total row */}
+            <div style={{
+              margin: "0 40px",
+              padding: "14px 26px", borderTop: `1px solid ${C.border}`,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              background: C.bg1,
+            }}>
+              <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em" }}>
+                Combined Liquidity Position
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                {(() => {
+                  const total = (pos.amount0 ?? 0) * (pos.price0 ?? 0) + (pos.amount1 ?? 0) * (pos.price1 ?? 0);
+                  if (total <= 0) return null;
+                  const pct0 = ((pos.amount0 ?? 0) * (pos.price0 ?? 0) / total * 100).toFixed(1);
+                  const pct1 = ((pos.amount1 ?? 0) * (pos.price1 ?? 0) / total * 100).toFixed(1);
+                  return (
+                    <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                      {pct0} / {pct1} split
+                    </span>
+                  );
+                })()}
+                <span style={{
+                  fontSize: 14, fontWeight: 700, color: C.green,
+                  textShadow: "0 0 12px rgba(0,255,65,0.2)",
+                  fontVariantNumeric: "tabular-nums",
+                }}>
+                  {fmt$(pos.value)}
+                </span>
+              </div>
+            </div>
+            <div style={{ height: 24 }} />
+          </Section>
         )}
 
-        {/* ── 2D: Uncollected Fees ──────────────────────────────────────────── */}
+        {/* ── UNCOLLECTED FEES ─────────────────────────────────────────── */}
         {hasFees && (
-          <Card style={{ marginBottom: 20 }}>
-            <SectionHeader icon="$" label="Uncollected Fees" />
-            <div className="detail-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <Section
+            icon="[$]"
+            title="Uncollected Fees"
+            sub="Trading fees earned but not yet claimed on-chain"
+            right={pos.fees > 0 && manageUrl ? (
+              <a href={manageUrl} target="_blank" rel="noopener noreferrer"
+                className="btn-primary"
+                style={{
+                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  letterSpacing: "0.1em", textTransform: "uppercase",
+                  padding: "10px 18px", marginRight: 40, marginTop: 0,
+                  border: `1px solid ${C.greenDim}`, background: C.greenFaint,
+                  color: C.green, textDecoration: "none",
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  cursor: "pointer", transition: "all 0.15s",
+                }}>
+                ↗ Claim All
+              </a>
+            ) : null}
+          >
+            <div style={{
+              margin: "0 40px",
+              display: "grid", gridTemplateColumns: "1fr 1fr",
+              border: `1px solid ${C.border}`,
+            }}>
               {[
                 { sym: t0, fee: pos.fees0, price: pos.price0 },
                 { sym: t1, fee: pos.fees1, price: pos.price1 },
-              ].map(({ sym, fee, price }) => (
-                <div key={sym} style={{ background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 16 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#6ee7b7", margin: "0 0 8px" }}>{sym}</p>
-                  <p style={{ fontSize: 22, fontWeight: 700, color: "white", margin: "0 0 4px" }}>
-                    {fee != null
-                      ? fee.toLocaleString("en-US", { maximumFractionDigits: 6 })
-                      : "—"}
-                  </p>
-                  {fee != null && price && (
-                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                      {fmt$(fee * price)}
-                    </p>
-                  )}
+              ].map(({ sym, fee, price }, i, arr) => {
+                const usd0 = (pos.fees0 ?? 0) * (pos.price0 ?? 0);
+                const usd1 = (pos.fees1 ?? 0) * (pos.price1 ?? 0);
+                const totalFee = usd0 + usd1;
+                const myUsd = (fee ?? 0) * (price ?? 0);
+                const pct = totalFee > 0 ? ((myUsd / totalFee) * 100).toFixed(1) : "—";
+                return (
+                  <div key={sym} style={{
+                    padding: "22px 26px",
+                    borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{sym}</span>
+                      <span style={{
+                        fontSize: 9, color: C.text, letterSpacing: "0.1em",
+                        padding: "2px 8px", border: `1px solid ${C.borderHi}`, textTransform: "uppercase",
+                      }}>
+                        {pct}%
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                      {fee != null ? fee.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "—"}
+                    </div>
+                    {fee != null && price && (
+                      <div style={{ fontSize: 11, color: C.text, marginTop: 4, opacity: 0.7 }}>
+                        {fmt$(myUsd)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{
+              margin: "0 40px",
+              padding: "14px 26px", borderTop: `1px solid ${C.border}`,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              background: C.bg1,
+            }}>
+              <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em" }}>Total Uncollected</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                  ready to collect
+                </span>
+                <span style={{
+                  fontSize: 14, fontWeight: 700, color: C.green,
+                  textShadow: "0 0 12px rgba(0,255,65,0.2)",
+                  fontVariantNumeric: "tabular-nums",
+                }}>
+                  {fmt$(pos.fees)}
+                </span>
+              </div>
+            </div>
+            <div style={{ height: 24 }} />
+          </Section>
+        )}
+
+        {/* ── PERFORMANCE METRICS ──────────────────────────────────────── */}
+        <Section icon="[△]" title="Performance Metrics" sub="Calculated from real on-chain fee claims">
+          <div style={{ padding: "0 40px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
+              {[
+                { label: "Total Claimed", val: activityLoading ? "…" : fmt$(claimedUSD), color: C.green, sub: activityLoading ? "loading…" : isActivityProtocol ? `${feeClaims.length} claim${feeClaims.length !== 1 ? "s" : ""} on-chain` : "no data" },
+                { label: "Uncollected", val: fmt$(uncollectedUSD), color: C.green, sub: "pending" },
+                { label: "Total Lifetime", val: fmt$(lifetimeUSD), color: C.textWhite, sub: "claimed + pending" },
+                { label: "Actual APR", val: activityLoading ? "…" : actualAPR != null ? `~${actualAPR.toFixed(1)}%` : "—", color: C.green, sub: "from real claims" },
+                { label: "Estimated APR", val: hasApr ? `~${pos.apy.toFixed(1)}%` : "N/A", color: C.cyan, sub: "pool APY" },
+                { label: "Position Age", val: daysLabel, color: C.textWhite, sub: openedDate ? `since ${openedDate}` : "tracking age" },
+              ].map((c, i) => (
+                <div key={c.label} style={{
+                  padding: cellPadding,
+                  borderRight: (i + 1) % 3 === 0 ? "none" : `1px solid ${C.border}`,
+                  borderBottom: i < 3 ? `1px solid ${C.border}` : "none",
+                }}>
+                  <div style={labelStyle}>{c.label}</div>
+                  <div style={{
+                    fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em",
+                    color: c.color,
+                    textShadow: c.color === C.green ? "0 0 14px rgba(0,255,65,0.2)" : "none",
+                    fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {c.val}
+                  </div>
+                  <div style={subStyle}>{c.sub}</div>
                 </div>
               ))}
             </div>
-            {pos.fees > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
-                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Total Uncollected</span>
-                <div style={{ textAlign: "right" }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: "#34d399" }}>{fmt$(pos.fees)}</span>
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginLeft: 8 }}>
-                    Ready to collect
-                  </span>
+            {/* Bottom 2-cell row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: `1px solid ${C.border}`, borderTop: "none" }}>
+              <div style={{ padding: cellPadding, borderRight: `1px solid ${C.border}` }}>
+                <div style={labelStyle}>Actual Daily Income</div>
+                <div style={{
+                  fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: C.green,
+                  textShadow: "0 0 14px rgba(0,255,65,0.2)", fontVariantNumeric: "tabular-nums",
+                }}>
+                  {activityLoading ? "…" : actualDailyIncome != null
+                    ? <>{fmt$(actualDailyIncome)}<span style={{ fontSize: 13, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>/day</span></>
+                    : "—"}
                 </div>
+                <div style={subStyle}>trailing 30d average</div>
               </div>
-            )}
-          </Card>
-        )}
-
-        {/* ── 2D.5: Performance Metrics ─────────────────────────────────────── */}
-        <Card style={{ marginBottom: 20, border: "1px solid rgba(251,191,36,0.15)" }}>
-          <SectionHeader icon="📊" label="Performance Metrics" />
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "-10px 0 16px", letterSpacing: 0.3 }}>
-            Based on actual fee claims
-          </p>
-          {(() => {
-            const feeClaims = activity?.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim') ?? [];
-            const deposits = activity?.events.filter(e => e.type === 'deposit') ?? [];
-            const claimedUSD = feeClaims.reduce((sum, e) => {
-              if (e.usdAtTime != null) return sum + e.usdAtTime;
-              return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
-            }, 0);
-            const uncollectedUSD = pos.fees;
-            const lifetimeUSD = claimedUSD + uncollectedUSD;
-            const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
-            const firstTs = firstDeposit?.timestamp ?? 0;
-            const nowTs = Math.floor(Date.now() / 1000);
-            const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
-            const actualAPR = daysActive >= 1 && pos.value > 0 && claimedUSD > 0
-              ? (claimedUSD / pos.value) / (daysActive / 365) * 100
-              : null;
-            const actualDailyIncome = daysActive >= 1 && claimedUSD > 0 ? claimedUSD / daysActive : null;
-            const feeIncomePct = pos.value > 0 ? (lifetimeUSD / pos.value) * 100 : 0;
-            const daysLabel = daysActive >= 1 ? `${Math.floor(daysActive)}d` : (firstTs > 0 ? '<1d' : '—');
-            const cellStyle: React.CSSProperties = {
-              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: 14, textAlign: "center",
-            };
-            return (
-              <div>
-                {/* Row 1: Claimed | Uncollected | Lifetime */}
-                <div className="detail-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-                  <div style={{ ...cellStyle, border: "1px solid rgba(52,211,153,0.15)" }}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Total Claimed</p>
-                    {activityLoading
-                      ? <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>…</p>
-                      : <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>{fmt$(claimedUSD)}</p>
-                    }
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                      {activityLoading ? "loading…" : isActivityProtocol ? `${feeClaims.length} claim${feeClaims.length !== 1 ? "s" : ""}` : "no data"}
-                    </p>
-                  </div>
-                  <div style={cellStyle}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Uncollected</p>
-                    <p style={{ fontSize: 20, fontWeight: 700, color: "#6ee7b7", margin: "0 0 4px" }}>{fmt$(uncollectedUSD)}</p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>pending</p>
-                  </div>
-                  <div style={cellStyle}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Total Lifetime</p>
-                    <p style={{ fontSize: 20, fontWeight: 700, color: "white", margin: "0 0 4px" }}>{fmt$(lifetimeUSD)}</p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>claimed + pending</p>
-                  </div>
+              <div style={{ padding: cellPadding }}>
+                <div style={labelStyle}>Fee Income Rate</div>
+                <div style={{
+                  fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite,
+                  fontVariantNumeric: "tabular-nums",
+                }}>
+                  {feeIncomePct.toFixed(3)}%
                 </div>
-                {/* Row 2: Actual APR | Estimated APR | Position Age */}
-                <div className="detail-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-                  <div style={{ ...cellStyle, border: "1px solid rgba(52,211,153,0.12)" }}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Actual APR</p>
-                    {activityLoading
-                      ? <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>…</p>
-                      : actualAPR != null
-                        ? <p style={{ fontSize: 20, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>~{actualAPR.toFixed(1)}%</p>
-                        : <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>—</p>
-                    }
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>from real claims</p>
-                  </div>
-                  <div style={{ ...cellStyle, border: "1px solid rgba(96,165,250,0.12)" }}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Estimated APR</p>
-                    {hasApr
-                      ? <p style={{ fontSize: 20, fontWeight: 700, color: "#93c5fd", margin: "0 0 4px" }}>~{pos.apy.toFixed(1)}%</p>
-                      : <p style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: "0 0 4px" }}>N/A</p>
-                    }
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>pool APY</p>
-                  </div>
-                  <div style={cellStyle}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Position Age</p>
-                    <p style={{ fontSize: 20, fontWeight: 700, color: "white", margin: "0 0 4px" }}>{daysLabel}</p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-                      {firstTs > 0 ? `since ${new Date(firstTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "tracking age"}
-                    </p>
-                  </div>
-                </div>
-                {/* Row 3: Daily Income | Fee Income % */}
-                <div className="detail-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <div style={cellStyle}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Actual Daily Income</p>
-                    {activityLoading
-                      ? <p style={{ fontSize: 18, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: 0 }}>…</p>
-                      : actualDailyIncome != null
-                        ? <p style={{ fontSize: 18, fontWeight: 700, color: "white", margin: 0 }}>{fmt$(actualDailyIncome)}<span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 400 }}>/day</span></p>
-                        : <p style={{ fontSize: 18, fontWeight: 700, color: "rgba(255,255,255,0.2)", margin: 0 }}>—</p>
-                    }
-                  </div>
-                  <div style={cellStyle}>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: 1 }}>Fee Income</p>
-                    <p style={{ fontSize: 18, fontWeight: 700, color: "white", margin: 0 }}>{feeIncomePct.toFixed(3)}%</p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "4px 0 0" }}>of position value</p>
-                  </div>
-                </div>
+                <div style={subStyle}>of position value (30d)</div>
               </div>
-            );
-          })()}
-        </Card>
-
-        {/* ── 2D.6: Fee Accumulation Chart ──────────────────────────────────── */}
-        {isActivityProtocol && feeChartData && (
-          <Card style={{ marginBottom: 20 }}>
-            <SectionHeader icon="📈" label="Fee Accumulation" />
-            {feeChartData.noClaimsYet || feeChartData.chartData.length < 2 ? (
-              <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No fee claims yet</p>
-              </div>
-            ) : (
-              <>
-                <div style={{ height: 160 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={feeChartData.chartData}
-                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
-                        tickLine={false} axisLine={false}
-                        interval={Math.max(0, Math.floor(feeChartData.chartData.length / 5) - 1)} />
-                      <YAxis tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }}
-                        tickLine={false} axisLine={false}
-                        tickFormatter={(v: number) => `$${v.toFixed(2)}`} width={52} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: "#0a1410",
-                          border: "1px solid rgba(255,255,255,0.06)",
-                          borderRadius: 8, color: "#fff", fontSize: 12 }}
-                        itemStyle={{ color: "#fff" }}
-                        labelStyle={{ color: "#fff" }}
-                        formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(4)}`, "Cumulative Fees"]}
-                      />
-                      <Line type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2}
-                        dot={{ r: 3, fill: "#34d399" }} activeDot={{ r: 5, fill: "#34d399" }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: "10px 0 0", textAlign: "center" }}>
-                  {feeChartData.chartData.length - 1} fee claim{feeChartData.chartData.length - 1 !== 1 ? "s" : ""} since{" "}
-                  {new Date(feeChartData.openTs ?? Date.now()).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                </p>
-              </>
-            )}
-          </Card>
-        )}
-
-        {/* ── 2D.7: Activity Log ────────────────────────────────────────────── */}
-        <Card style={{ marginBottom: 20, border: "1px solid rgba(52,211,153,0.12)" }}>
-          <SectionHeader icon="📋" label="Fee Claims History" />
-          {/* Spinner: covers both explicit loading AND the brief initial state before the effect fires */}
-          {(activityLoading || activityPending) && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,0.4)", fontSize: 13, padding: "12px 0" }}>
-              <div style={{ width: 16, height: 16, border: "2px solid #34d399", borderTopColor: "transparent",
-                borderRadius: "50%", animation: "_spin 1s linear infinite", flexShrink: 0 }} />
-              Scanning blockchain for fee history…
             </div>
-          )}
-          {!activityLoading && !activityPending && !isActivityProtocol && (
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-              Activity data not available for {pos.protocol} — on-chain fee history scanning is not yet supported for this protocol.
-            </p>
-          )}
-          {!activityLoading && !activityPending && isActivityProtocol && activityError && (
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-              Could not load fee claim data. The blockchain scan may have timed out — try refreshing.
-            </p>
-          )}
-          {!activityLoading && !activityPending && isActivityProtocol && activity && (() => {
-            const feeClaims = activity.events.filter(e => e.type === 'fee_claim' || e.type === 'reward_claim');
-            const txUrl = (hash: string): string => {
-              if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
-              if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
-              if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
-              if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
-              if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
-              if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
-              if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
-              return `https://basescan.org/tx/${hash}`;
-            };
-            const fmtDate = (ts: number) => {
-              if (!ts) return '—';
-              return new Date(ts * 1000).toLocaleDateString('en-US', {
-                year: 'numeric', month: 'short', day: 'numeric',
-                hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
-              });
-            };
-            const fmtAmt = (n: number) => n === 0 ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 6 });
-            const shortHash = (h: string) => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
-            const totalClaimed = feeClaims.reduce((sum, e) => {
-              if (e.usdAtTime != null) return sum + e.usdAtTime;
-              return sum + e.amount0 * (pos.price0 ?? 0) + e.amount1 * (pos.price1 ?? 0);
-            }, 0);
+            <div style={{ height: 24 }} />
+          </div>
+        </Section>
 
-            if (feeClaims.length === 0) {
-              return (
-                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                  No fee claims detected yet. Claims will appear here after you collect fees on-chain.
-                </p>
-              );
-            }
+        {/* ── FEE ACCUMULATION CHART ───────────────────────────────────── */}
+        {isActivityProtocol && (
+          <Section icon="[⏱]" title="Fee Accumulation" sub="Cumulative fees collected over position lifetime">
+            <div style={{ padding: "0 40px 28px" }}>
+              <div style={{ border: `1px solid ${C.border}`, padding: "20px 24px", background: C.bg1, position: "relative", overflow: "hidden" }}>
+                {/* Top scan sweep */}
+                <div aria-hidden style={{
+                  position: "absolute", top: 0, left: 0, width: 80, height: 1,
+                  background: `linear-gradient(90deg, transparent, ${C.green}, transparent)`,
+                  animation: "_scan 3s ease-in-out infinite",
+                }} />
+                {/* Chart meta */}
+                <div style={{ display: "flex", alignItems: "center", marginBottom: 14, gap: 0 }}>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 24 }}>
+                    {(() => {
+                      const peak = feeClaims.length > 0 ? Math.max(...feeClaims.map(e => e.usdAtTime ?? 0)) : 0;
+                      const avgClaim = feeClaims.length > 0 ? claimedUSD / feeClaims.length : 0;
+                      return [
+                        { lbl: "Avg / Claim", val: fmt$(avgClaim), color: C.textBright },
+                        { lbl: "Peak Claim", val: fmt$(peak), color: C.green },
+                        { lbl: "Total", val: fmt$(lifetimeUSD), color: C.green },
+                      ].map((m) => (
+                        <div key={m.lbl} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                          <span style={{ color: C.text, opacity: 0.5, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 9 }}>{m.lbl}</span>
+                          <span style={{ fontWeight: 700, color: m.color, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{m.val}</span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+                {/* Chart */}
+                {(activityLoading || activityPending) ? (
+                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: C.text, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                    <div style={{ width: 14, height: 14, border: `2px solid ${C.green}`, borderTopColor: "transparent", animation: "_spin 1s linear infinite" }} />
+                    Loading…
+                  </div>
+                ) : !feeChartData || feeChartData.noClaimsYet || feeChartData.chartData.length < 2 ? (
+                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: C.text, fontSize: 12 }}>
+                    No fee claims yet
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", height: 200 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={feeChartData.chartData}>
+                        <defs>
+                          <linearGradient id="feeAccumGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={C.green} stopOpacity={0.28} />
+                            <stop offset="60%" stopColor={C.green} stopOpacity={0.06} />
+                            <stop offset="100%" stopColor={C.green} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="4 8" stroke="rgba(255,255,255,0.025)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 10, fontFamily: FONT }} axisLine={false} tickLine={false} />
+                        <YAxis
+                          tick={{ fill: C.text, fontSize: 10, fontFamily: FONT }}
+                          tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
+                          axisLine={false} tickLine={false} width={50}
+                        />
+                        <Tooltip
+                          contentStyle={{ background: C.bg1, border: `1px solid ${C.borderHi}`, padding: "8px 12px", color: C.textBright, fontSize: 11, fontFamily: FONT }}
+                          itemStyle={{ color: C.textBright }}
+                          labelStyle={{ color: C.text }}
+                          formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(2)}`, "Cumulative Fees"]}
+                        />
+                        <Area type="monotone" dataKey="value" stroke={C.green} strokeWidth={1.6} fill="url(#feeAccumGrad)" dot={{ r: 3, fill: C.bg, stroke: C.green, strokeWidth: 1.5 }} activeDot={{ r: 5, fill: C.green }} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {feeChartData && !feeChartData.noClaimsYet && feeChartData.chartData.length >= 2 && (
+                  <div style={{ textAlign: "center", fontSize: 10, color: C.text, opacity: 0.5, marginTop: 12, letterSpacing: "0.08em" }}>
+                    ● markers indicate fee claim events · {feeChartData.chartData.length - 1} claims since {new Date(feeChartData.openTs).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </Section>
+        )}
 
-            const thStyle: React.CSSProperties = {
-              fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5,
-              color: "rgba(255,255,255,0.3)", padding: "0 0 10px", fontWeight: 500,
-            };
-            const tdStyle: React.CSSProperties = {
-              fontSize: 12, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.04)",
-              color: "rgba(255,255,255,0.7)",
-            };
-
-            return (
-              <div>
+        {/* ── FEE CLAIMS HISTORY ───────────────────────────────────────── */}
+        <Section icon="[⤓]" title="Fee Claims History" sub="On-chain claim transactions for this position">
+          <div style={{ padding: "0 40px 24px" }}>
+            {(activityLoading || activityPending) ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.text, fontSize: 12, padding: "12px 0" }}>
+                <div style={{ width: 14, height: 14, border: `2px solid ${C.green}`, borderTopColor: "transparent", animation: "_spin 1s linear infinite", flexShrink: 0 }} />
+                Scanning blockchain for fee history…
+              </div>
+            ) : !isActivityProtocol ? (
+              <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                Activity data not available for {pos.protocol} — on-chain fee history scanning is not yet supported.
+              </p>
+            ) : activityError ? (
+              <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                Could not load fee claim data. The blockchain scan may have timed out — try refreshing.
+              </p>
+            ) : feeClaims.length === 0 ? (
+              <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                No fee claims detected yet. Claims will appear here after you collect fees on-chain.
+              </p>
+            ) : (
+              <div style={{ border: `1px solid ${C.border}` }}>
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT }}>
                     <thead>
-                      <tr>
-                        <th style={{ ...thStyle, textAlign: "left" }}>Date (UTC)</th>
-                        <th style={{ ...thStyle, textAlign: "right" }}>{t0}</th>
-                        <th style={{ ...thStyle, textAlign: "right" }}>{t1}</th>
-                        <th style={{ ...thStyle, textAlign: "right" }}>Total USD</th>
-                        <th style={{ ...thStyle, textAlign: "right" }}>Tx</th>
+                      <tr style={{ background: C.bg1 }}>
+                        <th style={{
+                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "left",
+                        }}>Date (UTC)</th>
+                        <th style={{
+                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
+                        }}>{t0}</th>
+                        <th style={{
+                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
+                        }}>{t1}</th>
+                        <th style={{
+                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
+                        }}>Total USD</th>
+                        <th style={{
+                          padding: "12px 20px", fontSize: 10, fontWeight: 400,
+                          color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
+                          borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
+                        }}>Tx</th>
                       </tr>
                     </thead>
                     <tbody>
                       {feeClaims.map((ev, i) => {
                         const usd = ev.usdAtTime ?? (ev.amount0 * (pos.price0 ?? 0) + ev.amount1 * (pos.price1 ?? 0));
                         return (
-                          <tr key={i}>
-                            <td style={{ ...tdStyle, whiteSpace: "nowrap" as const }}>{fmtDate(ev.timestamp)}</td>
-                            <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace" }}>
+                          <tr key={i} className="pos-row" style={{ borderBottom: i === feeClaims.length - 1 ? "none" : `1px solid ${C.border}` }}>
+                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.textMid, whiteSpace: "nowrap" as const }}>{fmtDate(ev.timestamp)}</td>
+                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.textMid, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
                               {ev.type === 'reward_claim'
+                                /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
                                 ? `${fmtAmt(ev.amount0)} ${(ev as any).rewardSymbol ?? ''}`
                                 : fmtAmt(ev.amount0)}
                             </td>
-                            <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace" }}>
+                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.textMid, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
                               {ev.type === 'reward_claim' ? '—' : fmtAmt(ev.amount1)}
                             </td>
-                            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 600, color: "#34d399" }}>
+                            <td style={{ padding: "11px 20px", fontSize: 12, color: C.green, fontWeight: 600, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(usd)}
                             </td>
-                            <td style={{ ...tdStyle, textAlign: "right" }}>
-                              <a href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
-                                style={{ color: "#6ee7b7", fontFamily: "monospace", fontSize: 11, textDecoration: "none" }}>
-                                {shortHash(ev.txHash)}
+                            <td style={{ padding: "11px 20px", textAlign: "right" }}>
+                              <a className="tx-link" href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
+                                style={{ color: C.cyan, fontSize: 11, textDecoration: "none", transition: "opacity 0.15s" }}>
+                                {shortHash(ev.txHash)} ↗
                               </a>
                             </td>
                           </tr>
@@ -1154,285 +1177,367 @@ export default function PositionDetail() {
                     </tbody>
                   </table>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                  borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 12, paddingTop: 12 }}>
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>
-                    {feeClaims.length} collection{feeClaims.length !== 1 ? "s" : ""}
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "#34d399" }}>
-                    Total Claimed: {fmt$(totalClaimed)}
+                <div style={{
+                  padding: "12px 20px", borderTop: `1px solid ${C.border}`,
+                  display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg1,
+                }}>
+                  <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.04em" }}>{feeClaims.length} collection{feeClaims.length !== 1 ? "s" : ""}</span>
+                  <span style={{ fontSize: 13, color: C.green, fontWeight: 700 }}>
+                    <span style={{ color: C.text, fontWeight: 400, marginRight: 6, opacity: 0.6 }}>Total Claimed:</span>
+                    {fmt$(claimedUSD)}
                   </span>
                 </div>
               </div>
-            );
-          })()}
-        </Card>
+            )}
+          </div>
+        </Section>
 
-        {/* ── 2E: Concentrated Liquidity Range ─────────────────────────────── */}
+        {/* ── CONCENTRATED LIQUIDITY RANGE ─────────────────────────────── */}
         {hasRange && (
-          <Card style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-              marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-              <SectionHeader icon="◉" label="Concentrated Liquidity Range" />
+          <Section
+            icon="[◉]"
+            title="Concentrated Liquidity Range"
+            sub="Active price band — earning fees only when current price stays inside"
+            right={
               <span style={{
-                fontSize: 12,
-                padding: "3px 10px",
-                borderRadius: 20,
-                background: isClosed ? "rgba(255,255,255,0.03)"
-                  : posStatus === "In Range" ? "rgba(52,211,153,0.1)"
-                  : "rgba(245,158,11,0.1)",
-                border: `1px solid ${isClosed ? "rgba(255,255,255,0.06)"
-                  : posStatus === "In Range" ? "rgba(52,211,153,0.2)"
-                  : "rgba(245,158,11,0.2)"}`,
-                color: isClosed ? "rgba(255,255,255,0.3)"
-                  : posStatus === "In Range" ? "#34d399"
-                  : "#f59e0b",
+                marginRight: 40,
+                fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                padding: "4px 12px", fontWeight: 600,
+                display: "inline-flex", alignItems: "center", gap: 6,
+                border: `1px solid ${isClosed ? C.borderHi : posStatus === "In Range" ? C.greenDim : C.amber}`,
+                background: isClosed ? C.bg2 : posStatus === "In Range" ? C.greenFaint : "rgba(255,170,0,0.06)",
+                color: isClosed ? C.text : posStatus === "In Range" ? C.green : C.amber,
               }}>
+                {!isClosed && posStatus === "In Range" && (
+                  <span style={{ width: 6, height: 6, background: C.green, animation: "_pulse 2s infinite" }} />
+                )}
                 {isClosed ? "Position Closed" : posStatus === "In Range" ? "Position Active" : "Out of Range"}
               </span>
-            </div>
-
-            {/* Price labels */}
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-              <div>
-                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
-                  color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Min Price</p>
-                <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-                  {minPriceUSD != null ? fmtPrice(minPriceUSD) : "—"}
-                </p>
-              </div>
-              <div style={{ textAlign: "center" }}>
-                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
-                  color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Current Price</p>
-                <p style={{ fontSize: 14, fontWeight: 600,
-                  color: isClosed ? "rgba(255,255,255,0.4)"
-                    : posStatus === "In Range" ? "#34d399"
-                    : "#f59e0b",
-                  margin: 0 }}>
-                  {curPriceUSD != null ? fmtPrice(curPriceUSD) : "—"}
-                </p>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1,
-                  color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Max Price</p>
-                <p style={{ fontSize: 14, fontWeight: 600, color: "white", margin: 0 }}>
-                  {maxPriceUSD != null ? fmtPrice(maxPriceUSD) : "—"}
-                </p>
-              </div>
-            </div>
-
-            {/* Range bar */}
-            <div style={{ position: "relative", height: 6, background: "rgba(255,255,255,0.06)",
-              borderRadius: 3, marginBottom: 8 }}>
+            }
+          >
+            <div style={{ padding: "0 40px 24px" }}>
               <div style={{
-                position: "absolute", inset: 0, borderRadius: 3,
-                background: isClosed ? "#374151"
-                  : posStatus === "In Range"
-                  ? "linear-gradient(90deg, #059669, #34d399)"
-                  : "rgba(245,158,11,0.3)",
-              }} />
-              {!isClosed && curPriceUSD !== null && (
-                <div style={{
-                  position: "absolute", top: "50%", transform: "translate(-50%, -50%)",
-                  left: `${rangeBarPct}%`,
-                  width: 12, height: 12, borderRadius: "50%",
-                  background: posStatus === "In Range" ? "#34d399" : "#f59e0b",
-                  border: "2px solid white",
-                  zIndex: 1,
+                border: `1px solid ${C.border}`, padding: "24px 28px",
+                background: C.bg1, position: "relative", overflow: "hidden",
+              }}>
+                <div aria-hidden style={{
+                  position: "absolute", top: 0, left: 0, width: 80, height: 1,
+                  background: `linear-gradient(90deg, transparent, ${C.green}, transparent)`,
+                  animation: "_scan 3s ease-in-out infinite",
                 }} />
+                {/* Price labels */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Min Price</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
+                      {minPriceUSD != null ? fmtPrice(minPriceUSD) : "—"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Current Price</div>
+                    <div style={{
+                      fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em",
+                      color: isClosed ? C.text : posStatus === "In Range" ? C.green : C.amber,
+                      textShadow: !isClosed && posStatus === "In Range" ? "0 0 12px rgba(0,255,65,0.3)" : "none",
+                    }}>
+                      {curPriceUSD != null ? fmtPrice(curPriceUSD) : "—"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                    <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 6 }}>Max Price</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.01em" }}>
+                      {maxPriceUSD != null ? fmtPrice(maxPriceUSD) : "—"}
+                    </div>
+                  </div>
+                </div>
+                {/* Track */}
+                <div style={{ position: "relative", height: 36, marginTop: 14 }}>
+                  <div style={{
+                    position: "absolute", left: 0, right: 0, top: 14, height: 8,
+                    background: `repeating-linear-gradient(90deg, ${C.border} 0, ${C.border} 1px, transparent 1px, transparent 4px)`,
+                    borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
+                  }} />
+                  <div style={{
+                    position: "absolute", top: 14, left: 0, height: 8,
+                    width: `${rangeBarPct}%`,
+                    background: `linear-gradient(90deg, ${C.greenDim}, ${C.green})`,
+                    boxShadow: "0 0 8px rgba(0,255,65,0.4)",
+                    transition: "width 1.2s cubic-bezier(0.22,1,0.36,1)",
+                  }} />
+                  {curPriceUSD != null && !isClosed && (
+                    <div style={{
+                      position: "absolute", top: 8, width: 2, height: 20,
+                      left: `calc(${rangeBarPct}% - 1px)`,
+                      background: C.green, boxShadow: "0 0 8px rgba(0,255,65,0.8)", zIndex: 3,
+                    }} />
+                  )}
+                </div>
+                {/* Ticks */}
+                {minPriceUSD != null && maxPriceUSD != null && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.text, letterSpacing: "0.1em", opacity: 0.4, marginTop: 18 }}>
+                    {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+                      <span key={i}>{fmtPrice(minPriceUSD + (maxPriceUSD - minPriceUSD) * t)}</span>
+                    ))}
+                  </div>
+                )}
+                {/* Stats row */}
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}`, flexWrap: "wrap", gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Range Width</div>
+                    <div style={{ fontSize: 12, color: C.textBright, fontWeight: 600 }}>{rangeWidthPct ?? "—"}%</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Distance to Lower</div>
+                    <div style={{ fontSize: 12, color: C.textBright, fontWeight: 600 }}>{distLower != null ? `${distLower}%` : "—"}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Distance to Upper</div>
+                    <div style={{ fontSize: 12, color: C.textBright, fontWeight: 600 }}>{distUpper != null ? `+${distUpper}%` : "—"}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.6, marginBottom: 3 }}>Position Age</div>
+                    <div style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>{daysLabel}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {/* ── YIELD & APR PROJECTIONS ──────────────────────────────────── */}
+        <Section icon="[%]" title="Yield & APR Projections" sub="Forward-looking estimates based on trailing pool fee rate">
+          <div style={{ padding: "0 40px 24px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", border: `1px solid ${C.border}` }}>
+              {([
+                { label: "Daily",   div: 365,  amt: dailyUSD,   unit: "day" },
+                { label: "Weekly",  div: 52,   amt: weeklyUSD,  unit: "week" },
+                { label: "Monthly", div: 12,   amt: monthlyUSD, unit: "month" },
+                { label: "Yearly",  div: 1,    amt: yearlyUSD,  unit: "year" },
+              ] as const).map(({ label, div, amt, unit }, i, arr) => (
+                <div key={label} style={{
+                  padding: "22px 24px",
+                  borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                }}>
+                  <div style={{ ...labelStyle, marginBottom: 10 }}>{label}</div>
+                  {hasApr ? (
+                    <>
+                      <div style={{
+                        fontSize: 24, fontWeight: 700, color: C.green,
+                        textShadow: "0 0 14px rgba(0,255,65,0.2)", letterSpacing: "-0.02em",
+                        fontVariantNumeric: "tabular-nums",
+                      }}>
+                        +{(pos.apy / div).toFixed(div >= 52 ? 3 : 2)}%
+                      </div>
+                      <div style={subStyle}>{amt != null ? fmt$(amt) : "—"} / {unit}</div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 16, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Section>
+
+        {/* ── ON-CHAIN P&L + IL ────────────────────────────────────────── */}
+        {isActivityProtocol && (
+          <Section icon="[Σ]" title="On-Chain P&L & Impermanent Loss" sub="Performance versus a simple hold-the-tokens strategy">
+            <div style={{ padding: "0 40px 24px" }}>
+              {(activityLoading || activityPending) ? (
+                <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                  Reconstructing position from on-chain history…
+                </p>
+              ) : !activity ? (
+                <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                  Entry data unavailable — P&amp;L cannot be computed.
+                </p>
+              ) : !pnl ? (
+                <p style={{ fontSize: 12, color: C.text, opacity: 0.55 }}>
+                  Entry data unavailable — no on-chain deposit event found for this position. P&amp;L cannot be computed.
+                </p>
+              ) : (
+                <div style={{ border: `1px solid ${C.border}` }}>
+                  {/* 5-stat grid */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", borderBottom: `1px solid ${C.border}` }}>
+                    {[
+                      { label: "Initial Value", val: fmt$(pnl.initialValue), color: C.textWhite, sub: "at deposit time" },
+                      { label: pnl.isClosed ? "Closing Value" : "Current Value", val: fmt$(pnl.isClosed ? pnl.closingValue : pnl.currentValue), color: C.textWhite, sub: pnl.isClosed ? "at close time" : "live mark" },
+                      { label: "Fees Collected", val: fmt$(pnl.feesCollected), color: C.green, sub: "claimed on-chain" },
+                      { label: "Fees Unclaimed", val: fmt$(pnl.feesUnclaimed), color: C.green, sub: "ready to claim" },
+                      {
+                        label: "Impermanent Loss",
+                        val: `${ilNegative ? "−" : "+"}${fmt$(Math.abs(pnl.ilUSD))}`,
+                        color: ilNegative ? C.red : C.green,
+                        sub: `${pnl.ilPct.toFixed(2)}%`,
+                        subColor: ilNegative ? C.red : C.green,
+                      },
+                    ].map((c, i, arr) => (
+                      <div key={c.label} style={{
+                        padding: "20px 22px",
+                        borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                      }}>
+                        <div style={labelStyle}>{c.label}</div>
+                        <div style={{
+                          fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em",
+                          color: c.color,
+                          textShadow: c.color === C.green ? "0 0 14px rgba(0,255,65,0.2)" : "none",
+                          fontVariantNumeric: "tabular-nums",
+                        }}>
+                          {c.val}
+                        </div>
+                        <div style={{ ...subStyle, color: c.subColor ?? C.text, opacity: c.subColor ? 1 : 0.6 }}>{c.sub}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Summary panel */}
+                  <div style={{
+                    background: "linear-gradient(135deg, rgba(0,255,65,0.04), rgba(0,255,65,0.01))",
+                    padding: "24px 28px",
+                    display: "grid", gridTemplateColumns: "2fr 1fr 1fr",
+                    gap: 32,
+                    borderTop: `1px solid ${C.greenDim}`,
+                    position: "relative",
+                  }}>
+                    <div aria-hidden style={{
+                      position: "absolute", top: 0, left: 0, right: 0, height: 1,
+                      background: `linear-gradient(90deg, transparent, ${C.green} 50%, transparent)`,
+                      opacity: 0.6,
+                    }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ fontSize: 11, color: C.green, letterSpacing: "0.2em", textTransform: "uppercase", fontWeight: 600 }}>
+                        Net P&amp;L
+                      </div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+                        <div style={{
+                          fontSize: 36, fontWeight: 700,
+                          color: pnlPositive ? C.green : C.red,
+                          letterSpacing: "-0.03em",
+                          textShadow: pnlPositive ? "0 0 20px rgba(0,255,65,0.3)" : "0 0 20px rgba(255,51,85,0.3)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}>
+                          {pnlPositive ? "+" : "−"}{fmt$(Math.abs(pnl.netPnlUSD))}
+                        </div>
+                        <div style={{
+                          fontSize: 14, fontWeight: 600,
+                          color: pnlPositive ? C.green : C.red,
+                          opacity: 0.8,
+                        }}>
+                          {pnlPositive ? "+" : ""}{pnl.netPnlPct.toFixed(2)}%
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.text, opacity: 0.7, letterSpacing: "0.02em", lineHeight: 1.6 }}>
+                        {pnl.isClosed
+                          ? `(${fmt$(pnl.closingValue)} closing + ${fmt$(pnl.feesCollected)} fees) − ${fmt$(pnl.initialValue)} initial`
+                          : `(${fmt$(pnl.currentValue)} current + ${fmt$(pnl.feesCollected)} fees + ${fmt$(pnl.feesUnclaimed)} unclaimed) − ${fmt$(pnl.initialValue)} initial`}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", paddingLeft: 32, borderLeft: `1px solid ${C.border}` }}>
+                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7 }}>HODL Value</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                        {fmt$(pnl.hodlValue)}
+                      </div>
+                      <div style={{ fontSize: 9, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                        if you just held
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", paddingLeft: 32, borderLeft: `1px solid ${C.border}` }}>
+                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7 }}>Fees vs IL</div>
+                      <div style={{
+                        fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em",
+                        color: pnl.feesOffsetIL ? C.cyan : C.red,
+                      }}>
+                        {pnl.feesOffsetIL ? "Offset ✓" : "Not offset ✗"}
+                      </div>
+                      <div style={{ fontSize: 9, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                        {fmt$(totalFees)} fees vs {fmt$(Math.abs(pnl.ilUSD))} IL
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
-
-            {rangeWidthPct != null && (
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", textAlign: "right", margin: 0 }}>
-                Range Width: {rangeWidthPct}%
-              </p>
-            )}
-          </Card>
+          </Section>
         )}
 
-        {/* ── 2F: Yield & APR Projections ──────────────────────────────────── */}
-        <Card style={{ marginBottom: 20 }}>
-          <SectionHeader icon="%" label="Yield & APR Projections" />
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "-10px 0 16px", letterSpacing: 0.3 }}>
-            Based on current pool rate
-          </p>
-          <div className="detail-4col"
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
-            {([
-              { label: "Daily",   div: 365,  amt: dailyUSD,   unit: "/day" },
-              { label: "Weekly",  div: 52,   amt: weeklyUSD,  unit: "/week" },
-              { label: "Monthly", div: 12,   amt: monthlyUSD, unit: "/month" },
-              { label: "Yearly",  div: 1,    amt: yearlyUSD,  unit: "/year" },
-            ] as const).map(({ label, div, amt, unit }) => (
-              <div key={label} style={{ background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10,
-                padding: 14, textAlign: "center" }}>
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
-                  textTransform: "uppercase", letterSpacing: 1 }}>{label}</p>
-                {hasApr ? (
-                  <>
-                    <p style={{ fontSize: 16, fontWeight: 700, color: "#34d399", margin: "0 0 4px" }}>
-                      +{(pos.apy / div).toFixed(div >= 52 ? 2 : 1)}%
-                    </p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                      {amt != null ? fmt$(amt) : "—"}{unit}
-                    </p>
-                  </>
-                ) : (
-                  <p style={{ fontSize: 16, fontWeight: 700, color: "#6ee7b7", margin: 0 }}>N/A</p>
-                )}
-              </div>
-            ))}
+        {/* ── POOL STATISTICS ─────────────────────────────────────────── */}
+        <Section icon="[⚡]" title="Pool Statistics" sub={`Aggregate metrics for ${pos.pair} on ${pos.protocol}`}>
+          <div style={{ padding: "0 40px 32px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
+              {([
+                { label: "Pool TVL",   value: poolStats?.tvlUsd ?? null,    sub: "total value locked" },
+                { label: "24H Volume", value: poolStats?.volumeUsd1d ?? null, sub: "trailing 24h" },
+                { label: "24H Fees",   value: poolStats?.feesUsd1d ?? null,   sub: pos.feeTier != null ? `@ ${pos.feeTier}% fee tier` : "pool fees" },
+              ] as const).map(({ label, value, sub }, i, arr) => (
+                <div key={label} style={{
+                  padding: "22px 24px",
+                  borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                }}>
+                  <div style={labelStyle}>{label}</div>
+                  {poolStatsLoading ? (
+                    <div style={{ fontSize: 16, color: C.text, opacity: 0.4 }}>…</div>
+                  ) : value != null ? (
+                    <>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                        {fmtLarge(value)}
+                      </div>
+                      <div style={subStyle}>{sub}</div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 13, color: C.text, opacity: 0.5, fontStyle: "italic" }}>Data unavailable</div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-        </Card>
+        </Section>
 
-        {/* ── 2F.5: On-Chain P&L + Impermanent Loss ──────────────────────── */}
-        {isActivityProtocol && (
-          <Card style={{ marginBottom: 20 }}>
-            <SectionHeader icon="📊" label="On-Chain P&L & Impermanent Loss" />
-            {(() => {
-              if (activityLoading) {
-                return (
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                    Reconstructing position from on-chain history…
-                  </p>
-                );
-              }
-              if (!activity) {
-                return (
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                    Entry data unavailable — P&amp;L cannot be computed.
-                  </p>
-                );
-              }
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const pnlEvents = activity.events.map((e: any) => ({
-                type: e.type as 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim',
-                timestamp: e.timestamp as number,
-                amount0: e.amount0 as number,
-                amount1: e.amount1 as number,
-                usdAtTime: (e.usdAtTime as number | null) ?? null,
-                price0AtTime: (e.price0AtTime as number | null) ?? null,
-                price1AtTime: (e.price1AtTime as number | null) ?? null,
-                txHash: (e.txHash as string | undefined) ?? undefined,
-              }));
-              const result = computePositionPnL({
-                currentValue: pos.value,
-                unclaimedFeesUSD: pos.fees ?? 0,
-                price0: pos.price0 ?? 0,
-                price1: pos.price1 ?? 0,
-                events: pnlEvents,
-                isClosed: pos.status === "Closed",
-              });
-              if (!result.ok) {
-                return (
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                    Entry data unavailable — no on-chain deposit event found for this position. P&amp;L cannot be computed.
-                  </p>
-                );
-              }
-              const d = result.data;
-              const pnlPositive = d.netPnlUSD >= 0;
-              const ilNegative  = d.ilUSD < 0;
-              const closed = d.isClosed;
-              const totalFees = d.feesCollected + d.feesUnclaimed;
-
-              const cellStyle: React.CSSProperties = {
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
-                borderRadius: 10, padding: 14, textAlign: "center",
-              };
-              const lbl: React.CSSProperties = {
-                fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
-                textTransform: "uppercase", letterSpacing: 1,
-              };
-              const val = (c: string): React.CSSProperties => ({
-                fontSize: 18, fontWeight: 700, color: c, margin: "0 0 2px",
-              });
-              const sub: React.CSSProperties = { fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0 };
-
-              // Token symbols for display
-              const sym0 = pos.token0Symbol || pos.pair.split(" / ")[0] || "Token A";
-              const sym1 = pos.token1Symbol || pos.pair.split(" / ")[1] || "Token B";
-
-              // Explorer URL builder (same logic as fee claims table)
-              const txUrl = (hash: string): string => {
-                if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
-                if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
-                if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
-                if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
-                if (pos.chain === 'Polygon')  return `https://polygonscan.com/tx/${hash}`;
-                if (pos.chain === 'Optimism') return `https://optimistic.etherscan.io/tx/${hash}`;
-                if (pos.chain === 'Ethereum') return `https://etherscan.io/tx/${hash}`;
-                if (pos.chain === 'BNB Chain') return `https://bscscan.com/tx/${hash}`;
-                return `https://basescan.org/tx/${hash}`;
-              };
-
-              return (
-                <PnLCardContent
-                  d={d} closed={closed} pnlPositive={pnlPositive} ilNegative={ilNegative}
-                  totalFees={totalFees} sym0={sym0} sym1={sym1} txUrl={txUrl}
-                  cellStyle={cellStyle} lbl={lbl} val={val} sub={sub}
-                />
-              );
-            })()}
-          </Card>
-        )}
-
-        {/* ── 2G: Pool Statistics ───────────────────────────────────────────── */}
-        <Card style={{ marginBottom: 20 }}>
-          <SectionHeader icon="⚡" label="Pool Statistics" />
-          <div className="detail-3col"
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            {([
-              { label: "Pool TVL",   value: poolStats?.tvlUsd ?? null },
-              { label: "24h Volume", value: poolStats?.volumeUsd1d ?? null },
-              { label: "24h Fees",   value: poolStats?.feesUsd1d ?? null },
-            ] as const).map(({ label, value }) => (
-              <div key={label} style={{ background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10,
-                padding: 14, textAlign: "center" }}>
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: "0 0 6px",
-                  textTransform: "uppercase", letterSpacing: 1 }}>{label}</p>
-                {poolStatsLoading ? (
-                  <p style={{ fontSize: 16, color: "rgba(255,255,255,0.2)", margin: 0 }}>…</p>
-                ) : value != null ? (
-                  <p style={{ fontSize: 16, fontWeight: 700, color: "#6ee7b7", margin: 0 }}>{fmtLarge(value)}</p>
-                ) : (
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.2)", margin: 0 }}>Data unavailable</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* ── Footer: Position ID & manage link ─────────────────────────────── */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-          flexWrap: "wrap", gap: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 20 }}>
-          <div>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: "0 0 2px" }}>Position ID</p>
-            <p style={{ fontSize: 12, fontFamily: "monospace", color: "rgba(255,255,255,0.5)", margin: 0,
-              wordBreak: "break-all" }}>{pos.id}</p>
+        {/* ── PAGE FOOTER ─────────────────────────────────────────────── */}
+        <div style={{
+          padding: "24px 40px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          borderTop: `1px solid ${C.border}`, background: C.bg1, gap: 12, flexWrap: "wrap",
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontSize: 9, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.5 }}>
+              Position ID
+            </div>
+            <div style={{ fontSize: 11, color: C.textMid, fontFamily: FONT, letterSpacing: "0.02em", wordBreak: "break-all" }}>
+              {pos.id}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <Link href="/dashboard" style={{ background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)",
-              borderRadius: 10, padding: "8px 16px", textDecoration: "none", fontSize: 13 }}>
+            <Link href="/dashboard"
+              className="btn-neutral"
+              style={{
+                fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                letterSpacing: "0.1em", textTransform: "uppercase",
+                padding: "10px 18px",
+                border: `1px solid ${C.borderHi}`, background: "transparent",
+                color: C.textMid, textDecoration: "none",
+                display: "flex", alignItems: "center", gap: 8,
+                cursor: "pointer", transition: "all 0.15s",
+              }}>
               ← Dashboard
             </Link>
             {manageUrl && (
               <a href={manageUrl} target="_blank" rel="noopener noreferrer"
-                style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.3)",
-                  color: "#6ee7b7", borderRadius: 10, padding: "8px 16px", textDecoration: "none",
-                  fontSize: 13, fontWeight: 500 }}>
-                Manage Position ↗
+                className="btn-primary"
+                style={{
+                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  letterSpacing: "0.1em", textTransform: "uppercase",
+                  padding: "10px 18px",
+                  border: `1px solid ${C.greenDim}`, background: C.greenFaint,
+                  color: C.green, textDecoration: "none",
+                  display: "flex", alignItems: "center", gap: 8,
+                  cursor: "pointer", transition: "all 0.15s",
+                }}>
+                ↗ Manage Position
               </a>
             )}
           </div>
         </div>
 
-      </div>
+      </main>
     </div>
   );
 }
