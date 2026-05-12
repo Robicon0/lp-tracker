@@ -171,7 +171,7 @@ export default async function Home() {
       style={{
         fontFamily: "var(--font-jetbrains-mono), 'Courier New', monospace",
         color: "#c8c8c8",
-        fontSize: 13,
+        fontSize: 16,
         lineHeight: 1.6,
       }}
     >
@@ -195,7 +195,7 @@ export default async function Home() {
         className="sticky top-0 z-[10000] flex items-center justify-between h-[52px] px-4 sm:px-12 border-b border-[#1f1f1f]"
         style={{ background: "#000", backdropFilter: "blur(4px)" }}
       >
-        <Link href="/" className="text-[14px] font-bold tracking-[0.14em] uppercase">
+        <Link href="/" className="text-[17px] font-bold tracking-[0.14em] uppercase">
           <span className="text-[#00ff41]">DEFI</span>
           <span className="text-[#888]">/</span>
           <span className="text-[#e8e8e8]">DESH</span>
@@ -203,35 +203,35 @@ export default async function Home() {
         <div className="hidden md:flex gap-8">
           <Link
             href="/"
-            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Home
           </Link>
           <Link
             href="/dashboard"
-            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Dashboard
           </Link>
           <Link
             href="/analytics"
-            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Analytics
           </Link>
           <Link
             href="/about"
-            className="text-[10px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             About
           </Link>
         </div>
         <div className="flex items-center gap-2 px-3 py-[5px] border border-[#00cc33] bg-[rgba(0,255,65,0.12)]">
           <span className="inline-block w-1.5 h-1.5 bg-[#00ff41] animate-pulse" />
-          <span className="text-[10px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
+          <span className="text-[12px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
             All systems nominal
           </span>
-          <span className="text-[10px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
+          <span className="text-[12px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
         </div>
       </nav>
 
@@ -241,7 +241,7 @@ export default async function Home() {
         <div className="lg:border-r border-[#1f1f1f] lg:pr-16 pt-12 lg:pt-16 pb-8 lg:pb-10 flex flex-col min-w-0">
           <div
             className="flex items-center gap-3 mb-7 text-[#888] tracking-[0.2em] uppercase"
-            style={{ whiteSpace: "nowrap", fontSize: 11 }}
+            style={{ whiteSpace: "nowrap", fontSize: 14 }}
           >
             <span className="text-[#00ff41]">//</span>
             <span>DeFi Position Intelligence</span>
@@ -263,7 +263,7 @@ export default async function Home() {
           </h1>
           <p
             className="text-[#c8c8c8] max-w-[460px] mb-12 font-light"
-            style={{ fontSize: 14, lineHeight: 1.9 }}
+            style={{ fontSize: 17, lineHeight: 1.9 }}
           >
             Real-time liquidity position tracking across EVM, Solana, and Sui. Value, APY, fees,
             and rewards — all in one place. Connect a wallet or paste any address.
@@ -272,14 +272,14 @@ export default async function Home() {
             <Link
               href="/dashboard"
               className="bg-[#00ff41] hover:bg-[#00cc33] text-black font-bold tracking-[0.1em] uppercase transition-all hover:shadow-[0_0_24px_rgba(0,255,65,0.18)]"
-              style={{ padding: "14px 32px", fontSize: 13 }}
+              style={{ padding: "14px 32px", fontSize: 16 }}
             >
               ▸ Go to Dashboard
             </Link>
             <Link
               href="/analytics"
               className="border border-[#00e5ff] text-[#00e5ff] hover:bg-[rgba(0,229,255,0.1)] font-bold tracking-[0.1em] uppercase transition-all hover:shadow-[0_0_24px_rgba(0,229,255,0.15)]"
-              style={{ padding: "14px 32px", fontSize: 13 }}
+              style={{ padding: "14px 32px", fontSize: 16 }}
             >
               ▸ View Analytics
             </Link>
@@ -301,11 +301,11 @@ export default async function Home() {
 
       {/* PROTOCOLS */}
       <section className="px-4 sm:px-12 py-12 border-b border-[#1f1f1f]">
-        <div className="text-[10px] text-[#888] uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
+        <div className="text-[12px] text-[#888] uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
           <span className="text-[#00ff41]">//</span>
           <span>Supported Protocols</span>
           <span className="flex-1 h-px bg-[#1f1f1f]" />
-          <span className="text-[#888] tracking-[0.1em] text-[10px]">src: defillama</span>
+          <span className="text-[#888] tracking-[0.1em] text-[12px]">src: defillama</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-px bg-[#1f1f1f] border border-[#1f1f1f]">
           {PROTOCOL_DEFS.map((p) => {
@@ -316,21 +316,21 @@ export default async function Home() {
                 key={p.name}
                 className="bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5"
               >
-                <div className="text-[10px] text-[#00ff41] tracking-[0.1em]">[{p.type.toUpperCase()}]</div>
+                <div className="text-[12px] text-[#00ff41] tracking-[0.1em]">[{p.type.toUpperCase()}]</div>
                 <div>
-                  <div className="text-[13px] font-bold text-[#e8e8e8]">{p.name}</div>
-                  <div className="text-[10px] text-[#888] uppercase tracking-[0.1em] mt-0.5">
+                  <div className="text-[16px] font-bold text-[#e8e8e8]">{p.name}</div>
+                  <div className="text-[12px] text-[#888] uppercase tracking-[0.1em] mt-0.5">
                     {p.chain}
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5 mt-1">
-                  <div className="flex justify-between items-baseline text-[10px]">
+                  <div className="flex justify-between items-baseline text-[12px]">
                     <span className="text-[#888] tracking-[0.06em]">TVL</span>
                     <span className="text-[#00ff41] font-bold tabular-nums">
                       {fmtBig(s.tvl)}
                     </span>
                   </div>
-                  <div className="flex justify-between items-baseline text-[10px]">
+                  <div className="flex justify-between items-baseline text-[12px]">
                     <span className="text-[#888] tracking-[0.06em]">VOL 24H</span>
                     <span
                       className={`font-bold tabular-nums ${isDex ? "text-[#00ff41]" : "text-[#888]"}`}
@@ -354,14 +354,14 @@ export default async function Home() {
           >
             <div
               className="font-bold text-[#2e2e2e] leading-none mb-4"
-              style={{ fontSize: 48, letterSpacing: "-0.04em" }}
+              style={{ fontSize: 60, letterSpacing: "-0.04em" }}
             >
               {f.num}
             </div>
-            <div className="text-[14px] font-bold text-[#e8e8e8] tracking-[0.04em] mb-2.5">
+            <div className="text-[17px] font-bold text-[#e8e8e8] tracking-[0.04em] mb-2.5">
               {f.title}
             </div>
-            <div className="text-[12px] text-[#c8c8c8]" style={{ lineHeight: 1.8 }}>
+            <div className="text-[15px] text-[#c8c8c8]" style={{ lineHeight: 1.8 }}>
               {f.desc}
             </div>
           </div>
@@ -369,7 +369,7 @@ export default async function Home() {
       </section>
 
       {/* FOOTER */}
-      <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[11px] text-[#888] tracking-[0.08em]">
+      <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[14px] text-[#888] tracking-[0.08em]">
         <div>
           <span className="text-[#c8c8c8]">DEFIDESH</span> — DeFi Position Intelligence{" "}
           <span className="text-[#00ff41]">//</span> v0.9.1-beta
