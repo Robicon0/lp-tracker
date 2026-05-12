@@ -195,7 +195,7 @@ export default async function Home() {
         className="sticky top-0 z-[10000] flex items-center justify-between h-[52px] px-4 sm:px-12 border-b border-[#1f1f1f]"
         style={{ background: "#000", backdropFilter: "blur(4px)" }}
       >
-        <Link href="/" className="text-[17px] font-bold tracking-[0.14em] uppercase">
+        <Link href="/" className="text-[20px] font-bold tracking-[0.14em] uppercase">
           <span className="text-[#00ff41]">DEFI</span>
           <span className="text-[#888]">/</span>
           <span className="text-[#e8e8e8]">DESH</span>
@@ -203,35 +203,35 @@ export default async function Home() {
         <div className="hidden md:flex gap-8">
           <Link
             href="/"
-            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Home
           </Link>
           <Link
             href="/dashboard"
-            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Dashboard
           </Link>
           <Link
             href="/analytics"
-            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             Analytics
           </Link>
           <Link
             href="/about"
-            className="text-[12px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
           >
             About
           </Link>
         </div>
         <div className="flex items-center gap-2 px-3 py-[5px] border border-[#00cc33] bg-[rgba(0,255,65,0.12)]">
           <span className="inline-block w-1.5 h-1.5 bg-[#00ff41] animate-pulse" />
-          <span className="text-[12px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
+          <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
             All systems nominal
           </span>
-          <span className="text-[12px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
+          <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
         </div>
       </nav>
 

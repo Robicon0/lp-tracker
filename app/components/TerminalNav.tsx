@@ -22,7 +22,7 @@ export default function TerminalNav({
       <Link
         href="/"
         className="px-7 flex items-center border-r border-[#1c1c1c] no-underline"
-        style={{ fontSize: 14, letterSpacing: "0.14em", textTransform: "uppercase" }}
+        style={{ fontSize: 20, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" }}
       >
         <span className="text-[#00ff41] font-extrabold">DEFI</span>
         <span className="text-[#262626] font-light mx-[2px]">/</span>
@@ -37,7 +37,7 @@ export default function TerminalNav({
               href={t.href}
               className={`relative flex items-center px-[22px] border-r border-[#1c1c1c] no-underline transition-colors hover:bg-[#0d0d0d] hover:text-[#aaaaaa] ${isActive ? "text-[#e0e0e0]" : "text-[#a0a0a0]"}`}
               style={{
-                fontSize: 10,
+                fontSize: 15,
                 letterSpacing: "0.12em",
                 textTransform: "uppercase",
               }}
@@ -64,7 +64,7 @@ export default function TerminalNav({
         />
         <span
           className="text-[#00ff41]"
-          style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase" }}
+          style={{ fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase" }}
         >
           All systems nominal
         </span>

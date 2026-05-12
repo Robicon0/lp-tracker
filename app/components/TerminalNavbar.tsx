@@ -54,7 +54,7 @@ export default function TerminalNavbar() {
     display: "flex",
     alignItems: "center",
     padding: "0 22px",
-    fontSize: 10,
+    fontSize: 15,
     letterSpacing: "0.12em",
     textTransform: "uppercase",
     color: C.text,
@@ -127,9 +127,9 @@ export default function TerminalNavbar() {
           href="/"
           style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 0 }}
         >
-          <span style={{ fontSize: 14, fontWeight: 700, color: C.green, letterSpacing: "0.14em" }}>DEFI</span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: C.green, letterSpacing: "0.14em" }}>DEFI</span>
           <span style={{ color: C.borderGlow, fontWeight: 300, padding: "0 2px" }}>/</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: C.textMid, letterSpacing: "0.14em" }}>DESH</span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: C.textMid, letterSpacing: "0.14em" }}>DESH</span>
         </Link>
       </div>
 
@@ -216,7 +216,7 @@ export default function TerminalNavbar() {
           <span
             className="hidden sm:inline"
             style={{
-              fontSize: 9,
+              fontSize: 13,
               color: C.green,
               letterSpacing: "0.12em",
               textTransform: "uppercase",
@@ -227,7 +227,7 @@ export default function TerminalNavbar() {
           <span
             className="sm:hidden"
             style={{
-              fontSize: 9,
+              fontSize: 13,
               color: C.green,
               letterSpacing: "0.12em",
               textTransform: "uppercase",
