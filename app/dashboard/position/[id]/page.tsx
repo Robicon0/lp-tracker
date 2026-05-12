@@ -29,7 +29,7 @@ const C = {
   bg4:        "#171717",
   border:     "#1c1c1c",
   borderHi:   "#262626",
-  text:       "#7a7a7a",
+  text:       "#a0a0a0",
   textMid:    "#b0b0b0",
   textBright: "#e0e0e0",
   textWhite:  "#f0f0f0",

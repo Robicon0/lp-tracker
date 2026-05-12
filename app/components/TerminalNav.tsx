@@ -35,7 +35,7 @@ export default function TerminalNav({
             <Link
               key={t.key}
               href={t.href}
-              className={`relative flex items-center px-[22px] border-r border-[#1c1c1c] no-underline transition-colors hover:bg-[#0d0d0d] hover:text-[#aaaaaa] ${isActive ? "text-[#e0e0e0]" : "text-[#7a7a7a]"}`}
+              className={`relative flex items-center px-[22px] border-r border-[#1c1c1c] no-underline transition-colors hover:bg-[#0d0d0d] hover:text-[#aaaaaa] ${isActive ? "text-[#e0e0e0]" : "text-[#a0a0a0]"}`}
               style={{
                 fontSize: 10,
                 letterSpacing: "0.12em",

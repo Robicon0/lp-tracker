@@ -8,7 +8,7 @@ const C = {
   border:    "#1c1c1c",
   borderHi:  "#262626",
   borderGlow:"#2e2e2e",
-  text:      "#8a8a8a",
+  text:      "#a8a8a8",
   textMid:   "#b4b4b4",
   textBright:"#e8e8e8",
   textWhite: "#f5f5f5",

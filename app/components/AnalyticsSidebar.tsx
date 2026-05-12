@@ -9,7 +9,7 @@ const C = {
   bg4:       "#171717",
   border:    "#1c1c1c",
   borderHi:  "#262626",
-  text:      "#8a8a8a",
+  text:      "#a8a8a8",
   textMid:   "#b4b4b4",
   green:     "#00ff41",
   greenDim:  "#00b82a",

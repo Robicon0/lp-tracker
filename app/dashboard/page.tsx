@@ -103,7 +103,7 @@ const C = {
   border:     "#1c1c1c",
   borderHi:   "#262626",
   borderGlow: "#2e2e2e",
-  text:       "#7a7a7a",
+  text:       "#a0a0a0",
   textMid:    "#aaaaaa",
   textBright: "#e0e0e0",
   textWhite:  "#f0f0f0",

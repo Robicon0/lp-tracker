@@ -207,7 +207,7 @@ export default function LendingPage() {
       className="min-h-screen"
       style={{
         background: PAGE_BG,
-        color: "#7a7a7a",
+        color: "#a0a0a0",
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 12,
         lineHeight: 1.5,
@@ -233,7 +233,7 @@ export default function LendingPage() {
         {/* Back link */}
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-2 mb-5 text-[#7a7a7a] hover:text-[#00ff41] transition-colors no-underline"
+          className="inline-flex items-center gap-2 mb-5 text-[#a0a0a0] hover:text-[#00ff41] transition-colors no-underline"
           style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase" }}
         >
           ← Back to Dashboard
@@ -246,7 +246,7 @@ export default function LendingPage() {
             fontSize: 9,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
-            color: "#7a7a7a",
+            color: "#a0a0a0",
             opacity: 0.6,
           }}
         >
@@ -258,14 +258,14 @@ export default function LendingPage() {
         >
           Lending &amp; Borrowing Positions
         </h1>
-        <p className="mb-6" style={{ fontSize: 11, color: "#7a7a7a", opacity: 0.6 }}>
+        <p className="mb-6" style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.6 }}>
           Track your lending and borrowing across DeFi protocols
         </p>
 
         {/* Empty / loading states */}
         {!hasWallet && (
           <div className="text-center py-16">
-            <p style={{ fontSize: 12, color: "#7a7a7a", marginBottom: 20 }}>
+            <p style={{ fontSize: 12, color: "#a0a0a0", marginBottom: 20 }}>
               Connect a wallet to see your lending positions.
             </p>
             <Link
@@ -284,7 +284,7 @@ export default function LendingPage() {
         )}
 
         {hasWallet && combinedLoading && !hasAnyPositions && (
-          <div className="text-center py-16" style={{ color: "#7a7a7a" }}>
+          <div className="text-center py-16" style={{ color: "#a0a0a0" }}>
             <div
               className="mx-auto mb-4"
               style={{
@@ -311,7 +311,7 @@ export default function LendingPage() {
 
         {hasWallet && !combinedLoading && !hasAnyPositions && (
           <div className="text-center py-16">
-            <p style={{ fontSize: 13, color: "#7a7a7a" }}>
+            <p style={{ fontSize: 13, color: "#a0a0a0" }}>
               No lending positions detected.
             </p>
             <p style={{ fontSize: 10, color: "#444", marginTop: 6, letterSpacing: "0.05em" }}>
@@ -344,7 +344,7 @@ export default function LendingPage() {
             {/* Footer notes */}
             <div
               className="mt-6 px-5 py-4 border border-[#1c1c1c]"
-              style={{ background: "#090909", lineHeight: 1.8, color: "#7a7a7a", opacity: 0.75 }}
+              style={{ background: "#090909", lineHeight: 1.8, color: "#a0a0a0", opacity: 0.75 }}
             >
               {[
                 ["⚠", "Health Factor below 1.0 means your position can be liquidated."],
@@ -427,7 +427,7 @@ function TopStats({
               fontSize: 8,
               letterSpacing: "0.18em",
               textTransform: "uppercase",
-              color: "#7a7a7a",
+              color: "#a0a0a0",
               opacity: 0.6,
             }}
           >
@@ -444,7 +444,7 @@ function TopStats({
           >
             {s.value}
           </div>
-          <div className="mt-1.5" style={{ fontSize: 9, color: "#7a7a7a", opacity: 0.5 }}>
+          <div className="mt-1.5" style={{ fontSize: 9, color: "#a0a0a0", opacity: 0.5 }}>
             {s.sub}
           </div>
         </div>
@@ -478,7 +478,7 @@ function MetricCell({
           fontSize: 8,
           letterSpacing: "0.18em",
           textTransform: "uppercase",
-          color: "#7a7a7a",
+          color: "#a0a0a0",
           opacity: 0.55,
         }}
       >
@@ -700,7 +700,7 @@ function CardHeader({
           className="mt-0.5"
           style={{
             fontSize: 8,
-            color: "#7a7a7a",
+            color: "#a0a0a0",
             letterSpacing: "0.18em",
             textTransform: "uppercase",
             opacity: 0.5,
@@ -790,7 +790,7 @@ function AssetRow({
           className="mt-0.5"
           style={{
             fontSize: 9,
-            color: apyTone === "red" ? "#ff3355" : "#7a7a7a",
+            color: apyTone === "red" ? "#ff3355" : "#a0a0a0",
             letterSpacing: "0.06em",
             textTransform: "uppercase",
           }}
@@ -808,7 +808,7 @@ function AssetRow({
         </div>
         <div
           className="mt-0.5"
-          style={{ fontSize: 9, color: "#7a7a7a", opacity: 0.55 }}
+          style={{ fontSize: 9, color: "#a0a0a0", opacity: 0.55 }}
         >
           {amount}
         </div>
