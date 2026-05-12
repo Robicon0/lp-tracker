@@ -48,6 +48,14 @@ const SYMBOL_TO_CG_ID: Record<string, string> = {
   CVX: "convex-finance", "1INCH": "1inch", SUSHI: "sushi", GMX: "gmx",
   // Memes & alts
   PEPE: "pepe", SHIB: "shiba-inu", DOGE: "dogecoin", WIF: "dogwifcoin",
+  // Additional majors surfaced by PriceTickerStrip — listed here so any
+  // wallet-token surfaces that happen to hold these symbols can price them.
+  // (WBTC/CBBTC stay aliased to 'bitcoin' above for wallet-balance aggregation
+  // — see CLAUDE.md. The ticker uses its own TICKER_CG_IDS table for per-
+  // wrapper prices.)
+  AERO: "aerodrome-finance",
+  TAO: "bittensor",
+  ZCASH: "zcash", ZEC: "zcash",
 };
 
 // CoinGecko platform IDs for contract-address price lookups per chain.

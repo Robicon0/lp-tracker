@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Server-side proxy for CoinGecko API — avoids CORS errors from browser clients.
 // All client-side code should call /api/prices?... instead of api.coingecko.com directly.
+//
+// Canonical CoinGecko IDs for the PriceTickerStrip tokens (callers pass these
+// via ?ids=...):
+//   BTC   → bitcoin                ETH   → ethereum
+//   WBTC  → wrapped-bitcoin        SOL   → solana
+//   CBBTC → coinbase-wrapped-btc   SUI   → sui
+//   ARB   → arbitrum               UNI   → uniswap
+//   AERO  → aerodrome-finance      TAO   → bittensor
+//   ZCASH → zcash                  HYPE  → hyperliquid
+//   BNB   → binancecoin
+//
+// See also: app/components/PriceTickerStrip.tsx (TICKER_CG_IDS) and
+// app/hooks/useWalletTokens.ts (SYMBOL_TO_CG_ID — note that WBTC/CBBTC are
+// intentionally aliased to 'bitcoin' there for wallet-balance aggregation).
 
 // In-memory cache: key → { data, expiresAt }
 const cache = new Map<string, { data: unknown; expiresAt: number }>();

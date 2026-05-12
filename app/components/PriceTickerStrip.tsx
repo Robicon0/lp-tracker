@@ -3,14 +3,43 @@
 const PROTOCOL_COUNT = 7;
 const CHAIN_COUNT = 3;
 
+// Canonical CoinGecko IDs for these tickers — kept here next to the symbols so
+// any future "make the ticker live" pass can pass these straight to
+// /api/prices?ids=... Note: WBTC and CBBTC use their own CG IDs here
+// ('wrapped-bitcoin' / 'coinbase-wrapped-btc') so the ticker shows true
+// per-wrapper prices. This deliberately differs from SYMBOL_TO_CG_ID in
+// app/hooks/useWalletTokens.ts which aliases them to 'bitcoin' for wallet
+// balance aggregation — see CLAUDE.md note on stripAavePrefix / priceOf.
+export const TICKER_CG_IDS: Record<string, string> = {
+  BTC: "bitcoin",
+  WBTC: "wrapped-bitcoin",
+  CBBTC: "coinbase-wrapped-btc",
+  ETH: "ethereum",
+  SOL: "solana",
+  SUI: "sui",
+  ARB: "arbitrum",
+  AERO: "aerodrome-finance",
+  UNI: "uniswap",
+  TAO: "bittensor",
+  ZCASH: "zcash",
+  HYPE: "hyperliquid",
+  BNB: "binancecoin",
+};
+
 const TICKERS: { sym: string; price: string; chg: string; up: boolean }[] = [
-  { sym: "ETH", price: "3,182.40", chg: "+2.14%", up: true },
-  { sym: "SOL", price: "182.50", chg: "+4.71%", up: true },
-  { sym: "BTC", price: "94,210.00", chg: "+1.08%", up: true },
-  { sym: "SUI", price: "3.84", chg: "-1.22%", up: false },
-  { sym: "AAVE", price: "228.10", chg: "+3.40%", up: true },
-  { sym: "UNI", price: "11.42", chg: "+0.88%", up: true },
-  { sym: "ARB", price: "1.18", chg: "-0.54%", up: false },
+  { sym: "BTC",   price: "94,210.00", chg: "+1.08%", up: true  },
+  { sym: "WBTC",  price: "94,180.00", chg: "+1.05%", up: true  },
+  { sym: "CBBTC", price: "94,200.00", chg: "+1.07%", up: true  },
+  { sym: "ETH",   price: "3,182.40",  chg: "+2.14%", up: true  },
+  { sym: "SOL",   price: "182.50",    chg: "+4.71%", up: true  },
+  { sym: "SUI",   price: "3.84",      chg: "-1.22%", up: false },
+  { sym: "ARB",   price: "1.18",      chg: "-0.54%", up: false },
+  { sym: "AERO",  price: "0.94",      chg: "+3.20%", up: true  },
+  { sym: "UNI",   price: "11.42",     chg: "+0.88%", up: true  },
+  { sym: "TAO",   price: "480.00",    chg: "-2.10%", up: false },
+  { sym: "ZCASH", price: "42.50",     chg: "+5.80%", up: true  },
+  { sym: "HYPE",  price: "28.40",     chg: "+6.40%", up: true  },
+  { sym: "BNB",   price: "678.00",    chg: "+0.95%", up: true  },
 ];
 
 export default function PriceTickerStrip() {
@@ -42,9 +71,13 @@ export default function PriceTickerStrip() {
             LIVE Prices
           </span>
         </div>
-        <div className="flex-1 overflow-hidden flex items-center">
+        {/* pl-8 lives on the outer container, NOT the animated div, so the
+            inner doubled list is perfectly symmetric. With the padding on the
+            inner div, translateX(-50%) lands on "32px-then-item" instead of
+            "item-immediately", producing a visible snap each loop. */}
+        <div className="flex-1 overflow-hidden flex items-center pl-8">
           <div
-            className="flex gap-10 whitespace-nowrap pl-8"
+            className="flex gap-10 whitespace-nowrap"
             style={{ animation: "defidesh-ticker 25s linear infinite" }}
           >
             {doubled.map((t, i) => (
