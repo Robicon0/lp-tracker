@@ -27,3 +27,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Hide the FloatingFeedback round launcher globally — the rotated
+   FeedbackTab (mounted in app/layout.tsx) is the sole user-facing
+   feedback affordance. FloatingFeedback's modal still mounts and
+   works; FeedbackTab fires the hidden launcher via
+   document.querySelector to open the modal. */
+button[aria-label="Share feedback"] {
+  display: none !important;
+}
