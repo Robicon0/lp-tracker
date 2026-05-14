@@ -820,6 +820,59 @@ export default function Dashboard() {
                   <div style={{ color: C.borderGlow, fontSize: 15 }}>▸</div>
                 </div>
               ))}
+
+              {/* WALLET_BALANCES CTA — appears at the bottom of the // WALLETS
+                  card whenever any wallet (connected OR watched) is present.
+                  Gating on hasWallet means the CTA is driven by wallet state,
+                  so any future chain that adds to walletPaneRows automatically
+                  enables this CTA. */}
+              {hasWallet && (
+                <>
+                  <div style={{ height: 1, background: "#1a1a1a", margin: "8px 0 8px" }} />
+                  <Link
+                    href="/dashboard/wallets"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 9,
+                      padding: "10px 12px",
+                      background: "rgba(0,255,136,0.04)",
+                      border: "1px solid rgba(0,255,136,0.27)",
+                      borderRadius: 4,
+                      color: "#00ff88",
+                      textDecoration: "none",
+                      fontFamily: "var(--font-jetbrains-mono)",
+                      fontSize: 11,
+                      letterSpacing: "0.06em",
+                      transition: "border-color 0.12s, background 0.12s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(0,255,136,0.53)";
+                      e.currentTarget.style.background = "rgba(0,255,136,0.08)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(0,255,136,0.27)";
+                      e.currentTarget.style.background = "rgba(0,255,136,0.04)";
+                    }}
+                  >
+                    <span style={{ color: "#3a3a3a", fontSize: 11, flexShrink: 0 }}>▸</span>
+                    <span style={{ flex: 1, color: "#00ff88" }}>WALLET_BALANCES</span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: "rgba(0,255,136,0.4)",
+                        background: "rgba(0,255,136,0.067)",
+                        padding: "2px 6px",
+                        borderRadius: 2,
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      VIEW
+                    </span>
+                    <span style={{ color: "rgba(0,255,136,0.5)", fontSize: 10, flexShrink: 0 }}>▸</span>
+                  </Link>
+                </>
+              )}
             </div>
 
             {/* CASHFLOW */}

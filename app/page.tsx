@@ -3,7 +3,6 @@ import HeroWalletConnect from "./components/HeroWalletConnect";
 import DashboardPreview from "./components/DashboardPreview";
 import PriceTickerStrip from "./components/PriceTickerStrip";
 import BlinkingCursor from "./components/BlinkingCursor";
-import FeedbackTab from "./components/FeedbackTab";
 
 const PROTOCOL_DEFS: {
   name: string;
@@ -175,13 +174,9 @@ export default async function Home() {
         lineHeight: 1.6,
       }}
     >
-      {/* Hide the global FloatingFeedback launcher only on this page — */}
-      {/* the rotated FeedbackTab below triggers it programmatically. */}
-      <style
-        dangerouslySetInnerHTML={{
-          __html: 'button[aria-label="Share feedback"] { display: none !important; }',
-        }}
-      />
+      {/* The FloatingFeedback round launcher is hidden site-wide via
+          globals.css; the rotated FeedbackTab is mounted in app/layout.tsx
+          so it appears on every page including this one. */}
 
       {/* Scanline overlay */}
       <div
@@ -396,7 +391,6 @@ export default async function Home() {
         <div>© 2026 DefiDesh. Not financial advice.</div>
       </footer>
 
-      <FeedbackTab />
     </div>
   );
 }

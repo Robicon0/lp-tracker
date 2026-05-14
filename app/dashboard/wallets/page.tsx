@@ -331,7 +331,7 @@ export default function TokensPage() {
         (t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q),
       );
     }
-    if (hideDust) list = list.filter((t) => t.usdValue >= 1);
+    if (hideDust) list = list.filter((t) => t.usdValue >= 0.01);
     if (hideUnknown) list = list.filter((t) => t.price > 0 || t.usdValue > 0);
     return list;
   }, [regularTokens, search, hideDust, hideUnknown]);
@@ -401,7 +401,7 @@ export default function TokensPage() {
       <style
         dangerouslySetInnerHTML={{
           __html:
-            '@keyframes wal-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } } button[aria-label="Share feedback"] { display: none !important; }',
+            '@keyframes wal-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }',
         }}
       />
       <div
@@ -614,7 +614,7 @@ export default function TokensPage() {
                   }}
                 />
               </div>
-              <ToggleBtn label="Hide dust < $1" value={hideDust} onChange={setHideDust} />
+              <ToggleBtn label="Hide dust < $0.01" value={hideDust} onChange={setHideDust} />
               <ToggleBtn label="Hide unknown tokens" value={hideUnknown} onChange={setHideUnknown} />
             </div>
 

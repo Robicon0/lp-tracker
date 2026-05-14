@@ -4,12 +4,12 @@ import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import { getTokenLogo } from "../lib/tokenLogos";
 
-const CHAINS = [
-  { name: "Ethereum", url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}` },
-  { name: "Base",     url: `https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}` },
-  { name: "Arbitrum", url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}` },
-  { name: "Optimism", url: `https://opt-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}` },
-  { name: "Polygon",  url: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}` },
+const CHAINS: Array<{ name: string; url: string; nativeSymbol: string; nativeName: string }> = [
+  { name: "Ethereum", url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Base",     url: `https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Arbitrum", url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Optimism", url: `https://opt-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Polygon",  url: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "MATIC", nativeName: "Polygon"  },
 ];
 
 // HyperEVM has no Alchemy support, so we cannot use alchemy_getTokenBalances.
@@ -281,6 +281,37 @@ export function useWalletTokens(): WalletTokensData {
 
               try {
                 console.log(`[useWalletTokens] Scanning ${chain.name} for ${evmAddr}...`);
+
+                // Native chain coin (ETH on Eth/Base/Arb/Op, MATIC on Polygon).
+                // alchemy_getTokenBalances ONLY returns ERC-20s — native
+                // balance has to be fetched separately or it never appears.
+                try {
+                  const natRes = await post({
+                    jsonrpc: "2.0", id: 0,
+                    method: "eth_getBalance",
+                    params: [evmAddr, "latest"],
+                  });
+                  if (natRes?.result) {
+                    const natBal = Number(BigInt(natRes.result)) / 1e18;
+                    if (natBal > 0 && !cancelled) {
+                      const price = priceOf(chain.nativeSymbol);
+                      tokens.push({
+                        symbol: chain.nativeSymbol,
+                        name: chain.nativeName,
+                        balance: natBal,
+                        usdValue: natBal * price,
+                        price,
+                        change24h: changeOf(chain.nativeSymbol),
+                        chain: chain.name,
+                        logo: getTokenLogo(chain.nativeSymbol) || "",
+                        isLending: false,
+                        isDebt: false,
+                        contractAddress: "native",
+                      });
+                    }
+                  }
+                } catch (err) { console.error(`[useWalletTokens] ${chain.name} native balance failed:`, err); }
+
                 const balRes = await post({
                   jsonrpc: "2.0", id: 1,
                   method: "alchemy_getTokenBalances",
@@ -314,7 +345,11 @@ export function useWalletTokens(): WalletTokensData {
                       const decimals = m.decimals || 18;
                       const rawBal = BigInt(token.tokenBalance);
                       const balance = Number(rawBal) / Math.pow(10, decimals);
-                      if (balance < 0.0001) return;
+                      // Filter only true-zero balances at scan time. The page-
+                      // level "Hide dust < $0.01" toggle handles USD-value
+                      // filtering — keeping the scan permissive ensures every
+                      // real holding reaches the page even before pricing.
+                      if (balance <= 0) return;
                       const price = priceOf(displaySymbol);
                       const usdValue = balance * price;
                       if (!cancelled) {
@@ -385,7 +420,7 @@ export function useWalletTokens(): WalletTokensData {
               if (nativeHex) {
                 try {
                   const nativeBal = Number(BigInt(nativeHex)) / 1e18;
-                  if (nativeBal >= 0.0001) {
+                  if (nativeBal > 0) {
                     const price = priceOf("HYPE");
                     tokens.push({
                       symbol: "HYPE",
@@ -413,7 +448,7 @@ export function useWalletTokens(): WalletTokensData {
                 try { rawBal = BigInt(hex); } catch { continue; }
                 if (rawBal === 0n) continue;
                 const balance = Number(rawBal) / Math.pow(10, t.decimals);
-                if (balance < 0.0001) continue;
+                if (balance <= 0) continue;
                 const price = priceOf(t.symbol);
                 tokens.push({
                   symbol: t.symbol,
@@ -446,7 +481,7 @@ export function useWalletTokens(): WalletTokensData {
 
               // Native SOL
               const solBal = parseFloat(res.solBalance ?? "0");
-              if (solBal >= 0.0001) {
+              if (solBal > 0) {
                 tokens.push({
                   symbol: "SOL",
                   name: "Solana",
@@ -466,7 +501,7 @@ export function useWalletTokens(): WalletTokensData {
               for (const t of (res.tokens ?? [])) {
                 if (cancelled) return;
                 const balance = parseFloat(t.balance ?? "0");
-                if (balance < 0.0001) continue;
+                if (balance <= 0) continue;
                 const price = priceOf(t.symbol);
                 tokens.push({
                   symbol: t.symbol,

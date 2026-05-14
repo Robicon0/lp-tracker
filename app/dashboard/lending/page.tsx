@@ -216,7 +216,7 @@ export default function LendingPage() {
       <style
         dangerouslySetInnerHTML={{
           __html:
-            '@keyframes lend-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } } button[aria-label="Share feedback"] { display: none !important; }',
+            '@keyframes lend-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }',
         }}
       />
       <div

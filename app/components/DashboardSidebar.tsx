@@ -397,56 +397,6 @@ export default function DashboardSidebar({
           <span style={iconStyle}>+</span>
           Add Wallet
         </button>
-
-        {/* WALLET_BALANCES — terminal CTA pinned to the bottom of the WALLETS
-            section. A faint dim-border divider sits above; the row itself is a
-            faint-green-tinted rectangle with the chain primary green for the
-            label and a small "VIEW" badge on the right. Path is /dashboard/tokens
-            (the existing wallet-balances page; route name not yet renamed). */}
-        <div style={{ height: 1, background: "#1a1a1a", margin: "8px 18px 8px" }} />
-        <Link
-          href="/dashboard/tokens"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 9,
-            margin: "0 14px 6px",
-            padding: "8px 12px",
-            background: "rgba(0,255,136,0.04)",
-            border: "1px solid rgba(0,255,136,0.27)",
-            borderRadius: 4,
-            color: "#00ff88",
-            textDecoration: "none",
-            fontFamily: FONT,
-            fontSize: 11,
-            letterSpacing: "0.06em",
-            transition: "border-color 0.12s, background 0.12s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0,255,136,0.53)";
-            e.currentTarget.style.background = "rgba(0,255,136,0.08)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0,255,136,0.27)";
-            e.currentTarget.style.background = "rgba(0,255,136,0.04)";
-          }}
-        >
-          <span style={{ color: "#3a3a3a", fontSize: 11, flexShrink: 0 }}>▸</span>
-          <span style={{ flex: 1, color: "#00ff88" }}>WALLET_BALANCES</span>
-          <span
-            style={{
-              fontSize: 9,
-              color: "rgba(0,255,136,0.4)",
-              background: "rgba(0,255,136,0.067)",
-              padding: "2px 6px",
-              borderRadius: 2,
-              letterSpacing: "0.08em",
-            }}
-          >
-            VIEW
-          </span>
-          <span style={{ color: "rgba(0,255,136,0.5)", fontSize: 10, flexShrink: 0 }}>▸</span>
-        </Link>
       </div>
 
       {/* Solana wallet picker — rendered into document.body via createPortal
