@@ -170,22 +170,32 @@ export interface WalletTokensData {
 export function useWalletTokens(): WalletTokensData {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
-  const { watchedWallets } = useWatchedWallets();
+  const { watchedWallets, scanAddress } = useWatchedWallets();
+
+  // SCAN MODE: ignore connected + watched and fetch ONLY the scan address.
+  // See WatchedWalletsContext + dashboard banner for the full flow.
+  const isScanMode = scanAddress !== null;
 
   // Combine connected + watched wallets per chain (dedup, lowercase for EVM).
-  const evmAddresses = Array.from(new Set(
-    [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-      .map((a) => a.toLowerCase())
-  ));
-  const solanaAddresses = Array.from(new Set(
-    [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-  ));
-  const suiAddresses = Array.from(new Set(
-    [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-  ));
+  const evmAddresses = isScanMode
+    ? (scanAddress!.chain === "evm" ? [scanAddress!.address.toLowerCase()] : [])
+    : Array.from(new Set(
+        [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+          .map((a) => a.toLowerCase())
+      ));
+  const solanaAddresses = isScanMode
+    ? (scanAddress!.chain === "solana" ? [scanAddress!.address] : [])
+    : Array.from(new Set(
+        [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+      ));
+  const suiAddresses = isScanMode
+    ? (scanAddress!.chain === "sui" ? [scanAddress!.address] : [])
+    : Array.from(new Set(
+        [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+      ));
 
   const fetchedForRef = useRef<string | null>(null);
 

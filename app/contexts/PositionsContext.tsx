@@ -40,26 +40,38 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // user connections. Adapter state (useWallet, useCurrentAccount) is not used
   // here because those can reflect locked/silent-reconnect state.
   const { solanaAddress, suiAddress } = useWalletAuth();
-  const { watchedWallets } = useWatchedWallets();
+  const { watchedWallets, scanAddress } = useWatchedWallets();
 
-  const hasWallet = !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0;
+  // SCAN MODE: when scanAddress is set (from /dashboard?address=&chain=),
+  // ignore connected wallets AND saved watched wallets entirely — fetch ONLY
+  // the scan address on its declared chain. The dashboard banner makes the
+  // override visible to the user.
+  const isScanMode = scanAddress !== null;
+
+  const hasWallet = isScanMode || !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0;
 
   // Deduplicate connected + watched wallet addresses per chain. EVM is
   // case-insensitive (checksum differences must not count as two wallets);
   // Solana base58 and Sui hex are case-sensitive-equal after lowercasing hex.
-  const evmAddresses = Array.from(new Set(
-    [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-      .map((a) => a.toLowerCase()),
-  ));
-  const solanaAddresses = Array.from(new Set(
-    [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
-      .filter((a): a is string => !!a),
-  ));
-  const suiAddresses = Array.from(new Set(
-    [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address.toLowerCase())]
-      .filter((a): a is string => !!a),
-  ));
+  const evmAddresses = isScanMode
+    ? (scanAddress!.chain === "evm" ? [scanAddress!.address.toLowerCase()] : [])
+    : Array.from(new Set(
+        [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+          .map((a) => a.toLowerCase()),
+      ));
+  const solanaAddresses = isScanMode
+    ? (scanAddress!.chain === "solana" ? [scanAddress!.address] : [])
+    : Array.from(new Set(
+        [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
+          .filter((a): a is string => !!a),
+      ));
+  const suiAddresses = isScanMode
+    ? (scanAddress!.chain === "sui" ? [scanAddress!.address.toLowerCase()] : [])
+    : Array.from(new Set(
+        [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address.toLowerCase())]
+          .filter((a): a is string => !!a),
+      ));
 
   // Auto-register connected wallets with the snapshot DB so the cron job
   // knows which addresses to track historically. Fire-and-forget; silently

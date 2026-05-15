@@ -13,6 +13,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { setDisconnected } from "../lib/walletDisconnectFlag";
+import { detectChain } from "../lib/detectChain";
 
 const EVM_DISPLAY: { id: string; name: string }[] = [
   { id: "metaMaskSDK", name: "MetaMask" },
@@ -144,11 +145,21 @@ export default function HeroWalletConnect() {
   };
 
   const [addrInput, setAddrInput] = useState("");
+  const [scanError, setScanError] = useState<string | null>(null);
   function handleScan(e: React.FormEvent) {
     e.preventDefault();
     const v = addrInput.trim();
     if (!v) return;
-    router.push(`/dashboard?watch=${encodeURIComponent(v)}`);
+    // Detect EVM (0x + 40 hex), Sui (0x + 64 hex), or Solana (base58 32-44).
+    // Unknown formats show an inline error and don't navigate — the dashboard
+    // can't load anything useful without a chain hint.
+    const chain = detectChain(v);
+    if (!chain) {
+      setScanError("Unrecognized address. Use 0x… (EVM/Sui) or a Solana base58 address.");
+      return;
+    }
+    setScanError(null);
+    router.push(`/dashboard?address=${encodeURIComponent(v)}&chain=${chain}`);
   }
 
   const evmActive = mounted && isConnected && !!address;
@@ -233,6 +244,18 @@ export default function HeroWalletConnect() {
             SCAN
           </button>
         </form>
+        {scanError && (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              color: "#ff3355",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {scanError}
+          </div>
+        )}
       </div>
 
       {/* MODALS */}

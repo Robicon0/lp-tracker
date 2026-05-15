@@ -80,21 +80,30 @@ function buildPosition(
 export function useLendingPositions(): UseLendingPositionsData {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
-  const { watchedWallets } = useWatchedWallets();
+  const { watchedWallets, scanAddress } = useWatchedWallets();
 
-  const evmAddresses = Array.from(new Set(
-    [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-      .map((a) => a.toLowerCase())
-  ));
-  const solanaAddresses = Array.from(new Set(
-    [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-  ));
-  const suiAddresses = Array.from(new Set(
-    [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address)]
-      .filter((a): a is string => !!a)
-  ));
+  // SCAN MODE: ignore connected + watched and fetch ONLY the scan address.
+  const isScanMode = scanAddress !== null;
+
+  const evmAddresses = isScanMode
+    ? (scanAddress!.chain === "evm" ? [scanAddress!.address.toLowerCase()] : [])
+    : Array.from(new Set(
+        [address, ...watchedWallets.filter((w) => w.chain === "evm").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+          .map((a) => a.toLowerCase())
+      ));
+  const solanaAddresses = isScanMode
+    ? (scanAddress!.chain === "solana" ? [scanAddress!.address] : [])
+    : Array.from(new Set(
+        [solanaAddress, ...watchedWallets.filter((w) => w.chain === "solana").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+      ));
+  const suiAddresses = isScanMode
+    ? (scanAddress!.chain === "sui" ? [scanAddress!.address] : [])
+    : Array.from(new Set(
+        [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address)]
+          .filter((a): a is string => !!a)
+      ));
   const evmKey = evmAddresses.join(",");
   const solKey = solanaAddresses.join(",");
   const suiKey = suiAddresses.join(",");

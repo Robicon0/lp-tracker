@@ -11,11 +11,26 @@ export interface WatchedWallet {
   addedAt: number;
 }
 
+// Scan mode: when a user pastes an address into the homepage SCAN form, the
+// dashboard enters a read-only view of that address. While scanAddress is set,
+// every consumer hook (PositionsContext, useWalletTokens, useLendingPositions)
+// IGNORES the connected wagmi/Solana/Sui wallets AND the persisted
+// watchedWallets list — using ONLY the scan address on its declared chain.
+// scanAddress is intentionally ephemeral (NOT persisted to localStorage); it
+// dies on a hard refresh unless the URL still has ?address=&chain= params, and
+// the dashboard re-applies it from the URL on mount.
+export interface ScanAddress {
+  address: string;
+  chain: WatchedWalletChain;
+}
+
 interface WatchedWalletsContextValue {
   watchedWallets: WatchedWallet[];
   addWallet: (address: string, chain: WatchedWalletChain, label?: string) => void;
   removeWallet: (address: string, chain: WatchedWalletChain) => void;
   updateLabel: (address: string, chain: WatchedWalletChain, label: string) => void;
+  scanAddress: ScanAddress | null;
+  setScanAddress: (a: ScanAddress | null) => void;
 }
 
 const LS_KEY = "lp-watched-wallets";
@@ -25,10 +40,13 @@ const WatchedWalletsContext = createContext<WatchedWalletsContextValue>({
   addWallet: () => {},
   removeWallet: () => {},
   updateLabel: () => {},
+  scanAddress: null,
+  setScanAddress: () => {},
 });
 
 export function WatchedWalletsProvider({ children }: { children: React.ReactNode }) {
   const [watchedWallets, setWatchedWallets] = useState<WatchedWallet[]>([]);
+  const [scanAddress, setScanAddress] = useState<ScanAddress | null>(null);
 
   // Hydrate from localStorage on mount (client-only)
   useEffect(() => {
@@ -66,7 +84,7 @@ export function WatchedWalletsProvider({ children }: { children: React.ReactNode
   }
 
   return (
-    <WatchedWalletsContext.Provider value={{ watchedWallets, addWallet, removeWallet, updateLabel }}>
+    <WatchedWalletsContext.Provider value={{ watchedWallets, addWallet, removeWallet, updateLabel, scanAddress, setScanAddress }}>
       {children}
     </WatchedWalletsContext.Provider>
   );

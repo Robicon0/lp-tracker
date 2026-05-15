@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useMemo, useEffect, useRef, Suspense, type CSSProperties } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import TerminalNavbar from "../components/TerminalNavbar";
 import DashboardSidebar, { type NavSection } from "../components/DashboardSidebar";
 import { getTokenLogo } from "../lib/tokenLogos";
@@ -226,6 +227,35 @@ function chainInfoFromConnected(addr: string | null | undefined, kind: "EVM" | "
   return { colour, chains, name, addr };
 }
 
+// ── Scan-mode listener ────────────────────────────────────────────────────────
+// useSearchParams() must live inside a <Suspense> boundary in Next.js 16, so
+// the URL → scanAddress sync is isolated in this tiny component (returns null,
+// just runs the effect). The Dashboard renders this inside <Suspense> right
+// below TerminalNavbar; the rest of the dashboard reads scanAddress from
+// WatchedWalletsContext without needing its own Suspense wrapper.
+function ScanModeListener() {
+  const searchParams = useSearchParams();
+  const { setScanAddress } = useWatchedWallets();
+  const lastSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const addr = searchParams?.get("address") ?? null;
+    const chainParam = searchParams?.get("chain") ?? null;
+    const sig = `${addr}|${chainParam}`;
+    if (lastSigRef.current === sig) return;
+    lastSigRef.current = sig;
+    if (
+      addr &&
+      chainParam &&
+      (chainParam === "evm" || chainParam === "solana" || chainParam === "sui")
+    ) {
+      setScanAddress({ address: addr, chain: chainParam as WatchedWalletChain });
+    } else {
+      setScanAddress(null);
+    }
+  }, [searchParams, setScanAddress]);
+  return null;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch } = usePositions();
@@ -262,8 +292,29 @@ export default function Dashboard() {
     }
   }, [adapterSuiAccount, setSuiAddress]);
 
-  const { watchedWallets, addWallet, removeWallet, updateLabel } = useWatchedWallets();
-  const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
+  const { watchedWallets, addWallet, removeWallet, updateLabel, scanAddress, setScanAddress } = useWatchedWallets();
+
+  // ── SCAN MODE — driven by /dashboard?address=&chain= ──────────────────────
+  // The URL → scanAddress sync happens inside <ScanModeListener /> below
+  // (wrapped in <Suspense> per Next.js 16's useSearchParams() requirement).
+  // useRouter and usePathname don't need a Suspense boundary so they live
+  // here in the main component. Click [X] on the banner calls
+  // handleDismissScan, which clears scanAddress and strips the URL params.
+  const router = useRouter();
+  const pathname = usePathname();
+  const isScanMode = scanAddress !== null;
+  const hasWallet = mounted && (isScanMode || !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
+
+  function handleDismissScan() {
+    setScanAddress(null);
+    router.replace(pathname ?? "/dashboard");
+  }
+  function handleAddScanToWatched() {
+    if (!scanAddress) return;
+    addWallet(scanAddress.address, scanAddress.chain);
+    setScanAddress(null);
+    router.replace(pathname ?? "/dashboard");
+  }
 
   const {
     totalTokenValue, totalLendingValue,
@@ -391,7 +442,13 @@ export default function Dashboard() {
       .filter((r) => r.value > 0);
   }, [allPositions]);
 
-  const portfolioHistory = usePortfolioHistory(totalValue, allPositions.length, dataUpdatedAt);
+  // Skip writing to localStorage portfolio history while in scan mode — those
+  // snapshots represent the user's own wallet history, not someone else's.
+  const portfolioHistory = usePortfolioHistory(
+    isScanMode ? 0 : totalValue,
+    isScanMode ? 0 : allPositions.length,
+    isScanMode ? 0 : dataUpdatedAt,
+  );
   const activeRange    = TIME_RANGES.find((r) => r.key === chartTab) ?? TIME_RANGES[2];
   const rangeCutoff    = Date.now() - activeRange.ms;
   const rangedHistory  = portfolioHistory.filter((s) => s.timestamp >= rangeCutoff);
@@ -493,6 +550,17 @@ export default function Dashboard() {
   // Build wallet rows for the Wallets pane in row 1
   const walletPaneRows = useMemo(() => {
     const rows: Array<{ key: string; color: string; name: string; addr: string; sub: string; type: "browser" | "watched"; chain?: WatchedWalletChain; }> = [];
+    // SCAN MODE: the // WALLETS card mirrors the data shown — only the scan
+    // address, no connected/watched. Banner conveys "you're viewing X".
+    if (scanAddress) {
+      const colour = scanAddress.chain === "evm" ? C.cyan : scanAddress.chain === "solana" ? C.purple : scanAddress.chain === "sui" ? C.blue : C.text;
+      const sub = scanAddress.chain === "evm" ? "EVM Scanned"
+                : scanAddress.chain === "solana" ? "Solana Scanned"
+                : scanAddress.chain === "sui" ? "Sui Scanned"
+                : "Scanned";
+      rows.push({ key: scanAddress.address, color: colour, name: "Scanned", addr: scanAddress.address, sub, type: "watched", chain: scanAddress.chain });
+      return rows;
+    }
     if (address)        { const i = chainInfoFromConnected(address, "EVM")!;        rows.push({ key: address,        color: i.colour, name: i.name, addr: i.addr, sub: i.chains, type: "browser", chain: "evm"    }); }
     if (solanaAddress)  { const i = chainInfoFromConnected(solanaAddress, "SOL")!;  rows.push({ key: solanaAddress,  color: i.colour, name: i.name, addr: i.addr, sub: i.chains, type: "browser", chain: "solana" }); }
     if (suiAddress)     { const i = chainInfoFromConnected(suiAddress, "SUI")!;     rows.push({ key: suiAddress,     color: i.colour, name: i.name, addr: i.addr, sub: i.chains, type: "browser", chain: "sui"    }); }
@@ -505,7 +573,7 @@ export default function Dashboard() {
       rows.push({ key: w.address, color: colour, name: w.label ?? "Watched", addr: w.address, sub, type: "watched", chain: w.chain });
     }
     return rows;
-  }, [address, solanaAddress, suiAddress, watchedWallets]);
+  }, [address, solanaAddress, suiAddress, watchedWallets, scanAddress]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -559,6 +627,127 @@ export default function Dashboard() {
       />
 
       <TerminalNavbar />
+
+      {/* URL → scanAddress sync. Isolated in a tiny child wrapped in Suspense
+          because useSearchParams() requires a Suspense boundary in Next.js 16. */}
+      <Suspense fallback={null}>
+        <ScanModeListener />
+      </Suspense>
+
+      {/* SCAN MODE banner — shown when /dashboard?address=&chain= is set.
+          All dashboard data below is for the scanned address; user's own
+          connected wallets are temporarily ignored. Click [X] to dismiss
+          and return to the user's own wallet view. */}
+      {isScanMode && scanAddress && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "10px 16px",
+            margin: "12px 16px 0",
+            background: "rgba(0,255,136,0.04)",
+            border: "1px solid rgba(0,255,136,0.2)",
+            borderRadius: 4,
+            fontFamily: FONT,
+            flexWrap: "wrap",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              color: "#666",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              flexShrink: 0,
+            }}
+          >
+            // VIEWING_ADDRESS
+          </span>
+          <span style={{ color: "#1a1a1a", fontSize: 12, flexShrink: 0 }}>·</span>
+          <span
+            style={{
+              fontSize: 13,
+              color: "#00ff88",
+              letterSpacing: "0.04em",
+              fontFamily: FONT,
+              wordBreak: "break-all",
+            }}
+            title={scanAddress.address}
+          >
+            {scanAddress.address.length > 12
+              ? `${scanAddress.address.slice(0, 6)}…${scanAddress.address.slice(-4)}`
+              : scanAddress.address}
+          </span>
+          <span
+            style={{
+              fontSize: 9,
+              color: "#444",
+              background: "rgba(255,255,255,0.03)",
+              padding: "2px 6px",
+              borderRadius: 2,
+              letterSpacing: "0.1em",
+              flexShrink: 0,
+            }}
+          >
+            READ ONLY
+          </span>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={handleAddScanToWatched}
+            style={{
+              fontSize: 10,
+              color: "#00ff88",
+              background: "rgba(0,255,136,0.06)",
+              border: "1px solid rgba(0,255,136,0.27)",
+              borderRadius: 3,
+              padding: "5px 10px",
+              letterSpacing: "0.08em",
+              cursor: "pointer",
+              fontFamily: FONT,
+              transition: "border-color 0.12s, background 0.12s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "rgba(0,255,136,0.53)";
+              e.currentTarget.style.background = "rgba(0,255,136,0.1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "rgba(0,255,136,0.27)";
+              e.currentTarget.style.background = "rgba(0,255,136,0.06)";
+            }}
+          >
+            + ADD TO WATCHED
+          </button>
+          <button
+            type="button"
+            onClick={handleDismissScan}
+            title="Dismiss scan and return to your own wallets"
+            style={{
+              fontSize: 12,
+              color: "#333",
+              background: "transparent",
+              border: "1px solid #1a1a1a",
+              borderRadius: 3,
+              padding: "4px 9px",
+              cursor: "pointer",
+              fontFamily: FONT,
+              lineHeight: 1,
+              transition: "color 0.12s, border-color 0.12s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#888";
+              e.currentTarget.style.borderColor = "#333";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "#333";
+              e.currentTarget.style.borderColor = "#1a1a1a";
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Layout: sidebar + main */}
       <div style={{ display: "flex", flex: 1, minHeight: "calc(100vh - 52px)" }}>
