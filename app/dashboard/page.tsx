@@ -16,8 +16,7 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
-import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
-import { computePositionPnL, type ActivityEventForPnL } from "../lib/positionPnl";
+import { useLpPnl } from "../hooks/useLpPnl";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -260,7 +259,13 @@ function ScanModeListener() {
 export default function Dashboard() {
   const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch } = usePositions();
   // Per-position activity events — used for proper P&L calculation per row.
-  const { eventsMap: positionEventsMap } = useAllPositionsActivity(allPositions);
+  // Per-row P&L on the positions table comes from the SAME on-chain pipeline
+  // that feeds the analytics LP P&L totals — no parallel calculation, no
+  // snapshot fallbacks. lpPnl.perPosition[pos.id] lands once that position's
+  // activity fetch + computePositionPnL() resolves; rows for positions that
+  // haven't landed yet (or were excluded by computePositionPnL) fall back to
+  // the existing fees-only / "—" placeholders.
+  const lpPnl = useLpPnl(allPositions);
   const { address } = useAccount();
   const { connect: evmConnect, connectors } = useConnect();
   const { disconnect: evmDisconnect } = useDisconnect();
@@ -1725,34 +1730,15 @@ export default function Dashboard() {
                       const hColour = healthColor(health);
                       const isClosed = posStatus === "Closed";
 
-                      // ── P&L: (Current − Initial) + Fees Collected + Fees Unclaimed
-                      // (IL is implicit in Current − Initial for an LP position).
-                      // Computed from on-chain activity events via computePositionPnL.
-                      // Falls back to uncollected-fees-as-proxy when events / prices missing.
-                      let pnlUsd: number | null = null;
-                      let pnlPct: number | null = null;
-                      const events = positionEventsMap.get(pos.id);
-                      if (
-                        events &&
-                        events.length > 0 &&
-                        pos.price0 != null &&
-                        pos.price1 != null &&
-                        pos.price0 > 0 &&
-                        pos.price1 > 0
-                      ) {
-                        const r = computePositionPnL({
-                          currentValue: pos.value,
-                          unclaimedFeesUSD: pos.fees,
-                          price0: pos.price0,
-                          price1: pos.price1,
-                          events: events as ActivityEventForPnL[],
-                          isClosed,
-                        });
-                        if (r.ok) {
-                          pnlUsd = r.data.netPnlUSD;
-                          pnlPct = r.data.netPnlPct;
-                        }
-                      }
+                      // P&L for this row comes straight from useLpPnl.perPosition
+                      // — same numbers that aggregate into the analytics page
+                      // totals, so summing every visible row's pnlUsd yields
+                      // EXACTLY lpPnl.netPnl (for non-closed positions; closed
+                      // are excluded by useLpPnl's eligibility filter and fall
+                      // through to the fees-only / "—" placeholder below).
+                      const pnlData = lpPnl.perPosition[pos.id];
+                      const pnlUsd: number | null = pnlData ? pnlData.netPnlUSD : null;
+                      const pnlPct: number | null = pnlData ? pnlData.netPnlPct : null;
 
                       return (
                         <tr

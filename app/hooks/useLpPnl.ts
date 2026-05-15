@@ -19,12 +19,19 @@ export interface LpPnlResult {
   errored: number;    // positions whose fetch failed (timeout, HTTP error, etc.)
   errorReasons: string[]; // first-seen unique error reasons (for UI display)
   isLoading: boolean;
+  // Per-position results keyed by position.id — lets per-row UI (dashboard
+  // positions table) read EXACTLY the same on-chain P&L numbers that flow
+  // into the aggregated totals. A position appears here ONLY when its
+  // computePositionPnL() returned ok; pending / excluded / errored positions
+  // are absent and callers should fall back to a placeholder ("—" / fees-only).
+  perPosition: Record<string, PositionPnLData>;
 }
 
 const EMPTY: LpPnlResult = {
   initialValue: 0, currentValue: 0, feesCollected: 0, feesUnclaimed: 0,
   ilUSD: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
   errored: 0, errorReasons: [], isLoading: false,
+  perPosition: {},
 };
 
 // ── NFT manager lookup ──────────────────────────────────────────────────────
@@ -304,8 +311,12 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
   let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let included = 0, excluded = 0, errored = 0;
   const errorReasons = new Set<string>();
+  // Per-position record built from the same map the totals come from — any
+  // consumer that reads perPosition[id] gets a number that, summed across
+  // every present id, EXACTLY equals the aggregated total. No drift possible.
+  const perPosition: Record<string, PositionPnLData> = {};
 
-  for (const r of resultsMap.values()) {
+  for (const [id, r] of resultsMap) {
     if (r.ok) {
       initialValue += r.data.initialValue;
       currentValue += r.data.currentValue;
@@ -313,6 +324,7 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
       feesUnclaimed += r.data.feesUnclaimed;
       ilUSD += r.data.ilUSD;
       included += 1;
+      perPosition[id] = r.data;
     } else if (isTransportError(r.reason)) {
       errored += 1;
       errorReasons.add(r.reason);
@@ -329,6 +341,7 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
     ilUSD, netPnl, netPnlPct, included, excluded,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
+    perPosition,
   };
 }
 

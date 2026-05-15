@@ -1278,6 +1278,14 @@ export default function Analytics() {
                   gridTemplateColumns: "repeat(6, 1fr)",
                 }}
               >
+                {/* While ANY LP position is still being fetched/computed
+                    (lpPnl.isLoading), every value cell shows a skeleton bar.
+                    No partial totals reveal — the user only sees numbers once
+                    all positions across all chains have completed. Failed
+                    positions don't block this gate: useLpPnl's `errored`
+                    counter increments and the red banner below explains
+                    which positions couldn't load (per-position N/A semantics
+                    — the totals reflect only positions that succeeded). */}
                 {[
                   { label: "Total Deposited", val: fmt$(lpPnl.initialValue),   color: C.textBright, sub: "at deposit prices" },
                   { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "mark-to-market" },
@@ -1306,22 +1314,43 @@ export default function Analytics() {
                     <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10 }}>
                       {c.label}
                     </div>
-                    <div
-                      style={{
-                        fontSize: 21, fontWeight: 700,
-                        color: c.color,
-                        fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                        textShadow: c.color === C.green ? "0 0 12px rgba(0,255,65,0.22)" : "none",
-                      }}
-                    >
-                      {c.val}
-                    </div>
+                    {lpPnl.isLoading ? (
+                      <div
+                        aria-label="Loading"
+                        style={{
+                          width: 100, height: 26,
+                          background: "rgba(255,255,255,0.04)",
+                          borderRadius: 3,
+                          animation: "lp-pnl-shimmer 1.4s linear infinite",
+                          backgroundImage:
+                            "linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.02) 100%)",
+                          backgroundSize: "200% 100%",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          fontSize: 21, fontWeight: 700,
+                          color: c.color,
+                          fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                          textShadow: c.color === C.green ? "0 0 12px rgba(0,255,65,0.22)" : "none",
+                        }}
+                      >
+                        {c.val}
+                      </div>
+                    )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
-                      {c.sub}
+                      {lpPnl.isLoading ? "calculating…" : c.sub}
                     </div>
                   </div>
                 ))}
               </div>
+              <style
+                dangerouslySetInnerHTML={{
+                  __html:
+                    "@keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }",
+                }}
+              />
               {lpPnl.errored > 0 && (
                 <div
                   style={{
