@@ -1291,7 +1291,19 @@ export default function Analytics() {
                     which positions couldn't load (per-position N/A semantics
                     — the totals reflect only positions that succeeded). */}
                 {([
-                  { label: "Total Deposited", val: fmt$(lpPnl.initialValue),   color: C.textBright, sub: "at deposit prices" },
+                  {
+                    label: "Total Deposited",
+                    // "~" marker when ANY position contributing to the totals is
+                    // using the HyperEVM fallback (current value as deposit
+                    // estimate because eth_getLogs couldn't reach the deposit
+                    // block). The tooltip explains exactly what that means.
+                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(lpPnl.initialValue)}`,
+                    color: C.textBright,
+                    sub: "at deposit prices",
+                    tooltip: lpPnl.estimatedPositionCount > 0
+                      ? `${lpPnl.estimatedPositionCount} position${lpPnl.estimatedPositionCount === 1 ? "" : "s"} using estimated deposit value — Deposit price unavailable, using current value as estimate. Affects HyperEVM positions where on-chain deposit history isn't recoverable from the public RPC.`
+                      : undefined,
+                  },
                   { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "mark-to-market" },
                   { label: "Fees Collected",  val: `+${fmt$(lpPnl.feesCollected)}`, color: C.green, sub: "claimed lifetime" },
                   { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "pending on-chain" },
@@ -1359,6 +1371,59 @@ export default function Analytics() {
                     "@keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }",
                 }}
               />
+
+              {/* Excluded-positions warning. Surfaces every position that's
+                  NOT contributing to the totals — unsupported protocols
+                  (Cetus, Momentum, etc.), positions whose deposit history
+                  couldn't be fetched, etc. Shown only after isLoading
+                  resolves so we don't flash the warning during loading. */}
+              {!lpPnl.isLoading && lpPnl.excludedPositions.length > 0 && (
+                <div
+                  style={{
+                    margin: "0 26px 18px",
+                    border: "1px solid rgba(255,170,0,0.25)",
+                    background: "rgba(255,170,0,0.04)",
+                    padding: "12px 16px",
+                    fontFamily: FONT,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "#ffaa00",
+                      letterSpacing: "0.04em",
+                      marginBottom: 8,
+                    }}
+                  >
+                    ⚠ {lpPnl.excludedPositions.length} position
+                    {lpPnl.excludedPositions.length === 1 ? "" : "s"} could not
+                    be fully calculated and {lpPnl.excludedPositions.length === 1 ? "is" : "are"} excluded from totals:
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {lpPnl.excludedPositions.map((ep) => (
+                      <div
+                        key={`${ep.id}-${ep.reason}`}
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,170,0,0.85)",
+                          letterSpacing: "0.02em",
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        <span style={{ color: "#ffaa00", fontWeight: 600 }}>
+                          {ep.pair}
+                        </span>
+                        <span style={{ opacity: 0.7 }}>
+                          {" "}({ep.protocol} · {ep.chain})
+                        </span>
+                        <span style={{ opacity: 0.7 }}> — </span>
+                        <span>{ep.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {lpPnl.errored > 0 && (
                 <div
                   style={{

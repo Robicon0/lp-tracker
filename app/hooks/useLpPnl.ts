@@ -6,6 +6,15 @@ import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } fr
 
 // ── Result shape ────────────────────────────────────────────────────────────
 
+export interface ExcludedPosition {
+  id: string;
+  pair: string;
+  protocol: string;
+  chain: string;
+  /** User-friendly reason — already mapped from the technical code. */
+  reason: string;
+}
+
 export interface LpPnlResult {
   initialValue: number;
   currentValue: number;
@@ -25,6 +34,17 @@ export interface LpPnlResult {
   // computePositionPnL() returned ok; pending / excluded / errored positions
   // are absent and callers should fall back to a placeholder ("—" / fees-only).
   perPosition: Record<string, PositionPnLData>;
+  // Every position that's NOT contributing to the totals — surfaced verbatim
+  // in the analytics warning banner so the user knows why their totals look
+  // lower than expected. Includes: unsupported protocols (Cetus, Momentum),
+  // missing-data positions (no_deposits, missing_deposit_prices), and
+  // transport-error positions after all retries failed.
+  excludedPositions: ExcludedPosition[];
+  // Count of positions that ARE included in the totals but used the
+  // HyperEVM-style fallback (current value as proxy for initial value
+  // because deposit history wasn't recoverable from RPC). The analytics
+  // page prefixes the "Total Deposited" card with "~" when this is > 0.
+  estimatedPositionCount: number;
 }
 
 const EMPTY: LpPnlResult = {
@@ -32,7 +52,75 @@ const EMPTY: LpPnlResult = {
   ilUSD: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
   errored: 0, errorReasons: [], isLoading: false,
   perPosition: {},
+  excludedPositions: [],
+  estimatedPositionCount: 0,
 };
+
+// Map technical exclusion reasons to user-friendly text shown in the warning
+// banner. Keep these terse but informative — the user doesn't need to know
+// what computePositionPnL returns internally.
+function userFriendlyReason(reason: string, protocol: string): string {
+  if (reason === "no_deposits" || reason === "no events") {
+    if (protocol === "HyperSwap" || protocol === "KittenSwap" || protocol === "ProjectX") {
+      // HyperEVM positions taking this branch DESPITE the fallback below
+      // means the position has 0 value — fallback only kicks in when value > 0.
+      return "Deposit history unavailable on HyperEVM RPC";
+    }
+    return "No deposit events found on-chain";
+  }
+  if (reason === "missing_deposit_prices") return "Deposit price data unavailable";
+  if (reason === "missing_current_prices") return "Current price data unavailable";
+  if (reason === "no activity URL") return "P&L calculation not yet supported for this protocol";
+  if (reason === "unsupported protocol") return "P&L calculation not yet supported for this protocol";
+  if (reason.startsWith("HTTP ")) return `Failed to load — ${reason} after 3 attempts`;
+  if (reason === "timeout") return "Failed to load — RPC timeout after 3 attempts";
+  if (reason === "fetch error") return "Failed to load — network error after 3 attempts";
+  return reason;
+}
+
+// HyperEVM doesn't have an archival eth_getLogs source we can rely on, so
+// when the activity scan returns 0 deposit events the position would normally
+// be silently excluded. Instead we synthesize a PnL data point using the
+// CURRENT position value as a proxy for the deposit value. The result is
+// included in totals (so TOTAL DEPOSITED + CURRENT VALUE both reflect the
+// position) but flagged with `fallback: true` so the UI can mark it.
+//
+// Net P&L for a fallback position = unclaimed fees only (since current ===
+// initial by definition, and we have no claimed-fees history). IL is
+// non-computable without entry prices, so it's reported as 0 with
+// ilAvailable: false.
+function buildFallbackPnL(pos: AerodromePosition): PositionPnLData {
+  const value = pos.value;
+  const unclaimed = pos.fees;
+  const isClosed = pos.status === "Closed";
+  return {
+    initialValue: value,
+    currentValue: value,
+    closingValue: value,
+    feesCollected: 0,
+    feesUnclaimed: unclaimed,
+    netPnlUSD: unclaimed,
+    netPnlPct: value > 0 ? (unclaimed / value) * 100 : 0,
+    ilPct: 0,
+    ilUSD: 0,
+    hodlValue: value,
+    feesOffsetIL: true,
+    entryPrice0: pos.price0 ?? 0,
+    entryPrice1: pos.price1 ?? 0,
+    currentPrice0: pos.price0 ?? 0,
+    currentPrice1: pos.price1 ?? 0,
+    depositCount: 0,
+    firstDepositTs: 0,
+    isClosed,
+    totalAmount0: 0,
+    totalAmount1: 0,
+    entryRatio: 0,
+    currentRatio: 0,
+    priceRatioR: 0,
+    ilAvailable: false,
+    depositTxHashes: [],
+  };
+}
 
 // ── NFT manager lookup ──────────────────────────────────────────────────────
 
@@ -253,7 +341,10 @@ async function fetchEventsAttempt(
 
 async function fetchAndCompute(
   pos: AerodromePosition,
-): Promise<{ ok: true; data: PositionPnLData } | { ok: false; reason: string }> {
+): Promise<
+  | { ok: true; data: PositionPnLData; fallback?: true }
+  | { ok: false; reason: string }
+> {
   const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
 
   const url = buildActivityUrl(pos);
@@ -262,12 +353,20 @@ async function fetchAndCompute(
     return { ok: false, reason: "no activity URL" };
   }
 
+  const isHyperEvm = HYPEREVM_NFT_MANAGERS[pos.protocol] !== undefined;
+
   // Try cache first.
   let rawEvents: Array<Record<string, unknown>> | null = null;
   const cached = cacheGet(pos.id);
   if (cached) {
     if (cached.events === null) {
       console.log(`${tag} cache hit — empty (${cached.reason ?? "no events"})`);
+      // HyperEVM fallback path on cached-empty: synthesize PnL from current
+      // value rather than silently excluding. See buildFallbackPnL header.
+      if (isHyperEvm && pos.value > 0) {
+        console.log(`${tag} HyperEVM fallback (cached empty) — using current value $${pos.value.toFixed(2)} as deposit estimate`);
+        return { ok: true, data: buildFallbackPnL(pos), fallback: true };
+      }
       return { ok: false, reason: cached.reason ?? "no events" };
     }
     rawEvents = cached.events;
@@ -293,6 +392,12 @@ async function fetchAndCompute(
       // Cache definitive empty results so we don't re-fetch.
       if (result.cacheable) {
         cacheSet(pos.id, { ts: Date.now(), events: null, reason: result.reason });
+        // HyperEVM fallback for fresh empty result — same rationale as the
+        // cached-empty branch above.
+        if (isHyperEvm && pos.value > 0) {
+          console.log(`${tag} HyperEVM fallback (fresh empty) — using current value $${pos.value.toFixed(2)} as deposit estimate`);
+          return { ok: true, data: buildFallbackPnL(pos), fallback: true };
+        }
         return { ok: false, reason: result.reason };
       }
       // Stop retrying if this isn't a transport error (HTTP 4xx etc.).
@@ -344,20 +449,32 @@ async function fetchAndCompute(
 // ── Aggregate per-position results into totals ─────────────────────────────
 
 type PosResult =
-  | { ok: true; data: PositionPnLData }
+  | { ok: true; data: PositionPnLData; fallback?: true }
   | { ok: false; reason: string };
+
+interface PositionMeta {
+  pair: string;
+  protocol: string;
+  chain: string;
+}
 
 // `isTransportError` and `ERROR_REASONS` are defined above (next to
 // fetchEventsAttempt) so the retry loop can use them too.
 
-function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlResult {
+function aggregate(
+  resultsMap: Map<string, PosResult>,
+  inflight: number,
+  positionMeta: Map<string, PositionMeta>,
+  unsupportedRejections: ExcludedPosition[],
+): LpPnlResult {
   let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
-  let included = 0, excluded = 0, errored = 0;
+  let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
   const errorReasons = new Set<string>();
   // Per-position record built from the same map the totals come from — any
   // consumer that reads perPosition[id] gets a number that, summed across
   // every present id, EXACTLY equals the aggregated total. No drift possible.
   const perPosition: Record<string, PositionPnLData> = {};
+  const excludedPositions: ExcludedPosition[] = [];
 
   for (const [id, r] of resultsMap) {
     if (r.ok) {
@@ -368,13 +485,28 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
       ilUSD += r.data.ilUSD;
       included += 1;
       perPosition[id] = r.data;
-    } else if (isTransportError(r.reason)) {
-      errored += 1;
-      errorReasons.add(r.reason);
+      if (r.fallback) estimatedPositionCount += 1;
     } else {
-      excluded += 1;
+      const meta = positionMeta.get(id);
+      if (meta) {
+        excludedPositions.push({
+          id, pair: meta.pair, protocol: meta.protocol, chain: meta.chain,
+          reason: userFriendlyReason(r.reason, meta.protocol),
+        });
+      }
+      if (isTransportError(r.reason)) {
+        errored += 1;
+        errorReasons.add(r.reason);
+      } else {
+        excluded += 1;
+      }
     }
   }
+
+  // Append unsupported-protocol rejections (Cetus, Momentum, etc.) — these
+  // never make it through the eligibility filter so they have no entry in
+  // resultsMap, but the user still deserves to see them in the warning.
+  excludedPositions.push(...unsupportedRejections);
 
   const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
@@ -385,6 +517,8 @@ function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlR
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
     perPosition,
+    excludedPositions,
+    estimatedPositionCount,
   };
 }
 
@@ -403,6 +537,13 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
   const inflightRef = useRef<Set<string>>(new Set());
   // Stale-detection: track the generation so unmount can stop state updates.
   const mountedRef = useRef(true);
+  // Per-position metadata (pair, protocol, chain) tracked so the warning
+  // banner can reference excluded positions by name. Updated each useEffect.
+  const positionMetaRef = useRef<Map<string, PositionMeta>>(new Map());
+  // Positions rejected at the eligibility step for "unsupported protocol"
+  // (Cetus, Momentum, anything not in ACTIVITY_PROTOCOLS). Surfaced in the
+  // warning banner so the user knows P&L isn't calculated for them.
+  const unsupportedRejectionsRef = useRef<ExcludedPosition[]>([]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -414,14 +555,38 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     // contribute nothing to today's totals (Initial / Current / Fees / IL / Net P&L).
     // Filter them out before any aggregation. Closed = status "Closed" OR value === 0.
     const seen = new Set<string>();
+    const meta = new Map<string, PositionMeta>();
+    const unsupported: ExcludedPosition[] = [];
+
     const eligible = positions.filter((p) => {
-      if (!ACTIVITY_PROTOCOLS.has(p.protocol)) return false;
+      // Track metadata for every active position upfront — covers both the
+      // eligible ones (used during aggregate for excluded-warning text) and
+      // the unsupported ones (rejected below but still surfaced).
+      if (p.status !== "Closed" && p.value > 0) {
+        meta.set(p.id, { pair: p.pair, protocol: p.protocol, chain: p.chain });
+      }
+
+      if (!ACTIVITY_PROTOCOLS.has(p.protocol)) {
+        // Surface unsupported protocols (Cetus, Momentum, etc.) ONLY if the
+        // position is active — closed/zero-value rejected ones aren't
+        // interesting to flag. Prevents the warning from listing dust.
+        if (p.status !== "Closed" && p.value > 0) {
+          unsupported.push({
+            id: p.id, pair: p.pair, protocol: p.protocol, chain: p.chain,
+            reason: userFriendlyReason("unsupported protocol", p.protocol),
+          });
+        }
+        return false;
+      }
       if (p.status === "Closed") return false;
       if (p.value <= 0) return false;
       if (seen.has(p.id)) return false;
       seen.add(p.id);
       return true;
     });
+
+    positionMetaRef.current = meta;
+    unsupportedRejectionsRef.current = unsupported;
 
     // Evict any prior results / inflight markers for positions that are no
     // longer eligible (e.g. one transitioned to Closed). Without this, their
@@ -435,7 +600,12 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     }
 
     if (eligible.length === 0) {
-      setResult({ ...EMPTY });
+      // Even with no eligible positions we may have unsupported ones to
+      // surface — emit a result that includes them rather than EMPTY.
+      setResult({
+        ...EMPTY,
+        excludedPositions: [...unsupportedRejectionsRef.current],
+      });
       return;
     }
 
@@ -447,13 +617,13 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     if (toFetch.length === 0) {
       // All positions already fetched — just recompute totals (in case
       // positions array changed order but same IDs).
-      setResult(aggregate(resultsRef.current, inflightRef.current.size));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
       return;
     }
 
     // Mark as inflight and update loading state.
     for (const p of toFetch) inflightRef.current.add(p.id);
-    setResult(aggregate(resultsRef.current, inflightRef.current.size));
+    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
 
     // Fire fetches — each one lands independently.
     for (const pos of toFetch) {
@@ -461,7 +631,7 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
-        setResult(aggregate(resultsRef.current, inflightRef.current.size));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
       });
     }
   }, [positions]);
