@@ -19,6 +19,7 @@ import { useUniswapActivity } from "../../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
 import { usePancakeSwapActivity } from "../../../hooks/usePancakeSwapActivity";
 import { computePositionPnL } from "../../../lib/positionPnl";
+import InfoTooltip from "../../../components/InfoTooltip";
 
 // ── Terminal palette (matches position.html exactly) ─────────────────────────
 const C = {
@@ -122,17 +123,19 @@ function effectiveStatus(p: AerodromePosition): "In Range" | "Out of Range" | "C
 }
 
 function getManageUrl(protocol: string): string {
+  // Match by PROTOCOL NAME (substring) so any pair on a given protocol routes
+  // to the right management URL. To add a new protocol, append one line below.
   if (protocol.includes("Aerodrome"))  return "https://aerodrome.finance/dash";
   if (protocol.includes("Velodrome"))  return "https://velodrome.finance/dash";
   if (protocol.includes("Uniswap"))    return "https://app.uniswap.org/pool";
   if (protocol.includes("Orca"))       return "https://www.orca.so/portfolio";
   if (protocol.includes("Raydium"))    return "https://raydium.io/portfolio/";
-  if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/lend";
+  if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/liquidity-pools";
   if (protocol.includes("Cetus"))      return "https://app.cetus.zone/position";
   if (protocol.includes("Momentum"))   return "https://app.mmt.finance";
   if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.fi/pool";
   if (protocol.includes("KittenSwap")) return "https://www.kittenswap.org";
-  if (protocol.includes("ProjectX") || protocol.includes("PRJX")) return "https://prjx.com";
+  if (protocol.includes("ProjectX") || protocol.includes("PRJX")) return "https://www.prjx.com/portfolio";
   if (protocol.includes("PancakeSwap")) return "https://pancakeswap.finance/liquidity";
   return "";
 }
@@ -1000,8 +1003,13 @@ export default function PositionDetail() {
                 </div>
                 <div style={subStyle}>trailing 30d average</div>
               </div>
-              <div style={{ padding: cellPadding }}>
-                <div style={labelStyle}>Fee Income Rate</div>
+              <div style={{ padding: cellPadding, position: "relative" }}>
+                <div style={{ ...labelStyle, display: "flex", alignItems: "center" }}>
+                  Fee Income Rate
+                  <InfoTooltip
+                    text="Fee Income Rate is the annualised return from trading fees only, excluding price appreciation or impermanent loss. Calculated as: (Total Fees Collected / Average Position Value) × (365 / Days Active) × 100. This shows how efficiently your liquidity is earning fees."
+                  />
+                </div>
                 <div style={{
                   fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite,
                   fontVariantNumeric: "tabular-nums",

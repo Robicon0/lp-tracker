@@ -7,6 +7,7 @@ import AnalyticsSidebar, { type AnalyticsSection } from "../components/Analytics
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
+import InfoTooltip from "../components/InfoTooltip";
 import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
 import { useLpPnl } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
@@ -1286,7 +1287,7 @@ export default function Analytics() {
                     counter increments and the red banner below explains
                     which positions couldn't load (per-position N/A semantics
                     — the totals reflect only positions that succeeded). */}
-                {[
+                {([
                   { label: "Total Deposited", val: fmt$(lpPnl.initialValue),   color: C.textBright, sub: "at deposit prices" },
                   { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "mark-to-market" },
                   { label: "Fees Collected",  val: `+${fmt$(lpPnl.feesCollected)}`, color: C.green, sub: "claimed lifetime" },
@@ -1296,6 +1297,8 @@ export default function Analytics() {
                     val: fmt$Signed(-lpPnl.ilUSD),
                     color: -lpPnl.ilUSD > 0 ? C.red : C.green,
                     sub: "Σ(HODL − Current), open only",
+                    tooltip:
+                      "Impermanent Loss measures how much less your deposit is worth compared to simply holding the tokens. Calculated as: IL = 2√(price_ratio) / (1 + price_ratio) − 1, where price_ratio is the change in relative token prices since deposit. Shown as a positive number (cost to you).",
                   },
                   {
                     label: "Net P&L",
@@ -1303,16 +1306,18 @@ export default function Analytics() {
                     color: lpPnl.netPnl >= 0 ? C.cyan : C.red,
                     sub: `${lpPnl.netPnlPct >= 0 ? "+" : ""}${lpPnl.netPnlPct.toFixed(2)}%`,
                   },
-                ].map((c, i, arr) => (
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string }>).map((c, i, arr) => (
                   <div
                     key={c.label}
                     style={{
                       padding: "16px 20px",
                       borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                      position: "relative",
                     }}
                   >
-                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center" }}>
                       {c.label}
+                      {c.tooltip && <InfoTooltip text={c.tooltip} />}
                     </div>
                     {lpPnl.isLoading ? (
                       <div

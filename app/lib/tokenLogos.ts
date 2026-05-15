@@ -28,8 +28,13 @@ export const TOKEN_LOGOS: Record<string, string> = {
   WBNB:     "https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png",
   AVAX:     "https://assets.coingecko.com/coins/images/12559/small/Avalanche_Circle_RedWhite_Trans.png",
   // DeFi / HyperEVM
-  HYPE:     "https://assets.coingecko.com/coins/images/40845/small/hype.png",
-  WHYPE:    "https://assets.coingecko.com/coins/images/40845/small/hype.png",
+  // CG image id 50882 is the live Hyperliquid asset; the previous 40845 path
+  // returns 403. WHYPE / kHYPE / beHYPE all share the same logo.
+  HYPE:     "https://coin-images.coingecko.com/coins/images/50882/small/hyperliquid.jpg",
+  WHYPE:    "https://coin-images.coingecko.com/coins/images/50882/small/hyperliquid.jpg",
+  KHYPE:    "https://coin-images.coingecko.com/coins/images/50882/small/hyperliquid.jpg",
+  BEHYPE:   "https://coin-images.coingecko.com/coins/images/50882/small/hyperliquid.jpg",
+  WSTHYPE:  "https://coin-images.coingecko.com/coins/images/50882/small/hyperliquid.jpg",
   UNI:      "https://assets.coingecko.com/coins/images/12504/small/uni.jpg",
   AAVE:     "https://assets.coingecko.com/coins/images/12645/small/aave-token-round.png",
   CRV:      "https://assets.coingecko.com/coins/images/12124/small/Curve.png",
