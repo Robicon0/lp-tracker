@@ -607,7 +607,16 @@ export default function Dashboard() {
         .nav-tab-link:hover { color: ${C.textMid} !important; background: ${C.bg2} !important; }
         .filter-pill { transition: all 0.12s; }
         .filter-pill:hover { color: ${C.textMid}; border-color: ${C.border}; }
-        .ct-tab { transition: all 0.1s; }
+        /* Active toggle styling lives in CSS (not inline) so it's applied
+           the moment the DOM is parsed, NOT after React state computes the
+           inline ternaries. With the previous inline-only approach the
+           default-selected button (e.g. "30D" on first load) sometimes
+           briefly rendered un-highlighted before the inline styles took
+           effect, requiring a click+click-back to "wake up" the highlight.
+           data-active is set on first render, so [data-active="true"]
+           matches immediately. */
+        .ct-tab { transition: all 0.1s; border: 1px solid ${C.border}; background: transparent; color: ${C.text}; }
+        .ct-tab[data-active="true"] { border-color: ${C.greenDim}; background: rgba(0,255,65,0.06); color: ${C.green}; }
         .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
         .manage-btn:hover { border-color: ${C.cyanDim} !important; color: ${C.cyan} !important; background: ${C.cyanFaint} !important; }
         .pane-link:hover { color: ${C.green}; }
@@ -1383,10 +1392,10 @@ export default function Dashboard() {
                           fontSize: 11,
                           letterSpacing: "0.12em",
                           textTransform: "uppercase",
-                          border: `1px solid ${active ? C.greenDim : C.border}`,
-                          borderRight: i < arr.length - 1 ? "none" : `1px solid ${active ? C.greenDim : C.border}`,
-                          background: active ? C.bg2 : "transparent",
-                          color: active ? C.green : C.text,
+                          // border / background / color now come from .ct-tab
+                          // CSS rules (see <style> at top of component) so the
+                          // default-active button is highlighted on first paint.
+                          borderRight: i < arr.length - 1 ? "none" : undefined,
                           cursor: "pointer",
                         }}
                       >

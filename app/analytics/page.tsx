@@ -433,9 +433,9 @@ function RangePill({
         letterSpacing: "0.12em",
         textTransform: "uppercase",
         padding: "5px 12px",
-        border: `1px solid ${active ? C.greenDim : C.border}`,
-        background: active ? C.greenFaint : "transparent",
-        color: active ? C.green : C.text,
+        // border / background / color come from .ct-tab CSS — see <style>
+        // block in the page render — so the default pill is highlighted
+        // on first paint.
         cursor: "pointer",
         borderRight: "none",
       }}
@@ -885,7 +885,12 @@ export default function Analytics() {
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
         .a-row:hover td { background: rgba(255,255,255,0.012); }
-        .ct-tab { transition: color 0.1s, background 0.1s, border-color 0.1s; }
+        /* See dashboard/page.tsx for the rationale — active styling is
+           driven by CSS via [data-active="true"] so the default-selected
+           toggle is highlighted on first paint without any React render
+           dependency. */
+        .ct-tab { transition: color 0.1s, background 0.1s, border-color 0.1s; border: 1px solid ${C.border}; background: transparent; color: ${C.text}; }
+        .ct-tab[data-active="true"] { border-color: ${C.greenDim}; background: ${C.greenFaint}; color: ${C.green}; }
         .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
         .icon-btn { transition: all 0.12s; }
         .icon-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; }
@@ -1010,9 +1015,7 @@ export default function Analytics() {
                           fontFamily: FONT,
                           fontSize: 10,
                           padding: "2px 6px",
-                          border: `1px solid ${aprView === v ? C.greenDim : C.border}`,
-                          background: aprView === v ? C.greenFaint : "transparent",
-                          color: aprView === v ? C.green : C.text,
+                          // active styling via .ct-tab[data-active="true"] CSS
                           cursor: "pointer",
                           letterSpacing: "0.1em",
                           textTransform: "uppercase",
@@ -1501,9 +1504,7 @@ export default function Analytics() {
                           fontFamily: FONT,
                           fontSize: 11,
                           padding: "4px 10px",
-                          border: `1px solid ${chainPeriod === k ? C.greenDim : C.border}`,
-                          background: chainPeriod === k ? C.greenFaint : "transparent",
-                          color: chainPeriod === k ? C.green : C.text,
+                          // active styling via .ct-tab[data-active="true"] CSS
                           cursor: "pointer",
                           letterSpacing: "0.12em",
                           textTransform: "uppercase",

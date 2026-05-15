@@ -197,6 +197,60 @@ function cacheSet(posId: string, entry: CachedEntry): void {
 
 // ── Fetch one position's activity and compute P&L ───────────────────────────
 
+// Error reasons that indicate a transport failure (vs. legitimate "no data"
+// like `no_deposits`). These should retry on flaky RPCs and eventually
+// surface to the UI so the user knows the fetch failed rather than the
+// position just having no on-chain history.
+const ERROR_REASONS = new Set([
+  "timeout", "fetch error", "no activity URL",
+]);
+function isTransportError(reason: string): boolean {
+  return ERROR_REASONS.has(reason) || reason.startsWith("HTTP ");
+}
+
+// Retry policy: 1 initial attempt + up to 2 retries (per user spec).
+// Backoff: 1s, 2s. Per-attempt timeouts: 30s, 30s, 45s — last attempt
+// gets the most patience to handle slow archival RPCs (Tenderly chain).
+const ATTEMPT_TIMEOUTS_MS = [30_000, 30_000, 45_000];
+const ATTEMPT_BACKOFF_MS  = [0,      1_000,  2_000];
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function fetchEventsAttempt(
+  url: string, tag: string, timeoutMs: number,
+): Promise<
+  | { ok: true; events: Array<Record<string, unknown>> }
+  | { ok: false; reason: string; cacheable: boolean }
+> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`${tag} HTTP ${res.status} ${body.slice(0, 300)}`);
+      return { ok: false, reason: `HTTP ${res.status}`, cacheable: false };
+    }
+    const json: { events?: Array<Record<string, unknown>>; error?: string } = await res.json();
+    if (json.error) {
+      console.error(`${tag} route error: ${json.error}`);
+      return { ok: false, reason: json.error, cacheable: false };
+    }
+    if (!json.events || json.events.length === 0) {
+      // Definitive empty result — cache so we don't re-hit the route.
+      console.warn(`${tag} 0 events — no on-chain history found`);
+      return { ok: false, reason: "no events", cacheable: true };
+    }
+    return { ok: true, events: json.events };
+  } catch (err) {
+    clearTimeout(timer);
+    const isAbort = err instanceof Error && err.name === "AbortError";
+    console.error(`${tag} fetch ${isAbort ? "timed out" : "threw"}:`, err);
+    return { ok: false, reason: isAbort ? "timeout" : "fetch error", cacheable: false };
+  }
+}
+
 async function fetchAndCompute(
   pos: AerodromePosition,
 ): Promise<{ ok: true; data: PositionPnLData } | { ok: false; reason: string }> {
@@ -219,41 +273,37 @@ async function fetchAndCompute(
     rawEvents = cached.events;
     console.log(`${tag} cache hit — ${rawEvents.length} events`);
   } else {
-    let json: { events?: Array<Record<string, unknown>>; error?: string };
-    // Activity routes can chain through multiple RPC providers (Tenderly →
-    // LlamaRPC → publicnode). If they all slow-fail, the fetch can hang
-    // indefinitely. Cap at 30s per position so the LP P&L section never
-    // gets stuck on one slow position — the error surfaces in `errored`
-    // and the rest of the portfolio still aggregates correctly.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(timer);
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        console.error(`${tag} HTTP ${res.status} ${body.slice(0, 300)}`);
-        return { ok: false, reason: `HTTP ${res.status}` };
+    // Retry loop: per-position transient failures (timeout / fetch error /
+    // HTTP 5xx) get up to 2 retries with backoff before being surfaced as
+    // `errored`. Definitive failures (HTTP 4xx, route error, empty events)
+    // skip retries — retrying won't change the answer.
+    let lastFailure: { reason: string } = { reason: "no attempts" };
+    for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS_MS.length; attempt++) {
+      if (attempt > 0) {
+        console.log(`${tag} retry ${attempt + 1}/${ATTEMPT_TIMEOUTS_MS.length} after ${ATTEMPT_BACKOFF_MS[attempt]}ms`);
+        await sleep(ATTEMPT_BACKOFF_MS[attempt]);
       }
-      json = await res.json();
-    } catch (err) {
-      clearTimeout(timer);
-      const isAbort = err instanceof Error && err.name === "AbortError";
-      console.error(`${tag} fetch ${isAbort ? "timed out" : "threw"}:`, err);
-      return { ok: false, reason: isAbort ? "timeout" : "fetch error" };
+      const result = await fetchEventsAttempt(url, tag, ATTEMPT_TIMEOUTS_MS[attempt]);
+      if (result.ok) {
+        rawEvents = result.events;
+        cacheSet(pos.id, { ts: Date.now(), events: rawEvents });
+        break;
+      }
+      lastFailure = { reason: result.reason };
+      // Cache definitive empty results so we don't re-fetch.
+      if (result.cacheable) {
+        cacheSet(pos.id, { ts: Date.now(), events: null, reason: result.reason });
+        return { ok: false, reason: result.reason };
+      }
+      // Stop retrying if this isn't a transport error (HTTP 4xx etc.).
+      if (!isTransportError(result.reason)) {
+        return { ok: false, reason: result.reason };
+      }
     }
-
-    if (json.error) {
-      console.error(`${tag} route error: ${json.error}`);
-      return { ok: false, reason: json.error };
+    if (rawEvents === null) {
+      console.error(`${tag} all ${ATTEMPT_TIMEOUTS_MS.length} attempts failed — last reason: ${lastFailure.reason}`);
+      return { ok: false, reason: lastFailure.reason };
     }
-    if (!json.events || json.events.length === 0) {
-      console.warn(`${tag} 0 events — no on-chain history found`);
-      cacheSet(pos.id, { ts: Date.now(), events: null, reason: "no events" });
-      return { ok: false, reason: "no events" };
-    }
-    rawEvents = json.events;
-    cacheSet(pos.id, { ts: Date.now(), events: rawEvents });
   }
 
   const events: ActivityEventForPnL[] = rawEvents.map((e) => ({
@@ -297,15 +347,8 @@ type PosResult =
   | { ok: true; data: PositionPnLData }
   | { ok: false; reason: string };
 
-// Error reasons that indicate a transport failure (vs. legitimate "no data"
-// like `no_deposits`). These should surface to the UI so the user knows the
-// fetch failed rather than the position just having no on-chain history.
-const ERROR_REASONS = new Set([
-  "timeout", "fetch error", "no activity URL",
-]);
-function isTransportError(reason: string): boolean {
-  return ERROR_REASONS.has(reason) || reason.startsWith("HTTP ");
-}
+// `isTransportError` and `ERROR_REASONS` are defined above (next to
+// fetchEventsAttempt) so the retry loop can use them too.
 
 function aggregate(resultsMap: Map<string, PosResult>, inflight: number): LpPnlResult {
   let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
