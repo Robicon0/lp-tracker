@@ -1,11 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
+import { type CSSProperties } from "react";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
-import type { WalletName } from "@solana/wallet-adapter-base";
-import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { setDisconnected } from "../lib/walletDisconnectFlag";
 import { truncateAddr } from "../lib/truncateAddr";
@@ -74,57 +71,15 @@ export default function DashboardSidebar({
   watchedWallets,
   onAddWallet,
 }: Props) {
-  // ── Solana wallet connect — mirrors app/Navbar.tsx exactly ──
-  // Adapter used ONLY for mechanics (select / connect / disconnect / wallet list).
-  // Never read `connected` or `publicKey` for display — a locked Phantom wallet
-  // keeps those truthy via Wallet Standard silent reconnect. Source of truth for
-  // display is `solAddr` (from WalletAuthContext, passed in as a prop).
-  const {
-    wallet: currentSolanaWallet,
-    select: solanaSelect,
-    connect: connectSolana,
-    disconnect: disconnectSolana,
-    connected: adapterSolanaConnected,
-    publicKey: adapterPublicKey,
-    wallets: solanaWallets,
-  } = useWallet();
+  // ── Solana disconnect mechanics ──
+  // The sidebar deliberately does NOT host a Solana connect picker — wallet
+  // connection for every chain is owned by the homepage hero
+  // (HeroWalletConnect). The sidebar only shows already-connected wallets and
+  // the "+ Add Wallet" entry for watched addresses. Clicking the connected
+  // SOL row disconnects (matching the existing chip-as-disconnect-target
+  // pattern); useWallet() is destructured for that single mechanic.
+  const { disconnect: disconnectSolana } = useWallet();
   const { setSolanaAddress } = useWalletAuth();
-  const [showSolanaModal, setShowSolanaModal] = useState(false);
-  const awaitingSolanaConnect = useRef(false);
-
-  useEffect(() => {
-    if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
-      setSolanaAddress(adapterPublicKey.toBase58());
-      awaitingSolanaConnect.current = false;
-    }
-  }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
-
-  const handleSolanaConnect = async (walletName: string) => {
-    setShowSolanaModal(false);
-    try {
-      // Fast path: adapter already connected to this wallet (autoConnect / silent reconnect).
-      // connectSolana() would throw "Wallet already connected" and the useEffect above
-      // wouldn't fire (deps unchanged). Set directly.
-      if (
-        adapterSolanaConnected &&
-        adapterPublicKey &&
-        currentSolanaWallet?.adapter.name === walletName
-      ) {
-        setSolanaAddress(adapterPublicKey.toBase58());
-        return;
-      }
-      solanaSelect(walletName as WalletName);
-      awaitingSolanaConnect.current = true;
-      await connectSolana();
-    } catch (err) {
-      if (adapterSolanaConnected && adapterPublicKey) {
-        setSolanaAddress(adapterPublicKey.toBase58());
-      } else {
-        console.error("Solana connect error:", err);
-      }
-      awaitingSolanaConnect.current = false;
-    }
-  };
 
   const handleSolanaDisconnect = () => {
     setDisconnected("solana");
@@ -132,16 +87,6 @@ export default function DashboardSidebar({
     if (typeof window !== "undefined") localStorage.removeItem("defidesh-solana-addr");
     disconnectSolana();
   };
-
-  // Curated allow-list — only show Phantom, Backpack, Solflare in the Solana
-  // picker. Wallet Standard surfaces non-Solana wallets like MetaMask Snap that
-  // would otherwise pollute the list. Keep this list in sync with
-  // SOLANA_ALLOWED_NAMES in app/components/HeroWalletConnect.tsx.
-  const installedSolanaWallets = solanaWallets.filter((w) => {
-    if (w.readyState !== WalletReadyState.Installed) return false;
-    const lower = w.adapter.name.toLowerCase();
-    return ["phantom", "backpack", "solflare"].some((n) => lower.includes(n));
-  });
 
   const lpProtocolPresence = (keys: string[]) =>
     positions.some((p) => p.value > 0 && keys.some((k) => p.protocol.includes(k)));
@@ -317,8 +262,10 @@ export default function DashboardSidebar({
         {evmAddr && (
           <WalletItem color={walletColor("EVM")} chain={`EVM · ${truncateAddr(evmAddr)}`} />
         )}
-        {solAddr ? (
-          // Connected: clicking the row disconnects (matches Navbar.tsx pattern)
+        {/* Connected SOL row — clicking disconnects. When NOT connected the
+            sidebar shows nothing for Solana; users connect via the homepage
+            hero, never via a sidebar "Connect Solana" button. */}
+        {solAddr && (
           <button
             type="button"
             onClick={handleSolanaDisconnect}
@@ -341,29 +288,6 @@ export default function DashboardSidebar({
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               SOL · {truncateAddr(solAddr)}
             </span>
-          </button>
-        ) : (
-          // Not connected: shows Connect Solana button → opens wallet picker
-          <button
-            type="button"
-            onClick={() => setShowSolanaModal(true)}
-            style={{
-              ...itemBase,
-              cursor: "pointer",
-              color: C.purple,
-              opacity: 0.85,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(153,69,255,0.06)";
-              e.currentTarget.style.opacity = "1";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.opacity = "0.85";
-            }}
-          >
-            <span style={{ ...iconStyle, color: C.purple, opacity: 1 }}>◆</span>
-            Connect Solana
           </button>
         )}
         {suiAddr && (
@@ -398,109 +322,6 @@ export default function DashboardSidebar({
           Add Wallet
         </button>
       </div>
-
-      {/* Solana wallet picker — rendered into document.body via createPortal
-          so it escapes the <aside>'s sticky/overflow context. Without the
-          portal, the modal is clipped by any ancestor that creates a CSS
-          containing block, leaving [X] and the wallet buttons unclickable.
-          zIndex 100000 sits above TerminalNavbar (10000) and the
-          FloatingFeedback launcher (99998). */}
-      {showSolanaModal && typeof document !== "undefined" && createPortal(
-        <div
-          onClick={() => setShowSolanaModal(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            zIndex: 100000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: FONT,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: 360,
-              maxWidth: "90vw",
-              background: C.bg,
-              border: `1px solid ${C.purple}`,
-              boxShadow: "0 0 40px rgba(153,69,255,0.18)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "12px 16px",
-                borderBottom: `1px solid ${C.purple}`,
-              }}
-            >
-              <span style={{ color: C.purple, fontSize: 14, letterSpacing: "0.12em", fontWeight: 700 }}>
-                CONNECT_SOLANA_WALLET
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowSolanaModal(false)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: C.purple,
-                  fontSize: 14,
-                  letterSpacing: "0.2em",
-                  cursor: "pointer",
-                  fontFamily: FONT,
-                }}
-              >
-                [X]
-              </button>
-            </div>
-            <div style={{ padding: 16 }}>
-              {installedSolanaWallets.length === 0 ? (
-                <p style={{ fontSize: 15, color: C.text, lineHeight: 1.5 }}>
-                  No Solana wallet detected. Install Phantom, Backpack, or Solflare.
-                </p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {installedSolanaWallets.map((w) => (
-                    <button
-                      type="button"
-                      key={w.adapter.name}
-                      onClick={() => handleSolanaConnect(w.adapter.name)}
-                      style={{
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "10px 14px",
-                        background: "transparent",
-                        border: `1px solid ${C.borderHi}`,
-                        color: C.textMid,
-                        fontFamily: FONT,
-                        fontSize: 15,
-                        letterSpacing: "0.04em",
-                        cursor: "pointer",
-                        transition: "all 0.12s",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = C.purple;
-                        e.currentTarget.style.background = "rgba(153,69,255,0.06)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = C.borderHi;
-                        e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      ▸ {w.adapter.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
     </aside>
   );
 }
