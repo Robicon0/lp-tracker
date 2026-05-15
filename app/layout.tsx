@@ -24,10 +24,34 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata = {
   title: "DefiDesh",
   description: "Track your DeFi liquidity positions across multiple chains — Ethereum, Solana, Sui, and more.",
+  // All icon / OG image assets are served from /public — never link to
+  // external URLs. Update the files in /public to change branding; the
+  // paths below stay stable.
+  icons: {
+    icon: "/Logo.png",
+    shortcut: "/Logo.png",
+    apple: "/apple-touch-icon.png",
+  },
   openGraph: {
     title: "DefiDesh",
-    siteName: "DefiDesh",
     description: "Track your DeFi liquidity positions across multiple chains.",
+    url: "https://defidesh.com",
+    siteName: "DefiDesh",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "DefiDesh — DeFi Position Tracker",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "DefiDesh",
+    description: "Track your DeFi liquidity positions across multiple chains.",
+    images: ["/og-image.png"],
   },
 };
 
