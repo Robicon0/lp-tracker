@@ -24,14 +24,12 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata = {
   title: "DefiDesh",
   description: "Track your DeFi liquidity positions across multiple chains — Ethereum, Solana, Sui, and more.",
-  // All icon / OG image assets are served from /public — never link to
-  // external URLs. Update the files in /public to change branding; the
-  // paths below stay stable.
-  icons: {
-    icon: "/Logo.png",
-    shortcut: "/Logo.png",
-    apple: "/apple-touch-icon.png",
-  },
+  // Browser tab + iOS home-screen icons are auto-discovered by Next.js from
+  // the file-system convention: `app/favicon.ico`, `app/icon.png`, and
+  // `public/apple-touch-icon.png` (which iOS finds at the standard
+  // `/apple-touch-icon.png` path). NO `metadata.icons` block here — adding
+  // one creates duplicate / conflicting <link> tags. To rebrand: replace
+  // the source PNGs in `app/` (favicon.ico, icon.png) and `public/`.
   openGraph: {
     title: "DefiDesh",
     description: "Track your DeFi liquidity positions across multiple chains.",
