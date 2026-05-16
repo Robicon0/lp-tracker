@@ -89,6 +89,33 @@ function userFriendlyReason(reason: string, protocol: string): string {
 // initial by definition, and we have no claimed-fees history). IL is
 // non-computable without entry prices, so it's reported as 0 with
 // ilAvailable: false.
+// Sum fee_claim / reward_claim events' claim-time USD. Used by the HyperEVM
+// fallback so a position with successfully-fetched fee events still
+// contributes its claimed fees to the totals even when computePositionPnL
+// rejects the events for lacking deposit history.
+//
+// RULE (site-wide): feesCollected always uses CLAIM-TIME USD price — never
+// current price. Activity routes populate `usdAtTime` from on-chain V3
+// historical sqrtPrice at each claim's block. If `usdAtTime` is null we fall
+// back to amount × per-token price at claim time (also historical) before
+// finally defaulting to 0 — never to current price.
+function sumFeeClaimUsd(events: ActivityEventForPnL[]): number {
+  let sum = 0;
+  for (const e of events) {
+    if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
+    if (e.usdAtTime != null && Number.isFinite(e.usdAtTime) && e.usdAtTime > 0) {
+      sum += e.usdAtTime;
+      continue;
+    }
+    // Secondary: claim-time per-token prices (still historical, not current).
+    const v0 = (e.amount0 ?? 0) * (e.price0AtTime ?? 0);
+    const v1 = (e.amount1 ?? 0) * (e.price1AtTime ?? 0);
+    const v = v0 + v1;
+    if (Number.isFinite(v) && v > 0) sum += v;
+  }
+  return sum;
+}
+
 function buildFallbackPnL(pos: AerodromePosition): PositionPnLData {
   const value = pos.value;
   const unclaimed = pos.fees;
@@ -432,6 +459,22 @@ async function fetchAndCompute(
   });
 
   if (!result.ok) {
+    // HyperEVM fallback for compute failures (no_deposits /
+    // missing_deposit_prices). The activity route may have returned events
+    // that include fee_claim records but no deposit records — pull the
+    // claimed fees out of those events so they still land in the totals,
+    // and build a synthetic PnL using current value as the deposit estimate.
+    if (isHyperEvm && pos.value > 0) {
+      const feesFromEvents = sumFeeClaimUsd(events);
+      const fallback = buildFallbackPnL(pos);
+      fallback.feesCollected = feesFromEvents;
+      fallback.netPnlUSD = feesFromEvents + pos.fees;
+      fallback.netPnlPct = pos.value > 0 ? ((feesFromEvents + pos.fees) / pos.value) * 100 : 0;
+      console.log(
+        `${tag} HyperEVM fallback (compute failed: ${result.reason}) — using current value $${pos.value.toFixed(2)} as deposit estimate, fees from events: $${feesFromEvents.toFixed(2)}`,
+      );
+      return { ok: true, data: fallback, fallback: true };
+    }
     console.warn(`${tag} excluded: ${result.reason}`);
     return { ok: false, reason: result.reason };
   }

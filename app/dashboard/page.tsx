@@ -616,7 +616,11 @@ export default function Dashboard() {
            data-active is set on first render, so [data-active="true"]
            matches immediately. */
         .ct-tab { transition: all 0.1s; border: 1px solid ${C.border}; background: transparent; color: ${C.text}; }
-        .ct-tab[data-active="true"] { border-color: ${C.greenDim}; background: rgba(0,255,65,0.06); color: ${C.green}; }
+        /* Active toggle = SOLID green fill, black text. NOT faint-tinted —
+           inline ternaries setting greenFaint were the previous bug; making
+           the active rule fully opaque eliminates any "border only / no fill"
+           ambiguity on first paint. */
+        .ct-tab[data-active="true"] { border-color: ${C.green}; background: ${C.green}; color: #000000; }
         .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
         .manage-btn:hover { border-color: ${C.cyanDim} !important; color: ${C.cyan} !important; background: ${C.cyanFaint} !important; }
         .pane-link:hover { color: ${C.green}; }

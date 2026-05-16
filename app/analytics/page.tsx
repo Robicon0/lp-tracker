@@ -890,7 +890,8 @@ export default function Analytics() {
            toggle is highlighted on first paint without any React render
            dependency. */
         .ct-tab { transition: color 0.1s, background 0.1s, border-color 0.1s; border: 1px solid ${C.border}; background: transparent; color: ${C.text}; }
-        .ct-tab[data-active="true"] { border-color: ${C.greenDim}; background: ${C.greenFaint}; color: ${C.green}; }
+        /* Active toggle = SOLID green fill, black text (matches dashboard). */
+        .ct-tab[data-active="true"] { border-color: ${C.green}; background: ${C.green}; color: #000000; }
         .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
         .icon-btn { transition: all 0.12s; }
         .icon-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; }
@@ -1290,7 +1291,26 @@ export default function Analytics() {
                     counter increments and the red banner below explains
                     which positions couldn't load (per-position N/A semantics
                     — the totals reflect only positions that succeeded). */}
-                {([
+                {(() => {
+                  // FEES COLLECTED is the LIFETIME number from the Fee Income
+                  // pipeline (same eventsMap + walletLevelFees the SECTION 2
+                  // chart aggregates from). `useLpPnl.feesCollected` only
+                  // reflects open-position fees; `feeIncome.totalAllTime`
+                  // captures fees from closed positions and Bluefin's
+                  // wallet-level scan too. Single source of truth here so the
+                  // LP P&L card's "Fees Collected" matches the chart above
+                  // exactly. Net P&L is recomputed against lifetime fees so
+                  // the two numbers stay consistent.
+                  //
+                  // RULE: feesCollected uses CLAIM-TIME USD price (from the
+                  // activity route's usdAtTime). feesUnclaimed uses CURRENT
+                  // price (computed from pos.fees, which IS current-mark).
+                  const lifetimeFeesCollected = feeIncome.totalAllTime;
+                  const adjustedNetPnl =
+                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
+                  const adjustedNetPnlPct =
+                    lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
+                  return ([
                   {
                     label: "Total Deposited",
                     // "~" marker when ANY position contributing to the totals is
@@ -1305,7 +1325,12 @@ export default function Analytics() {
                       : undefined,
                   },
                   { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "mark-to-market" },
-                  { label: "Fees Collected",  val: `+${fmt$(lpPnl.feesCollected)}`, color: C.green, sub: "claimed lifetime" },
+                  {
+                    label: "Fees Collected",
+                    val: `+${fmt$(lifetimeFeesCollected)}`,
+                    color: C.green,
+                    sub: "claimed lifetime (at claim-time price)",
+                  },
                   { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "pending on-chain" },
                   {
                     label: "Imperm. Loss",
@@ -1317,11 +1342,12 @@ export default function Analytics() {
                   },
                   {
                     label: "Net P&L",
-                    val: fmt$Signed(lpPnl.netPnl),
-                    color: lpPnl.netPnl >= 0 ? C.cyan : C.red,
-                    sub: `${lpPnl.netPnlPct >= 0 ? "+" : ""}${lpPnl.netPnlPct.toFixed(2)}%`,
+                    val: fmt$Signed(adjustedNetPnl),
+                    color: adjustedNetPnl >= 0 ? C.cyan : C.red,
+                    sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
                   },
-                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string }>).map((c, i, arr) => (
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string }>);
+                })().map((c, i, arr) => (
                   <div
                     key={c.label}
                     style={{
