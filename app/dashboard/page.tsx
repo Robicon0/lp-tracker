@@ -1399,7 +1399,11 @@ export default function Dashboard() {
                           // border / background / color now come from .ct-tab
                           // CSS rules (see <style> at top of component) so the
                           // default-active button is highlighted on first paint.
-                          borderRight: i < arr.length - 1 ? "none" : undefined,
+                          // When active, defer borderRight to the CSS rule so
+                          // the green box fully encloses on all 4 sides. When
+                          // not active and not the last button, keep the
+                          // connected-tab style by suppressing right border.
+                          borderRight: !active && i < arr.length - 1 ? "none" : undefined,
                           cursor: "pointer",
                         }}
                       >

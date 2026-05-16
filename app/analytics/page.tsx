@@ -435,9 +435,10 @@ function RangePill({
         padding: "5px 12px",
         // border / background / color come from .ct-tab CSS — see <style>
         // block in the page render — so the default pill is highlighted
-        // on first paint.
+        // on first paint. When active, defer borderRight to CSS so the
+        // green box fully encloses on all 4 sides.
         cursor: "pointer",
-        borderRight: "none",
+        borderRight: active ? undefined : "none",
       }}
     >
       {k}
@@ -1020,7 +1021,8 @@ export default function Analytics() {
                           cursor: "pointer",
                           letterSpacing: "0.1em",
                           textTransform: "uppercase",
-                          borderRight: "none",
+                          // Active = defer to CSS so green border fully encloses.
+                          borderRight: aprView === v ? undefined : "none",
                         }}
                       >
                         {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
@@ -1599,7 +1601,8 @@ export default function Analytics() {
                           cursor: "pointer",
                           letterSpacing: "0.12em",
                           textTransform: "uppercase",
-                          borderRight: "none",
+                          // Active = defer to CSS so green border fully encloses.
+                          borderRight: chainPeriod === k ? undefined : "none",
                         }}
                       >
                         {k}
