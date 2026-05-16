@@ -607,21 +607,10 @@ export default function Dashboard() {
         .nav-tab-link:hover { color: ${C.textMid} !important; background: ${C.bg2} !important; }
         .filter-pill { transition: all 0.12s; }
         .filter-pill:hover { color: ${C.textMid}; border-color: ${C.border}; }
-        /* Active toggle styling lives in CSS (not inline) so it's applied
-           the moment the DOM is parsed, NOT after React state computes the
-           inline ternaries. With the previous inline-only approach the
-           default-selected button (e.g. "30D" on first load) sometimes
-           briefly rendered un-highlighted before the inline styles took
-           effect, requiring a click+click-back to "wake up" the highlight.
-           data-active is set on first render, so [data-active="true"]
-           matches immediately. */
-        .ct-tab { transition: all 0.1s; border: 1px solid ${C.border}; background: transparent; color: ${C.text}; }
-        /* Active toggle = SOLID green fill, black text. NOT faint-tinted —
-           inline ternaries setting greenFaint were the previous bug; making
-           the active rule fully opaque eliminates any "border only / no fill"
-           ambiguity on first paint. */
-        .ct-tab[data-active="true"] { border-color: ${C.green}; background: ${C.green}; color: #000000; }
-        .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
+        /* Toggle button styling is now 100% inline (see TIME_RANGES button
+           below). No .ct-tab CSS rules — eliminates the inline-vs-CSS
+           specificity conflicts that caused the active state to render
+           with gaps in the green border. */
         .manage-btn:hover { border-color: ${C.cyanDim} !important; color: ${C.cyan} !important; background: ${C.cyanFaint} !important; }
         .pane-link:hover { color: ${C.green}; }
         .lending-card:hover { border-color: ${C.green} !important; }
@@ -1382,29 +1371,27 @@ export default function Dashboard() {
                   yield_history
                 </div>
                 <div style={{ display: "flex" }}>
-                  {TIME_RANGES.map((r, i, arr) => {
+                  {TIME_RANGES.map((r) => {
                     const active = chartTab === r.key;
                     return (
                       <button
                         key={r.key}
                         onClick={() => setChartTab(r.key)}
-                        data-active={active}
-                        className="ct-tab"
                         style={{
                           padding: "4px 12px",
                           fontFamily: FONT,
                           fontSize: 11,
                           letterSpacing: "0.12em",
                           textTransform: "uppercase",
-                          // border / background / color now come from .ct-tab
-                          // CSS rules (see <style> at top of component) so the
-                          // default-active button is highlighted on first paint.
-                          // When active, defer borderRight to the CSS rule so
-                          // the green box fully encloses on all 4 sides. When
-                          // not active and not the last button, keep the
-                          // connected-tab style by suppressing right border.
-                          borderRight: !active && i < arr.length - 1 ? "none" : undefined,
                           cursor: "pointer",
+                          // Inline-only active state — never CSS classes.
+                          // Active = full green box on all 4 sides; inactive =
+                          // no border. Setting border (shorthand) covers all
+                          // 4 sides so no gap is possible.
+                          border: active ? "1px solid #00ff41" : "none",
+                          background: "transparent",
+                          color: active ? "#00ff41" : C.text,
+                          marginRight: 6,
                         }}
                       >
                         {r.key}

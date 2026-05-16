@@ -424,8 +424,6 @@ function RangePill({
   return (
     <button
       type="button"
-      className="ct-tab"
-      data-active={active ? "true" : "false"}
       onClick={onClick}
       style={{
         fontFamily: FONT,
@@ -433,12 +431,12 @@ function RangePill({
         letterSpacing: "0.12em",
         textTransform: "uppercase",
         padding: "5px 12px",
-        // border / background / color come from .ct-tab CSS — see <style>
-        // block in the page render — so the default pill is highlighted
-        // on first paint. When active, defer borderRight to CSS so the
-        // green box fully encloses on all 4 sides.
         cursor: "pointer",
-        borderRight: active ? undefined : "none",
+        // Inline-only active state — never CSS classes. `border` shorthand
+        // covers all 4 sides so no gap is possible.
+        border: active ? "1px solid #00ff41" : "none",
+        background: "transparent",
+        color: active ? "#00ff41" : C.text,
       }}
     >
       {k}
@@ -886,14 +884,10 @@ export default function Analytics() {
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
         .a-row:hover td { background: rgba(255,255,255,0.012); }
-        /* See dashboard/page.tsx for the rationale — active styling is
-           driven by CSS via [data-active="true"] so the default-selected
-           toggle is highlighted on first paint without any React render
-           dependency. */
-        .ct-tab { transition: color 0.1s, background 0.1s, border-color 0.1s; border: 1px solid ${C.border}; background: transparent; color: ${C.text}; }
-        /* Active toggle = SOLID green fill, black text (matches dashboard). */
-        .ct-tab[data-active="true"] { border-color: ${C.green}; background: ${C.green}; color: #000000; }
-        .ct-tab:hover:not([data-active="true"]) { color: ${C.textMid}; background: ${C.bg2}; }
+        /* Toggle styling is now 100% inline on every button (RangePill,
+           aprView D/W/M/Y, incomePeriod D/M/Y, chainPeriod 1D/7D/30D). No
+           .ct-tab CSS rules — eliminates the inline-vs-CSS specificity
+           conflicts that caused the active state to render with gaps. */
         .icon-btn { transition: all 0.12s; }
         .icon-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; }
         .sort-th { transition: color 0.1s; }
@@ -1006,28 +1000,31 @@ export default function Analytics() {
                     Actual APR
                   </span>
                   <div style={{ display: "flex" }}>
-                    {(["daily", "weekly", "monthly", "yearly"] as const).map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() => setAprView(v)}
-                        className="ct-tab"
-                        data-active={aprView === v ? "true" : "false"}
-                        style={{
-                          fontFamily: FONT,
-                          fontSize: 10,
-                          padding: "2px 6px",
-                          // active styling via .ct-tab[data-active="true"] CSS
-                          cursor: "pointer",
-                          letterSpacing: "0.1em",
-                          textTransform: "uppercase",
-                          // Active = defer to CSS so green border fully encloses.
-                          borderRight: aprView === v ? undefined : "none",
-                        }}
-                      >
-                        {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
-                      </button>
-                    ))}
+                    {(["daily", "weekly", "monthly", "yearly"] as const).map((v) => {
+                      const active = aprView === v;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => setAprView(v)}
+                          style={{
+                            fontFamily: FONT,
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            cursor: "pointer",
+                            letterSpacing: "0.1em",
+                            textTransform: "uppercase",
+                            // Inline-only active state — border shorthand
+                            // covers all 4 sides so no gap is possible.
+                            border: active ? "1px solid #00ff41" : "none",
+                            background: "transparent",
+                            color: active ? "#00ff41" : C.text,
+                          }}
+                        >
+                          {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 {(() => {
@@ -1482,29 +1479,31 @@ export default function Analytics() {
                     Income by Source · {incomePeriod === "D" ? "Today" : incomePeriod === "M" ? "Month" : "Year"}
                   </div>
                   <div style={{ display: "flex" }}>
-                    {(["D", "M", "Y"] as const).map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setIncomePeriod(k)}
-                        className="ct-tab"
-                        data-active={incomePeriod === k ? "true" : "false"}
-                        style={{
-                          fontFamily: FONT,
-                          fontSize: 11,
-                          padding: "4px 10px",
-                          border: `1px solid ${incomePeriod === k ? C.greenDim : C.border}`,
-                          background: incomePeriod === k ? C.greenFaint : "transparent",
-                          color: incomePeriod === k ? C.green : C.text,
-                          cursor: "pointer",
-                          letterSpacing: "0.12em",
-                          textTransform: "uppercase",
-                          borderRight: "none",
-                        }}
-                      >
-                        {k}
-                      </button>
-                    ))}
+                    {(["D", "M", "Y"] as const).map((k) => {
+                      const active = incomePeriod === k;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setIncomePeriod(k)}
+                          style={{
+                            fontFamily: FONT,
+                            fontSize: 11,
+                            padding: "4px 10px",
+                            cursor: "pointer",
+                            letterSpacing: "0.12em",
+                            textTransform: "uppercase",
+                            // Inline-only active state — border shorthand
+                            // covers all 4 sides so no gap is possible.
+                            border: active ? "1px solid #00ff41" : "none",
+                            background: "transparent",
+                            color: active ? "#00ff41" : C.text,
+                          }}
+                        >
+                          {k}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1586,28 +1585,31 @@ export default function Analytics() {
                     Income by Chain
                   </div>
                   <div style={{ display: "flex" }}>
-                    {(["1D", "7D", "30D"] as const).map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setChainPeriod(k)}
-                        className="ct-tab"
-                        data-active={chainPeriod === k ? "true" : "false"}
-                        style={{
-                          fontFamily: FONT,
-                          fontSize: 11,
-                          padding: "4px 10px",
-                          // active styling via .ct-tab[data-active="true"] CSS
-                          cursor: "pointer",
-                          letterSpacing: "0.12em",
-                          textTransform: "uppercase",
-                          // Active = defer to CSS so green border fully encloses.
-                          borderRight: chainPeriod === k ? undefined : "none",
-                        }}
-                      >
-                        {k}
-                      </button>
-                    ))}
+                    {(["1D", "7D", "30D"] as const).map((k) => {
+                      const active = chainPeriod === k;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setChainPeriod(k)}
+                          style={{
+                            fontFamily: FONT,
+                            fontSize: 11,
+                            padding: "4px 10px",
+                            cursor: "pointer",
+                            letterSpacing: "0.12em",
+                            textTransform: "uppercase",
+                            // Inline-only active state — border shorthand
+                            // covers all 4 sides so no gap is possible.
+                            border: active ? "1px solid #00ff41" : "none",
+                            background: "transparent",
+                            color: active ? "#00ff41" : C.text,
+                          }}
+                        >
+                          {k}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
