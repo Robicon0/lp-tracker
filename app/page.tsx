@@ -52,8 +52,8 @@ const PROTOCOL_DEFS: {
     name: "Momentum",
     type: "LP",
     chain: "Sui",
-    slugs: ["mmt-finance", "momentum-finance"],
-    dexSlugs: ["mmt-finance", "momentum-finance"],
+    slugs: ["momentum"],
+    dexSlugs: ["momentum"],
   },
   {
     name: "AAVE V3",
@@ -328,41 +328,60 @@ export default async function Home() {
           <span className="flex-1 h-px bg-[#1f1f1f]" />
           <span className="text-[#888] tracking-[0.1em] text-[12px]">src: defillama</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-px bg-[#1f1f1f] border border-[#1f1f1f]">
-          {PROTOCOL_DEFS.map((p) => {
-            const s = stats.get(p.name) ?? { tvl: null, volume24h: null };
-            const isDex = p.dexSlugs.length > 0;
-            return (
-              <div
-                key={p.name}
-                className="bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5"
-              >
-                <div className="text-[12px] text-[#00ff41] tracking-[0.1em]">[{p.type.toUpperCase()}]</div>
-                <div>
-                  <div className="text-[16px] font-bold text-[#e8e8e8]">{p.name}</div>
-                  <div className="text-[12px] text-[#888] uppercase tracking-[0.1em] mt-0.5">
-                    {p.chain}
+        {/* Continuous left-scrolling ticker — same duplicate-list pattern as
+            PriceTickerStrip. Single-copy width (8 cards × 240px + 7px gaps =
+            1927px) exceeds typical viewports so translateX(-50%) wraps
+            seamlessly with no visible empty space. */}
+        <style
+          dangerouslySetInnerHTML={{
+            __html:
+              "@keyframes defidesh-protocols { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }",
+          }}
+        />
+        <div className="overflow-hidden border border-[#1f1f1f] bg-[#1f1f1f]">
+          <div
+            className="flex gap-px"
+            style={{
+              width: "max-content",
+              animation: "defidesh-protocols 45s linear infinite",
+            }}
+          >
+            {[...PROTOCOL_DEFS, ...PROTOCOL_DEFS].map((p, i) => {
+              const s = stats.get(p.name) ?? { tvl: null, volume24h: null };
+              const isDex = p.dexSlugs.length > 0;
+              return (
+                <div
+                  key={`${p.name}-${i}`}
+                  className="bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5 flex-shrink-0"
+                  style={{ width: 240 }}
+                >
+                  <div className="text-[12px] text-[#00ff41] tracking-[0.1em]">[{p.type.toUpperCase()}]</div>
+                  <div>
+                    <div className="text-[16px] font-bold text-[#e8e8e8]">{p.name}</div>
+                    <div className="text-[12px] text-[#888] uppercase tracking-[0.1em] mt-0.5">
+                      {p.chain}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    <div className="flex justify-between items-baseline text-[12px]">
+                      <span className="text-[#888] tracking-[0.06em]">TVL</span>
+                      <span className="text-[#00ff41] font-bold tabular-nums">
+                        {fmtBig(s.tvl)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-baseline text-[12px]">
+                      <span className="text-[#888] tracking-[0.06em]">VOL 24H</span>
+                      <span
+                        className={`font-bold tabular-nums ${isDex ? "text-[#00ff41]" : "text-[#888]"}`}
+                      >
+                        {isDex ? fmtBig(s.volume24h) : "n/a"}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-col gap-1.5 mt-1">
-                  <div className="flex justify-between items-baseline text-[12px]">
-                    <span className="text-[#888] tracking-[0.06em]">TVL</span>
-                    <span className="text-[#00ff41] font-bold tabular-nums">
-                      {fmtBig(s.tvl)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-baseline text-[12px]">
-                    <span className="text-[#888] tracking-[0.06em]">VOL 24H</span>
-                    <span
-                      className={`font-bold tabular-nums ${isDex ? "text-[#00ff41]" : "text-[#888]"}`}
-                    >
-                      {isDex ? fmtBig(s.volume24h) : "n/a"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </section>
 
