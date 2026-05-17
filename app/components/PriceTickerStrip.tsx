@@ -53,6 +53,7 @@ function formatChange(chg: number): string {
 
 export default function PriceTickerStrip() {
   const [prices, setPrices] = useState<PriceMap>({});
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,14 +102,21 @@ export default function PriceTickerStrip() {
     ];
   });
 
-  const doubled = [...items, ...items];
+  // TRIPLED list (not doubled) animated to translateX(-33.333%) so the wrap
+  // point always lands inside the rendered content even on ultrawide viewports
+  // (up to ~2 × single-copy width). Per-item marginRight (NOT flex gap) is
+  // mathematically required for perfect seamless wrap: with `gap` the doubled
+  // sibling separator is half-gap offset from the loop point (1/3 × 40px ≈
+  // 13px visible jump at K=3); marginRight on every item INCLUDING the last
+  // of copy 3 produces zero misalignment.
+  const tripled = [...items, ...items, ...items];
 
   return (
     <>
       <style
         dangerouslySetInnerHTML={{
           __html:
-            "@keyframes defidesh-ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }",
+            "@keyframes defidesh-ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-33.3333%); } }",
         }}
       />
       <div className="border-b border-[#1f1f1f] px-4 sm:px-12 flex items-stretch h-12 overflow-hidden">
@@ -131,16 +139,26 @@ export default function PriceTickerStrip() {
           </span>
         </div>
         {/* pl-8 lives on the outer container, NOT the animated div, so the
-            inner doubled list is perfectly symmetric. With the padding on the
-            inner div, translateX(-50%) lands on "32px-then-item" instead of
-            "item-immediately", producing a visible snap each loop. */}
-        <div className="flex-1 overflow-hidden flex items-center pl-8">
+            inner tripled list is perfectly symmetric. */}
+        <div
+          className="flex-1 overflow-hidden flex items-center pl-8"
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
+        >
           <div
-            className="flex gap-10 whitespace-nowrap"
-            style={{ animation: "defidesh-ticker 50s linear infinite" }}
+            className="flex whitespace-nowrap"
+            style={{
+              width: "max-content",
+              animation: "defidesh-ticker 50s linear infinite",
+              animationPlayState: paused ? "paused" : "running",
+            }}
           >
-            {doubled.map((t, i) => (
-              <div key={i} className="text-[14px] flex gap-2 items-center">
+            {tripled.map((t, i) => (
+              <div
+                key={i}
+                className="text-[14px] flex gap-2 items-center"
+                style={{ marginRight: 40 }}
+              >
                 <span className="text-[#888]">{t.sym}</span>
                 <span className="text-[#e8e8e8] tabular-nums">${t.price}</span>
                 {t.chg !== null && (
