@@ -120,19 +120,19 @@ export default function PriceTickerStrip() {
         }}
       />
       <div className="border-b border-[#1f1f1f] px-4 sm:px-12 flex items-stretch h-12 overflow-hidden">
-        <div className="flex items-center gap-2.5 pr-6 sm:pr-8 border-r border-[#1f1f1f] whitespace-nowrap">
+        <div className="pts-static flex items-center gap-2.5 pr-6 sm:pr-8 border-r border-[#1f1f1f] whitespace-nowrap">
           <span className="text-[#00ff41] font-bold text-[16px] tabular-nums">
             {PROTOCOL_COUNT}
           </span>
           <span className="text-[#888] uppercase tracking-[0.12em] text-[14px]">Protocols</span>
         </div>
-        <div className="flex items-center gap-2.5 px-6 sm:px-8 border-r border-[#1f1f1f] whitespace-nowrap">
+        <div className="pts-static flex items-center gap-2.5 px-6 sm:px-8 border-r border-[#1f1f1f] whitespace-nowrap">
           <span className="text-[#00ff41] font-bold text-[16px] tabular-nums">
             {CHAIN_COUNT}
           </span>
           <span className="text-[#888] uppercase tracking-[0.12em] text-[14px]">Chains</span>
         </div>
-        <div className="flex items-center gap-2 px-8 border-r border-[#1f1f1f] whitespace-nowrap">
+        <div className="pts-static flex items-center gap-2 px-8 border-r border-[#1f1f1f] whitespace-nowrap">
           <span className="inline-block w-[5px] h-[5px] bg-[#00ff41] animate-pulse" />
           <span className="text-[#00e5ff] uppercase tracking-[0.12em] text-[14px]">
             LIVE Prices
@@ -141,7 +141,7 @@ export default function PriceTickerStrip() {
         {/* pl-8 lives on the outer container, NOT the animated div, so the
             inner tripled list is perfectly symmetric. */}
         <div
-          className="flex-1 overflow-hidden flex items-center pl-8"
+          className="pts-scroll flex-1 overflow-hidden flex items-center pl-8"
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
         >

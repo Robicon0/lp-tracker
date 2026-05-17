@@ -103,4 +103,29 @@ button[aria-label="Share feedback"] {
   .ddp-cashflow > .ddp-cashflow-cell:nth-child(2) {
     border-right: none !important;
   }
+
+  /* FIX (price ticker) — Hide the static "7 PROTOCOLS · 3 CHAINS ·
+     LIVE PRICES" left section on phones so the scrolling prices use
+     the full bar width. Also drop the desktop-only pl-8 inner padding
+     so prices start flush against the bar's existing px-4 padding. */
+  .pts-static { display: none !important; }
+  .pts-scroll { padding-left: 0 !important; }
+
+  /* FIX (supported protocols) — Swap the auto-scroll animation for
+     native horizontal touch scroll on phones. First card sits flush
+     against the left edge (no mid-animation partial-card "ghost"),
+     user swipes through the rest. Duplicate cards from the
+     desktop tripled-for-seamless-loop layout are hidden so the user
+     doesn't see each protocol three times while swiping. */
+  .protocol-scroll-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .protocol-scroll-inner {
+    animation: none !important;
+    transform: none !important;
+  }
+  .protocol-scroll-card[data-copy="duplicate"] {
+    display: none !important;
+  }
 }

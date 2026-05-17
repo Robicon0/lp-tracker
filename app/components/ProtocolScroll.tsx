@@ -44,12 +44,12 @@ export default function ProtocolScroll({
         }}
       />
       <div
-        className="overflow-hidden border border-[#1f1f1f] bg-[#1f1f1f]"
+        className="protocol-scroll-container overflow-hidden border border-[#1f1f1f] bg-[#1f1f1f]"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
       >
         <div
-          className="flex gap-px"
+          className="protocol-scroll-inner flex gap-px"
           style={{
             width: "max-content",
             animation: "defidesh-protocols 45s linear infinite",
@@ -59,7 +59,8 @@ export default function ProtocolScroll({
           {tripled.map((p, i) => (
             <div
               key={`${p.name}-${i}`}
-              className="bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5 flex-shrink-0"
+              data-copy={i < protocols.length ? "original" : "duplicate"}
+              className="protocol-scroll-card bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5 flex-shrink-0"
               style={{ width: 240 }}
             >
               <div className="text-[12px] text-[#00ff41] tracking-[0.1em]">
