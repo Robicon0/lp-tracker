@@ -1,5 +1,6 @@
 import Providers from "./providers";
 import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/react";
 import FloatingFeedback from "./components/FloatingFeedback";
 import FeedbackTab from "./components/FeedbackTab";
 import WalletRestoreEffect from "./components/WalletRestoreEffect";
@@ -75,6 +76,10 @@ export default function RootLayout({
           <FloatingFeedback />
           <FeedbackTab />
         </Providers>
+        {/* Vercel Analytics — pageview tracking. Outside <Providers> because
+            it doesn't need wagmi / Solana / Sui context. Renders nothing
+            visible; only injects the tracking script via /_vercel/insights. */}
+        <Analytics />
       </body>
     </html>
   );
