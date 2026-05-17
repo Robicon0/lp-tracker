@@ -426,11 +426,13 @@ export default async function Home() {
           <Link href="/about" className="hover:text-[#e8e8e8] transition-colors">
             Docs
           </Link>
-          <a href="#" className="hover:text-[#e8e8e8] transition-colors">
-            Twitter
-          </a>
-          <a href="#" className="hover:text-[#e8e8e8] transition-colors">
-            Discord
+          <a
+            href="https://x.com/defidesh"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-[#e8e8e8] transition-colors"
+          >
+            𝕏 @defidesh
           </a>
         </div>
         <div>© 2026 DefiDesh. Not financial advice.</div>
