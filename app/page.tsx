@@ -49,6 +49,13 @@ const PROTOCOL_DEFS: {
     dexSlugs: ["bluefin-spot"],
   },
   {
+    name: "Momentum",
+    type: "LP",
+    chain: "Sui",
+    slugs: ["mmt-finance", "momentum-finance"],
+    dexSlugs: ["mmt-finance", "momentum-finance"],
+  },
+  {
     name: "AAVE V3",
     type: "Lending",
     chain: "EVM",

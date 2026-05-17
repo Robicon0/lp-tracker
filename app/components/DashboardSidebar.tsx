@@ -46,6 +46,7 @@ const PROTOCOL_LIST: { name: string; matchKeys: string[]; type: "lp" | "lending"
   { name: "Orca",       matchKeys: ["Orca"],      type: "lp" },
   { name: "Cetus",      matchKeys: ["Cetus"],     type: "lp" },
   { name: "Bluefin",    matchKeys: ["Bluefin"],   type: "lp" },
+  { name: "Momentum",   matchKeys: ["Momentum"],  type: "lp" },
 ];
 
 interface Props {

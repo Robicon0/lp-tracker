@@ -57,6 +57,7 @@ const PROTOCOL_LIST = [
   "Raydium",
   "Cetus",
   "Bluefin",
+  "Momentum",
   "AAVE V3",
   "Suilend",
   "Kamino",
