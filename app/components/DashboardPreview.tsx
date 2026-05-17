@@ -181,46 +181,46 @@ export default function DashboardPreview() {
       >
         {/* Top metrics */}
         <div className="grid grid-cols-3 border-b border-[#1f1f1f]">
-          <div className="p-5 border-r border-[#1f1f1f]">
-            <div className="text-[11px] text-[#888] tracking-[0.15em] uppercase mb-2">Total Value</div>
-            <div className="text-[32px] font-bold text-[#e8e8e8] tracking-[-0.02em] tabular-nums">
+          <div className="ddp-top-stat-cell p-5 border-r border-[#1f1f1f]">
+            <div className="ddp-top-stat-label text-[11px] text-[#888] tracking-[0.15em] uppercase mb-2">Total Value</div>
+            <div className="ddp-top-stat-value text-[32px] font-bold text-[#e8e8e8] tracking-[-0.02em] tabular-nums">
               <AnimatedCounter target={133180} prefix="$" decimals={0} />
             </div>
-            <div className="text-[12px] text-[#00ff41] mt-1">▲ +$2,574 (24h)</div>
+            <div className="ddp-top-stat-delta text-[12px] text-[#00ff41] mt-1">▲ +$2,574 (24h)</div>
           </div>
-          <div className="p-5 border-r border-[#1f1f1f]">
-            <div className="text-[11px] text-[#888] tracking-[0.15em] uppercase mb-2">Avg APY</div>
-            <div className="text-[32px] font-bold text-[#00ff41] tracking-[-0.02em] tabular-nums">
+          <div className="ddp-top-stat-cell p-5 border-r border-[#1f1f1f]">
+            <div className="ddp-top-stat-label text-[11px] text-[#888] tracking-[0.15em] uppercase mb-2">Avg APY</div>
+            <div className="ddp-top-stat-value text-[32px] font-bold text-[#00ff41] tracking-[-0.02em] tabular-nums">
               <LiveFlicker base={16.4} variance={0.8} suffix="%" decimals={1} />
             </div>
-            <div className="text-[12px] text-[#00ff41] mt-1">▲ +0.3% (7d)</div>
+            <div className="ddp-top-stat-delta text-[12px] text-[#00ff41] mt-1">▲ +0.3% (7d)</div>
           </div>
-          <div className="p-5">
-            <div className="text-[11px] text-[#888] tracking-[0.15em] uppercase mb-2">Positions</div>
-            <div className="text-[32px] font-bold text-[#00e5ff] tracking-[-0.02em]">5</div>
-            <div className="text-[12px] text-[#888] mt-1">across 3 chains</div>
+          <div className="ddp-top-stat-cell p-5">
+            <div className="ddp-top-stat-label text-[11px] text-[#888] tracking-[0.15em] uppercase mb-2">Positions</div>
+            <div className="ddp-top-stat-value text-[32px] font-bold text-[#00e5ff] tracking-[-0.02em]">5</div>
+            <div className="ddp-top-stat-delta text-[12px] text-[#888] mt-1">across 3 chains</div>
           </div>
         </div>
 
         {/* Body: positions + alloc */}
         <div
-          className="grid border-b border-[#1f1f1f]"
+          className="ddp-body grid border-b border-[#1f1f1f]"
           style={{ gridTemplateColumns: "1fr 160px", flex: 1 }}
         >
-          <div className="border-r border-[#1f1f1f]">
+          <div className="ddp-positions border-r border-[#1f1f1f]">
             <div
-              className="grid gap-2 py-3 px-4 border-b border-[#1f1f1f] text-[11px] text-[#888] tracking-[0.15em] uppercase"
+              className="ddp-pos-header grid gap-2 py-3 px-4 border-b border-[#1f1f1f] text-[11px] text-[#888] tracking-[0.15em] uppercase"
               style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr" }}
             >
               <span>Position</span>
               <span className="text-right">Value</span>
               <span className="text-right">APY</span>
-              <span className="text-right">P&amp;L</span>
+              <span className="ddp-pos-pnl text-right">P&amp;L</span>
             </div>
             {POSITIONS.map((p, i) => (
               <div
                 key={i}
-                className={`grid gap-2 py-2.5 px-4 text-[14px] items-center hover:bg-white/[0.015] transition-colors ${i < POSITIONS.length - 1 ? "border-b border-[#1f1f1f]" : ""}`}
+                className={`ddp-pos-row grid gap-2 py-2.5 px-4 text-[14px] items-center hover:bg-white/[0.015] transition-colors ${i < POSITIONS.length - 1 ? "border-b border-[#1f1f1f]" : ""}`}
                 style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr" }}
               >
                 <div>
@@ -230,7 +230,7 @@ export default function DashboardPreview() {
                 <div className="text-right text-[#c8c8c8] tabular-nums">{p.val}</div>
                 <div className="text-right text-[#00ff41] tabular-nums">{p.apy}</div>
                 <div
-                  className={`text-right tabular-nums ${p.up ? "text-[#00ff41]" : "text-[#ff3366]"}`}
+                  className={`ddp-pos-pnl text-right tabular-nums ${p.up ? "text-[#00ff41]" : "text-[#ff3366]"}`}
                 >
                   {p.pnl}
                 </div>
@@ -244,20 +244,20 @@ export default function DashboardPreview() {
         </div>
 
         {/* Cashflow */}
-        <div className="grid grid-cols-4 border-b border-[#1f1f1f]">
-          <div className="p-3.5 border-r border-[#1f1f1f]">
+        <div className="ddp-cashflow grid grid-cols-4 border-b border-[#1f1f1f]">
+          <div className="ddp-cashflow-cell p-3.5 border-r border-[#1f1f1f]">
             <div className="text-[11px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Daily Yield</div>
             <div className="text-[17px] font-semibold text-[#00ff41] tabular-nums">+$59.84</div>
           </div>
-          <div className="p-3.5 border-r border-[#1f1f1f]">
+          <div className="ddp-cashflow-cell p-3.5 border-r border-[#1f1f1f]">
             <div className="text-[11px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Weekly</div>
             <div className="text-[17px] font-semibold text-[#00ff41] tabular-nums">+$418.91</div>
           </div>
-          <div className="p-3.5 border-r border-[#1f1f1f]">
+          <div className="ddp-cashflow-cell p-3.5 border-r border-[#1f1f1f]">
             <div className="text-[11px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Monthly</div>
             <div className="text-[17px] font-semibold text-[#00e5ff] tabular-nums">+$1,820</div>
           </div>
-          <div className="p-3.5">
+          <div className="ddp-cashflow-cell p-3.5">
             <div className="text-[11px] text-[#888] tracking-[0.12em] uppercase mb-1.5">Unrealized</div>
             <div className="text-[17px] font-semibold text-[#c8c8c8] tabular-nums">+$2,486</div>
           </div>

@@ -174,6 +174,7 @@ export default function HeroWalletConnect() {
           {"// connect wallet"}
         </div>
         <div
+          className="hwc-chips"
           style={{
             display: "flex",
             flexDirection: "row",

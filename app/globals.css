@@ -36,3 +36,71 @@ body {
 button[aria-label="Share feedback"] {
   display: none !important;
 }
+
+/* ─── MOBILE STYLES (max-width: 768px) ───────────────────────────────────────
+   Purely additive overrides for phone-sized viewports. Every rule here is
+   wrapped in the @media block so desktop rendering is byte-for-byte
+   unchanged. Selectors are stable hooks added to the components — do not
+   remove the corresponding class names. */
+@media (max-width: 768px) {
+  /* Belt-and-braces: any rogue child that escapes its container should not
+     trigger a full-page horizontal scrollbar on phones. */
+  html, body { overflow-x: hidden; }
+
+  /* FIX 8 — Hide the rotated FeedbackTab on phones (overlaps content and
+     can't be reached with one thumb anyway). The desktop button stays
+     visible. */
+  button[aria-label="Open feedback"] { display: none !important; }
+
+  /* FIX 2 — HeroWalletConnect chip strip becomes a 2-column grid with the
+     3rd chip (SUI) spanning full-width on its own row. Overrides the
+     inline flex-wrap layout for phones only. */
+  .hwc-chips {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100%;
+  }
+  .hwc-chips > button {
+    display: flex !important;
+    width: 100% !important;
+    min-height: 40px;
+    justify-content: center;
+  }
+  .hwc-chips > button:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  /* FIX 3 — DashboardPreview top stat cells: shrink the 32px headline so
+     three numbers fit without overlapping at iPhone-SE width (375px). */
+  .ddp-top-stat-cell  { padding: 12px 10px !important; }
+  .ddp-top-stat-label { font-size: 9px !important; letter-spacing: 0.1em !important; }
+  .ddp-top-stat-value { font-size: 18px !important; }
+  .ddp-top-stat-delta { font-size: 10px !important; }
+
+  /* FIX 1b — DashboardPreview body grid (positions | 160px alloc) stacks
+     to a single column on mobile so the donut sits below the table. */
+  .ddp-body { grid-template-columns: 1fr !important; }
+  .ddp-positions {
+    border-right: none !important;
+    border-bottom: 1px solid #1f1f1f;
+  }
+
+  /* FIX 4 — Hide the P&L column from the positions table on mobile;
+     remaining 3 columns get the full row width. */
+  .ddp-pos-header,
+  .ddp-pos-row { grid-template-columns: 1.8fr 1fr 0.8fr !important; }
+  .ddp-pos-pnl { display: none !important; }
+
+  /* FIX 5 — Cashflow row collapses from 4 columns to a 2x2 grid. The
+     middle-of-row-1 divider (Weekly's border-right) is suppressed and
+     row 1 picks up a bottom divider. */
+  .ddp-cashflow { grid-template-columns: 1fr 1fr !important; }
+  .ddp-cashflow > .ddp-cashflow-cell:nth-child(1),
+  .ddp-cashflow > .ddp-cashflow-cell:nth-child(2) {
+    border-bottom: 1px solid #1f1f1f;
+  }
+  .ddp-cashflow > .ddp-cashflow-cell:nth-child(2) {
+    border-right: none !important;
+  }
+}
