@@ -191,7 +191,26 @@ export default function TerminalNavbar() {
       <div style={{ flex: 1 }} />
 
       {/* LIVE status */}
-      <div style={{ display: "flex", alignItems: "stretch" }}>
+      <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
+        {/* Read-only / non-custodial security badge — purely informational,
+            mirrors the visual style of the LIVE pill. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            margin: "10px 0",
+            padding: "4px 10px",
+            border: "0.5px solid #00ff4133",
+            background: "#00ff4108",
+            borderRadius: 3,
+            fontSize: 9,
+            color: "#00ff41",
+            letterSpacing: "0.08em",
+            whiteSpace: "nowrap",
+          }}
+        >
+          🔒 READ-ONLY · NON-CUSTODIAL
+        </div>
         <div
           style={{
             display: "flex",
@@ -199,7 +218,7 @@ export default function TerminalNavbar() {
             gap: 8,
             border: `1px solid ${C.greenDim}`,
             background: C.greenFaint,
-            margin: "10px 16px",
+            margin: "10px 16px 10px 0",
             padding: "0 14px",
           }}
         >

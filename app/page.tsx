@@ -221,12 +221,31 @@ export default async function Home() {
             About
           </Link>
         </div>
-        <div className="flex items-center gap-2 px-3 py-[5px] border border-[#00cc33] bg-[rgba(0,255,65,0.12)]">
-          <span className="inline-block w-1.5 h-1.5 bg-[#00ff41] animate-pulse" />
-          <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
-            All systems nominal
-          </span>
-          <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
+        <div className="flex items-center gap-2">
+          {/* Read-only / non-custodial security badge — sibling of the LIVE
+              pill, hidden on the smallest screens to avoid wrap. */}
+          <div
+            className="hidden md:flex items-center"
+            style={{
+              padding: "4px 10px",
+              border: "0.5px solid #00ff4133",
+              background: "#00ff4108",
+              borderRadius: 3,
+              fontSize: 9,
+              color: "#00ff41",
+              letterSpacing: "0.08em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🔒 READ-ONLY · NON-CUSTODIAL
+          </div>
+          <div className="flex items-center gap-2 px-3 py-[5px] border border-[#00cc33] bg-[rgba(0,255,65,0.12)]">
+            <span className="inline-block w-1.5 h-1.5 bg-[#00ff41] animate-pulse" />
+            <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
+              All systems nominal
+            </span>
+            <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
+          </div>
         </div>
       </nav>
 

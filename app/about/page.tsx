@@ -255,6 +255,65 @@ export default function About() {
           </div>
         </div>
 
+        {/* ── SECURITY · TRUST & TRANSPARENCY ──────────────────────────── */}
+        <div style={{ ...cardStyle, animationDelay: "0.3s" }}>
+          <div aria-hidden style={cardTopAccent} />
+          <div style={{
+            fontSize: 12, color: "#3a3a3a", letterSpacing: "0.1em",
+            textTransform: "uppercase", marginBottom: 14,
+          }}>
+            // SECURITY · TRUST &amp; TRANSPARENCY
+          </div>
+          <h2 style={{
+            fontSize: 26, fontWeight: 700, color: C.textWhite,
+            letterSpacing: "-0.01em", lineHeight: 1.15, marginBottom: 8,
+          }}>
+            Your funds are always safe.
+          </h2>
+          <p style={{
+            fontSize: 14, color: "#555", marginBottom: 22, maxWidth: 620,
+          }}>
+            DefiDesh is a read-only portfolio tracker. We never have access to your funds.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+            {[
+              {
+                title: "🔒 Read-Only Access",
+                desc: "We only read publicly available blockchain data. We never ask for your private keys, seed phrases, or passwords.",
+              },
+              {
+                title: "⛓ Non-Custodial",
+                desc: "DefiDesh never holds, moves, or has custody of your funds. Your wallet remains 100% in your control at all times.",
+              },
+              {
+                title: "🚫 No Transaction Approvals",
+                desc: "We will never ask you to sign a transaction, approve a contract, or grant any permissions that could move your funds.",
+              },
+              {
+                title: "👁 Public Data Only",
+                desc: "All data displayed is fetched directly from public blockchains. You can verify everything we show on-chain yourself.",
+              },
+            ].map((card) => (
+              <div
+                key={card.title}
+                style={{
+                  background: "#0a0a0a",
+                  border: "0.5px solid #1a1a1a",
+                  borderRadius: 4,
+                  padding: 14,
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#00ff41", marginBottom: 6 }}>
+                  {card.title}
+                </div>
+                <div style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>
+                  {card.desc}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Footer line */}
         <div style={{
           textAlign: "center",

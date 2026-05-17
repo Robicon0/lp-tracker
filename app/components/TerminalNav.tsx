@@ -54,6 +54,22 @@ export default function TerminalNav({
         })}
       </div>
       <div className="flex-1" />
+      {/* Read-only / non-custodial security badge */}
+      <div
+        className="flex items-center my-[10px]"
+        style={{
+          padding: "4px 10px",
+          border: "0.5px solid #00ff4133",
+          background: "#00ff4108",
+          borderRadius: 3,
+          fontSize: 9,
+          color: "#00ff41",
+          letterSpacing: "0.08em",
+          whiteSpace: "nowrap",
+        }}
+      >
+        🔒 READ-ONLY · NON-CUSTODIAL
+      </div>
       <div
         className="flex items-center gap-2 my-[10px] mx-4 px-[14px] border border-[#00992a]"
         style={{ background: "rgba(0,255,65,0.06)" }}
