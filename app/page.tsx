@@ -229,29 +229,43 @@ export default async function Home() {
           </Link>
         </div>
         <div className="flex items-center gap-2">
-          {/* Read-only / non-custodial security badge — sibling of the LIVE
-              pill, hidden on the smallest screens to avoid wrap. */}
+          {/* Matched pair: READ-ONLY badge + LIVE pill share identical
+              container styling (padding, border, bg, font, letter-spacing,
+              radius). Only difference is text content + the pulsing dot on
+              ALL SYSTEMS NOMINAL. */}
           <div
             className="hidden md:flex items-center"
             style={{
-              padding: "4px 10px",
-              border: "0.5px solid #00ff4133",
+              padding: "5px 12px",
+              border: "0.5px solid #00ff41",
               background: "#00ff4108",
               borderRadius: 3,
-              fontSize: 9,
+              fontSize: 13,
               color: "#00ff41",
-              letterSpacing: "0.08em",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
               whiteSpace: "nowrap",
             }}
           >
-            🔒 READ-ONLY · NON-CUSTODIAL
+            ■ READ-ONLY · NON-CUSTODIAL
           </div>
-          <div className="flex items-center gap-2 px-3 py-[5px] border border-[#00cc33] bg-[rgba(0,255,65,0.12)]">
+          <div
+            className="flex items-center gap-2"
+            style={{
+              padding: "5px 12px",
+              border: "0.5px solid #00ff41",
+              background: "#00ff4108",
+              borderRadius: 3,
+              fontSize: 13,
+              color: "#00ff41",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              whiteSpace: "nowrap",
+            }}
+          >
             <span className="inline-block w-1.5 h-1.5 bg-[#00ff41] animate-pulse" />
-            <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] hidden sm:inline">
-              All systems nominal
-            </span>
-            <span className="text-[13px] text-[#00ff41] uppercase tracking-[0.1em] sm:hidden">LIVE</span>
+            <span className="hidden sm:inline">All systems nominal</span>
+            <span className="sm:hidden">LIVE</span>
           </div>
         </div>
       </nav>

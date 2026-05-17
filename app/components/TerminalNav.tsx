@@ -54,36 +54,44 @@ export default function TerminalNav({
         })}
       </div>
       <div className="flex-1" />
-      {/* Read-only / non-custodial security badge */}
+      {/* Matched pair: READ-ONLY badge and LIVE pill share identical
+          container styling. Only difference is text + the pulsing dot on
+          ALL SYSTEMS NOMINAL. */}
       <div
-        className="flex items-center my-[10px]"
+        className="flex items-center my-[10px] mr-2"
         style={{
-          padding: "4px 10px",
-          border: "0.5px solid #00ff4133",
+          padding: "5px 12px",
+          border: "0.5px solid #00ff41",
           background: "#00ff4108",
           borderRadius: 3,
-          fontSize: 9,
+          fontSize: 13,
           color: "#00ff41",
-          letterSpacing: "0.08em",
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
           whiteSpace: "nowrap",
         }}
       >
-        🔒 READ-ONLY · NON-CUSTODIAL
+        ■ READ-ONLY · NON-CUSTODIAL
       </div>
       <div
-        className="flex items-center gap-2 my-[10px] mx-4 px-[14px] border border-[#00992a]"
-        style={{ background: "rgba(0,255,65,0.06)" }}
+        className="flex items-center gap-2 my-[10px] mr-4"
+        style={{
+          padding: "5px 12px",
+          border: "0.5px solid #00ff41",
+          background: "#00ff4108",
+          borderRadius: 3,
+          fontSize: 13,
+          color: "#00ff41",
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
       >
         <span
           className="inline-block w-1.5 h-1.5 bg-[#00ff41]"
           style={{ animation: "tn-pulse 2s infinite" }}
         />
-        <span
-          className="text-[#00ff41]"
-          style={{ fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase" }}
-        >
-          All systems nominal
-        </span>
+        <span>All systems nominal</span>
       </div>
       <style
         dangerouslySetInnerHTML={{

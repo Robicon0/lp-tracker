@@ -190,36 +190,43 @@ export default function TerminalNavbar() {
 
       <div style={{ flex: 1 }} />
 
-      {/* LIVE status */}
+      {/* LIVE status — matched pair: READ-ONLY badge and LIVE pill share
+          identical container styling. Only differences are text content
+          and the pulsing dot on ALL SYSTEMS NOMINAL. */}
       <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
-        {/* Read-only / non-custodial security badge — purely informational,
-            mirrors the visual style of the LIVE pill. */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             margin: "10px 0",
-            padding: "4px 10px",
-            border: "0.5px solid #00ff4133",
+            padding: "5px 12px",
+            border: "0.5px solid #00ff41",
             background: "#00ff4108",
             borderRadius: 3,
-            fontSize: 9,
+            fontSize: 13,
             color: "#00ff41",
-            letterSpacing: "0.08em",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
             whiteSpace: "nowrap",
           }}
         >
-          🔒 READ-ONLY · NON-CUSTODIAL
+          ■ READ-ONLY · NON-CUSTODIAL
         </div>
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
-            border: `1px solid ${C.greenDim}`,
-            background: C.greenFaint,
             margin: "10px 16px 10px 0",
-            padding: "0 14px",
+            padding: "5px 12px",
+            border: "0.5px solid #00ff41",
+            background: "#00ff4108",
+            borderRadius: 3,
+            fontSize: 13,
+            color: "#00ff41",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
           }}
         >
           <span
@@ -232,28 +239,8 @@ export default function TerminalNavbar() {
               display: "inline-block",
             }}
           />
-          <span
-            className="hidden sm:inline"
-            style={{
-              fontSize: 13,
-              color: C.green,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-            }}
-          >
-            All systems nominal
-          </span>
-          <span
-            className="sm:hidden"
-            style={{
-              fontSize: 13,
-              color: C.green,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-            }}
-          >
-            LIVE
-          </span>
+          <span className="hidden sm:inline">All systems nominal</span>
+          <span className="sm:hidden">LIVE</span>
         </div>
       </div>
     </nav>
