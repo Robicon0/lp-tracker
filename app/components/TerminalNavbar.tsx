@@ -134,7 +134,7 @@ export default function TerminalNavbar() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex" }}>
+      <div className="term-nav-tabs" style={{ display: "flex" }}>
         {NAV_LINKS.map((l) => {
           const active = isActive(l.href);
           return (
@@ -195,6 +195,7 @@ export default function TerminalNavbar() {
           and the pulsing dot on ALL SYSTEMS NOMINAL. */}
       <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
         <div
+          className="term-nav-ro-badge"
           style={{
             display: "flex",
             alignItems: "center",

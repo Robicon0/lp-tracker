@@ -164,7 +164,7 @@ export default function About() {
         <div style={{ ...cardStyle, animationDelay: "0.1s" }}>
           <div aria-hidden style={cardTopAccent} />
           <H2>Supported Chains</H2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          <div className="about-chains" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
             {CHAINS.map((ch) => (
               <div
                 key={ch.name}
@@ -234,7 +234,7 @@ export default function About() {
         <div style={{ ...cardStyle, animationDelay: "0.2s" }}>
           <div aria-hidden style={cardTopAccent} />
           <H2>Tech Stack</H2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+          <div className="about-tech" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
             {TECH.map((t) => (
               <div
                 key={t}
@@ -275,7 +275,7 @@ export default function About() {
           }}>
             DefiDesh is a read-only portfolio tracker. We never have access to your funds.
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+          <div className="about-security" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
             {[
               {
                 title: "🔒 Read-Only Access",

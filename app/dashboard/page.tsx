@@ -902,7 +902,7 @@ export default function Dashboard() {
             </div>
 
             {/* 4 stat tiles */}
-            <div style={{ display: "flex", gap: 0 }}>
+            <div className="dash-stat-tiles" style={{ display: "flex", gap: 0 }}>
               {[
                 {
                   label: "Positions",
@@ -1469,12 +1469,12 @@ export default function Dashboard() {
 
           {/* ── ROW 4: bottom metrics strip (4 cells) ───────────────────── */}
           <div
+            className="dash-summary-row anim-fade"
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
               borderBottom: `1px solid ${C.border}`,
             }}
-            className="anim-fade"
           >
             {[
               {

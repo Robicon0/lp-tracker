@@ -134,4 +134,90 @@ button[aria-label="Share feedback"] {
   .protocol-scroll-card[data-copy="duplicate"] {
     display: none !important;
   }
+
+  /* ─── DASHBOARD / ANALYTICS / ABOUT — SHARED PAGE FIXES ────────────────
+     Sidebars (DashboardSidebar, AnalyticsSidebar) are already hidden via
+     the existing Tailwind `hidden md:flex` on their `<aside>` roots —
+     no extra rule needed here, but documenting for future maintainers. */
+
+  /* TerminalNavbar — hide the nav tabs and the READ-ONLY badge on phones.
+     Only the DEFI/DESH logo on the left and the LIVE pill on the right
+     remain. Wallet chips already used `hidden md:flex` so they're gone too. */
+  .term-nav-tabs    { display: none !important; }
+  .term-nav-ro-badge { display: none !important; }
+
+  /* DASHBOARD — 4 stat tiles (Positions / Avg APY / Uncollected Fees /
+     Daily Yield) collapse from a single-row flex layout into a 2×2 grid.
+     The desktop separator borders and asymmetric paddings are reset so
+     the 4 cells sit cleanly inside the new grid. */
+  .dash-stat-tiles {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 18px 24px !important;
+  }
+  .dash-stat-tiles > div {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    border-right: none !important;
+  }
+
+  /* DASHBOARD — ROW 4 bottom summary strip (Daily / Weekly / Monthly /
+     Uncollected). Desktop uses `repeat(auto-fit, minmax(180px, 1fr))`
+     which collapses to a single column at 390px. Force 2×2 instead. */
+  .dash-summary-row {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .dash-summary-row > div:nth-child(2) {
+    border-right: none !important;
+  }
+  .dash-summary-row > div:nth-child(-n+2) {
+    border-bottom: 1px solid #1c1c1c;
+  }
+
+  /* ANALYTICS — top stats strip (Total Portfolio / Daily Income /
+     Unclaimed Fees / Actual APR / Health Score) goes from 5 cols
+     to 2×2 + 1. Right-side dividers on the wrapping cells are
+     suppressed so the grid lines stay clean. */
+  .ana-top-stats {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .ana-top-stats > div:nth-child(2),
+  .ana-top-stats > div:nth-child(4) {
+    border-right: none !important;
+  }
+  .ana-top-stats > div:nth-child(-n+4) {
+    border-bottom: 1px solid #1c1c1c;
+  }
+  .ana-top-stats > div:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+
+  /* ANALYTICS — Fee Income 4 sub-metrics (In Last X / Hourly Rate /
+     Annualized / Lifetime) collapse to 2×2. */
+  .ana-fee-sub {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .ana-fee-sub > div:nth-child(2) {
+    border-right: none !important;
+  }
+  .ana-fee-sub > div:nth-child(-n+2) {
+    border-bottom: 1px solid #1c1c1c;
+  }
+
+  /* ANALYTICS — LP P&L 6 stat cards collapse to 2×3 (2 cols × 3 rows). */
+  .ana-lp-pnl {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* ANALYTICS — Income by Source + Daily Income by Chain stack
+     vertically (1 column instead of 2). */
+  .ana-income-pair {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ABOUT — Supported Chains (3→2), Tech Stack (4→2), Security cards
+     (2→1). */
+  .about-chains   { grid-template-columns: 1fr 1fr !important; }
+  .about-tech     { grid-template-columns: 1fr 1fr !important; }
+  .about-security { grid-template-columns: 1fr !important; }
 }

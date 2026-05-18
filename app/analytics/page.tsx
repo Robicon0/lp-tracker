@@ -939,6 +939,7 @@ export default function Analytics() {
 
             {/* TOP STATS STRIP — 5 cells */}
             <div
+              className="ana-top-stats"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(5, 1fr)",
@@ -1090,6 +1091,7 @@ export default function Analytics() {
             >
               {/* sub-metric strip */}
               <div
+                className="ana-fee-sub"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr 1fr 1fr",
@@ -1277,6 +1279,7 @@ export default function Analytics() {
               }
             >
               <div
+                className="ana-lp-pnl"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(6, 1fr)",
@@ -1470,7 +1473,7 @@ export default function Analytics() {
             </SectionFrame>
 
             {/* ── INCOME BY SOURCE + DAILY INCOME BY CHAIN ──────────────── */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+            <div className="ana-income-pair" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
               {/* Income by Source */}
               <div style={{ border: `1px solid ${C.border}`, background: C.bg1, padding: "22px 26px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
