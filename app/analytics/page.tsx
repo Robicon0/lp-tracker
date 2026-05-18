@@ -895,6 +895,28 @@ export default function Analytics() {
         .analyze-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; background: ${C.cyanFaint}; }
         .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
         .scroll-thin::-webkit-scrollbar-thumb { background: ${C.borderHi}; }
+
+        /* ── Mobile layout (max-width: 768px) ────────────────────────────
+           CSS-only — no logic, no data, no functionality changes. */
+        @media (max-width: 768px) {
+          .ana-lp-pnl { grid-template-columns: 1fr 1fr !important; }
+          .ana-income-pair { grid-template-columns: 1fr !important; }
+          .ana-income-source-inner { flex-direction: column !important; }
+          .ana-chain-mo { display: none !important; }
+          .ana-col-value,
+          .ana-col-daily,
+          .ana-col-fees,
+          .ana-col-status,
+          .ana-col-analyze { display: none !important; }
+          .ana-flow-row { padding: 10px 12px !important; gap: 8px !important; }
+          .ana-flow-time { display: none !important; }
+          #section-exposure { grid-template-columns: 1fr !important; }
+          .ana-rankings-grid { grid-template-columns: 1fr !important; }
+          .ana-rankings-top {
+            border-right: none !important;
+            border-bottom: 1px solid #1c1c1c;
+          }
+        }
       `}</style>
 
       <div
@@ -1511,7 +1533,7 @@ export default function Analytics() {
                 </div>
 
                 {incomeWindow.total > 0 ? (
-                  <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+                  <div className="ana-income-source-inner" style={{ display: "flex", gap: 24, alignItems: "center" }}>
                     <div style={{ width: 150, height: 150, flexShrink: 0, position: "relative" }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
@@ -1654,7 +1676,7 @@ export default function Analytics() {
                                 <span style={{ fontWeight: 700, color: C.textBright, minWidth: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                                   {fmt$(row.period)}
                                 </span>
-                                <span style={{ fontSize: 11, color: C.text, minWidth: 50, textAlign: "right" }}>
+                                <span className="ana-chain-mo" style={{ fontSize: 11, color: C.text, minWidth: 50, textAlign: "right" }}>
                                   {fmt$(row.daily * 30, 0)}/mo
                                 </span>
                               </div>
@@ -1728,7 +1750,7 @@ export default function Analytics() {
                         Chain <SortIcon col="chain" />
                       </th>
                       <th
-                        className="sort-th"
+                        className="sort-th ana-col-value"
                         onClick={() => handleSort("value")}
                         style={{
                           padding: "12px 16px",
@@ -1754,7 +1776,7 @@ export default function Analytics() {
                         APR <SortIcon col="apy" />
                       </th>
                       <th
-                        className="sort-th"
+                        className="sort-th ana-col-daily"
                         onClick={() => handleSort("daily")}
                         style={{
                           padding: "12px 16px",
@@ -1767,7 +1789,7 @@ export default function Analytics() {
                         Daily <SortIcon col="daily" />
                       </th>
                       <th
-                        className="sort-th"
+                        className="sort-th ana-col-fees"
                         onClick={() => handleSort("fees")}
                         style={{
                           padding: "12px 16px",
@@ -1780,6 +1802,7 @@ export default function Analytics() {
                         Fees <SortIcon col="fees" />
                       </th>
                       <th
+                        className="ana-col-status"
                         style={{
                           padding: "12px 16px",
                           fontSize: 11, fontWeight: 400, color: C.text,
@@ -1791,6 +1814,7 @@ export default function Analytics() {
                         Status
                       </th>
                       <th
+                        className="ana-col-analyze"
                         style={{
                           padding: "12px 26px 12px 16px",
                           fontSize: 11, fontWeight: 400, color: C.text,
@@ -1844,7 +1868,7 @@ export default function Analytics() {
                           <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
                             <ChainTag chain={p.chain} />
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                          <td className="ana-col-value" style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                             {fmt$(p.value)}
                           </td>
                           <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: aprColor, fontVariantNumeric: "tabular-nums" }}>
@@ -1853,13 +1877,13 @@ export default function Analytics() {
                               <span style={{ fontSize: 10, color: C.text, marginLeft: 4 }}>est.</span>
                             )}
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                          <td className="ana-col-daily" style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
                             {p.displayDaily > 0 ? fmt$(p.displayDaily) : "--"}
                           </td>
-                          <td style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
+                          <td className="ana-col-fees" style={{ padding: "13px 16px", textAlign: "right", fontSize: 15.5, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
                             {p.fees > 0 ? fmt$(p.fees) : "--"}
                           </td>
-                          <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                          <td className="ana-col-status" style={{ padding: "12px 16px", textAlign: "center" }}>
                             <span
                               style={{
                                 fontSize: 11,
@@ -1885,7 +1909,7 @@ export default function Analytics() {
                               {p.status}
                             </span>
                           </td>
-                          <td style={{ padding: "12px 26px 12px 16px", textAlign: "right" }}>
+                          <td className="ana-col-analyze" style={{ padding: "12px 26px 12px 16px", textAlign: "right" }}>
                             <Link
                               href={`/dashboard/position/${p.id}`}
                               className="analyze-btn"
@@ -1980,7 +2004,7 @@ export default function Analytics() {
                     return (
                       <div
                         key={`${e.dedupeKey}_${i}`}
-                        className="a-row"
+                        className="a-row ana-flow-row"
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -1998,10 +2022,10 @@ export default function Analytics() {
                         <span style={{ flex: 1, color: C.text, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                           Fee Claim
                         </span>
-                        <span style={{ fontWeight: 700, color: C.green, minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                        <span className="ana-flow-amount" style={{ fontWeight: 700, color: C.green, minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                           +{fmt$(e.usd)}
                         </span>
-                        <span style={{ fontSize: 11, color: C.text, minWidth: 64, textAlign: "right", letterSpacing: "0.04em" }}>{timeStr}</span>
+                        <span className="ana-flow-time" style={{ fontSize: 11, color: C.text, minWidth: 64, textAlign: "right", letterSpacing: "0.04em" }}>{timeStr}</span>
                       </div>
                     );
                   })}
@@ -2037,9 +2061,9 @@ export default function Analytics() {
                 title="Performance Rankings"
                 sub={`Ranked by actual APR from claimed fees${activityLoading ? " (loading…)" : ""}`}
               >
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+                <div className="ana-rankings-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
                   {/* Top */}
-                  <div style={{ padding: "22px 26px", borderRight: `1px solid ${C.border}` }}>
+                  <div className="ana-rankings-top" style={{ padding: "22px 26px", borderRight: `1px solid ${C.border}` }}>
                     <div
                       style={{
                         fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase",
