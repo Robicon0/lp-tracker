@@ -104,11 +104,17 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
 
-  /* FIX (price ticker) — Hide the static "7 PROTOCOLS · 3 CHAINS ·
-     LIVE PRICES" left section on phones so the scrolling prices use
-     the full bar width. Also drop the desktop-only pl-8 inner padding
-     so prices start flush against the bar's existing px-4 padding. */
+  /* FIX (price ticker) — Hide only the "7 PROTOCOLS" and "3 CHAINS"
+     count labels on phones; keep the "■ LIVE PRICES" label visible
+     as a left-edge anchor for the scrolling prices that follow it.
+     Tighten its desktop px-8 (32px each side) down to ~12px so the
+     scrolling ticker has more room. Also drop the desktop-only pl-8
+     inner padding so prices start flush against the LIVE label. */
   .pts-static { display: none !important; }
+  .pts-live {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
   .pts-scroll { padding-left: 0 !important; }
 
   /* FIX (supported protocols) — Swap the auto-scroll animation for
