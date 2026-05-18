@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import MobileNavMenu from "./MobileNavMenu";
 
 const NAV_LINKS = [
   { href: "/",          label: "Home"      },
@@ -244,6 +245,11 @@ export default function TerminalNavbar() {
           <span className="sm:hidden">LIVE</span>
         </div>
       </div>
+
+      {/* Mobile-only hamburger + dropdown menu. Shared with TerminalNav
+          and the homepage <nav> so all three nav variants expose the
+          same mobile navigation. */}
+      <MobileNavMenu />
     </nav>
   );
 }

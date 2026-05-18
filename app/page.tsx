@@ -4,6 +4,7 @@ import DashboardPreview from "./components/DashboardPreview";
 import PriceTickerStrip from "./components/PriceTickerStrip";
 import BlinkingCursor from "./components/BlinkingCursor";
 import ProtocolScroll, { type ProtocolScrollItem } from "./components/ProtocolScroll";
+import MobileNavMenu from "./components/MobileNavMenu";
 
 const PROTOCOL_DEFS: {
   name: string;
@@ -270,6 +271,7 @@ export default async function Home() {
             <span className="hidden sm:inline">All systems nominal</span>
             <span className="sm:hidden">LIVE</span>
           </div>
+          <MobileNavMenu />
         </div>
       </nav>
 

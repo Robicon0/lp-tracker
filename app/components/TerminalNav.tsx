@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import MobileNavMenu from "./MobileNavMenu";
 
 const TABS: { label: string; href: string; key: "home" | "dashboard" | "analytics" | "about" }[] = [
   { label: "Home", href: "/", key: "home" },
@@ -28,7 +29,7 @@ export default function TerminalNav({
         <span className="text-[#262626] font-light mx-[2px]">/</span>
         <span className="text-[#e0e0e0] font-extrabold">DESH</span>
       </Link>
-      <div className="flex">
+      <div className="term-nav-tabs flex">
         {TABS.map((t) => {
           const isActive = active === t.key;
           return (
@@ -58,7 +59,7 @@ export default function TerminalNav({
           container styling. Only difference is text + the pulsing dot on
           ALL SYSTEMS NOMINAL. */}
       <div
-        className="flex items-center my-[10px] mr-2"
+        className="term-nav-ro-badge flex items-center my-[10px] mr-2"
         style={{
           padding: "5px 12px",
           border: "0.5px solid #00ff41",
@@ -93,6 +94,7 @@ export default function TerminalNav({
         />
         <span>All systems nominal</span>
       </div>
+      <MobileNavMenu />
       <style
         dangerouslySetInnerHTML={{
           __html: "@keyframes tn-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.25 } }",
