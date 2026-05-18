@@ -226,6 +226,9 @@ export async function GET(request: Request) {
       const value = (amount0 * price0) + (amount1 * price1);
       const feesUsd = (fees0 * price0) + (fees1 * price1);
 
+      // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+      // never filtered out. Status is set to 'Closed' below. Applies to all
+      // current and future protocol integrations on any chain.
       // Determine status: closed if all liquidity removed, otherwise check range
       const totalLiquidity = BigInt(raw.liquidity) + BigInt(raw.staked);
       const isClosed = totalLiquidity === 0n;

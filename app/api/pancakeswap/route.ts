@@ -239,6 +239,9 @@ export async function GET(request: Request) {
         const apyKey = `BSC-${[pos.token0, pos.token1].sort().join('-')}`;
         const apy = apyData[apyKey] || 0;
 
+        // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+        // never filtered out. Status is set to 'Closed' below. Applies to all
+        // current and future protocol integrations on any chain.
         const status =
           pos.liquidity === 0n ? 'Closed'
           : amount0 > 0.0001 && amount1 > 0.0001 ? 'In Range'

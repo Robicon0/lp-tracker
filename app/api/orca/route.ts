@@ -516,6 +516,12 @@ export async function GET(request: Request) {
       }
       const feesUsd = feesA * priceA + feesB * priceB;
 
+      // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+      // never filtered out. Status is set to 'Closed' in the returned object.
+      // Applies to all current and future protocol integrations on any chain.
+      // Solana caveat: when a position is fully closed via the protocol UI,
+      // the position NFT is BURNED and cannot be recovered. Only zero-liquidity
+      // positions whose NFT still exists surface here.
       const tickCurrent = pool?.tickCurrentIndex ?? 0;
       const inRange = pos.liquidity > 0n && tickCurrent >= pos.tickLowerIndex && tickCurrent < pos.tickUpperIndex;
 

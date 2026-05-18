@@ -344,7 +344,9 @@ async function fetchPositionsForChain(
         const apyKey = `${chain.defillamaChain}-${[pos.token0, pos.token1].sort().join('-')}`;
         const apy = apyData[apyKey] || 0;
         
-        // Determine status
+        // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+        // never filtered out. Status is set to 'Closed' below. Applies to all
+        // current and future protocol integrations on any chain.
         const hasToken0 = amount0 > 0.0001;
         const hasToken1 = amount1 > 0.0001;
         const status = pos.liquidity === 0n ? 'Closed' : (hasToken0 && hasToken1) ? 'In Range' : 'Out of Range';

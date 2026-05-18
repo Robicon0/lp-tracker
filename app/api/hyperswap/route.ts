@@ -534,6 +534,9 @@ export async function GET(request: Request) {
       const apy = apyData[apyKey] || apyData[apyKeyRaw] || 0;
       const poolStats = poolStatsData[apyKey] || poolStatsData[apyKeyRaw] || null;
 
+      // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+      // never filtered out. Status is set to 'Closed' below. Applies to all
+      // current and future protocol integrations on any chain.
       // Range status from actual currentTick
       const status = pos.liquidity === 0n
         ? 'Closed'

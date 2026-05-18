@@ -241,7 +241,14 @@ export async function GET(request: Request) {
       }),
     );
 
-    // 4. Build positions (filter ghost zero-liquidity objects)
+    // 4. Build positions.
+    // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+    // never filtered out. Status is set to 'Closed' below. Applies to all
+    // current and future protocol integrations on any chain.
+    // Sui caveat: when a position is fully closed via the protocol UI, the
+    // on-chain Position object is destroyed and suix_getOwnedObjects cannot
+    // return it. Only zero-liquidity positions whose object still exists
+    // surface here.
     const positions = rawPositions.map((pos) => {
       const poolId = pos.pool as string;
       const pool = poolMap[poolId];

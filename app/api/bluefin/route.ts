@@ -331,6 +331,13 @@ export async function GET(request: Request) {
       }),
     );
 
+    // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
+    // never filtered out. Status is set to 'Closed' in the returned object.
+    // Applies to all current and future protocol integrations on any chain.
+    // Sui caveat: when a position is fully closed via the protocol UI, the
+    // on-chain Position object is destroyed and suix_getOwnedObjects cannot
+    // return it. Only zero-liquidity positions whose object still exists
+    // surface here.
     const positions = rawWithNormalized.map((pos) => {
       const poolId = pos.pool_id as string;
       const pool = poolMap[poolId];
