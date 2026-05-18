@@ -356,10 +356,10 @@ function ExposureCard({
                   <span style={{ flex: 1, letterSpacing: "0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.name}
                   </span>
-                  <span style={{ minWidth: 36, textAlign: "right", color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                  <span className="ana-exposure-pct" style={{ minWidth: 36, textAlign: "right", color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                     {pct.toFixed(1)}%
                   </span>
-                  <span style={{ minWidth: 60, textAlign: "right", color: C.text, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                  <span className="ana-exposure-val" style={{ minWidth: 60, textAlign: "right", color: C.text, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
                     {valueFmt(row.value)}
                   </span>
                 </button>
@@ -908,9 +908,30 @@ export default function Analytics() {
           .ana-col-fees,
           .ana-col-status,
           .ana-col-analyze { display: none !important; }
+          /* Position column MUST stay visible. Hidden columns above use
+             display:none; the explicit table-cell here is paranoid but
+             prevents any future blanket hide rule from clipping it. Tighter
+             padding so the icon+pair-name fits on a 390px viewport. */
+          .ana-col-position {
+            display: table-cell !important;
+            padding-left: 12px !important;
+            padding-right: 8px !important;
+          }
           .ana-flow-row { padding: 10px 12px !important; gap: 8px !important; }
           .ana-flow-time { display: none !important; }
+          /* "FEE CLAIM" label was wrapping to 2 lines on phones because the
+             flex:1 cell shrank below the text's natural width (10px font ×
+             0.14em letter-spacing). Force single line — overflow clips
+             cleanly since the row already constrains width. */
+          .ana-flow-label { white-space: nowrap !important; overflow: hidden !important; }
           #section-exposure { grid-template-columns: 1fr !important; }
+          /* ExposureCard legend rows: the percentage and value spans
+             shrink below their min-widths in flex layout, clipping the
+             numbers. Drop both to 11px on phones (the value span is
+             already 11px on desktop; matching the percentage prevents the
+             flex shrink from clipping). */
+          .ana-exposure-pct,
+          .ana-exposure-val { font-size: 11px !important; flex-shrink: 0 !important; }
           .ana-rankings-grid { grid-template-columns: 1fr !important; }
           .ana-rankings-top {
             border-right: none !important;
@@ -1713,6 +1734,7 @@ export default function Analytics() {
                   <thead>
                     <tr style={{ background: C.bg2 }}>
                       <th
+                        className="ana-col-position"
                         style={{
                           padding: "12px 16px 12px 26px",
                           fontSize: 11, fontWeight: 400, color: C.text,
@@ -1831,7 +1853,7 @@ export default function Analytics() {
                       const aprColor = p.displayAPR >= 20 ? C.green : p.displayAPR >= 5 ? C.amber : p.displayAPR > 0 ? C.red : C.text;
                       return (
                         <tr key={p.id} className="a-row" style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <td style={{ padding: "12px 16px 12px 26px", verticalAlign: "middle" }}>
+                          <td className="ana-col-position" style={{ padding: "12px 16px 12px 26px", verticalAlign: "middle" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                               <div
                                 style={{
@@ -2019,7 +2041,7 @@ export default function Analytics() {
                           {e.protocol}
                         </span>
                         <ChainTag chain={e.chain} />
-                        <span style={{ flex: 1, color: C.text, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                        <span className="ana-flow-label" style={{ flex: 1, color: C.text, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                           Fee Claim
                         </span>
                         <span className="ana-flow-amount" style={{ fontWeight: 700, color: C.green, minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
