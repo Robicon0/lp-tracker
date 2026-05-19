@@ -117,23 +117,15 @@ button[aria-label="Share feedback"] {
   }
   .pts-scroll { padding-left: 0 !important; }
 
-  /* FIX (supported protocols) — Swap the auto-scroll animation for
-     native horizontal touch scroll on phones. First card sits flush
-     against the left edge (no mid-animation partial-card "ghost"),
-     user swipes through the rest. Duplicate cards from the
-     desktop tripled-for-seamless-loop layout are hidden so the user
-     doesn't see each protocol three times while swiping. */
-  .protocol-scroll-container {
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  .protocol-scroll-inner {
-    animation: none !important;
-    transform: none !important;
-  }
-  .protocol-scroll-card[data-copy="duplicate"] {
-    display: none !important;
-  }
+  /* FIX (supported protocols) — Mobile parity with desktop: the
+     auto-scroll marquee runs on phones too. The earlier override
+     that swapped this for native overflow-x: auto + hid duplicate
+     cards has been reverted per user request. The triple-list +
+     translateX(0) → translateX(-33.333%) keyframes from
+     ProtocolScroll.tsx + the Tailwind overflow-hidden on its
+     outer container are now uncontested at every viewport size.
+     The partial card visible at the wrap boundary is normal
+     infinite-ticker behaviour — not a "ghost element". */
 
   /* ─── DASHBOARD / ANALYTICS / ABOUT — SHARED PAGE FIXES ────────────────
      Sidebars (DashboardSidebar, AnalyticsSidebar) are already hidden via
