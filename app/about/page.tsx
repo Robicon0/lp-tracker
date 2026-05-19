@@ -185,7 +185,7 @@ export default function About() {
                   width: 6, height: 6, background: ch.color, flexShrink: 0,
                   boxShadow: `0 0 6px ${ch.color}88`,
                 }} />
-                <span>{ch.name}</span>
+                <span className="about-chain-name">{ch.name}</span>
                 {!ch.live && (
                   <span style={{
                     marginLeft: 4,

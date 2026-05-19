@@ -217,7 +217,25 @@ button[aria-label="Share feedback"] {
 
   /* ABOUT — Supported Chains (3→2), Tech Stack (4→2), Security cards
      (2→1). */
-  .about-chains   { grid-template-columns: 1fr 1fr !important; }
+  .about-chains   { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
   .about-tech     { grid-template-columns: 1fr 1fr !important; }
   .about-security { grid-template-columns: 1fr !important; }
+
+  /* Supported Chains cells: enforce a consistent min-height so all
+     cards sit on the same baseline regardless of whether the row has
+     a SOON badge or not. Tighter padding + slightly smaller font so
+     2-word names ("BNB Chain", "HyperEVM") fit on one line at iPhone-
+     SE width (375px → ~155px per cell after section padding + grid
+     gap). Combined with the nowrap on the inner name span this kills
+     the "BNB Chain wraps to 2 lines" bug. */
+  .about-chains > div {
+    min-height: 48px !important;
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+  }
+  .about-chain-name {
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
