@@ -4,7 +4,9 @@ import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePr
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
-// Tenderly public gateways — primary for eth_getLogs: full-history, no block-range limit, fast
+// Tenderly public gateways — primary for eth_getLogs: full-history, no block-range limit, fast.
+// NOTE: no BNB Chain entry — Tenderly has no public BSC gateway. BNB skips
+// straight to publicnode chunked via ROLLING_SCAN_DEPTH below.
 const TENDERLY_RPCS: Record<string, string> = {
   ethereum: 'https://mainnet.gateway.tenderly.co',
   arbitrum: 'https://arbitrum.gateway.tenderly.co',
@@ -18,6 +20,7 @@ const BLAST_RPCS: Record<string, string> = {
   arbitrum: 'https://arb1.llamarpc.com',
   polygon:  'https://polygon.llamarpc.com',
   optimism: 'https://op.llamarpc.com',
+  bnb:      'https://binance.llamarpc.com',
 };
 
 // publicnode — tertiary fallback for chunked scanning
@@ -26,6 +29,7 @@ const PUBLIC_NODE_RPCS: Record<string, string> = {
   arbitrum: 'https://arbitrum-one-rpc.publicnode.com',
   polygon:  'https://polygon-bor-rpc.publicnode.com',
   optimism: 'https://optimism-rpc.publicnode.com',
+  bnb:      'https://bsc-rpc.publicnode.com',
 };
 
 // Alchemy RPCs — used only for eth_getBlockByNumber (timestamp lookups)
@@ -34,10 +38,20 @@ const ALCHEMY_RPCS: Record<string, string> = {
   arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
   polygon:  `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
   optimism: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+  bnb:      `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
 };
 
-// Uniswap V3 NonfungiblePositionManager — same address on all supported chains
-const NFT_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
+// Uniswap V3 NonfungiblePositionManager per chain. Standard 0xC36442… deploys
+// to Ethereum / Arbitrum / Optimism / Polygon, but BNB Chain has a DIFFERENT
+// canonical address (Uniswap deployed to BSC in 2023 via governance with its
+// own CREATE2 salt). Source: @uniswap/v3-sdk constants.ts.
+const NFT_MANAGERS: Record<string, string> = {
+  ethereum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  arbitrum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  polygon:  '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  optimism: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  bnb:      '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+};
 
 // Approximate deployment block per chain (numeric, used for chunked fallback scanning)
 const DEPLOY_BLOCKS: Record<string, number> = {
@@ -45,6 +59,19 @@ const DEPLOY_BLOCKS: Record<string, number> = {
   arbitrum:    165_216,  // Uniswap V3 on Arbitrum launch
   polygon:  22_761_331,  // Uniswap V3 on Polygon launch
   optimism:   3_000_000, // Uniswap V3 on Optimism launch
+  bnb:      26_324_000,  // Uniswap V3 on BNB Chain launch (March 2023, ~block 26.3M)
+};
+
+// BSC free-tier public RPCs (publicnode, Alchemy free, LlamaRPC) all PRUNE
+// archive history aggressively — publicnode keeps only ~50,000 blocks
+// (≈42 hours at 3s block time) and returns "History has been pruned" for
+// anything older. With no free-tier archive path the route falls back to a
+// rolling window for any chain listed here: scan latestBlock-N → latestBlock
+// instead of deploy-block → latestBlock, and gracefully return events:[] when
+// chunks fail. Mirrors the pattern in app/api/pancakeswap/activity/route.ts.
+// A future upgrade to a paid BSC archive RPC (or BSCSCAN_API_KEY) lifts this.
+const ROLLING_SCAN_DEPTH: Record<string, number | undefined> = {
+  bnb: 48_000, // ~40 hours, fits inside publicnode's pruning window
 };
 
 // Chunk sizes: LlamaRPC just under 30k limit; publicnode supports up to 49k
@@ -82,6 +109,11 @@ const STABLECOINS_BY_CHAIN: Record<string, Set<string>> = {
     '0x7f5c764cbc14f9669b88837ca1490cca17c31607', // USDC.e
     '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58', // USDT
     '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1', // DAI
+  ]),
+  bnb: new Set([
+    '0x55d398326f99059ff775485246999027b3197955', // USDT (18 decimals on BSC)
+    '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', // USDC (18 decimals on BSC)
+    '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
   ]),
 };
 
@@ -128,6 +160,7 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
 }
 
 async function fetchLogsChunked(
+  nftManager: string,
   tokenIdHex: string,
   fromBlock: number,
   toBlock: number,
@@ -150,7 +183,7 @@ async function fetchLogsChunked(
           jsonrpc: '2.0',
           method: 'eth_getLogs',
           params: [{
-            address: NFT_MANAGER,
+            address: nftManager,
             topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
             fromBlock: '0x' + from.toString(16),
             toBlock:   '0x' + to.toString(16),
@@ -178,12 +211,41 @@ async function fetchLogs(
   alchemyRpc: string,
   tokenIdHex: string,
 ): Promise<RawLog[]> {
-  const deployBlock = DEPLOY_BLOCKS[chain] ?? 0;
-  const tenderlyRpc = TENDERLY_RPCS[chain];
-  const pubNodeRpc  = PUBLIC_NODE_RPCS[chain];
+  const nftManager = NFT_MANAGERS[chain];
+  if (!nftManager) {
+    console.warn('[uniswap/activity] no NFT manager configured for chain:', chain);
+    return [];
+  }
+  const deployBlock   = DEPLOY_BLOCKS[chain] ?? 0;
+  const tenderlyRpc   = TENDERLY_RPCS[chain];
+  const pubNodeRpc    = PUBLIC_NODE_RPCS[chain];
+  const rollingDepth  = ROLLING_SCAN_DEPTH[chain];
+
+  // ── BNB Chain rolling-window path ────────────────────────────────────
+  // BSC free RPCs prune archive history (~50k block window on publicnode).
+  // Skip full-range Tenderly/LlamaRPC attempts (they'll fail with a
+  // "history pruned" error) and chunk-scan only the recent window.
+  // Older deposits surface as missing — the consumer (computePositionPnL)
+  // returns {ok:false, reason:'no_deposits'} and the UI shows
+  // "Entry data unavailable" gracefully. Same pattern as
+  // app/api/pancakeswap/activity/route.ts.
+  if (rollingDepth) {
+    if (!pubNodeRpc) return [];
+    const bnRes = await rpcPost(alchemyRpc, {
+      jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
+    }) as { result?: string; error?: unknown };
+    const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : deployBlock + rollingDepth;
+    const fromBlock = Math.max(deployBlock, currentBlock - rollingDepth);
+    try {
+      return await fetchLogsChunked(nftManager, tokenIdHex, fromBlock, currentBlock, pubNodeRpc, PUBNODE_CHUNK);
+    } catch (err) {
+      console.warn(`[uniswap/activity] ${chain} rolling-window scan failed — returning empty:`, String(err));
+      return [];
+    }
+  }
 
   const logsParams = {
-    address: NFT_MANAGER,
+    address: nftManager,
     topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
     fromBlock: '0x' + deployBlock.toString(16),
     toBlock: 'latest' as const,
@@ -224,7 +286,7 @@ async function fetchLogs(
   // Tier 3: LlamaRPC chunked
   if (isRangeErr) {
     try {
-      return await fetchLogsChunked(tokenIdHex, deployBlock, currentBlock, blastRpc, LLAMA_CHUNK);
+      return await fetchLogsChunked(nftManager, tokenIdHex, deployBlock, currentBlock, blastRpc, LLAMA_CHUNK);
     } catch (llamaChunkErr) {
       console.warn('[uniswap/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
     }
@@ -232,7 +294,7 @@ async function fetchLogs(
 
   // Tier 4: publicnode chunked
   if ((isRangeErr || isUnreachable) && pubNodeRpc) {
-    return fetchLogsChunked(tokenIdHex, deployBlock, currentBlock, pubNodeRpc, PUBNODE_CHUNK);
+    return fetchLogsChunked(nftManager, tokenIdHex, deployBlock, currentBlock, pubNodeRpc, PUBNODE_CHUNK);
   }
 
   throw new Error(`[uniswap/activity] eth_getLogs RPC error: ${msg}`);

@@ -3,32 +3,55 @@ import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
-// Uniswap V3 NonfungiblePositionManager - same address on all chains
-const POSITION_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
-// Uniswap V3 factory - same address on all V3-supported chains
-const FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
-
-// Chain configurations with Alchemy RPC endpoints
-const CHAINS: Record<string, { rpc: string; chainName: string; defillamaChain: string }> = {
+// NonfungiblePositionManager + Factory: ON BNB CHAIN THESE ARE DIFFERENT
+// from every other Uniswap V3 deployment — Uniswap deployed to BSC in 2023
+// via Wormhole + governance with its own CREATE2 salt, so the canonical
+// 0xC36442… NPM and 0x1F98431… Factory do NOT exist there. Read the per-
+// chain `nftManager` / `factory` fields instead of any module-level
+// constant. Source: @uniswap/v3-sdk constants.ts (NONFUNGIBLE_POSITION_
+// MANAGER_ADDRESSES + V3_CORE_FACTORY_ADDRESSES).
+const CHAINS: Record<string, {
+  rpc: string;
+  chainName: string;
+  defillamaChain: string;
+  nftManager: string;
+  factory: string;
+}> = {
   ethereum: {
     rpc: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
     chainName: 'Ethereum',
     defillamaChain: 'Ethereum',
+    nftManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    factory:    '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   },
   arbitrum: {
     rpc: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
     chainName: 'Arbitrum',
     defillamaChain: 'Arbitrum',
+    nftManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    factory:    '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   },
   polygon: {
     rpc: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
     chainName: 'Polygon',
     defillamaChain: 'Polygon',
+    nftManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    factory:    '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   },
   optimism: {
     rpc: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
     chainName: 'Optimism',
     defillamaChain: 'Optimism',
+    nftManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    factory:    '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+  },
+  bnb: {
+    rpc: 'https://bsc-dataseed.binance.org/',
+    chainName: 'BNB Chain',
+    defillamaChain: 'BSC',
+    // BNB Chain has its own Uniswap V3 contract addresses — see comment above.
+    nftManager: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+    factory:    '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7',
   },
 };
 
@@ -70,6 +93,13 @@ const KNOWN_TOKENS: Record<string, Record<string, { symbol: string; decimals: nu
     '0x68f180fcce6836688e9084f035309e29bf0a2095': { symbol: 'WBTC', decimals: 8, coingeckoId: 'bitcoin' },
     '0x4200000000000000000000000000000000000042': { symbol: 'OP', decimals: 18, coingeckoId: 'optimism' },
   },
+  bnb: {
+    // NOTE: USDT and USDC on BSC use 18 decimals (NOT 6 like on Ethereum / L2s).
+    '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': { symbol: 'WBNB', decimals: 18, coingeckoId: 'wbnb' },
+    '0x55d398326f99059ff775485246999027b3197955': { symbol: 'USDT', decimals: 18, coingeckoId: 'tether' },
+    '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': { symbol: 'USDC', decimals: 18, coingeckoId: 'usd-coin' },
+    '0xe9e7cea3dedca5984780bafc599bd69add087d56': { symbol: 'BUSD', decimals: 18, coingeckoId: 'binance-usd' },
+  },
 };
 
 // Function selectors
@@ -105,17 +135,17 @@ async function rpcCall(rpc: string, to: string, data: string): Promise<string> {
 }
 
 // Get number of Uniswap V3 NFTs owned by account
-async function getBalance(rpc: string, account: string): Promise<number> {
+async function getBalance(rpc: string, nftManager: string, account: string): Promise<number> {
   const data = SELECTORS.balanceOf + padAddress(account);
-  const result = await rpcCall(rpc, POSITION_MANAGER, data);
+  const result = await rpcCall(rpc, nftManager, data);
   if (!result || result === '0x') return 0;
   return parseInt(result, 16);
 }
 
 // Get token ID at index
-async function getTokenId(rpc: string, account: string, index: number): Promise<bigint> {
+async function getTokenId(rpc: string, nftManager: string, account: string, index: number): Promise<bigint> {
   const data = SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(index));
-  const result = await rpcCall(rpc, POSITION_MANAGER, data);
+  const result = await rpcCall(rpc, nftManager, data);
   if (!result || result === '0x') return 0n;
   return BigInt(result);
 }
@@ -134,14 +164,14 @@ interface PositionData {
   tokensOwed1: bigint;
 }
 
-async function getPosition(rpc: string, tokenId: bigint): Promise<PositionData | null> {
-  // positions(uint256) selector = 0x99fd0e82  
+async function getPosition(rpc: string, nftManager: string, tokenId: bigint): Promise<PositionData | null> {
+  // positions(uint256) selector = 0x99fd0e82
   // Actually the correct selector for positions(uint256) on NonfungiblePositionManager
   // keccak256("positions(uint256)") = 0x99fd0e82... let me verify
   // The function signature returns 12 values as a tuple
   const selector = '0x99fd0e82';
   const data = selector + padUint256(tokenId);
-  const result = await rpcCall(rpc, POSITION_MANAGER, data);
+  const result = await rpcCall(rpc, nftManager, data);
   
   if (!result || result === '0x' || result.length < 770) return null;
   
@@ -291,23 +321,23 @@ async function fetchPositionsForChain(
   const positions: any[] = [];
   
   try {
-    const balance = await getBalance(chain.rpc, account);
+    const balance = await getBalance(chain.rpc, chain.nftManager, account);
     if (balance === 0) return [];
-    
+
     // Limit to 20 positions per chain to avoid timeout
     const count = Math.min(balance, 20);
-    
+
     // Fetch all token IDs
     const tokenIds: bigint[] = [];
     for (let i = 0; i < count; i++) {
-      const id = await getTokenId(chain.rpc, account, i);
+      const id = await getTokenId(chain.rpc, chain.nftManager, account, i);
       if (id > 0n) tokenIds.push(id);
     }
-    
+
     // Fetch position data for each token
     for (const tokenId of tokenIds) {
       try {
-        const pos = await getPosition(chain.rpc, tokenId);
+        const pos = await getPosition(chain.rpc, chain.nftManager, tokenId);
         if (!pos) continue;
         
         // Get token info
