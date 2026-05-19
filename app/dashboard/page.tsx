@@ -1376,6 +1376,7 @@ export default function Dashboard() {
                     return (
                       <button
                         key={r.key}
+                        className="dash-chart-toggle"
                         onClick={() => setChartTab(r.key)}
                         style={{
                           padding: "4px 12px",

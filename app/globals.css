@@ -153,6 +153,26 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
 
+  /* DASHBOARD — yield-history chart timeframe toggles (1D / 7D / 30D /
+     90D / 1Y). On desktop they sit at padding: 4px 12px (~22px tall) —
+     fine for cursor clicks, too small for a fingertip and frequently
+     reported as "tapping does nothing". Bump padding so the touch
+     target hits the ~40px minimum, and add `touch-action: manipulation`
+     to skip the legacy 300ms tap-delay heuristic plus a visible
+     `-webkit-tap-highlight-color` so the user gets feedback on tap.
+     `position: relative` + `z-index: 2` is paranoid-defensive against
+     any sibling chart element extending its bounding rect over the
+     button row at narrow viewports. Inline `padding: "4px 12px"`
+     on the button itself needs !important to override. */
+  .dash-chart-toggle {
+    padding: 9px 14px !important;
+    min-height: 38px;
+    position: relative;
+    z-index: 2;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 255, 65, 0.18);
+  }
+
   /* DASHBOARD — ROW 4 bottom summary strip (Daily / Weekly / Monthly /
      Uncollected). Desktop uses `repeat(auto-fit, minmax(180px, 1fr))`
      which collapses to a single column at 390px. Force 2×2 instead. */
