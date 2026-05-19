@@ -6,6 +6,7 @@ import TerminalNav from "../../components/TerminalNav";
 import AnimatedCount from "../../components/AnimatedCount";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
+import { useWatchedWallets } from "../../contexts/WatchedWalletsContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
 import { getTokenLogo, TOKEN_COLORS } from "../../lib/tokenLogos";
 
@@ -311,7 +312,15 @@ function ChainSection({
 export default function TokensPage() {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
-  const hasWallet = !!(address || solanaAddress || suiAddress);
+  const { watchedWallets, scanAddress } = useWatchedWallets();
+  // hasWallet must mirror the active fetch set inside useWalletTokens —
+  // wagmi adapter address, Solana/Sui wallet, watched wallets list, OR
+  // scan-mode address. Otherwise the empty state hides the very data
+  // useWalletTokens is happily fetching for a watched / scanned address.
+  const hasWallet =
+    scanAddress !== null ||
+    !!(address || solanaAddress || suiAddress) ||
+    watchedWallets.length > 0;
   const { tokens, totalTokenValue, tokenCount, isLoading } = useWalletTokens();
 
   const [search, setSearch] = useState("");

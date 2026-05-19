@@ -6,6 +6,7 @@ import TerminalNav from "../../components/TerminalNav";
 import AnimatedCount from "../../components/AnimatedCount";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
+import { useWatchedWallets } from "../../contexts/WatchedWalletsContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
 import { useLendingPositions, type ExternalLendingPosition } from "../../hooks/useLendingPositions";
 import { useAaveV3Rates, type AaveV3RatesMap } from "../../hooks/useAaveV3Rates";
@@ -152,7 +153,16 @@ const SCANLINE =
 export default function LendingPage() {
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
-  const hasWallet = !!(address || solanaAddress || suiAddress);
+  const { watchedWallets, scanAddress } = useWatchedWallets();
+  // hasWallet must mirror the active fetch set inside
+  // useWalletTokens + useLendingPositions — wagmi adapter address,
+  // Solana/Sui wallet, watched wallets list, OR scan-mode address.
+  // Otherwise the empty state hides the very data the hooks are
+  // happily fetching for a watched / scanned address.
+  const hasWallet =
+    scanAddress !== null ||
+    !!(address || solanaAddress || suiAddress) ||
+    watchedWallets.length > 0;
   const { tokens: rawTokens, isLoading } = useWalletTokens();
   const { positions: externalPositions, isLoading: externalLoading } = useLendingPositions();
   const { rates: aaveRates, prices: aavePrices } = useAaveV3Rates(rawTokens);
