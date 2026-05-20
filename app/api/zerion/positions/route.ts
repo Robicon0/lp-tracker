@@ -23,6 +23,20 @@ const SUPPORTED_PROTOCOLS = [
   'cetus',     'momentum',
 ] as const;
 
+// Allow-list of position_type values we surface as "Additional Positions".
+// Combines Zerion's actual enum (deposit / loan / locked / staked / reward /
+// margin / claimable) with the conceptual names from the user spec
+// (liquidity / lending / staking / yield) so the rule survives either
+// renaming or a future Zerion enum expansion. Notably ABSENT: 'wallet' —
+// plain ERC-20 token holdings are already covered by the existing
+// WALLET_BALANCES section, so surfacing them here would be a duplicate.
+const ALLOWED_POSITION_TYPES = new Set([
+  // Zerion's actual position_type enum (the DeFi-meaningful members)
+  'deposit', 'loan', 'locked', 'staked', 'reward', 'margin', 'claimable',
+  // User-spec conceptual names (defensive — accept if Zerion ever emits these)
+  'liquidity', 'lending', 'staking', 'yield',
+]);
+
 const ZERION_TIMEOUT_MS = 10_000;
 
 export interface ZerionPosition {
@@ -153,8 +167,24 @@ export async function GET(request: Request) {
       if (attrs.flags?.is_trash) continue;
       if (attrs.flags?.displayable === false) continue;
 
-      const protocolName =
-        attrs.protocol ?? attrs.application_metadata?.name ?? '';
+      // Filter 1 — drop plain wallet token balances. These already show in
+      // the dashboard's WALLET_BALANCES section; surfacing them again here
+      // is a duplicate. Also drops anything outside our DeFi-position
+      // allowlist (reward / margin / claimable / locked still pass).
+      const positionType = (attrs.position_type ?? '').toLowerCase();
+      if (!ALLOWED_POSITION_TYPES.has(positionType)) continue;
+
+      // Filter 2 — drop positions with no identified protocol. Zerion
+      // sometimes returns "Unknown" / "" / null for receipt tokens it
+      // can't map. Without a protocol name the row gives the user nothing
+      // actionable, so it goes to the same bucket as wallet duplicates.
+      const protocolName = (
+        attrs.protocol ?? attrs.application_metadata?.name ?? ''
+      ).trim();
+      const protocolKey = protocolName.toLowerCase();
+      if (!protocolName || protocolKey === 'unknown') continue;
+
+      // Filter 3 — drop deep-integrated protocols (existing rule).
       if (isSupportedProtocol(protocolName)) continue;
 
       const usdValue = Number(attrs.value ?? 0);
@@ -165,7 +195,7 @@ export async function GET(request: Request) {
 
       const symbol = attrs.fungible_info?.symbol ?? '';
       const tokens = symbol ? [symbol] : [];
-      const pair   = symbol || attrs.name || 'Unknown';
+      const pair   = symbol || attrs.name || protocolName;
 
       const apy = typeof attrs.apy === 'number' && Number.isFinite(attrs.apy)
         ? attrs.apy
@@ -173,13 +203,13 @@ export async function GET(request: Request) {
 
       positions.push({
         id:           `zerion-${item.id}`,
-        protocol:     protocolName || 'Unknown',
+        protocol:     protocolName,
         chain,
         pair,
         usdValue:     Math.round(usdValue * 100) / 100,
         apy,
         tokens,
-        positionType: attrs.position_type ?? 'unknown',
+        positionType: positionType || 'unknown',
         source:       'zerion',
       });
     }
