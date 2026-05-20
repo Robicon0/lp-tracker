@@ -58,6 +58,20 @@ button[aria-label="Share feedback"] {
   display: none;
 }
 
+/* Dashboard scan-mode banner sits in normal flow ABOVE the
+   sidebar+main flex container. Since the DashboardSidebar is now
+   `position: fixed; top: 52; width: 192`, on desktop the leftmost
+   192px of every page row is reserved for the sidebar — including
+   the banner row. Push the banner's left margin past the sidebar so
+   its content isn't obscured. !important overrides the inline
+   `margin: "12px 16px 0"` shorthand. Mobile is untouched (sidebar
+   is display:none below md, so the banner can use full width). */
+@media (min-width: 768px) {
+  .dashboard-scan-banner {
+    margin-left: 208px !important;
+  }
+}
+
 /* ─── MOBILE STYLES (max-width: 768px) ───────────────────────────────────────
    Purely additive overrides for phone-sized viewports. Every rule here is
    wrapped in the @media block so desktop rendering is byte-for-byte

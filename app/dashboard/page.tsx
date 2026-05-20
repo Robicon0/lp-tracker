@@ -605,7 +605,7 @@ export default function Dashboard() {
         background: C.bg,
         color: C.text,
         fontFamily: FONT,
-        fontSize: 15,
+        fontSize: 16.5,
         lineHeight: 1.5,
         overflowX: "hidden",
       }}
@@ -662,6 +662,7 @@ export default function Dashboard() {
           and return to the user's own wallet view. */}
       {isScanMode && scanAddress && (
         <div
+          className="dashboard-scan-banner"
           style={{
             display: "flex",
             alignItems: "center",
@@ -785,7 +786,7 @@ export default function Dashboard() {
           onAddWallet={() => setShowManageWallets(true)}
         />
 
-        <main className="scroll-thin" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
+        <main className="scroll-thin md:ml-[192px]" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
 
           {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
           <section

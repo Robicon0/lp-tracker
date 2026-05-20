@@ -955,7 +955,7 @@ export default function Analytics() {
           activeChains={activeChains}
         />
 
-        <main className="scroll-thin" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
+        <main className="scroll-thin md:ml-[200px]" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
 
           {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
           <section

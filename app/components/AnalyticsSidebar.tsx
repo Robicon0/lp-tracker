@@ -127,13 +127,16 @@ export default function AnalyticsSidebar({
       className="hidden md:flex sidebar-no-scrollbar"
       style={{
         flexDirection: "column",
-        position: "sticky",
+        // Fixed positioning per user spec. <main> compensates with
+        // md:ml-[200px] to leave room since fixed takes the sidebar
+        // OUT of the flex flow.
+        position: "fixed",
         top: 52,
-        alignSelf: "flex-start",
+        left: 0,
         width: 200,
-        flexShrink: 0,
         height: "calc(100vh - 52px)",
         overflowY: "auto",
+        zIndex: 10,
         background: C.bg1,
         borderRight: `1px solid ${C.border}`,
         fontFamily: FONT,

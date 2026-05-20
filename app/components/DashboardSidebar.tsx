@@ -178,13 +178,17 @@ export default function DashboardSidebar({
       className="hidden md:flex sidebar-no-scrollbar"
       style={{
         flexDirection: "column",
-        position: "sticky",
+        // Fixed positioning per user spec — sticky was previously
+        // configured correctly but reported as not staying in place.
+        // Fixed takes the sidebar OUT of the flex flow; <main>
+        // compensates with md:ml-[192px] to leave room.
+        position: "fixed",
         top: 52,
-        alignSelf: "flex-start",
+        left: 0,
         width: 192,
-        flexShrink: 0,
         height: "calc(100vh - 52px)",
         overflowY: "auto",
+        zIndex: 10,
         background: C.bg1,
         borderRight: `1px solid ${C.border}`,
         fontFamily: FONT,
