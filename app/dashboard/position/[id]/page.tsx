@@ -579,7 +579,7 @@ export default function PositionDetail() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{
+    <div className="pd-page" style={{
       display: "flex",
       flexDirection: "column",
       minHeight: "100vh",
@@ -832,7 +832,7 @@ export default function PositionDetail() {
         {/* ── CURRENT LIQUIDITY ────────────────────────────────────────── */}
         {hasAmounts && (
           <Section icon="[◎]" title="Current Liquidity" sub="Token balances actively deposited in the pool">
-            <div style={{
+            <div className="pd-tokens" style={{
               margin: "0 40px",
               display: "grid", gridTemplateColumns: "1fr 1fr",
               border: `1px solid ${C.border}`,
@@ -927,7 +927,7 @@ export default function PositionDetail() {
               </a>
             ) : null}
           >
-            <div style={{
+            <div className="pd-tokens" style={{
               margin: "0 40px",
               display: "grid", gridTemplateColumns: "1fr 1fr",
               border: `1px solid ${C.border}`,
@@ -994,7 +994,7 @@ export default function PositionDetail() {
         {/* ── PERFORMANCE METRICS ──────────────────────────────────────── */}
         <Section icon="[△]" title="Performance Metrics" sub="Calculated from real on-chain fee claims">
           <div style={{ padding: "0 40px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
+            <div className="pd-perf-top" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
               {[
                 { label: "Total Claimed", val: activityLoading ? "…" : fmt$(claimedUSD), color: C.green, sub: activityLoading ? "loading…" : isActivityProtocol ? `${feeClaims.length} claim${feeClaims.length !== 1 ? "s" : ""} on-chain` : "no data" },
                 { label: "Uncollected", val: fmt$(uncollectedUSD), color: C.green, sub: "pending" },
@@ -1066,7 +1066,7 @@ export default function PositionDetail() {
               ))}
             </div>
             {/* Bottom 2-cell row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: `1px solid ${C.border}`, borderTop: "none" }}>
+            <div className="pd-perf-bottom" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: `1px solid ${C.border}`, borderTop: "none" }}>
               <div style={{ padding: cellPadding, borderRight: `1px solid ${C.border}` }}>
                 {/* Label + value + suffix all driven by aprView. The
                     underlying actualDailyIncome is a per-day rate, so the
@@ -1229,7 +1229,7 @@ export default function PositionDetail() {
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
                         }}>Total USD</th>
-                        <th style={{
+                        <th className="pd-tx-col" style={{
                           padding: "12px 20px", fontSize: 12, fontWeight: 400,
                           color: C.text, letterSpacing: "0.18em", textTransform: "uppercase",
                           borderBottom: `1px solid ${C.border}`, opacity: 0.6, textAlign: "right",
@@ -1254,7 +1254,7 @@ export default function PositionDetail() {
                             <td style={{ padding: "11px 20px", fontSize: 15, color: C.green, fontWeight: 600, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(usd)}
                             </td>
-                            <td style={{ padding: "11px 20px", textAlign: "right" }}>
+                            <td className="pd-tx-col" style={{ padding: "11px 20px", textAlign: "right" }}>
                               <a className="tx-link" href={txUrl(ev.txHash)} target="_blank" rel="noopener noreferrer"
                                 style={{ color: C.cyan, fontSize: 14, textDecoration: "none", transition: "opacity 0.15s" }}>
                                 {shortHash(ev.txHash)} ↗
@@ -1420,7 +1420,7 @@ export default function PositionDetail() {
         {/* ── YIELD & APR PROJECTIONS ──────────────────────────────────── */}
         <Section icon="[%]" title="Yield & APR Projections" sub="Forward-looking estimates based on trailing pool fee rate">
           <div style={{ padding: "0 40px 24px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", border: `1px solid ${C.border}` }}>
+            <div className="pd-yield-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", border: `1px solid ${C.border}` }}>
               {([
                 { label: "Daily",   div: 365,  amt: dailyUSD,   unit: "day" },
                 { label: "Weekly",  div: 52,   amt: weeklyUSD,  unit: "week" },
@@ -1471,7 +1471,7 @@ export default function PositionDetail() {
               ) : (
                 <div style={{ border: `1px solid ${C.border}` }}>
                   {/* 5-stat grid */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", borderBottom: `1px solid ${C.border}` }}>
+                  <div className="pd-pnl-stats" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", borderBottom: `1px solid ${C.border}` }}>
                     {[
                       { label: "Initial Value", val: fmt$(pnl.initialValue), color: C.textWhite, sub: "at deposit time" },
                       { label: pnl.isClosed ? "Closing Value" : "Current Value", val: fmt$(pnl.isClosed ? pnl.closingValue : pnl.currentValue), color: C.textWhite, sub: pnl.isClosed ? "at close time" : "live mark" },
@@ -1503,7 +1503,7 @@ export default function PositionDetail() {
                     ))}
                   </div>
                   {/* Summary panel */}
-                  <div style={{
+                  <div className="pd-pnl-summary" style={{
                     background: "linear-gradient(135deg, rgba(0,255,65,0.04), rgba(0,255,65,0.01))",
                     padding: "24px 28px",
                     display: "grid", gridTemplateColumns: "2fr 1fr 1fr",
@@ -1538,7 +1538,7 @@ export default function PositionDetail() {
                           {pnlPositive ? "+" : ""}{pnl.netPnlPct.toFixed(2)}%
                         </div>
                       </div>
-                      <div style={{ fontSize: 14, color: C.text, opacity: 0.7, letterSpacing: "0.02em", lineHeight: 1.6 }}>
+                      <div className="pd-pnl-formula" style={{ fontSize: 14, color: C.text, opacity: 0.7, letterSpacing: "0.02em", lineHeight: 1.6 }}>
                         {pnl.isClosed
                           ? `(${fmt$(pnl.closingValue)} closing + ${fmt$(pnl.feesCollected)} fees) − ${fmt$(pnl.initialValue)} initial`
                           : `(${fmt$(pnl.currentValue)} current + ${fmt$(pnl.feesCollected)} fees + ${fmt$(pnl.feesUnclaimed)} unclaimed) − ${fmt$(pnl.initialValue)} initial`}
@@ -1575,7 +1575,7 @@ export default function PositionDetail() {
         {/* ── POOL STATISTICS ─────────────────────────────────────────── */}
         <Section icon="[⚡]" title="Pool Statistics" sub={`Aggregate metrics for ${pos.pair} on ${pos.protocol}`}>
           <div style={{ padding: "0 40px 32px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
+            <div className="pd-pool-stats" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
               {([
                 { label: "Pool TVL",   value: poolStats?.tvlUsd ?? null,    sub: "total value locked" },
                 { label: "24H Volume", value: poolStats?.volumeUsd1d ?? null, sub: "trailing 24h" },
