@@ -17,6 +17,7 @@ import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useLpPnl } from "../hooks/useLpPnl";
+import { useZerionPositions } from "../hooks/useZerionPositions";
 import type { AerodromePosition } from "../lib/aerodrome";
 import {
   PieChart,
@@ -309,6 +310,20 @@ export default function Dashboard() {
   const pathname = usePathname();
   const isScanMode = scanAddress !== null;
   const hasWallet = mounted && (isScanMode || !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
+
+  // ── Zerion hybrid fallback — basic data for protocols we don't deep-
+  // integrate. Picks ONE active EVM address (scan → connected → first
+  // watched EVM). Fail-silent: any error path returns an empty list. The
+  // resulting positions render in their own section BELOW the existing
+  // positions table and are NEVER mixed into any aggregation (no
+  // portfolio total, no APR, no fees, no P&L, no analytics, no CSV).
+  const zerionAddress: string | null =
+    isScanMode && scanAddress!.chain === "evm"
+      ? scanAddress!.address
+      : address ??
+        watchedWallets.find((w) => w.chain === "evm")?.address ??
+        null;
+  const { positions: zerionPositions } = useZerionPositions(zerionAddress);
 
   function handleDismissScan() {
     setScanAddress(null);
@@ -1920,6 +1935,202 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+
+          {/* ── Zerion hybrid-fallback positions ───────────────────────────
+              Basic position data for protocols we don't deep-integrate.
+              Section renders only when zerionPositions.length > 0 — silent
+              otherwise. NEVER mixed into totals / APR / fees / P&L / CSV /
+              Analytics. The BASIC badge + info tooltip make it visually
+              obvious that these rows are second-tier data. */}
+          {zerionPositions.length > 0 && (
+            <div id="section-zerion" className="anim-fade" style={{ borderTop: `1px solid ${C.border}` }}>
+              <div
+                style={{
+                  display:        "flex",
+                  alignItems:     "center",
+                  gap:            10,
+                  padding:        "16px 28px 14px",
+                  fontSize:       11,
+                  letterSpacing:  "0.22em",
+                  textTransform:  "uppercase",
+                  color:          C.text,
+                  background:     C.bg1,
+                  borderBottom:   `1px solid ${C.border}`,
+                  flexWrap:       "wrap",
+                }}
+              >
+                <span style={{ color: C.green, opacity: 1 }}>//</span>
+                <span>Additional Positions · Basic Data</span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    border: `1px solid ${C.borderHi}`,
+                    color: C.text,
+                    letterSpacing: "0.1em",
+                    background: "transparent",
+                    opacity: 0.7,
+                  }}
+                  title="Position data via Zerion. Full deep analytics available for supported protocols."
+                >
+                  via zerion
+                </span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 11, color: C.text, opacity: 0.5, textTransform: "none", letterSpacing: 0 }}>
+                  {zerionPositions.length} {zerionPositions.length === 1 ? "position" : "positions"}
+                </span>
+              </div>
+
+              <div>
+                {zerionPositions.map((z) => {
+                  // Per-chain accent for the Zerion row's chain tag. Names
+                  // here mirror what /api/zerion/positions/route.ts emits
+                  // via ZERION_CHAIN_MAP. Unknown chains fall through to
+                  // the neutral border color — never crashes the row.
+                  const ZERION_CHAIN_COLORS: Record<string, string> = {
+                    "Ethereum":  "#627eea",
+                    "Arbitrum":  "#28a0f0",
+                    "Optimism":  "#ff0420",
+                    "Polygon":   "#8247e5",
+                    "BNB Chain": "#f0b90b",
+                    "Avalanche": "#e84142",
+                    "Base":      "#0052ff",
+                    "Fantom":    "#1969ff",
+                    "Gnosis":    "#04795b",
+                    "Celo":      "#35d07f",
+                    "zkSync":    "#8c8dfc",
+                    "Linea":     "#61dfff",
+                    "Scroll":    "#ffeed4",
+                    "Blast":     "#fcfc03",
+                    "Mode":      "#dffe00",
+                    "Mantle":    "#000000",
+                    "Manta":     "#19d3ff",
+                    "Metis":     "#00dacc",
+                    "Sonic":     "#f76b1c",
+                    "Unichain":  "#ff007a",
+                  };
+                  const chainColor = ZERION_CHAIN_COLORS[z.chain] ?? C.borderHi;
+                  return (
+                    <div
+                      key={z.id}
+                      className="zerion-row"
+                      style={{
+                        display:        "flex",
+                        alignItems:     "center",
+                        gap:            14,
+                        padding:        "14px 28px",
+                        borderBottom:   `1px solid ${C.border}`,
+                        fontSize:       14,
+                        flexWrap:       "wrap",
+                      }}
+                    >
+                      {/* Token icon (initials only — Zerion gives us no logo path) */}
+                      <div
+                        className="zerion-icon"
+                        style={{
+                          width: 30, height: 30,
+                          border: `1px solid ${C.borderHi}`,
+                          background: C.bg2,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 700, color: C.textMid,
+                          letterSpacing: "0.04em",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {z.pair.slice(0, 4).toUpperCase()}
+                      </div>
+
+                      {/* Pair + protocol + position type */}
+                      <div className="zerion-name" style={{ flex: "1 1 200px", minWidth: 140 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                          {z.pair}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.text, marginTop: 2, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                          {z.protocol}
+                          {z.positionType && z.positionType !== "unknown" && (
+                            <span style={{ marginLeft: 6, opacity: 0.5 }}>· {z.positionType}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* BASIC badge (replaces the protocol color badge on regular rows) */}
+                      <div
+                        className="zerion-basic-badge"
+                        title="Basic position data via Zerion. Full deep analytics available for supported protocols."
+                        style={{
+                          fontSize: 10,
+                          padding: "3px 9px",
+                          border: `1px solid ${C.borderHi}`,
+                          color: C.text,
+                          letterSpacing: "0.12em",
+                          background: C.bg2,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                          cursor: "help",
+                        }}
+                      >
+                        BASIC
+                      </div>
+
+                      {/* Chain tag */}
+                      <div
+                        className="zerion-chain"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "3px 9px",
+                          border: `1px solid ${chainColor}55`,
+                          background: `${chainColor}11`,
+                          fontSize: 10,
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                          fontWeight: 700,
+                          color: chainColor,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span style={{ width: 5, height: 5, background: chainColor, flexShrink: 0 }} />
+                        {z.chain}
+                      </div>
+
+                      {/* USD value */}
+                      <div
+                        className="zerion-value"
+                        style={{
+                          textAlign: "right",
+                          minWidth: 80,
+                          fontSize: 15,
+                          fontWeight: 700,
+                          color: C.textBright,
+                          fontVariantNumeric: "tabular-nums",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {fmt$(z.usdValue)}
+                      </div>
+
+                      {/* APR (or — when null) */}
+                      <div
+                        className="zerion-apr"
+                        style={{
+                          textAlign: "right",
+                          minWidth: 60,
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: z.apy != null && z.apy > 0 ? C.green : C.text,
+                          fontVariantNumeric: "tabular-nums",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {z.apy != null && z.apy > 0 ? `${z.apy.toFixed(1)}%` : "--"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ── Alerts placeholder section ──────────────────────────────── */}
           <div
