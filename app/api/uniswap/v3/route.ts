@@ -106,7 +106,7 @@ const KNOWN_TOKENS: Record<string, Record<string, { symbol: string; decimals: nu
 const SELECTORS = {
   balanceOf: '0x70a08231',     // balanceOf(address)
   tokenOfOwnerByIndex: '0x2f745c59', // tokenOfOwnerByIndex(address,uint256)
-  positions: '0x99fd0e82',     // positions(uint256) — NOT the 4-byte but let me use the right one
+  positions: '0x99fbab88',     // positions(uint256) — keccak256("positions(uint256)")[:4]. Same selector across every Uniswap V3 NPM deployment (Ethereum / Arbitrum / Optimism / Polygon / BNB Chain) and across HyperEVM V3 forks. Was '0x99fd0e82' (wrong — reverts on every chain).
   symbol: '0x95d89b41',
   decimals: '0x313ce567',
 };
@@ -165,11 +165,16 @@ interface PositionData {
 }
 
 async function getPosition(rpc: string, nftManager: string, tokenId: bigint): Promise<PositionData | null> {
-  // positions(uint256) selector = 0x99fd0e82
-  // Actually the correct selector for positions(uint256) on NonfungiblePositionManager
-  // keccak256("positions(uint256)") = 0x99fd0e82... let me verify
-  // The function signature returns 12 values as a tuple
-  const selector = '0x99fd0e82';
+  // positions(uint256) selector. keccak256("positions(uint256)")[:4] = 0x99fbab88.
+  // SAME selector across every Uniswap V3 NPM deployment (Ethereum, Arbitrum,
+  // Optimism, Polygon, BNB Chain) and across HyperEVM V3 forks. The previous
+  // value '0x99fd0e82' was wrong and reverted with "execution reverted: 0x" on
+  // every chain — silently caused getPosition to return null so the route
+  // emitted zero positions on chains where balanceOf reported any. Returns the
+  // standard 12-tuple (nonce, operator, token0, token1, fee, tickLower,
+  // tickUpper, liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128,
+  // tokensOwed0, tokensOwed1).
+  const selector = '0x99fbab88';
   const data = selector + padUint256(tokenId);
   const result = await rpcCall(rpc, nftManager, data);
   
