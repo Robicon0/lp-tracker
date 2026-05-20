@@ -124,7 +124,7 @@ export default function AnalyticsSidebar({
 
   return (
     <aside
-      className="hidden md:flex"
+      className="hidden md:flex sidebar-no-scrollbar"
       style={{
         flexDirection: "column",
         position: "sticky",

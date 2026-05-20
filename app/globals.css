@@ -37,6 +37,27 @@ button[aria-label="Share feedback"] {
   display: none !important;
 }
 
+/* Dashboard + Analytics left sidebars: hide the internal scrollbar
+   while keeping the sidebar scrollable when its content overflows
+   the 100vh - 52px height cap. The sidebars are already sticky-
+   positioned (position: sticky, top: 52) so they visually pin to
+   the left while <main overflowY: auto> scrolls internally on the
+   right — the scrollbar's visual presence was the only thing
+   making the sticky behaviour look like "the sidebar scrolls". Both
+   sidebars carry className="hidden md:flex sidebar-no-scrollbar"
+   so this rule never affects mobile (where the sidebar isn't
+   rendered anyway). Three properties cover every engine:
+   scrollbar-width:none (Firefox), -ms-overflow-style:none (legacy
+   IE/Edge), ::-webkit-scrollbar display:none (Chrome / Safari /
+   modern Edge). */
+.sidebar-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sidebar-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ─── MOBILE STYLES (max-width: 768px) ───────────────────────────────────────
    Purely additive overrides for phone-sized viewports. Every rule here is
    wrapped in the @media block so desktop rendering is byte-for-byte
