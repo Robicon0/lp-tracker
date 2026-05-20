@@ -275,6 +275,21 @@ export default function PositionDetail() {
   const [poolStats, setPoolStats] = useState<{ tvlUsd: number | null; volumeUsd1d: number | null; feesUsd1d: number | null } | null>(null);
   const [poolStatsLoading, setPoolStatsLoading] = useState(false);
 
+  // Performance-metrics timeframe toggle. Default Y (yearly) — Actual /
+  // Estimated APR are stored as annual rates so Y shows them as-is; D/W/M
+  // divide. Actual Daily Income is stored as a per-day rate so the same
+  // toggle multiplies it. Fee Income Rate is stored as a 30-day-derived
+  // (i.e. monthly) percentage, so the toggle scales it from the M base.
+  // The state lives ONLY in this section and never feeds back into any
+  // data fetch or calculation — pure display transform.
+  const [aprView, setAprView] = useState<"D" | "W" | "M" | "Y">("Y");
+  const APR_DIVISOR:        Record<typeof aprView, number> = { D: 365, W: 52,  M: 12, Y: 1   };
+  const INCOME_MULTIPLIER:  Record<typeof aprView, number> = { D: 1,   W: 7,   M: 30, Y: 365 };
+  const FEE_RATE_FROM_30D:  Record<typeof aprView, number> = { D: 1/30, W: 7/30, M: 1, Y: 365/30 };
+  const INCOME_SUFFIX:      Record<typeof aprView, string> = { D: "/day", W: "/week", M: "/month", Y: "/year" };
+  const INCOME_LABEL:       Record<typeof aprView, string> = { D: "Actual Daily Income", W: "Actual Weekly Income", M: "Actual Monthly Income", Y: "Actual Annual Income" };
+  const FEE_PERIOD_LABEL:   Record<typeof aprView, string> = { D: "(1d)", W: "(7d)", M: "(30d)", Y: "(365d)" };
+
   useEffect(() => {
     if (!pos) return;
     setPoolStatsLoading(true);
@@ -967,11 +982,55 @@ export default function PositionDetail() {
                 { label: "Total Claimed", val: activityLoading ? "…" : fmt$(claimedUSD), color: C.green, sub: activityLoading ? "loading…" : isActivityProtocol ? `${feeClaims.length} claim${feeClaims.length !== 1 ? "s" : ""} on-chain` : "no data" },
                 { label: "Uncollected", val: fmt$(uncollectedUSD), color: C.green, sub: "pending" },
                 { label: "Total Lifetime", val: fmt$(lifetimeUSD), color: C.textWhite, sub: "claimed + pending" },
-                { label: "Actual APR", val: activityLoading ? "…" : actualAPR != null ? `~${actualAPR.toFixed(1)}%` : "—", color: C.green, sub: "from real claims" },
-                { label: "Estimated APR", val: hasApr ? `~${pos.apy.toFixed(1)}%` : "N/A", color: C.cyan, sub: "pool APY" },
+                {
+                  // Actual APR cell — label now carries the D/W/M/Y
+                  // timeframe toggle. Inline style matches the analytics
+                  // page convention (border shorthand on active, none on
+                  // inactive — no CSS classes, no specificity conflicts).
+                  label: (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                      <span>Actual APR</span>
+                      <div className="dash-perf-toggle" style={{ display: "flex" }}>
+                        {(["D", "W", "M", "Y"] as const).map((v) => {
+                          const active = aprView === v;
+                          return (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => setAprView(v)}
+                              style={{
+                                fontFamily: FONT,
+                                fontSize: 10,
+                                padding: "2px 7px",
+                                cursor: "pointer",
+                                letterSpacing: "0.1em",
+                                textTransform: "uppercase",
+                                border: active ? "1px solid #00ff41" : "none",
+                                background: "transparent",
+                                color: active ? "#00ff41" : C.text,
+                                marginLeft: 2,
+                              }}
+                              aria-pressed={active}
+                              aria-label={`Show ${v === "D" ? "daily" : v === "W" ? "weekly" : v === "M" ? "monthly" : "yearly"} rate`}
+                            >
+                              {v}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ),
+                  val: activityLoading ? "…" : actualAPR != null ? `~${(actualAPR / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : "—",
+                  color: C.green,
+                  sub: "from real claims",
+                },
+                { label: "Estimated APR", val: hasApr ? `~${(pos.apy / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : "N/A", color: C.cyan, sub: "pool APY" },
                 { label: "Position Age", val: daysLabel, color: C.textWhite, sub: openedDate ? `since ${openedDate}` : "tracking age" },
               ].map((c, i) => (
-                <div key={c.label} style={{
+                // Key is the index because c.label is now ReactNode for the
+                // Actual APR cell (carries the D/W/M/Y toggle). Stable
+                // because the array order never changes.
+                <div key={i} style={{
                   padding: cellPadding,
                   borderRight: (i + 1) % 3 === 0 ? "none" : `1px solid ${C.border}`,
                   borderBottom: i < 3 ? `1px solid ${C.border}` : "none",
@@ -992,13 +1051,16 @@ export default function PositionDetail() {
             {/* Bottom 2-cell row */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: `1px solid ${C.border}`, borderTop: "none" }}>
               <div style={{ padding: cellPadding, borderRight: `1px solid ${C.border}` }}>
-                <div style={labelStyle}>Actual Daily Income</div>
+                {/* Label + value + suffix all driven by aprView. The
+                    underlying actualDailyIncome is a per-day rate, so the
+                    multiplier scales it up to the selected period. */}
+                <div style={labelStyle}>{INCOME_LABEL[aprView]}</div>
                 <div style={{
                   fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: C.green,
                   textShadow: "0 0 14px rgba(0,255,65,0.2)", fontVariantNumeric: "tabular-nums",
                 }}>
                   {activityLoading ? "…" : actualDailyIncome != null
-                    ? <>{fmt$(actualDailyIncome)}<span style={{ fontSize: 16, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>/day</span></>
+                    ? <>{fmt$(actualDailyIncome * INCOME_MULTIPLIER[aprView])}<span style={{ fontSize: 16, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>{INCOME_SUFFIX[aprView]}</span></>
                     : "—"}
                 </div>
                 <div style={subStyle}>trailing 30d average</div>
@@ -1014,9 +1076,11 @@ export default function PositionDetail() {
                   fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: C.textWhite,
                   fontVariantNumeric: "tabular-nums",
                 }}>
-                  {feeIncomePct.toFixed(3)}%
+                  {/* feeIncomePct is the 30-day-derived percentage stored
+                      at the M base. Scale per the period selected above. */}
+                  {(feeIncomePct * FEE_RATE_FROM_30D[aprView]).toFixed(3)}%
                 </div>
-                <div style={subStyle}>of position value (30d)</div>
+                <div style={subStyle}>of position value {FEE_PERIOD_LABEL[aprView]}</div>
               </div>
             </div>
             <div style={{ height: 24 }} />

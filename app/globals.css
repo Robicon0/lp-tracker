@@ -173,6 +173,18 @@ button[aria-label="Share feedback"] {
     -webkit-tap-highlight-color: rgba(0, 255, 65, 0.18);
   }
 
+  /* POSITION DETAIL — Performance Metrics D/W/M/Y toggle next to the
+     Actual APR label. Same touch-target reasoning as dash-chart-toggle:
+     desktop inline padding (2px 7px) is too small for a fingertip and
+     would silently miss taps. Override only on mobile so desktop keeps
+     the compact look. Inline padding needs !important to override. */
+  .dash-perf-toggle button {
+    padding: 6px 9px !important;
+    min-height: 30px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 255, 65, 0.18);
+  }
+
   /* DASHBOARD — Zerion fallback rows. Desktop renders the row as a
      single flex line; on phones the row already wraps via flexWrap:wrap
      but we tighten horizontal padding so wrapped lines don't eat the
