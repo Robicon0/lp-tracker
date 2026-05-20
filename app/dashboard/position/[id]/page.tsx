@@ -240,9 +240,26 @@ export default function PositionDetail() {
   const maxPriceUSD = hasRange && pos ? tickToUSD(pos.tickUpper!, pos) : null;
   const curPriceUSD = pos ? getCurrentPrice(pos) : null;
 
+  // Range-bar fill percentage. The previous Math.max(2, Math.min(98, …))
+  // clamp kept the marker tick visible inside the bar bounds, but it also
+  // capped fill at 98% when price exceeded max and floored at 2% when price
+  // dropped below min — wrong for out-of-range states. New rule:
+  //   below range  → 0   (empty bar, amber pulse at left tip)
+  //   above range  → 100 (full green bar, amber pulse at right tip)
+  //   in range     → proportional 0..100
   let rangeBarPct = 50;
+  let isOutOfRangeBelow = false;
+  let isOutOfRangeAbove = false;
   if (minPriceUSD !== null && maxPriceUSD !== null && curPriceUSD !== null && maxPriceUSD > minPriceUSD) {
-    rangeBarPct = Math.max(2, Math.min(98, ((curPriceUSD - minPriceUSD) / (maxPriceUSD - minPriceUSD)) * 100));
+    if (curPriceUSD <= minPriceUSD) {
+      rangeBarPct = 0;
+      isOutOfRangeBelow = true;
+    } else if (curPriceUSD >= maxPriceUSD) {
+      rangeBarPct = 100;
+      isOutOfRangeAbove = true;
+    } else {
+      rangeBarPct = ((curPriceUSD - minPriceUSD) / (maxPriceUSD - minPriceUSD)) * 100;
+    }
   }
 
   const rangeWidthPct = (minPriceUSD && maxPriceUSD && minPriceUSD > 0)
@@ -1337,11 +1354,35 @@ export default function PositionDetail() {
                     transition: "width 1.2s cubic-bezier(0.22,1,0.36,1)",
                   }} />
                   {curPriceUSD != null && !isClosed && (
-                    <div style={{
-                      position: "absolute", top: 8, width: 2, height: 20,
-                      left: `calc(${rangeBarPct}% - 1px)`,
-                      background: C.green, boxShadow: "0 0 8px rgba(0,255,65,0.8)", zIndex: 3,
-                    }} />
+                    isOutOfRangeBelow ? (
+                      // Out of range below — no green fill; amber pulse at the
+                      // LEFT tip of the track signals price dropped under min.
+                      <div style={{
+                        position: "absolute", top: 8, left: 0, width: 6, height: 20,
+                        background: C.amber,
+                        boxShadow: "0 0 12px rgba(255,170,0,0.85)",
+                        animation: "_pulse 1.4s infinite",
+                        zIndex: 3,
+                      }} />
+                    ) : isOutOfRangeAbove ? (
+                      // Out of range above — green fill stretched to 100%; amber
+                      // pulse at the RIGHT tip signals price exceeded max.
+                      <div style={{
+                        position: "absolute", top: 8, right: 0, width: 6, height: 20,
+                        background: C.amber,
+                        boxShadow: "0 0 12px rgba(255,170,0,0.85)",
+                        animation: "_pulse 1.4s infinite",
+                        zIndex: 3,
+                      }} />
+                    ) : (
+                      // In range — original behaviour: 2px green tick at the
+                      // proportional bar position marking the current price.
+                      <div style={{
+                        position: "absolute", top: 8, width: 2, height: 20,
+                        left: `calc(${rangeBarPct}% - 1px)`,
+                        background: C.green, boxShadow: "0 0 8px rgba(0,255,65,0.8)", zIndex: 3,
+                      }} />
+                    )
                   )}
                 </div>
                 {/* Ticks */}
