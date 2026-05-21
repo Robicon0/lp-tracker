@@ -812,7 +812,7 @@ export default function Dashboard() {
 
             <div
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 color: C.text,
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
@@ -957,7 +957,7 @@ export default function Dashboard() {
                     gap: 5,
                   }}
                 >
-                  <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6 }}>
+                  <div style={{ fontSize: 13, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6 }}>
                     {s.label}
                   </div>
                   <div
@@ -974,7 +974,7 @@ export default function Dashboard() {
                   >
                     {s.val}
                   </div>
-                  <div style={{ fontSize: 11, color: C.text, opacity: 0.5 }}>{s.sub}</div>
+                  <div style={{ fontSize: 12, color: C.text, opacity: 0.5 }}>{s.sub}</div>
                 </div>
               ))}
             </div>
@@ -1015,18 +1015,18 @@ export default function Dashboard() {
                 >
                   <div style={{ width: 2, height: 36, background: w.color, flexShrink: 0 }} />
                   <div style={{ flex: 1, overflow: "hidden" }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.textBright, letterSpacing: "0.02em" }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: C.textBright, letterSpacing: "0.02em" }}>
                       {w.name}
                     </div>
-                    <div style={{ fontSize: 11, color: C.text, marginTop: 2, fontStyle: "italic", opacity: 0.6 }}>
+                    <div style={{ fontSize: 12, color: C.text, marginTop: 2, fontStyle: "italic", opacity: 0.6 }}>
                       {w.addr.slice(0, 6)}…{w.addr.slice(-4)}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontSize: 14, color: C.textMid, opacity: 0.7 }}>
+                    <div style={{ fontSize: 15, color: C.textMid, opacity: 0.7 }}>
                       {w.type === "browser" ? "● Connected" : "Watched"}
                     </div>
-                    <div style={{ fontSize: 11, color: C.text, marginTop: 2, opacity: 0.5 }}>
+                    <div style={{ fontSize: 12, color: C.text, marginTop: 2, opacity: 0.5 }}>
                       {w.sub}
                     </div>
                   </div>
@@ -1376,7 +1376,7 @@ export default function Dashboard() {
               <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20, flexWrap: "wrap" }}>
                 <div
                   style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     letterSpacing: "0.22em",
                     textTransform: "uppercase",
                     color: C.text,
@@ -1485,7 +1485,14 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ── ROW 4: bottom metrics strip (4 cells) ───────────────────── */}
+          {/* ── ROW 4: cash flow heading + bottom metrics strip (4 cells) ── */}
+          {/* Section heading uses the shared PaneHead component so styling
+              (fontSize, color, letter-spacing, // prefix in green) auto-
+              matches every other section header on the page (// WALLETS,
+              // ESTIMATED_NET_CASHFLOW, // LEND_AND_BORROW, etc.). */}
+          <div style={{ padding: "24px 28px 0" }} className="anim-fade">
+            <PaneHead title="cash_flow" />
+          </div>
           <div
             className="dash-summary-row anim-fade"
             style={{
@@ -1538,7 +1545,7 @@ export default function Dashboard() {
                 />
                 <div
                   style={{
-                    fontSize: 10,
+                    fontSize: 13,
                     color: C.text,
                     letterSpacing: "0.18em",
                     textTransform: "uppercase",
@@ -1566,7 +1573,7 @@ export default function Dashboard() {
                 >
                   {m.val}
                 </div>
-                <div style={{ fontSize: 11, color: C.text, opacity: 0.45 }}>{m.sub}</div>
+                <div style={{ fontSize: 12, color: C.text, opacity: 0.45 }}>{m.sub}</div>
               </div>
             ))}
           </div>
@@ -1725,7 +1732,7 @@ export default function Dashboard() {
                           style={{
                             padding: i === 0 ? "10px 16px 10px 28px" : "10px 16px 10px 0",
                             textAlign: i === 0 ? "left" : "right",
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 400,
                             color: C.text,
                             letterSpacing: "0.16em",
@@ -2644,7 +2651,7 @@ function PaneHead({
     >
       <div
         style={{
-          fontSize: 10,
+          fontSize: 12,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
           color: C.text,
@@ -2654,7 +2661,7 @@ function PaneHead({
           gap: 8,
         }}
       >
-        <span style={{ color: C.green, opacity: 1, fontSize: 11 }}>//</span>
+        <span style={{ color: C.green, opacity: 1, fontSize: 12 }}>//</span>
         {title}
       </div>
       {linkLabel && (
