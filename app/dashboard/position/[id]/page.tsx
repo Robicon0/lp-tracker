@@ -459,7 +459,7 @@ export default function PositionDetail() {
   // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading && !pos) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
         <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
           <div style={{
@@ -477,7 +477,7 @@ export default function PositionDetail() {
   // ── Not found ──────────────────────────────────────────────────────────────
   if (!pos) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
         <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
           <h2 style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, marginBottom: 12, letterSpacing: "-0.01em" }}>
@@ -589,6 +589,8 @@ export default function PositionDetail() {
       fontSize: 16,
       lineHeight: 1.5,
       overflowX: "hidden",
+      // Clear the now-fixed TerminalNavbar (52px tall).
+      paddingTop: 52,
     }}>
       <style>{`
         @keyframes _spin   { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }

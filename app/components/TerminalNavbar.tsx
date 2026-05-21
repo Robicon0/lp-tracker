@@ -108,9 +108,16 @@ export default function TerminalNavbar() {
         alignItems: "stretch",
         borderBottom: `1px solid ${C.border}`,
         background: "rgba(5,5,5,0.97)",
-        position: "sticky",
+        // Fixed positioning per user spec — sticky was reported as
+        // not staying pinned. Pages that mount this component
+        // compensate with paddingTop: 52 on their outer container so
+        // the now-out-of-flow nav doesn't overlap their first row.
+        position: "fixed",
         top: 0,
-        zIndex: 10000,
+        left: 0,
+        right: 0,
+        width: "100%",
+        zIndex: 50,
         fontFamily: FONT,
       }}
     >

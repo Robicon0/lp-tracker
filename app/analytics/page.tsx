@@ -820,7 +820,7 @@ export default function Analytics() {
   // ── Loading / empty states ─────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT }}>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
         <TerminalNavbar />
         <div style={{ padding: 40 }}>
           <h1 style={{ fontSize: 28, color: C.textWhite }}>Analytics</h1>
@@ -832,7 +832,7 @@ export default function Analytics() {
 
   if (mounted && !hasWallet) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, display: "flex", flexDirection: "column" }}>
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, display: "flex", flexDirection: "column", paddingTop: 52 }}>
         <TerminalNavbar />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 40 }}>
           <div
@@ -876,6 +876,7 @@ export default function Analytics() {
         fontSize: 16.5,
         lineHeight: 1.55,
         overflowX: "hidden",
+        paddingTop: 52,
       }}
     >
       <style>{`
@@ -977,8 +978,13 @@ export default function Analytics() {
             </div>
           </section>
 
-          {/* ── CONTENT ─────────────────────────────────────────────────── */}
-          <div style={{ padding: "20px 32px 32px" }}>
+          {/* ── CONTENT ───────────────────────────────────────────────────
+              Horizontal padding removed (was "20px 32px 32px") so analytics
+              sections sit flush against <main>'s edges — same look as
+              dashboard, where sections are direct children of <main> with
+              no outer padding wrapper. Vertical breathing room is kept
+              (20px top / 32px bottom). */}
+          <div style={{ padding: "20px 0 32px" }}>
 
             {/* TOP STATS STRIP — 5 cells */}
             <div

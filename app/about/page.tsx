@@ -103,6 +103,8 @@ export default function About() {
     <div style={{
       background: C.bg, color: C.text, minHeight: "100vh",
       fontFamily: FONT, fontSize: 16, lineHeight: 1.55, overflowX: "hidden",
+      // Clear the now-fixed TerminalNavbar (52px tall).
+      paddingTop: 52,
     }}>
       <style>{`
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }

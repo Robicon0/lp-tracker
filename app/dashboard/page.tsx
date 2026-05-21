@@ -606,8 +606,9 @@ export default function Dashboard() {
         color: C.text,
         fontFamily: FONT,
         fontSize: 16.5,
-        lineHeight: 1.5,
+        lineHeight: 1.55,
         overflowX: "hidden",
+        paddingTop: 52,
       }}
     >
       <style>{`
