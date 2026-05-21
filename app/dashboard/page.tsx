@@ -962,7 +962,7 @@ export default function Dashboard() {
                   </div>
                   <div
                     style={{
-                      fontSize: 25,
+                      fontSize: 28,
                       fontWeight: 700,
                       letterSpacing: "-0.01em",
                       color:
@@ -1791,7 +1791,7 @@ export default function Dashboard() {
                                 );
                               })()}
                               <div>
-                                <div style={{ fontSize: 15, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
+                                <div style={{ fontSize: 15.5, fontWeight: 700, color: C.textBright, letterSpacing: "0.02em" }}>
                                   {pos.pair}
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
@@ -1821,7 +1821,7 @@ export default function Dashboard() {
 
                           {/* Value */}
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                            <div style={{ fontSize: 15.5, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(pos.value)}
                             </div>
                             {dailyEarnings !== null && (
@@ -1853,7 +1853,7 @@ export default function Dashboard() {
                               <>
                                 <div
                                   style={{
-                                    fontSize: 15,
+                                    fontSize: 15.5,
                                     fontWeight: 700,
                                     color: pnlUsd >= 0 ? C.green : C.red,
                                     fontVariantNumeric: "tabular-nums",
@@ -1870,7 +1870,7 @@ export default function Dashboard() {
                               </>
                             ) : pos.fees > 0 ? (
                               <>
-                                <div style={{ fontSize: 15, fontWeight: 700, color: C.green, fontVariantNumeric: "tabular-nums" }}>
+                                <div style={{ fontSize: 15.5, fontWeight: 700, color: C.green, fontVariantNumeric: "tabular-nums" }}>
                                   +{fmt$(pos.fees)}
                                 </div>
                                 <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.45 }}>
