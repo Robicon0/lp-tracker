@@ -812,7 +812,7 @@ export default function Dashboard() {
 
             <div
               style={{
-                fontSize: 12,
+                fontSize: 13,
                 color: C.text,
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
@@ -1376,7 +1376,7 @@ export default function Dashboard() {
               <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20, flexWrap: "wrap" }}>
                 <div
                   style={{
-                    fontSize: 12,
+                    fontSize: 13,
                     letterSpacing: "0.22em",
                     textTransform: "uppercase",
                     color: C.text,
@@ -2651,7 +2651,7 @@ function PaneHead({
     >
       <div
         style={{
-          fontSize: 12,
+          fontSize: 13,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
           color: C.text,
@@ -2661,7 +2661,7 @@ function PaneHead({
           gap: 8,
         }}
       >
-        <span style={{ color: C.green, opacity: 1, fontSize: 12 }}>//</span>
+        <span style={{ color: C.green, opacity: 1, fontSize: 13 }}>//</span>
         {title}
       </div>
       {linkLabel && (

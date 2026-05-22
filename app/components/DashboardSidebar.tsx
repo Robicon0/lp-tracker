@@ -106,7 +106,7 @@ export default function DashboardSidebar({
   };
 
   const labelStyle: CSSProperties = {
-    fontSize: 10,
+    fontSize: 12,
     letterSpacing: "0.22em",
     textTransform: "uppercase",
     color: C.text,
@@ -119,7 +119,7 @@ export default function DashboardSidebar({
     alignItems: "center",
     gap: 9,
     padding: "7px 18px",
-    fontSize: 14,
+    fontSize: 15,
     color: C.text,
     cursor: "pointer",
     textDecoration: "none",
@@ -337,7 +337,7 @@ function WalletItem({ color, chain }: { color: string; chain: string }) {
     alignItems: "center",
     gap: 9,
     padding: "7px 18px",
-    fontSize: 14,
+    fontSize: 15,
     color: C.text,
     textDecoration: "none",
     letterSpacing: "0.02em",
