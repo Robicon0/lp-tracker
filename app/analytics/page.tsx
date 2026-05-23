@@ -444,6 +444,31 @@ function RangePill({
   );
 }
 
+// ── Skel — shimmer placeholder used across loading sections ───────────────
+// Tiny pill-style div that animates the same `lp-pnl-shimmer` keyframe the
+// LP P&L grid already uses. Width/height come in as props so callers can
+// shape it to match the real value/chart they'll replace. The keyframe is
+// declared in the page-wide <style> block below, so any Skel anywhere on
+// the page picks it up.
+function Skel({ w = 80, h = 20, r = 3, style }: { w?: number | string; h?: number | string; r?: number; style?: CSSProperties }) {
+  return (
+    <div
+      aria-label="Loading"
+      style={{
+        width: w,
+        height: h,
+        borderRadius: r,
+        background: "rgba(255,255,255,0.04)",
+        animation: "lp-pnl-shimmer 1.4s linear infinite",
+        backgroundImage:
+          "linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.02) 100%)",
+        backgroundSize: "200% 100%",
+        ...style,
+      }}
+    />
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 export default function Analytics() {
   const { positions, isLoading } = usePositions();
@@ -817,18 +842,14 @@ export default function Analytics() {
     return s;
   }, [positions, lendingPositions]);
 
-  // ── Loading / empty states ─────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
-        <TerminalNavbar />
-        <div style={{ padding: 40 }}>
-          <h1 style={{ fontSize: 28, color: C.textWhite }}>Analytics</h1>
-          <p style={{ color: C.text, marginTop: 8 }}>Loading positions…</p>
-        </div>
-      </div>
-    );
-  }
+  // ── Empty / no-wallet state ────────────────────────────────────────────────
+  // NOTE: the previous `if (isLoading) return <Loading>` gate that blocked
+  // the entire page until positions arrived is REMOVED. Page hero + section
+  // frames now render instantly; per-section data shows shimmer skeletons
+  // (`<Skel />`) until its specific source resolves, so the user sees the
+  // page populate progressively rather than waiting on the slowest RPC.
+  // The no-wallet gate below stays — without a wallet there's literally
+  // nothing to compute.
 
   if (mounted && !hasWallet) {
     return (
@@ -883,6 +904,7 @@ export default function Analytics() {
         @keyframes _spin   { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
         @keyframes _pulse  { 0%,100%{opacity:1} 50%{opacity:0.25} }
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
         .a-row:hover td { background: rgba(255,255,255,0.012); }
         /* Toggle styling is now 100% inline on every button (RangePill,
@@ -1002,11 +1024,13 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Total Portfolio
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
-                  {fmtCompact(totalPortfolioValue)}
-                </div>
+                {isLoading ? <Skel w={120} h={28} /> : (
+                  <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                    {fmtCompact(totalPortfolioValue)}
+                  </div>
+                )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}
+                  {isLoading ? <Skel w={140} h={11} /> : <>LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}</>}
                 </div>
               </div>
 
@@ -1015,18 +1039,20 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Daily Income
                 </div>
-                <div
-                  style={{
-                    fontSize: 28, fontWeight: 700,
-                    color: totalDailyIncome > 0 ? C.green : C.text,
-                    fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                    textShadow: totalDailyIncome > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
-                  }}
-                >
-                  {totalDailyIncome > 0 ? `+${fmt$(totalDailyIncome)}` : "$0.00"}
-                </div>
+                {isLoading ? <Skel w={100} h={28} /> : (
+                  <div
+                    style={{
+                      fontSize: 28, fontWeight: 700,
+                      color: totalDailyIncome > 0 ? C.green : C.text,
+                      fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                      textShadow: totalDailyIncome > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                    }}
+                  >
+                    {totalDailyIncome > 0 ? `+${fmt$(totalDailyIncome)}` : "$0.00"}
+                  </div>
+                )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions"}
+                  {isLoading ? <Skel w={120} h={11} /> : (totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions")}
                 </div>
               </div>
 
@@ -1035,11 +1061,13 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Unclaimed Fees
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
-                  {fmt$(totalLpFees)}
-                </div>
+                {isLoading ? <Skel w={100} h={28} /> : (
+                  <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                    {fmt$(totalLpFees)}
+                  </div>
+                )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {positions.filter((p) => p.fees > 0).length} positions with fees
+                  {isLoading ? <Skel w={140} h={11} /> : `${positions.filter((p) => p.fees > 0).length} positions with fees`}
                 </div>
               </div>
 
@@ -1092,6 +1120,14 @@ export default function Analytics() {
                     : aprView === "weekly" ? "/week"
                     : aprView === "monthly" ? "/mo"
                     : "/year";
+                  if (isLoading || activityLoading) {
+                    return (
+                      <>
+                        <Skel w={100} h={28} />
+                        <div style={{ marginTop: 6 }}><Skel w={120} h={11} /></div>
+                      </>
+                    );
+                  }
                   return (
                     <>
                       <div style={{
@@ -1115,20 +1151,29 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Health Score
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
-                  {healthScore != null ? healthScore : "--"}
-                  <span style={{ fontSize: 15, color: C.text, marginLeft: 4 }}>/100</span>
-                </div>
-                <div style={{ width: "100%", height: 2, background: C.border, marginTop: 10 }}>
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${healthScore != null ? Math.max(0, Math.min(100, healthScore)) : 0}%`,
-                      background: `linear-gradient(90deg, ${C.green}, ${C.cyan})`,
-                      transition: "width 1.2s ease",
-                    }}
-                  />
-                </div>
+                {isLoading || activityLoading ? (
+                  <>
+                    <Skel w={80} h={28} />
+                    <div style={{ marginTop: 10 }}><Skel w="100%" h={2} r={0} /></div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: C.cyan, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                      {healthScore != null ? healthScore : "--"}
+                      <span style={{ fontSize: 15, color: C.text, marginLeft: 4 }}>/100</span>
+                    </div>
+                    <div style={{ width: "100%", height: 2, background: C.border, marginTop: 10 }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${healthScore != null ? Math.max(0, Math.min(100, healthScore)) : 0}%`,
+                          background: `linear-gradient(90deg, ${C.green}, ${C.cyan})`,
+                          transition: "width 1.2s ease",
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1163,18 +1208,20 @@ export default function Analytics() {
                     <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
                       {c.label}
                     </div>
-                    <div
-                      style={{
-                        fontSize: 28, fontWeight: 700,
-                        color: c.green ? C.green : C.textBright,
-                        fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                        textShadow: c.green ? "0 0 18px rgba(0,255,65,0.22)" : "none",
-                      }}
-                    >
-                      {c.val}
-                    </div>
+                    {activityLoading ? <Skel w={100} h={28} /> : (
+                      <div
+                        style={{
+                          fontSize: 28, fontWeight: 700,
+                          color: c.green ? C.green : C.textBright,
+                          fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                          textShadow: c.green ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                        }}
+                      >
+                        {c.val}
+                      </div>
+                    )}
                     <div style={{ fontSize: 11, marginTop: 6, letterSpacing: "0.06em", color: c.subUp ? C.green : C.text }}>
-                      {c.sub}
+                      {activityLoading ? <Skel w={90} h={11} /> : c.sub}
                     </div>
                   </div>
                 ))}
@@ -1559,7 +1606,17 @@ export default function Analytics() {
                   </div>
                 </div>
 
-                {incomeWindow.total > 0 ? (
+                {isLoading ? (
+                  <div className="ana-income-source-inner" style={{ display: "flex", gap: 24, alignItems: "center" }}>
+                    {/* Donut placeholder + legend skeleton */}
+                    <Skel w={150} h={150} r={75} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
+                      <Skel w="100%" h={16} />
+                      <Skel w="100%" h={16} />
+                      <Skel w="60%" h={14} />
+                    </div>
+                  </div>
+                ) : incomeWindow.total > 0 ? (
                   <div className="ana-income-source-inner" style={{ display: "flex", gap: 24, alignItems: "center" }}>
                     <div style={{ width: 150, height: 150, flexShrink: 0, position: "relative" }}>
                       <ResponsiveContainer width="100%" height="100%">
@@ -1665,7 +1722,17 @@ export default function Analytics() {
                   </div>
                 </div>
 
-                {incomeByChain.length > 0 ? (
+                {isLoading ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={`chain-skel-${i}`} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <Skel w={70} h={14} />
+                        <div style={{ flex: 1 }}><Skel w="100%" h={10} /></div>
+                        <Skel w={60} h={12} />
+                      </div>
+                    ))}
+                  </div>
+                ) : incomeByChain.length > 0 ? (
                   (() => {
                     const days = chainPeriod === "1D" ? 1 : chainPeriod === "7D" ? 7 : 30;
                     const rows = [...incomeByChain].map((c) => ({ chain: c.chain, period: c.daily * days, daily: c.daily })).sort((a, b) => b.period - a.period);
@@ -1854,6 +1921,29 @@ export default function Analytics() {
                     </tr>
                   </thead>
                   <tbody>
+                    {/* Skeleton rows while positions / activity loads.
+                        Only shown when we have no real rows yet to avoid
+                        flashing skeletons on top of real data. */}
+                    {(isLoading || activityLoading) && sortedPositions.length === 0 && (
+                      Array.from({ length: 4 }).map((_, i) => (
+                        <tr key={`skel-${i}`} style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <td className="ana-col-position" style={{ padding: "12px 16px 12px 26px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <Skel w={30} h={30} r={2} />
+                              <Skel w={120} h={14} />
+                            </div>
+                          </td>
+                          <td style={{ padding: "12px 16px" }}><Skel w={80} h={12} /></td>
+                          <td style={{ padding: "12px 16px" }}><Skel w={60} h={12} /></td>
+                          <td className="ana-col-value" style={{ padding: "13px 16px", textAlign: "right" }}><Skel w={70} h={14} style={{ marginLeft: "auto" }} /></td>
+                          <td style={{ padding: "13px 16px", textAlign: "right" }}><Skel w={50} h={14} style={{ marginLeft: "auto" }} /></td>
+                          <td className="ana-col-daily" style={{ padding: "13px 16px", textAlign: "right" }}><Skel w={50} h={14} style={{ marginLeft: "auto" }} /></td>
+                          <td className="ana-col-fees" style={{ padding: "13px 16px", textAlign: "right" }}><Skel w={50} h={14} style={{ marginLeft: "auto" }} /></td>
+                          <td className="ana-col-status" style={{ padding: "12px 16px", textAlign: "center" }}><Skel w={70} h={18} style={{ margin: "0 auto" }} /></td>
+                          <td className="ana-col-analyze" style={{ padding: "12px 26px 12px 16px", textAlign: "right" }}><Skel w={60} h={22} style={{ marginLeft: "auto" }} /></td>
+                        </tr>
+                      ))
+                    )}
                     {sortedPositions.map((p) => {
                       const protoColor = PROTOCOL_COLORS[p.protocol] ?? C.text;
                       const aprColor = p.displayAPR >= 20 ? C.green : p.displayAPR >= 5 ? C.amber : p.displayAPR > 0 ? C.red : C.text;
@@ -1963,7 +2053,7 @@ export default function Analytics() {
                         </tr>
                       );
                     })}
-                    {sortedPositions.length === 0 && (
+                    {!isLoading && !activityLoading && sortedPositions.length === 0 && (
                       <tr>
                         <td colSpan={9} style={{ padding: 32, textAlign: "center", color: C.text, fontSize: 14 }}>
                           No active LP positions
@@ -2020,9 +2110,33 @@ export default function Analytics() {
             </SectionFrame>
 
             {/* ── EARNING FLOWS (recent fee claims) ──────────────────────── */}
-            {feeIncome.recent.length > 0 && (
+            {(activityLoading || feeIncome.recent.length > 0) && (
               <SectionFrame title="Earning Flows" sub="Recent on-chain fee claim events">
                 <div style={{ display: "flex", flexDirection: "column" }}>
+                  {/* Skeleton rows while activity loads and we have no
+                      real fee-claim events yet. */}
+                  {activityLoading && feeIncome.recent.length === 0 && (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <div
+                        key={`flow-skel-${i}`}
+                        className="ana-flow-row"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 14,
+                          padding: "12px 28px",
+                          borderBottom: `1px solid ${C.border}`,
+                        }}
+                      >
+                        <Skel w={6} h={6} r={0} />
+                        <Skel w={100} h={11} />
+                        <Skel w={60} h={18} />
+                        <div style={{ flex: 1 }}><Skel w={80} h={10} /></div>
+                        <Skel w={80} h={14} />
+                        <Skel w={64} h={11} />
+                      </div>
+                    ))
+                  )}
                   {feeIncome.recent.map((e, i) => {
                     const color = PROTOCOL_COLORS[e.protocol] ?? C.green;
                     const mins = Math.max(1, Math.floor((Date.now() - e.ts) / 60_000));
