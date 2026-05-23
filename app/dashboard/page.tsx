@@ -635,6 +635,7 @@ export default function Dashboard() {
         .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
         .scroll-thin::-webkit-scrollbar-thumb { background: ${C.borderHi}; }
         .anim-fade { animation: _fadeUp 0.45s ease both; }
+        @media (max-width: 768px) { .docs-help-btn { display: none !important; } }
       `}</style>
 
       {/* Scanline overlay */}
@@ -871,6 +872,32 @@ export default function Dashboard() {
               </div>
 
               <div style={{ display: "flex", gap: 8, alignSelf: "flex-end" }}>
+                <a
+                  href="/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Documentation"
+                  aria-label="Documentation"
+                  className="term-btn docs-help-btn"
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${C.borderHi}`,
+                    color: C.text,
+                    width: 32,
+                    height: 32,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.05em",
+                    cursor: "pointer",
+                    fontFamily: FONT,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textDecoration: "none",
+                  }}
+                >
+                  ?
+                </a>
                 <button
                   type="button"
                   className="term-btn"

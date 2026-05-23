@@ -918,10 +918,12 @@ export default function Analytics() {
         .analyze-btn:hover { border-color: ${C.cyan}; color: ${C.cyan}; background: ${C.cyanFaint}; }
         .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
         .scroll-thin::-webkit-scrollbar-thumb { background: ${C.borderHi}; }
+        .docs-help-btn:hover { color: ${C.green} !important; border-color: ${C.green} !important; background: ${C.bg2} !important; }
 
         /* ── Mobile layout (max-width: 768px) ────────────────────────────
            CSS-only — no logic, no data, no functionality changes. */
         @media (max-width: 768px) {
+          .docs-help-btn { display: none !important; }
           .ana-lp-pnl { grid-template-columns: 1fr 1fr !important; }
           .ana-income-pair { grid-template-columns: 1fr !important; }
           .ana-income-source-inner { flex-direction: column !important; }
@@ -987,8 +989,38 @@ export default function Analytics() {
               padding: "26px 32px 22px",
               borderBottom: `1px solid ${C.border}`,
               animation: "_fadeUp 0.4s ease both",
+              position: "relative",
             }}
           >
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Documentation"
+              aria-label="Documentation"
+              className="docs-help-btn"
+              style={{
+                position: "absolute",
+                top: 26,
+                right: 32,
+                background: "transparent",
+                border: `1px solid ${C.borderHi}`,
+                color: C.text,
+                width: 32,
+                height: 32,
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: FONT,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                textDecoration: "none",
+                cursor: "pointer",
+                transition: "color 0.15s, border-color 0.15s, background 0.15s",
+              }}
+            >
+              ?
+            </a>
             <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
               // <span style={{ color: C.green }}>analytics</span> · performance insights &amp; attribution
             </div>

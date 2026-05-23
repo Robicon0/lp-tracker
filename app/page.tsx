@@ -388,7 +388,7 @@ export default async function Home() {
           >
             GitHub
           </a>
-          <Link href="/about" className="hover:text-[#e8e8e8] transition-colors">
+          <Link href="/docs" className="hover:text-[#e8e8e8] transition-colors">
             Docs
           </Link>
           <a
