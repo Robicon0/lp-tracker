@@ -17,7 +17,10 @@ export interface ExcludedPosition {
 
 export interface LpPnlResult {
   initialValue: number;
+  /** Mark-to-market value of OPEN positions only (closed positions contribute 0). */
   currentValue: number;
+  /** Realised value at close, summed across CLOSED positions only (open positions contribute 0). */
+  closingValue: number;
   feesCollected: number;
   feesUnclaimed: number;
   ilUSD: number;
@@ -48,7 +51,7 @@ export interface LpPnlResult {
 }
 
 const EMPTY: LpPnlResult = {
-  initialValue: 0, currentValue: 0, feesCollected: 0, feesUnclaimed: 0,
+  initialValue: 0, currentValue: 0, closingValue: 0, feesCollected: 0, feesUnclaimed: 0,
   ilUSD: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
   errored: 0, errorReasons: [], isLoading: false,
   perPosition: {},
@@ -510,7 +513,7 @@ function aggregate(
   positionMeta: Map<string, PositionMeta>,
   unsupportedRejections: ExcludedPosition[],
 ): LpPnlResult {
-  let initialValue = 0, currentValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
+  let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
   const errorReasons = new Set<string>();
   // Per-position record built from the same map the totals come from — any
@@ -522,7 +525,13 @@ function aggregate(
   for (const [id, r] of resultsMap) {
     if (r.ok) {
       initialValue += r.data.initialValue;
+      // currentValue is naturally 0 for closed positions (computePositionPnL
+      // sets it to 0 on the closed path), and closingValue is naturally 0 for
+      // open positions. Summing both into separate fields keeps the semantics
+      // clean: currentValue = "what you have now", closingValue = "what you
+      // realised at close". Net P&L = currentValue + closingValue + fees − initial.
       currentValue += r.data.currentValue;
+      closingValue += r.data.closingValue;
       feesCollected += r.data.feesCollected;
       feesUnclaimed += r.data.feesUnclaimed;
       ilUSD += r.data.ilUSD;
@@ -551,11 +560,11 @@ function aggregate(
   // resultsMap, but the user still deserves to see them in the warning.
   excludedPositions.push(...unsupportedRejections);
 
-  const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
+  const netPnl = currentValue + closingValue + feesCollected + feesUnclaimed - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
 
   return {
-    initialValue, currentValue, feesCollected, feesUnclaimed,
+    initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
     ilUSD, netPnl, netPnlPct, included, excluded,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
@@ -594,26 +603,25 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
   }, []);
 
   useEffect(() => {
-    // Analytics shows the CURRENT state of the portfolio — closed positions
-    // contribute nothing to today's totals (Initial / Current / Fees / IL / Net P&L).
-    // Filter them out before any aggregation. Closed = status "Closed" OR value === 0.
+    // Analytics now shows BOTH current state AND lifetime realised P&L —
+    // CLOSED positions are included in the aggregation so their realised
+    // initialValue / closingValue / feesCollected (and realised IL at close)
+    // contribute to the totals. Net P&L = currentValue + closingValue + fees
+    // − initialValue captures both unrealised (open) and realised (closed)
+    // performance. Zero-value OPEN positions are still excluded — they have
+    // no meaningful state to compute.
     const seen = new Set<string>();
     const meta = new Map<string, PositionMeta>();
     const unsupported: ExcludedPosition[] = [];
 
     const eligible = positions.filter((p) => {
-      // Track metadata for every active position upfront — covers both the
-      // eligible ones (used during aggregate for excluded-warning text) and
-      // the unsupported ones (rejected below but still surfaced).
-      if (p.status !== "Closed" && p.value > 0) {
-        meta.set(p.id, { pair: p.pair, protocol: p.protocol, chain: p.chain });
-      }
+      const isClosed = p.status === "Closed";
 
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) {
         // Surface unsupported protocols (Cetus, Momentum, etc.) ONLY if the
         // position is active — closed/zero-value rejected ones aren't
         // interesting to flag. Prevents the warning from listing dust.
-        if (p.status !== "Closed" && p.value > 0) {
+        if (!isClosed && p.value > 0) {
           unsupported.push({
             id: p.id, pair: p.pair, protocol: p.protocol, chain: p.chain,
             reason: userFriendlyReason("unsupported protocol", p.protocol),
@@ -621,10 +629,15 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
         }
         return false;
       }
-      if (p.status === "Closed") return false;
-      if (p.value <= 0) return false;
+      // Reject zero-value OPEN positions (no state). Closed positions with
+      // pos.value === 0 are EXPECTED (their liquidity is fully withdrawn) —
+      // accept them so their realised closingValue + feesCollected contribute.
+      if (!isClosed && p.value <= 0) return false;
       if (seen.has(p.id)) return false;
       seen.add(p.id);
+      // Track metadata for every eligible position (open + closed) so the
+      // excluded-warning banner can reference them by name if their fetch fails.
+      meta.set(p.id, { pair: p.pair, protocol: p.protocol, chain: p.chain });
       return true;
     });
 
@@ -632,14 +645,29 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     unsupportedRejectionsRef.current = unsupported;
 
     // Evict any prior results / inflight markers for positions that are no
-    // longer eligible (e.g. one transitioned to Closed). Without this, their
-    // stale initialValue / currentValue / IL would keep contributing to totals.
+    // longer eligible (e.g. one filtered out as zero-value open). Without
+    // this, their stale initialValue / currentValue / IL would keep
+    // contributing to totals.
     const eligibleIds = new Set(eligible.map((p) => p.id));
     for (const id of Array.from(resultsRef.current.keys())) {
       if (!eligibleIds.has(id)) resultsRef.current.delete(id);
     }
     for (const id of Array.from(inflightRef.current)) {
       if (!eligibleIds.has(id)) inflightRef.current.delete(id);
+    }
+
+    // Evict cached results whose `isClosed` no longer matches the current
+    // position status. Happens when a position transitions Open → Closed
+    // (or vice versa) between refreshes — the cached `currentValue` /
+    // `closingValue` were computed for the wrong state and need recomputing.
+    // We don't re-fetch events (those are still valid); fetchAndCompute will
+    // hit its localStorage event cache and re-run computePositionPnL with
+    // the updated isClosed flag.
+    for (const p of eligible) {
+      const cached = resultsRef.current.get(p.id);
+      if (cached && cached.ok && cached.data.isClosed !== (p.status === "Closed")) {
+        resultsRef.current.delete(p.id);
+      }
     }
 
     if (eligible.length === 0) {

@@ -1436,8 +1436,16 @@ export default function Analytics() {
                   // activity route's usdAtTime). feesUnclaimed uses CURRENT
                   // price (computed from pos.fees, which IS current-mark).
                   const lifetimeFeesCollected = feeIncome.totalAllTime;
+                  // Net P&L = currentValue (open mark-to-market)
+                  //        + closingValue (realised at close for closed positions)
+                  //        + lifetimeFeesCollected (all-time, includes closed)
+                  //        + feesUnclaimed (pending on open positions)
+                  //        − initialValue (lifetime deposits, includes closed)
+                  // useLpPnl now includes closed positions in the aggregation —
+                  // closingValue captures the value withdrawn at close so the
+                  // realised price-action P&L isn't silently dropped.
                   const adjustedNetPnl =
-                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
+                    lpPnl.currentValue + lpPnl.closingValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
                   const adjustedNetPnlPct =
                     lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
                   return ([
@@ -1466,9 +1474,9 @@ export default function Analytics() {
                     label: "Imperm. Loss",
                     val: fmt$Signed(-lpPnl.ilUSD),
                     color: -lpPnl.ilUSD > 0 ? C.red : C.green,
-                    sub: "Σ(HODL − Current), open only",
+                    sub: "Σ(HODL − live), open + closed",
                     tooltip:
-                      "Impermanent Loss measures how much less your deposit is worth compared to simply holding the tokens. Calculated as: IL = 2√(price_ratio) / (1 + price_ratio) − 1, where price_ratio is the change in relative token prices since deposit. Shown as a positive number (cost to you).",
+                      "Impermanent Loss measures how much less your deposit is worth compared to simply holding the tokens. Calculated as: IL = 2√(price_ratio) / (1 + price_ratio) − 1, where price_ratio is the change in relative token prices since deposit. Shown as a positive number (cost to you). Includes unrealised IL on open positions plus realised IL at close on closed positions.",
                   },
                   {
                     label: "Net P&L",

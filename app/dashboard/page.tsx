@@ -1789,9 +1789,11 @@ export default function Dashboard() {
                       // P&L for this row comes straight from useLpPnl.perPosition
                       // — same numbers that aggregate into the analytics page
                       // totals, so summing every visible row's pnlUsd yields
-                      // EXACTLY lpPnl.netPnl (for non-closed positions; closed
-                      // are excluded by useLpPnl's eligibility filter and fall
-                      // through to the fees-only / "—" placeholder below).
+                      // EXACTLY lpPnl.netPnl across open + closed positions.
+                      // Closed positions now get a realised P&L (closingValue
+                      // + feesCollected − initialValue) from computePositionPnL's
+                      // closed-path; the placeholder below only fires for
+                      // positions whose fetch failed or returned no events.
                       const pnlData = lpPnl.perPosition[pos.id];
                       const pnlUsd: number | null = pnlData ? pnlData.netPnlUSD : null;
                       const pnlPct: number | null = pnlData ? pnlData.netPnlPct : null;
