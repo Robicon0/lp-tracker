@@ -159,8 +159,22 @@ async function fetchLogsViaEtherscan(
       if (r.status === '0') {
         const msg = String(r.message ?? '');
         if (msg.includes('No records')) continue; // legitimate empty result for this topic
-        // Any other status=0 (rate limit, missing key, error) → fall back.
-        console.warn(`[hyperswap/activity] source=etherscan FAIL "${msg}" — falling back to DRPC`);
+        // Invalid API Key is loud because it silently sinks every call to Tier 2 DRPC
+        // and looks identical to a benign rate-limit fallback in the logs. Surface
+        // it distinctly so a misconfigured key in .env.local / Vercel env is
+        // diagnosable from a single Vercel function log entry.
+        const resultMsg = typeof r.result === 'string' ? r.result : '';
+        const isInvalidKey = msg === 'NOTOK' && resultMsg.toLowerCase().includes('invalid api key');
+        if (isInvalidKey) {
+          console.error(
+            '[hyperswap/activity] source=etherscan INVALID_API_KEY — ETHERSCAN_API_KEY ' +
+            'is rejected by Etherscan V2. Check for duplicate keys in .env.local (dotenv ' +
+            'keeps the LAST definition) and on Vercel. Tier 2 DRPC will run but cannot ' +
+            'reach blocks older than its 5M scan window — closed positions will see 0 events.',
+          );
+        } else {
+          console.warn(`[hyperswap/activity] source=etherscan FAIL "${msg}" — falling back to DRPC`);
+        }
         return null;
       }
       if (Array.isArray(r.result)) all.push(...(r.result as RawLog[]));

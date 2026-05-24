@@ -53,7 +53,15 @@ const ACTIVITY_PROTOCOLS = new Set([
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function cacheKey(id: string) { return `analytics-activity-${id}`; }
+// v2 key: invalidates entries cached during the window when a duplicate
+// ETHERSCAN_API_KEY line in .env.local caused the second (invalid) key to
+// override the first (valid) one — dotenv keeps the LAST definition. The
+// hyperswap activity route's Tier 1 (Etherscan) silently failed on every
+// call and Tier 2 (DRPC) couldn't reach deposit blocks older than the 5M
+// scan window for closed positions, so closed HyperEVM positions cached
+// here as `events: []`. Bumping the key forces a fresh fetch with the
+// now-valid key so analytics lifetime totals pick up those fee claims.
+function cacheKey(id: string) { return `analytics-activity-v2-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {
