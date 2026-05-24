@@ -28,7 +28,21 @@ export interface PositionPnLInput {
 
 export type PositionPnLStatus =
   | { ok: true; data: PositionPnLData }
-  | { ok: false; reason: 'no_deposits' | 'missing_deposit_prices' | 'missing_current_prices' };
+  | { ok: false; reason: 'no_deposits' | 'missing_deposit_prices' | 'missing_current_prices' | 'value_overflow' };
+
+// Sanity ceiling for any single position's USD-denominated metric.
+// $10M per position is comfortably above any realistic retail LP — anything
+// over this is almost certainly raw-uint256 leaking through a decimals mismatch
+// or a malformed event payload. Whole position is rejected rather than letting
+// a single garbage value poison the aggregated totals (Total Deposited / IL /
+// Net P&L showing trillions of dollars). Applies to initialValue, currentValue,
+// closingValue, and |ilUSD| — fees are NOT capped here (they go through the
+// feeIncome pipeline which has its own validation per event).
+const SINGLE_POSITION_USD_CEILING = 10_000_000;
+
+function withinSanityCeiling(v: number): boolean {
+  return Number.isFinite(v) && Math.abs(v) <= SINGLE_POSITION_USD_CEILING;
+}
 
 export interface PositionPnLData {
   initialValue: number;
@@ -115,6 +129,13 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       const p1 = d.price1AtTime ?? 0;
       initialValue += d.amount0 * p0 + d.amount1 * p1;
     }
+  }
+
+  // Sanity ceiling — reject the whole position if initialValue is non-finite
+  // or implausibly large (decimals mismatch / raw uint256 leak / malformed event).
+  // Better to exclude one position than to poison Total Deposited with trillions.
+  if (!withinSanityCeiling(initialValue)) {
+    return { ok: false, reason: 'value_overflow' };
   }
 
   // HODL basis — sum deposited amounts.
@@ -206,11 +227,22 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       }
     }
 
+    // Sanity ceiling — closing value can leak raw uint256 just like initial
+    // value (decimals mismatch / malformed withdrawal log). Reject the whole
+    // position rather than let ~trillions land in aggregated closingValue.
+    if (!withinSanityCeiling(closingValue) || !withinSanityCeiling(hodlValue)) {
+      return { ok: false, reason: 'value_overflow' };
+    }
+
     const netPnlUSD = closingValue + feesCollected - initialValue;
     const netPnlPct = initialValue > 0 ? (netPnlUSD / initialValue) * 100 : 0;
 
     const ilUSD = ilAvailable ? closingValue - hodlValue : 0;
     const ilPct = ilAvailable ? (closingValue / hodlValue - 1) * 100 : 0;
+
+    if (!withinSanityCeiling(ilUSD) || !withinSanityCeiling(netPnlUSD)) {
+      return { ok: false, reason: 'value_overflow' };
+    }
 
     return {
       ok: true,
@@ -238,6 +270,18 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
 
   const ilUSD = ilAvailable ? currentValue - hodlValue : 0;
   const ilPct = ilAvailable ? (currentValue / hodlValue - 1) * 100 : 0;
+
+  // Sanity ceiling — open path. `currentValue` comes from pos.value (positions
+  // route) so should be safe, but hodl/IL/netPnl could still pick up garbage
+  // from a bad initialValue path. Defensive check before returning.
+  if (
+    !withinSanityCeiling(currentValue) ||
+    !withinSanityCeiling(hodlValue) ||
+    !withinSanityCeiling(ilUSD) ||
+    !withinSanityCeiling(netPnlUSD)
+  ) {
+    return { ok: false, reason: 'value_overflow' };
+  }
 
   return {
     ok: true,

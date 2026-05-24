@@ -73,6 +73,7 @@ function userFriendlyReason(reason: string, protocol: string): string {
   }
   if (reason === "missing_deposit_prices") return "Deposit price data unavailable";
   if (reason === "missing_current_prices") return "Current price data unavailable";
+  if (reason === "value_overflow") return "Calculation overflow — implausible USD value (likely decimals mismatch)";
   if (reason === "no activity URL") return "P&L calculation not yet supported for this protocol";
   if (reason === "unsupported protocol") return "P&L calculation not yet supported for this protocol";
   if (reason.startsWith("HTTP ")) return `Failed to load — ${reason} after 3 attempts`;
@@ -522,21 +523,58 @@ function aggregate(
   const perPosition: Record<string, PositionPnLData> = {};
   const excludedPositions: ExcludedPosition[] = [];
 
+  // Belt-and-braces overflow guard at the aggregation boundary. computePositionPnL
+  // already rejects implausible values with `value_overflow`, but if a bad number
+  // ever sneaks past (e.g. a future protocol path returns ok:true with a raw
+  // uint256 in initialValue), this second gate prevents trillions from showing
+  // up in Total Deposited / IL / Net P&L. Threshold matches positionPnl.ts's
+  // SINGLE_POSITION_USD_CEILING — kept duplicated rather than imported so the
+  // hook is self-contained.
+  const AGG_USD_CEILING = 10_000_000;
+  const isPlausible = (v: number) => Number.isFinite(v) && Math.abs(v) <= AGG_USD_CEILING;
+
   for (const [id, r] of resultsMap) {
     if (r.ok) {
-      initialValue += r.data.initialValue;
+      const d = r.data;
+      const componentsOk =
+        isPlausible(d.initialValue) &&
+        isPlausible(d.currentValue) &&
+        isPlausible(d.closingValue) &&
+        isPlausible(d.ilUSD) &&
+        isPlausible(d.netPnlUSD);
+      if (!componentsOk) {
+        // Treat as an excluded position with a calculation-overflow reason.
+        // We DO NOT touch feesCollected here — fees aggregation lives in the
+        // separate feeIncome pipeline (analytics page) and has its own checks.
+        const meta = positionMeta.get(id);
+        console.error(
+          `[useLpPnl] overflow guard rejected ${id} — ` +
+          `initial=${d.initialValue} current=${d.currentValue} closing=${d.closingValue} ` +
+          `ilUSD=${d.ilUSD} netPnl=${d.netPnlUSD}`,
+        );
+        if (meta) {
+          excludedPositions.push({
+            id, pair: meta.pair, protocol: meta.protocol, chain: meta.chain,
+            reason: userFriendlyReason("value_overflow", meta.protocol),
+          });
+        }
+        excluded += 1;
+        continue;
+      }
+
+      initialValue += d.initialValue;
       // currentValue is naturally 0 for closed positions (computePositionPnL
       // sets it to 0 on the closed path), and closingValue is naturally 0 for
       // open positions. Summing both into separate fields keeps the semantics
       // clean: currentValue = "what you have now", closingValue = "what you
       // realised at close". Net P&L = currentValue + closingValue + fees − initial.
-      currentValue += r.data.currentValue;
-      closingValue += r.data.closingValue;
-      feesCollected += r.data.feesCollected;
-      feesUnclaimed += r.data.feesUnclaimed;
-      ilUSD += r.data.ilUSD;
+      currentValue += d.currentValue;
+      closingValue += d.closingValue;
+      feesCollected += d.feesCollected;
+      feesUnclaimed += d.feesUnclaimed;
+      ilUSD += d.ilUSD;
       included += 1;
-      perPosition[id] = r.data;
+      perPosition[id] = d;
       if (r.fallback) estimatedPositionCount += 1;
     } else {
       const meta = positionMeta.get(id);
