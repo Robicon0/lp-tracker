@@ -65,7 +65,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 //     now retries failed topics individually and aggregates partial successes;
 //     this bump forces a fresh fetch so browsers with empty cached entries
 //     pick up the new behaviour.
-function cacheKey(id: string) { return `analytics-activity-v3-${id}`; }
+function cacheKey(id: string) { return `analytics-activity-v4-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

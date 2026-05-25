@@ -30,7 +30,7 @@ const PROTOCOL_NFT_MANAGERS: Record<string, string> = {
 // v2 key: invalidates entries cached before tickLower/tickUpper were passed
 // through for V3 price derivation.
 function cacheKey(positionId: string) {
-  return `hyperswap-activity-v2-${positionId}`;
+  return `hyperswap-activity-v3-${positionId}`;
 }
 
 function readCache(positionId: string): HyperSwapActivityData | null {
