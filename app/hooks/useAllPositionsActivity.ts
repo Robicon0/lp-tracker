@@ -53,15 +53,19 @@ const ACTIVITY_PROTOCOLS = new Set([
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-// v2 key: invalidates entries cached during the window when a duplicate
-// ETHERSCAN_API_KEY line in .env.local caused the second (invalid) key to
-// override the first (valid) one — dotenv keeps the LAST definition. The
-// hyperswap activity route's Tier 1 (Etherscan) silently failed on every
-// call and Tier 2 (DRPC) couldn't reach deposit blocks older than the 5M
-// scan window for closed positions, so closed HyperEVM positions cached
-// here as `events: []`. Bumping the key forces a fresh fetch with the
-// now-valid key so analytics lifetime totals pick up those fee claims.
-function cacheKey(id: string) { return `analytics-activity-v2-${id}`; }
+// v3 key: invalidates entries cached during two prior buggy windows —
+//   v1→v2 (commit ca03ce2): a duplicate ETHERSCAN_API_KEY line in .env.local
+//     caused the second (invalid) key to override the first (valid) one —
+//     dotenv keeps the LAST definition. The hyperswap activity route's Tier 1
+//     (Etherscan) silently failed on every call.
+//   v2→v3 (this commit): Etherscan free tier is 5 req/sec; analytics fetches
+//     N positions × 3 topic calls in parallel, so a single rate-limited topic
+//     call discarded the OTHER successful topic results for that position and
+//     tanked it to DRPC, which can't reach old closed positions. The route
+//     now retries failed topics individually and aggregates partial successes;
+//     this bump forces a fresh fetch so browsers with empty cached entries
+//     pick up the new behaviour.
+function cacheKey(id: string) { return `analytics-activity-v3-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

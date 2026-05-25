@@ -116,9 +116,71 @@ async function fetchLogsChunk(nftManager: string, tokenIdHex: string, from: numb
   return (result.result as RawLog[]) ?? [];
 }
 
+// One Etherscan topic call — separated from the parent so each topic can be
+// retried INDEPENDENTLY and a transient rate-limit on one topic doesn't tank
+// the other two. Returns one of:
+//   { ok: true, logs }        — got logs (possibly empty if "No records found")
+//   { ok: false, reason }     — retryable failure (rate limit, timeout, etc.)
+//   { ok: false, reason, invalidKey: true } — fatal (no point retrying)
+async function fetchOneEtherscanTopic(
+  nftManager: string,
+  tokenIdHex: string,
+  topic0: string,
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<{ ok: true; logs: RawLog[] } | { ok: false; reason: string; invalidKey?: boolean }> {
+  const u = new URL(ETHERSCAN_V2_URL);
+  u.searchParams.set('chainid', ETHERSCAN_CHAIN_ID);
+  u.searchParams.set('module', 'logs');
+  u.searchParams.set('action', 'getLogs');
+  u.searchParams.set('address', nftManager);
+  u.searchParams.set('topic0', topic0);
+  u.searchParams.set('topic1', tokenIdHex);
+  u.searchParams.set('topic0_1_opr', 'and');
+  u.searchParams.set('fromBlock', '0');
+  u.searchParams.set('toBlock', 'latest');
+  u.searchParams.set('apikey', apiKey);
+
+  try {
+    const res = await fetch(u.toString(), { signal });
+    const json: { status?: string; message?: string; result?: unknown } = await res.json();
+    if (json.status === '1') {
+      return { ok: true, logs: Array.isArray(json.result) ? (json.result as RawLog[]) : [] };
+    }
+    // status === '0'
+    const msg = String(json.message ?? '');
+    if (msg.includes('No records')) return { ok: true, logs: [] }; // legitimate empty
+    const resultStr = typeof json.result === 'string' ? json.result : '';
+    const invalidKey = msg === 'NOTOK' && resultStr.toLowerCase().includes('invalid api key');
+    return { ok: false, reason: resultStr || msg || 'unknown', invalidKey };
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    return { ok: false, reason: isAbort ? 'timeout' : 'fetch error' };
+  }
+}
+
 // TIER 1: Etherscan V2 getLogs. One call per topic0 (Etherscan requires topic0
-// in the query — there's no "any topic" wildcard). Returns null on rate-limit,
-// timeout, no-api-key, or any error so the caller falls back to DRPC.
+// in the query — there's no "any topic" wildcard). Each topic is fetched
+// independently, retried ONCE after a 1s backoff on transient failure.
+//
+// **Per-topic criticality** — partial success is only safe for topics whose
+// absence causes MISSING data (not WRONG data):
+//   - IncreaseLiquidity (optional): if dropped, deposit history is missing.
+//     computePositionPnL excludes the position but no fees are mis-valued.
+//   - DecreaseLiquidity (REQUIRED): if dropped, the Collect-vs-Decrease tx
+//     pairing in the parent route can't subtract withdrawal amounts from
+//     Collect events, so Collect amounts in close txs leak into fee totals
+//     (e.g. position 388173 fees inflated from $68 → $8,196 in testing).
+//     Decrease failure forces full fallback to DRPC.
+//   - Collect (optional): if dropped, fee_claim events are missing but no
+//     other event is mis-valued.
+//
+// Returns null when:
+//   - ETHERSCAN_API_KEY is unset (caller skips to DRPC)
+//   - Any topic returned the "Invalid API Key" signature (key is wrong —
+//     retrying won't help, full DRPC fallback is correct)
+//   - DecreaseLiquidity topic still failed after retry (correctness gate)
+//   - ALL THREE topics still failed after retry
 // "No records found" comes back as status:"0" with that exact message — NOT
 // treated as an error; just means this topic yielded no logs for this position.
 async function fetchLogsViaEtherscan(
@@ -132,55 +194,85 @@ async function fetchLogsViaEtherscan(
   }
 
   const topics = [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT];
+  const topicNames = ['IncreaseLiquidity', 'DecreaseLiquidity', 'Collect'];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ETHERSCAN_TIMEOUT_MS);
 
   try {
-    const calls = topics.map((topic0) => {
-      const u = new URL(ETHERSCAN_V2_URL);
-      u.searchParams.set('chainid', ETHERSCAN_CHAIN_ID);
-      u.searchParams.set('module', 'logs');
-      u.searchParams.set('action', 'getLogs');
-      u.searchParams.set('address', nftManager);
-      u.searchParams.set('topic0', topic0);
-      u.searchParams.set('topic1', tokenIdHex);
-      u.searchParams.set('topic0_1_opr', 'and');
-      u.searchParams.set('fromBlock', '0');
-      u.searchParams.set('toBlock', 'latest');
-      u.searchParams.set('apikey', apiKey);
-      return fetch(u.toString(), { signal: controller.signal }).then((r) => r.json());
-    });
+    // First pass — fire all 3 topic calls in parallel.
+    const firstPass = await Promise.all(
+      topics.map((topic) => fetchOneEtherscanTopic(nftManager, tokenIdHex, topic, apiKey, controller.signal)),
+    );
 
-    const results = await Promise.all(calls);
-    clearTimeout(timer);
-
-    const all: RawLog[] = [];
-    for (const r of results as Array<{ status?: string; message?: string; result?: unknown }>) {
-      if (r.status === '0') {
-        const msg = String(r.message ?? '');
-        if (msg.includes('No records')) continue; // legitimate empty result for this topic
-        // Invalid API Key is loud because it silently sinks every call to Tier 2 DRPC
-        // and looks identical to a benign rate-limit fallback in the logs. Surface
-        // it distinctly so a misconfigured key in .env.local / Vercel env is
-        // diagnosable from a single Vercel function log entry.
-        const resultMsg = typeof r.result === 'string' ? r.result : '';
-        const isInvalidKey = msg === 'NOTOK' && resultMsg.toLowerCase().includes('invalid api key');
-        if (isInvalidKey) {
-          console.error(
-            '[hyperswap/activity] source=etherscan INVALID_API_KEY — ETHERSCAN_API_KEY ' +
-            'is rejected by Etherscan V2. Check for duplicate keys in .env.local (dotenv ' +
-            'keeps the LAST definition) and on Vercel. Tier 2 DRPC will run but cannot ' +
-            'reach blocks older than its 5M scan window — closed positions will see 0 events.',
-          );
-        } else {
-          console.warn(`[hyperswap/activity] source=etherscan FAIL "${msg}" — falling back to DRPC`);
-        }
-        return null;
-      }
-      if (Array.isArray(r.result)) all.push(...(r.result as RawLog[]));
+    // If ANY first-pass call hit "Invalid API Key", abort the whole tier.
+    // Retrying won't help — operator needs to fix .env.local / Vercel env.
+    const invalidKey = firstPass.find((r) => !r.ok && r.invalidKey);
+    if (invalidKey) {
+      clearTimeout(timer);
+      console.error(
+        '[hyperswap/activity] source=etherscan INVALID_API_KEY — ETHERSCAN_API_KEY ' +
+        'is rejected by Etherscan V2. Check for duplicate keys in .env.local (dotenv ' +
+        'keeps the LAST definition) and on Vercel. Tier 2 DRPC will run but cannot ' +
+        'reach blocks older than its 5M scan window — closed positions will see 0 events.',
+      );
+      return null;
     }
 
-    console.log(`[hyperswap/activity] source=etherscan OK — ${all.length} logs for tokenId ${tokenIdHex}`);
+    // Retry each failed topic ONCE after a 1s backoff. Etherscan's 5 req/sec
+    // free-tier limit gets hit when analytics fetches multiple closed positions
+    // in parallel (each position = 3 Etherscan calls). Without per-topic retry
+    // a single rate-limited Collect call would discard the successful Increase
+    // + Decrease results and waste the work.
+    const final = await Promise.all(
+      firstPass.map(async (r, i) => {
+        if (r.ok) return r;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        return fetchOneEtherscanTopic(nftManager, tokenIdHex, topics[i], apiKey, controller.signal);
+      }),
+    );
+    clearTimeout(timer);
+
+    // Aggregate successful topics; log (but don't fail) the OPTIONAL topics
+    // that still failed after retry. DecreaseLiquidity is REQUIRED because
+    // the parent route relies on it to subtract withdrawal amounts from
+    // Collect events in close txs — without it, Collect amounts in close
+    // txs leak into fee totals (verified live: position 388173 fees went
+    // from $68 → $8,196 when Decrease topic was rate-limited and dropped).
+    // If Decrease failed, fall back to DRPC for the whole position rather
+    // than emitting wrong fee numbers.
+    const all: RawLog[] = [];
+    let failed = 0;
+    const DECREASE_IDX = 1; // topics array order: [INCREASE, DECREASE, COLLECT]
+    let decreaseOk = false;
+    for (let i = 0; i < final.length; i++) {
+      const r = final[i];
+      if (r.ok) {
+        all.push(...r.logs);
+        if (i === DECREASE_IDX) decreaseOk = true;
+      } else {
+        failed += 1;
+        const note = i === DECREASE_IDX ? ' (REQUIRED — falling back to DRPC for correctness)' : '';
+        console.warn(
+          `[hyperswap/activity] source=etherscan ${topicNames[i]} FAILED after retry: ${r.reason} — ` +
+          `events from this topic missing for tokenId ${tokenIdHex}${note}`,
+        );
+      }
+    }
+
+    if (failed === 3) {
+      console.warn('[hyperswap/activity] source=etherscan ALL_TOPICS_FAILED — falling back to DRPC');
+      return null;
+    }
+    if (!decreaseOk) {
+      // Decrease is load-bearing for fee separation. Don't return partial logs
+      // here — DRPC scan is more reliable for THIS position than wrong fees.
+      return null;
+    }
+
+    console.log(
+      `[hyperswap/activity] source=etherscan OK — ${all.length} logs for tokenId ${tokenIdHex} ` +
+      `(${3 - failed}/3 topics succeeded)`,
+    );
     return all;
   } catch (err) {
     clearTimeout(timer);
