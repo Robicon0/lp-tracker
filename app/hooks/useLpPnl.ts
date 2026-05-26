@@ -572,7 +572,14 @@ function aggregate(
       closingValue += d.closingValue;
       feesCollected += d.feesCollected;
       feesUnclaimed += d.feesUnclaimed;
-      ilUSD += d.ilUSD;
+      // IL is OPEN POSITIONS ONLY. Closed positions are realised — once you've
+      // withdrawn, the "loss vs HODL" is locked in and no longer impermanent.
+      // Including closed positions in the sum also dilutes the metric with
+      // historical-price-drift artefacts (e.g. closing $5k of HYPE when HYPE
+      // was $30 and HYPE is now $60 makes the HODL basis look enormous and
+      // shows as a multi-thousand-dollar "loss" even when the trade was fine).
+      // The analytics card subtitle reflects this scoping: "open positions only".
+      if (!d.isClosed) ilUSD += d.ilUSD;
       included += 1;
       perPosition[id] = d;
       if (r.fallback) estimatedPositionCount += 1;

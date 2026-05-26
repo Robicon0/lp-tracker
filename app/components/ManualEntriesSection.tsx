@@ -161,16 +161,32 @@ function ManualEntryCard({
         </span>
       </div>
 
-      {/* Fees-earned line (always shown) */}
-      <div style={{
-        fontSize: 12, color: C.green, letterSpacing: "0.04em",
-        marginBottom: 12,
-      }}>
-        ✓ Fees earned: <span style={{ fontWeight: 700 }}>+{fmt$(np.feesUsd)}</span>
-        <span style={{ color: C.text, opacity: 0.6, marginLeft: 8, fontSize: 11 }}>
-          (auto-retrieved on-chain)
-        </span>
-      </div>
+      {/* Fees line — green checkmark + amount when fees were retrieved,
+          amber note when they weren't (rate-limit / empty activity scan).
+          Either way the user can enter deposit + withdrawal; Net P&L just
+          uses 0 fees in the latter case. */}
+      {np.feesUsd > 0 ? (
+        <div style={{
+          fontSize: 12, color: C.green, letterSpacing: "0.04em",
+          marginBottom: 12,
+        }}>
+          ✓ Fees earned: <span style={{ fontWeight: 700 }}>+{fmt$(np.feesUsd)}</span>
+          <span style={{ color: C.text, opacity: 0.6, marginLeft: 8, fontSize: 11 }}>
+            (auto-retrieved on-chain)
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          fontSize: 12, color: C.amber, letterSpacing: "0.04em",
+          marginBottom: 12,
+          opacity: 0.9,
+        }}>
+          ⚠ Fees not retrieved
+          <span style={{ color: C.text, opacity: 0.6, marginLeft: 8, fontSize: 11 }}>
+            (refreshing may recover them — Net P&amp;L will use 0 fees until then)
+          </span>
+        </div>
+      )}
 
       {showInputs ? (
         <>

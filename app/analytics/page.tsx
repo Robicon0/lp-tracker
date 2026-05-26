@@ -602,16 +602,37 @@ export default function Analytics() {
   }, [manualEntries.entriesByPositionId]);
 
   // Positions that need manual input: excluded by useLpPnl (no deposit history,
-  // value_overflow, etc.) BUT we did successfully retrieve fees for them.
-  // Without fees we have nothing useful to display anyway. Dedupe by id.
+  // value_overflow, etc.) where manual entry can plausibly fix the gap.
+  //
+  // We include positions REGARDLESS of whether fees were retrieved — under
+  // heavy rate-limit a position can have its entire activity fetch return 0
+  // events, which means fees AND deposits are both missing. Those positions
+  // are exactly the ones the user wants to manually enter; gating on fees > 0
+  // hid them silently.
+  //
+  // We DO exclude positions whose exclusion reason indicates manual entry
+  // won't help: unsupported protocols (need protocol implementation), transport
+  // errors (retryable — refreshing the page may fix), and missing current
+  // prices (Net P&L still works without them but the broader page is broken).
+  const MANUAL_ENTRY_BLOCKED_REASON_FRAGMENTS = [
+    "not yet supported", // unsupported protocol / no activity URL
+    "Failed to load",     // HTTP / timeout / network — retryable
+    "Current price",      // current price data unavailable
+  ];
   const needsInputPositions = useMemo<NeedsInputPosition[]>(() => {
     const seen = new Set<string>();
     const out: NeedsInputPosition[] = [];
     for (const ep of lpPnl.excludedPositions) {
+      // Use position id (not pair name) for dedup — the same wallet can have
+      // multiple closed positions in the same pair (e.g. 4× HYPE/USDC on
+      // ProjectX, each with its own NFT tokenId).
       if (seen.has(ep.id)) continue;
       seen.add(ep.id);
+      // Skip reasons that manual entry can't fix.
+      if (MANUAL_ENTRY_BLOCKED_REASON_FRAGMENTS.some((frag) => ep.reason.includes(frag))) {
+        continue;
+      }
       const feesUsd = feesByPositionId.get(ep.id) ?? 0;
-      if (feesUsd <= 0) continue;
       out.push({ excluded: ep, feesUsd });
     }
     return out;
@@ -1561,9 +1582,9 @@ export default function Analytics() {
                     label: "Imperm. Loss",
                     val: fmt$Signed(-lpPnl.ilUSD),
                     color: -lpPnl.ilUSD > 0 ? C.red : C.green,
-                    sub: "Σ(HODL − live), open + closed",
+                    sub: "Σ(HODL − Current), open positions only",
                     tooltip:
-                      "Impermanent Loss measures how much less your deposit is worth compared to simply holding the tokens. Calculated as: IL = 2√(price_ratio) / (1 + price_ratio) − 1, where price_ratio is the change in relative token prices since deposit. Shown as a positive number (cost to you). Includes unrealised IL on open positions plus realised IL at close on closed positions.",
+                      "Impermanent Loss measures how much less your open LP positions are worth compared to simply holding the tokens. Calculated as: IL = Current Value − HODL Value for each open position, then summed. Closed positions are excluded — their loss versus holding is realised at close and would conflate price drift since closure with the original trade outcome.",
                   },
                   {
                     label: "Net P&L",
