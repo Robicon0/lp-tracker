@@ -10,8 +10,6 @@ import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import InfoTooltip from "../components/InfoTooltip";
 import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
 import { useLpPnl } from "../hooks/useLpPnl";
-import { useManualEntries } from "../hooks/useManualEntries";
-import ManualEntriesSection, { type NeedsInputPosition } from "../components/ManualEntriesSection";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 import { useAccount } from "wagmi";
@@ -544,121 +542,6 @@ export default function Analytics() {
   const { events: walletLevelFees } = useWalletLevelFees(positions);
   const lpPnl = useLpPnl(positions);
 
-  // ── Manual deposit/withdrawal entries (for closed positions whose on-chain
-  //    history can't be reconstructed — HyperEVM old closed, BSC archive
-  //    limit, etc.). Keyed off the active EVM address; flows into the LP P&L
-  //    Total Deposited + Net P&L numbers and into the "POSITIONS REQUIRING
-  //    YOUR INPUT" section below the existing excluded-positions warning.
-  const manualEntries = useManualEntries(address ?? null);
-
-  // Per-position fee USD totals built from the SAME eventsMap that drives
-  // feeIncome — so the "Fees earned" line shown on each manual-entry card
-  // matches the lifetime number above it. Same dedupe rule as feeIncome
-  // (txHash + amounts) to avoid double-counting.
-  const feesByPositionId = useMemo(() => {
-    const m = new Map<string, number>();
-    const seenByPos = new Map<string, Set<string>>();
-    for (const [posId, events] of eventsMap.entries()) {
-      let seen = seenByPos.get(posId);
-      if (!seen) { seen = new Set<string>(); seenByPos.set(posId, seen); }
-      let total = 0;
-      for (const e of events) {
-        if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
-        const usd = e.usdAtTime ?? 0;
-        if (!Number.isFinite(usd) || usd <= 0) continue;
-        const key = e.txHash
-          ? `${e.txHash}::${e.amount0}::${e.amount1}`
-          : `ts${e.timestamp}::${e.amount0}::${e.amount1}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        total += usd;
-      }
-      m.set(posId, total);
-    }
-    return m;
-  }, [eventsMap]);
-
-  // Manual entries no longer contribute to the LP P&L headline numbers —
-  // those are now scoped to OPEN POSITIONS ONLY for everything except
-  // Fees Collected (lifetime). Since manual entries are conceptually tied
-  // to CLOSED positions whose on-chain history is unavailable, they fall
-  // out of the LP P&L card scope entirely. The Manual Entries section
-  // below STILL renders cards from `needsInputPositions` so users can
-  // view / edit / zero-out their saved entries — the per-card Net P&L
-  // (withdrawal + fees − deposit) is shown locally on each card and is
-  // independent of the LP P&L card above.
-
-  // Positions that need manual input. Two paths into this list:
-  //
-  // 1. Position is in `lpPnl.excludedPositions` with a manual-entry-eligible
-  //    reason (no deposit history, value_overflow, etc.) — user needs to
-  //    enter values so the position contributes to Net P&L.
-  //
-  // 2. Position has a saved manual entry from a PRIOR session — user wants
-  //    to see / edit / delete it even if on-chain data later became available
-  //    (e.g. the sequential-chain fix lands and previously-empty fetches now
-  //    return events). Without this path, saved entries are invisible after
-  //    the on-chain side recovers, and the user can't manage them.
-  //
-  // For path 2 positions, the per-position card surfaces an info note that
-  // on-chain data is now authoritative (see ManualEntryCard). The card stays
-  // editable so the user can choose to zero out the saved entry if desired.
-  //
-  // Excluded reasons that manual entry can't fix are still filtered out
-  // (unsupported protocols, transport errors, missing current prices).
-  const MANUAL_ENTRY_BLOCKED_REASON_FRAGMENTS = [
-    "not yet supported",
-    "Failed to load",
-    "Current price",
-  ];
-  const needsInputPositions = useMemo<NeedsInputPosition[]>(() => {
-    const seen = new Set<string>();
-    const out: NeedsInputPosition[] = [];
-
-    // Path 1 — currently excluded positions (manual-entry-eligible reasons).
-    for (const ep of lpPnl.excludedPositions) {
-      // Dedup by position id, never by pair name — same wallet can have
-      // multiple closed positions in the same pair (e.g. 4× HYPE/USDC on
-      // ProjectX, each with its own NFT tokenId).
-      if (seen.has(ep.id)) continue;
-      if (MANUAL_ENTRY_BLOCKED_REASON_FRAGMENTS.some((frag) => ep.reason.includes(frag))) {
-        continue;
-      }
-      seen.add(ep.id);
-      const feesUsd = feesByPositionId.get(ep.id) ?? 0;
-      out.push({ excluded: ep, feesUsd, onChainAvailable: false });
-    }
-
-    // Path 2 — positions with saved manual entries that aren't already
-    // listed via path 1. These either have on-chain data now (in perPosition)
-    // OR have neither (e.g. position no longer in the user's wallet list).
-    for (const [posId, _entry] of Object.entries(manualEntries.entriesByPositionId)) {
-      void _entry;
-      if (seen.has(posId)) continue;
-      // Find the position's metadata. Try positions[] first (preferred),
-      // then synthesize a minimal fallback from the position id parts.
-      const pos = positions.find((p) => p.id === posId);
-      if (!pos) continue;
-      seen.add(posId);
-      const feesUsd = feesByPositionId.get(posId) ?? 0;
-      const onChain = !!lpPnl.perPosition[posId];
-      out.push({
-        excluded: {
-          id: posId,
-          pair: pos.pair,
-          protocol: pos.protocol,
-          chain: pos.chain,
-          reason: onChain
-            ? "On-chain data available — saved entry overridden"
-            : "Saved manually",
-        },
-        feesUsd,
-        onChainAvailable: onChain,
-      });
-    }
-    return out;
-  }, [lpPnl.excludedPositions, lpPnl.perPosition, feesByPositionId, manualEntries.entriesByPositionId, positions]);
-
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -1041,7 +924,9 @@ export default function Analytics() {
            CSS-only — no logic, no data, no functionality changes. */
         @media (max-width: 768px) {
           .docs-help-btn { display: none !important; }
-          .ana-lp-pnl { grid-template-columns: 1fr 1fr !important; }
+          /* 3 cells stack vertically on mobile — 1fr 1fr would orphan the
+             third cell on its own row with empty space beside it. */
+          .ana-lp-pnl { grid-template-columns: 1fr !important; }
           .ana-income-pair { grid-template-columns: 1fr !important; }
           .ana-income-source-inner { flex-direction: column !important; }
           .ana-chain-mo { display: none !important; }
@@ -1497,11 +1382,11 @@ export default function Analytics() {
               </div>
             </SectionFrame>
 
-            {/* ── LP P&L ────────────────────────────────────────────────── */}
+            {/* ── PORTFOLIO SUMMARY ─────────────────────────────────────── */}
             <SectionFrame
               id="section-lp-pnl"
-              title="LP Profit & Loss"
-              sub="Aggregated from on-chain deposit & fee events across all LP positions"
+              title="Portfolio Summary"
+              sub="Verified on-chain data across all positions"
               action={
                 lpPnl.isLoading ? (
                   <span
@@ -1527,7 +1412,7 @@ export default function Analytics() {
                 className="ana-lp-pnl"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(6, 1fr)",
+                  gridTemplateColumns: "repeat(3, 1fr)",
                 }}
               >
                 {/* While ANY LP position is still being fetched/computed
@@ -1536,62 +1421,29 @@ export default function Analytics() {
                     all positions across all chains have completed. Failed
                     positions don't block this gate: useLpPnl's `errored`
                     counter increments and the red banner below explains
-                    which positions couldn't load (per-position N/A semantics
-                    — the totals reflect only positions that succeeded). */}
+                    which positions couldn't load.
+
+                    The grid is now 3 cells (Current Value | Fees Collected |
+                    Fees Unclaimed). Total Deposited / IL / Net P&L were
+                    removed because they all depend on historical deposit
+                    data, which isn't reliably retrievable on every chain
+                    (HyperEVM closed positions older than DRPC's 5M-block
+                    window, BSC archive gaps, etc.) — partial data made the
+                    headline misleading. The 3 remaining fields are all
+                    derived from data we can always retrieve on-chain. */}
                 {(() => {
-                  // FEES COLLECTED is the LIFETIME number from the Fee Income
-                  // pipeline (same eventsMap + walletLevelFees the SECTION 2
-                  // chart aggregates from). `useLpPnl.feesCollected` only
-                  // reflects open-position fees; `feeIncome.totalAllTime`
-                  // captures fees from closed positions and Bluefin's
-                  // wallet-level scan too. Single source of truth here so the
-                  // LP P&L card's "Fees Collected" matches the chart above
-                  // exactly. Net P&L is recomputed against lifetime fees so
-                  // the two numbers stay consistent.
+                  // Fees Collected uses the LIFETIME number from the Fee Income
+                  // pipeline (same eventsMap + walletLevelFees that drive the
+                  // chart in SECTION 2). useLpPnl.feesCollected sees per-position
+                  // events only; feeIncome.totalAllTime additionally folds in
+                  // wallet-level Bluefin fees from destroyed Sui objects, so it's
+                  // the authoritative lifetime fee total.
                   //
-                  // RULE: feesCollected uses CLAIM-TIME USD price (from the
-                  // activity route's usdAtTime). feesUnclaimed uses CURRENT
-                  // price (computed from pos.fees, which IS current-mark).
-                  // LP P&L scoping — applies to ALL five non-fee fields:
-                  //   Total Deposited / Current Value / Fees Unclaimed / IL → OPEN POSITIONS ONLY.
-                  //   Fees Collected → ALL positions (open + closed lifetime).
-                  //   Net P&L = Current + Fees Collected + Fees Unclaimed − Total Deposited.
-                  //
-                  // useLpPnl.aggregate() already excludes closed positions from
-                  // initialValue / currentValue / feesUnclaimed / ilUSD; only
-                  // feesCollected sums across all positions. We use feeIncome.totalAllTime
-                  // for the Fees Collected card and Net P&L formula because it
-                  // additionally folds in wallet-level Bluefin fees (which
-                  // useLpPnl.feesCollected can't see — they don't belong to any
-                  // specific per-position scan). For LP-only chains the two
-                  // numbers match exactly.
-                  //
-                  // Manual entries no longer flow into these headline numbers
-                  // (they were tied to CLOSED positions, which are out of
-                  // scope here). The Manual Entries section below still
-                  // renders per-card values for visibility/editing — just
-                  // independently of the LP P&L card.
+                  // Current Value and Fees Unclaimed come straight from useLpPnl
+                  // and are open-positions-only by aggregator design (closed
+                  // positions have currentValue=0 and feesUnclaimed=0 anyway).
                   const lifetimeFeesCollected = feeIncome.totalAllTime;
-                  const adjustedNetPnl =
-                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
-                  const adjustedNetPnlPct =
-                    lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
                   return ([
-                  {
-                    label: "Total Deposited",
-                    // "~" marker when an OPEN position contributing to the
-                    // totals is using the HyperEVM fallback (current value as
-                    // deposit estimate because eth_getLogs couldn't reach the
-                    // deposit block). Closed positions don't contribute here
-                    // (scoping rule), so manual entries / closed-position
-                    // estimates no longer affect this number.
-                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(lpPnl.initialValue)}`,
-                    color: C.textBright,
-                    sub: "open positions only",
-                    tooltip: lpPnl.estimatedPositionCount > 0
-                      ? `${lpPnl.estimatedPositionCount} position${lpPnl.estimatedPositionCount === 1 ? "" : "s"} using estimated deposit value — Deposit price unavailable, using current value as estimate. Affects HyperEVM positions where on-chain deposit history isn't recoverable from the public RPC.`
-                      : undefined,
-                  },
                   { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market" },
                   {
                     label: "Fees Collected",
@@ -1600,20 +1452,6 @@ export default function Analytics() {
                     sub: "claimed lifetime (at claim-time price)",
                   },
                   { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "open positions, pending on-chain" },
-                  {
-                    label: "Imperm. Loss",
-                    val: fmt$Signed(-lpPnl.ilUSD),
-                    color: -lpPnl.ilUSD > 0 ? C.red : C.green,
-                    sub: "Σ(HODL − Current), open positions only",
-                    tooltip:
-                      "Impermanent Loss measures how much less your open LP positions are worth compared to simply holding the tokens. Calculated as: IL = Current Value − HODL Value for each open position, then summed. Closed positions are excluded — their loss versus holding is realised at close and would conflate price drift since closure with the original trade outcome.",
-                  },
-                  {
-                    label: "Net P&L",
-                    val: fmt$Signed(adjustedNetPnl),
-                    color: adjustedNetPnl >= 0 ? C.cyan : C.red,
-                    sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
-                  },
                 ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string }>);
                 })().map((c, i, arr) => (
                   <div
@@ -1665,70 +1503,6 @@ export default function Analytics() {
                     "@keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }",
                 }}
               />
-
-              {/* Excluded-positions warning. Surfaces every position that's
-                  NOT contributing to the totals — unsupported protocols
-                  (Cetus, Momentum, etc.), positions whose deposit history
-                  couldn't be fetched, etc. Shown only after isLoading
-                  resolves so we don't flash the warning during loading. */}
-              {!lpPnl.isLoading && lpPnl.excludedPositions.length > 0 && (
-                <div
-                  style={{
-                    margin: "0 26px 18px",
-                    border: "1px solid rgba(255,170,0,0.25)",
-                    background: "rgba(255,170,0,0.04)",
-                    padding: "12px 16px",
-                    fontFamily: FONT,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "#ffaa00",
-                      letterSpacing: "0.04em",
-                      marginBottom: 8,
-                    }}
-                  >
-                    ⚠ {lpPnl.excludedPositions.length} position
-                    {lpPnl.excludedPositions.length === 1 ? "" : "s"} could not
-                    be fully calculated and {lpPnl.excludedPositions.length === 1 ? "is" : "are"} excluded from totals:
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {lpPnl.excludedPositions.map((ep) => (
-                      <div
-                        key={`${ep.id}-${ep.reason}`}
-                        style={{
-                          fontSize: 11,
-                          color: "rgba(255,170,0,0.85)",
-                          letterSpacing: "0.02em",
-                          lineHeight: 1.55,
-                        }}
-                      >
-                        <span style={{ color: "#ffaa00", fontWeight: 600 }}>
-                          {ep.pair}
-                        </span>
-                        <span style={{ opacity: 0.7 }}>
-                          {" "}({ep.protocol} · {ep.chain})
-                        </span>
-                        <span style={{ opacity: 0.7 }}> — </span>
-                        <span>{ep.reason}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Manual deposit/withdrawal entry section. Surfaces every
-                  excluded position that DOES have fees (so we have something
-                  useful to display) but is missing deposit/withdrawal data.
-                  Saved entries flow into Total Deposited + Net P&L above. */}
-              {!lpPnl.isLoading && needsInputPositions.length > 0 && address && (
-                <ManualEntriesSection
-                  positions={needsInputPositions}
-                  entriesByPositionId={manualEntries.entriesByPositionId}
-                  onSave={manualEntries.save}
-                />
-              )}
 
               {lpPnl.errored > 0 && (
                 <div
