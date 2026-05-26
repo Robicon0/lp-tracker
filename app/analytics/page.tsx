@@ -578,53 +578,15 @@ export default function Analytics() {
     return m;
   }, [eventsMap]);
 
-  // Saved manual entries' contribution to the LP P&L headline numbers.
-  // depositSum  → adds to Total Deposited
-  // withdrawalSum → adds to closingValue side of Net P&L
-  // netDelta = withdrawalSum − depositSum (fees per-position are already
-  //   in lifetimeFeesCollected via feeIncome, so the deposit/withdraw
-  //   delta is the only thing this layer needs to inject into Net P&L)
-  // Zero-zero entries are ignored — they exist as soft-deletes from the
-  // schema's UNIQUE constraint (no DELETE endpoint).
-  //
-  // CRITICAL: positions that ALREADY have on-chain data in `lpPnl.perPosition`
-  // are skipped here — those positions' initialValue / closingValue / fees
-  // come from on-chain events (computePositionPnL), which is the authoritative
-  // source. Without this skip, a saved manual entry for a position whose
-  // on-chain fetch later succeeded would double-count: once in lpPnl.initialValue
-  // (on-chain) and once here (manual). That's what produced the $89,860 Total
-  // Deposited bug — position 401954 had both $7,879 on-chain initialValue and
-  // an $11,776 manual entry, contributing $19,655 from one position.
-  const manualContribution = useMemo(() => {
-    let depositSum = 0;
-    let withdrawalSum = 0;
-    const usedEntryIds: string[] = [];
-    const skippedEntryIds: string[] = [];
-    for (const [posId, e] of Object.entries(manualEntries.entriesByPositionId)) {
-      if (e.depositUsd <= 0 && e.withdrawalUsd <= 0) continue;
-      if (lpPnl.perPosition[posId]) {
-        // On-chain data is authoritative — skip this entry from totals.
-        skippedEntryIds.push(posId);
-        continue;
-      }
-      depositSum += e.depositUsd;
-      withdrawalSum += e.withdrawalUsd;
-      usedEntryIds.push(posId);
-    }
-    if (typeof window !== "undefined" && (usedEntryIds.length > 0 || skippedEntryIds.length > 0)) {
-      console.log(
-        `[analytics] manualContribution — used=${usedEntryIds.length} skipped=${skippedEntryIds.length} ` +
-        `depositSum=$${depositSum.toFixed(2)} withdrawalSum=$${withdrawalSum.toFixed(2)}`,
-      );
-      if (usedEntryIds.length > 0) console.log("  used entries (no on-chain data):", usedEntryIds);
-      if (skippedEntryIds.length > 0) console.log("  skipped entries (on-chain data authoritative):", skippedEntryIds);
-    }
-    return {
-      depositSum,
-      withdrawalSum,
-      netDelta: withdrawalSum - depositSum,
-    };
-  }, [manualEntries.entriesByPositionId, lpPnl.perPosition]);
+  // Manual entries no longer contribute to the LP P&L headline numbers —
+  // those are now scoped to OPEN POSITIONS ONLY for everything except
+  // Fees Collected (lifetime). Since manual entries are conceptually tied
+  // to CLOSED positions whose on-chain history is unavailable, they fall
+  // out of the LP P&L card scope entirely. The Manual Entries section
+  // below STILL renders cards from `needsInputPositions` so users can
+  // view / edit / zero-out their saved entries — the per-card Net P&L
+  // (withdrawal + fees − deposit) is shown locally on each card and is
+  // independent of the LP P&L card above.
 
   // Positions that need manual input. Two paths into this list:
   //
@@ -1590,53 +1552,54 @@ export default function Analytics() {
                   // RULE: feesCollected uses CLAIM-TIME USD price (from the
                   // activity route's usdAtTime). feesUnclaimed uses CURRENT
                   // price (computed from pos.fees, which IS current-mark).
-                  const lifetimeFeesCollected = feeIncome.totalAllTime;
-                  // Net P&L = currentValue (open mark-to-market)
-                  //        + closingValue (realised at close for closed positions)
-                  //        + lifetimeFeesCollected (all-time, includes closed)
-                  //        + feesUnclaimed (pending on open positions)
-                  //        − initialValue (lifetime deposits, includes closed)
-                  // useLpPnl now includes closed positions in the aggregation —
-                  // closingValue captures the value withdrawn at close so the
-                  // realised price-action P&L isn't silently dropped.
+                  // LP P&L scoping — applies to ALL five non-fee fields:
+                  //   Total Deposited / Current Value / Fees Unclaimed / IL → OPEN POSITIONS ONLY.
+                  //   Fees Collected → ALL positions (open + closed lifetime).
+                  //   Net P&L = Current + Fees Collected + Fees Unclaimed − Total Deposited.
                   //
-                  // Manual entries (saved via the section below) inject their
-                  // own (withdrawal − deposit) delta into Net P&L and bump
-                  // Total Deposited by their deposit sum. Fees from these
-                  // positions are ALREADY in lifetimeFeesCollected because
-                  // useAllPositionsActivity fetches events for closed
-                  // positions even when the parent useLpPnl rejected them.
-                  const effectiveInitial = lpPnl.initialValue + manualContribution.depositSum;
+                  // useLpPnl.aggregate() already excludes closed positions from
+                  // initialValue / currentValue / feesUnclaimed / ilUSD; only
+                  // feesCollected sums across all positions. We use feeIncome.totalAllTime
+                  // for the Fees Collected card and Net P&L formula because it
+                  // additionally folds in wallet-level Bluefin fees (which
+                  // useLpPnl.feesCollected can't see — they don't belong to any
+                  // specific per-position scan). For LP-only chains the two
+                  // numbers match exactly.
+                  //
+                  // Manual entries no longer flow into these headline numbers
+                  // (they were tied to CLOSED positions, which are out of
+                  // scope here). The Manual Entries section below still
+                  // renders per-card values for visibility/editing — just
+                  // independently of the LP P&L card.
+                  const lifetimeFeesCollected = feeIncome.totalAllTime;
                   const adjustedNetPnl =
-                    lpPnl.currentValue + lpPnl.closingValue + lifetimeFeesCollected + lpPnl.feesUnclaimed
-                    - lpPnl.initialValue + manualContribution.netDelta;
+                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
                   const adjustedNetPnlPct =
-                    effectiveInitial > 0 ? (adjustedNetPnl / effectiveInitial) * 100 : 0;
+                    lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
                   return ([
                   {
                     label: "Total Deposited",
-                    // "~" marker when ANY position contributing to the totals is
-                    // using the HyperEVM fallback (current value as deposit
-                    // estimate because eth_getLogs couldn't reach the deposit
-                    // block). The tooltip explains exactly what that means.
-                    // Includes any manual deposit entries saved by the user
-                    // for closed positions whose on-chain history isn't
-                    // available (see "POSITIONS REQUIRING YOUR INPUT" section).
-                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(effectiveInitial)}`,
+                    // "~" marker when an OPEN position contributing to the
+                    // totals is using the HyperEVM fallback (current value as
+                    // deposit estimate because eth_getLogs couldn't reach the
+                    // deposit block). Closed positions don't contribute here
+                    // (scoping rule), so manual entries / closed-position
+                    // estimates no longer affect this number.
+                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(lpPnl.initialValue)}`,
                     color: C.textBright,
-                    sub: "at deposit prices",
+                    sub: "open positions only",
                     tooltip: lpPnl.estimatedPositionCount > 0
                       ? `${lpPnl.estimatedPositionCount} position${lpPnl.estimatedPositionCount === 1 ? "" : "s"} using estimated deposit value — Deposit price unavailable, using current value as estimate. Affects HyperEVM positions where on-chain deposit history isn't recoverable from the public RPC.`
                       : undefined,
                   },
-                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "mark-to-market" },
+                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market" },
                   {
                     label: "Fees Collected",
                     val: `+${fmt$(lifetimeFeesCollected)}`,
                     color: C.green,
                     sub: "claimed lifetime (at claim-time price)",
                   },
-                  { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "pending on-chain" },
+                  { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "open positions, pending on-chain" },
                   {
                     label: "Imperm. Loss",
                     val: fmt$Signed(-lpPnl.ilUSD),

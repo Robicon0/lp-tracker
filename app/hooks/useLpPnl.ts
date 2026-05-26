@@ -562,24 +562,28 @@ function aggregate(
         continue;
       }
 
-      initialValue += d.initialValue;
-      // currentValue is naturally 0 for closed positions (computePositionPnL
-      // sets it to 0 on the closed path), and closingValue is naturally 0 for
-      // open positions. Summing both into separate fields keeps the semantics
-      // clean: currentValue = "what you have now", closingValue = "what you
-      // realised at close". Net P&L = currentValue + closingValue + fees − initial.
-      currentValue += d.currentValue;
-      closingValue += d.closingValue;
-      feesCollected += d.feesCollected;
-      feesUnclaimed += d.feesUnclaimed;
-      // IL is OPEN POSITIONS ONLY. Closed positions are realised — once you've
-      // withdrawn, the "loss vs HODL" is locked in and no longer impermanent.
-      // Including closed positions in the sum also dilutes the metric with
+      // LP P&L scoping (per analytics-page card semantics):
+      //   - Fees Collected: ALL positions (open + closed lifetime).
+      //   - Everything else (initial / current / unclaimed / IL): OPEN ONLY.
+      //
+      // Closed positions are realised — once you've withdrawn, the "loss vs
+      // HODL" is locked in (no longer impermanent), the "current value" is
+      // zero by definition, the "initial deposited" was returned to you at
+      // close, and there are no pending unclaimed fees. Including them in the
+      // headline numbers conflates the present open-portfolio state with
       // historical-price-drift artefacts (e.g. closing $5k of HYPE when HYPE
-      // was $30 and HYPE is now $60 makes the HODL basis look enormous and
-      // shows as a multi-thousand-dollar "loss" even when the trade was fine).
-      // The analytics card subtitle reflects this scoping: "open positions only".
-      if (!d.isClosed) ilUSD += d.ilUSD;
+      // was $30 and HYPE is now $60 inflates the HODL basis). Only fees stay
+      // lifetime because that's the natural lifetime measure of LP earnings.
+      // `closingValue` aggregate is intentionally not summed here — the
+      // per-position `perPosition[id].closingValue` still carries the close-
+      // event value for any per-position UI that needs it (e.g. dashboard row).
+      feesCollected += d.feesCollected;
+      if (!d.isClosed) {
+        initialValue += d.initialValue;
+        currentValue += d.currentValue;
+        feesUnclaimed += d.feesUnclaimed;
+        ilUSD += d.ilUSD;
+      }
       included += 1;
       perPosition[id] = d;
       if (r.fallback) estimatedPositionCount += 1;
@@ -605,7 +609,11 @@ function aggregate(
   // resultsMap, but the user still deserves to see them in the warning.
   excludedPositions.push(...unsupportedRejections);
 
-  const netPnl = currentValue + closingValue + feesCollected + feesUnclaimed - initialValue;
+  // Net P&L derived strictly from the displayed fields per the LP P&L card
+  // semantics: open Current + lifetime Fees + open Unclaimed − open Initial.
+  // closingValue is no longer a term (closed positions don't contribute their
+  // realised value to the headline either).
+  const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
 
   // Per-position contribution log — fires every time `aggregate()` runs (every
