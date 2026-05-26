@@ -10,6 +10,8 @@ import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import InfoTooltip from "../components/InfoTooltip";
 import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
 import { useLpPnl } from "../hooks/useLpPnl";
+import { useManualEntries } from "../hooks/useManualEntries";
+import ManualEntriesSection, { type NeedsInputPosition } from "../components/ManualEntriesSection";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 import { useAccount } from "wagmi";
@@ -541,6 +543,79 @@ export default function Analytics() {
   const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
   const { events: walletLevelFees } = useWalletLevelFees(positions);
   const lpPnl = useLpPnl(positions);
+
+  // ── Manual deposit/withdrawal entries (for closed positions whose on-chain
+  //    history can't be reconstructed — HyperEVM old closed, BSC archive
+  //    limit, etc.). Keyed off the active EVM address; flows into the LP P&L
+  //    Total Deposited + Net P&L numbers and into the "POSITIONS REQUIRING
+  //    YOUR INPUT" section below the existing excluded-positions warning.
+  const manualEntries = useManualEntries(address ?? null);
+
+  // Per-position fee USD totals built from the SAME eventsMap that drives
+  // feeIncome — so the "Fees earned" line shown on each manual-entry card
+  // matches the lifetime number above it. Same dedupe rule as feeIncome
+  // (txHash + amounts) to avoid double-counting.
+  const feesByPositionId = useMemo(() => {
+    const m = new Map<string, number>();
+    const seenByPos = new Map<string, Set<string>>();
+    for (const [posId, events] of eventsMap.entries()) {
+      let seen = seenByPos.get(posId);
+      if (!seen) { seen = new Set<string>(); seenByPos.set(posId, seen); }
+      let total = 0;
+      for (const e of events) {
+        if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
+        const usd = e.usdAtTime ?? 0;
+        if (!Number.isFinite(usd) || usd <= 0) continue;
+        const key = e.txHash
+          ? `${e.txHash}::${e.amount0}::${e.amount1}`
+          : `ts${e.timestamp}::${e.amount0}::${e.amount1}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        total += usd;
+      }
+      m.set(posId, total);
+    }
+    return m;
+  }, [eventsMap]);
+
+  // Saved manual entries' contribution to the LP P&L headline numbers.
+  // depositSum  → adds to Total Deposited
+  // withdrawalSum → adds to closingValue side of Net P&L
+  // netDelta = withdrawalSum − depositSum (fees per-position are already
+  //   in lifetimeFeesCollected via feeIncome, so the deposit/withdraw
+  //   delta is the only thing this layer needs to inject into Net P&L)
+  // Zero-zero entries are ignored — they exist as soft-deletes from the
+  // schema's UNIQUE constraint (no DELETE endpoint).
+  const manualContribution = useMemo(() => {
+    let depositSum = 0;
+    let withdrawalSum = 0;
+    for (const e of Object.values(manualEntries.entriesByPositionId)) {
+      if (e.depositUsd <= 0 && e.withdrawalUsd <= 0) continue;
+      depositSum += e.depositUsd;
+      withdrawalSum += e.withdrawalUsd;
+    }
+    return {
+      depositSum,
+      withdrawalSum,
+      netDelta: withdrawalSum - depositSum,
+    };
+  }, [manualEntries.entriesByPositionId]);
+
+  // Positions that need manual input: excluded by useLpPnl (no deposit history,
+  // value_overflow, etc.) BUT we did successfully retrieve fees for them.
+  // Without fees we have nothing useful to display anyway. Dedupe by id.
+  const needsInputPositions = useMemo<NeedsInputPosition[]>(() => {
+    const seen = new Set<string>();
+    const out: NeedsInputPosition[] = [];
+    for (const ep of lpPnl.excludedPositions) {
+      if (seen.has(ep.id)) continue;
+      seen.add(ep.id);
+      const feesUsd = feesByPositionId.get(ep.id) ?? 0;
+      if (feesUsd <= 0) continue;
+      out.push({ excluded: ep, feesUsd });
+    }
+    return out;
+  }, [lpPnl.excludedPositions, feesByPositionId]);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -1444,10 +1519,19 @@ export default function Analytics() {
                   // useLpPnl now includes closed positions in the aggregation —
                   // closingValue captures the value withdrawn at close so the
                   // realised price-action P&L isn't silently dropped.
+                  //
+                  // Manual entries (saved via the section below) inject their
+                  // own (withdrawal − deposit) delta into Net P&L and bump
+                  // Total Deposited by their deposit sum. Fees from these
+                  // positions are ALREADY in lifetimeFeesCollected because
+                  // useAllPositionsActivity fetches events for closed
+                  // positions even when the parent useLpPnl rejected them.
+                  const effectiveInitial = lpPnl.initialValue + manualContribution.depositSum;
                   const adjustedNetPnl =
-                    lpPnl.currentValue + lpPnl.closingValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
+                    lpPnl.currentValue + lpPnl.closingValue + lifetimeFeesCollected + lpPnl.feesUnclaimed
+                    - lpPnl.initialValue + manualContribution.netDelta;
                   const adjustedNetPnlPct =
-                    lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
+                    effectiveInitial > 0 ? (adjustedNetPnl / effectiveInitial) * 100 : 0;
                   return ([
                   {
                     label: "Total Deposited",
@@ -1455,7 +1539,10 @@ export default function Analytics() {
                     // using the HyperEVM fallback (current value as deposit
                     // estimate because eth_getLogs couldn't reach the deposit
                     // block). The tooltip explains exactly what that means.
-                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(lpPnl.initialValue)}`,
+                    // Includes any manual deposit entries saved by the user
+                    // for closed positions whose on-chain history isn't
+                    // available (see "POSITIONS REQUIRING YOUR INPUT" section).
+                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(effectiveInitial)}`,
                     color: C.textBright,
                     sub: "at deposit prices",
                     tooltip: lpPnl.estimatedPositionCount > 0
@@ -1586,6 +1673,18 @@ export default function Analytics() {
                     ))}
                   </div>
                 </div>
+              )}
+
+              {/* Manual deposit/withdrawal entry section. Surfaces every
+                  excluded position that DOES have fees (so we have something
+                  useful to display) but is missing deposit/withdrawal data.
+                  Saved entries flow into Total Deposited + Net P&L above. */}
+              {!lpPnl.isLoading && needsInputPositions.length > 0 && address && (
+                <ManualEntriesSection
+                  positions={needsInputPositions}
+                  entriesByPositionId={manualEntries.entriesByPositionId}
+                  onSave={manualEntries.save}
+                />
               )}
 
               {lpPnl.errored > 0 && (

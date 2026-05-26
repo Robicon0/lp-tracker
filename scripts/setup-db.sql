@@ -42,3 +42,21 @@ CREATE INDEX IF NOT EXISTS idx_position_snapshots_pid_time
 
 CREATE INDEX IF NOT EXISTS idx_position_snapshots_wallet_time
   ON position_snapshots (wallet_address, timestamp DESC);
+
+-- Manual deposit/withdrawal entries for closed positions whose on-chain
+-- history cannot be reconstructed from public RPCs (HyperEVM closed pos,
+-- BNB Chain old positions, etc.). Users enter their amounts ONCE in the
+-- analytics page and the values persist across sessions.
+CREATE TABLE IF NOT EXISTS position_manual_entries (
+  id              SERIAL PRIMARY KEY,
+  wallet_address  TEXT NOT NULL,
+  position_id     TEXT NOT NULL,
+  deposit_usd     NUMERIC(24, 6) NOT NULL,
+  withdrawal_usd  NUMERIC(24, 6) NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (wallet_address, position_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_manual_entries_wallet
+  ON position_manual_entries (wallet_address);
