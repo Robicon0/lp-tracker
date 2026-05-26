@@ -291,14 +291,54 @@ export function useAllPositionsActivity(
       actualAPR: null, actualDaily: null, claimedUSD: 0, daysActive: 0, isEstimated: true,
     };
 
+    // HyperEVM sequential chain — Etherscan V2's free tier is 5 req/sec, and
+    // each /api/hyperswap/activity call fires 3 parallel topic requests
+    // (Increase / Decrease / Collect) that take 2-3s wall time per call. A
+    // fixed-interval stagger isn't enough because concurrent route calls
+    // still overlap at the Etherscan layer — verified live: 4 positions ×
+    // 3 topics with even a 700ms stagger leaves the last 2 positions empty.
+    //
+    // Solution: serialise HyperEVM fetches behind a shared promise chain so
+    // the next position only fires after the previous one's Etherscan calls
+    // are done. Total wall time matches the pure-sequential ground truth
+    // (~9s for 4 positions) — same as before but with EVERY position
+    // returning correct data instead of 2 of 4 returning empty.
+    //
+    // Non-HyperEVM positions are NOT serialised — they don't hit Etherscan
+    // the same way and benefit from the parallel fan-out.
+    let hyperEvmChain: Promise<unknown> = Promise.resolve();
+
     const fetches = eligible.map(async (pos): Promise<FetchResult> => {
       const tag = `[activity] ${pos.protocol} ${pos.chain} ${pos.id}`;
-      // Check cache first
+      // Check cache first — serialising doesn't apply when we'd skip the
+      // network anyway. Cache TTL is 5 min; subsequent loads in that window
+      // serve instantly and incur zero Etherscan pressure.
       const cached = readCache(pos.id);
       if (cached) {
         return [pos.id, computePerformance(cached.events, pos), cached.events];
       }
 
+      // Queue HyperEVM positions behind the previous one in the chain.
+      // Non-HyperEVM positions skip this and fetch immediately in parallel.
+      if (HYPEREVM_PROTOCOLS.has(pos.protocol)) {
+        const previous = hyperEvmChain;
+        let releaseChain!: () => void;
+        hyperEvmChain = new Promise<void>((resolve) => { releaseChain = resolve; });
+        try {
+          await previous;
+          if (cancelled) return [pos.id, emptyPerf, []];
+          return await runFetch(pos, tag);
+        } finally {
+          releaseChain();
+        }
+      }
+
+      return runFetch(pos, tag);
+    });
+
+    // Hoisted so both the HyperEVM-chained path and the parallel path call
+    // the same logic. Returns the canonical FetchResult tuple.
+    async function runFetch(pos: typeof eligible[number], tag: string): Promise<FetchResult> {
       const url = buildActivityUrl(pos);
       if (!url) {
         console.error(`${tag} no activity URL — protocol not wired into buildActivityUrl or missing required fields`);
@@ -333,7 +373,7 @@ export function useAllPositionsActivity(
         console.error(`${tag} fetch threw:`, err);
         return [pos.id, emptyPerf, []];
       }
-    });
+    }
 
     Promise.all(fetches).then((results) => {
       if (cancelled) return;

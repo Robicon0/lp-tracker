@@ -741,9 +741,39 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     for (const p of toFetch) inflightRef.current.add(p.id);
     setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
 
+    // HyperEVM sequential chain — Etherscan V2 free tier is 5 req/sec, and
+    // each /api/hyperswap/activity call fires 3 parallel topic requests that
+    // take ~2-3s wall time. A fixed-interval stagger isn't sufficient because
+    // concurrent route calls still overlap at the Etherscan layer — verified
+    // live: 4 positions × 3 topics with even a 700ms stagger leaves 2 of 4
+    // positions empty. Serialise HyperEVM fetches behind a shared promise
+    // chain so the next one only fires after the previous one's Etherscan
+    // calls finish. Non-HyperEVM protocols fire in parallel as before.
+    //
+    // This hook AND useAllPositionsActivity both call /api/hyperswap/activity
+    // on the same wallet load — each independently serialises its own
+    // fan-out, and each call carries its own 5-min localStorage cache so
+    // they share upstream pressure only on the very first cold load.
+    let hyperEvmChain: Promise<unknown> = Promise.resolve();
+
     // Fire fetches — each one lands independently.
     for (const pos of toFetch) {
-      fetchAndCompute(pos).then((r) => {
+      const isHyperEvm = HYPEREVM_NFT_MANAGERS[pos.protocol] !== undefined;
+      const run = async () => {
+        if (isHyperEvm) {
+          const previous = hyperEvmChain;
+          let releaseChain!: () => void;
+          hyperEvmChain = new Promise<void>((resolve) => { releaseChain = resolve; });
+          try {
+            await previous;
+            return await fetchAndCompute(pos);
+          } finally {
+            releaseChain();
+          }
+        }
+        return fetchAndCompute(pos);
+      };
+      run().then((r) => {
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
