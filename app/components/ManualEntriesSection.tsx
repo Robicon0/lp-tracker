@@ -27,6 +27,9 @@ const FONT = "'JetBrains Mono','Courier New',monospace";
 export interface NeedsInputPosition {
   excluded: ExcludedPosition;
   feesUsd: number;
+  /** True when on-chain data is now authoritative; the saved entry is shown
+   *  for visibility/edit but does NOT contribute to LP P&L totals. */
+  onChainAvailable: boolean;
 }
 
 export interface ManualEntriesSectionProps {
@@ -159,7 +162,30 @@ function ManualEntryCard({
         }}>
           CLOSED
         </span>
+        {np.onChainAvailable && (
+          <span
+            title="On-chain data is now available and authoritative for this position. Your saved entry is shown here for visibility but is NOT contributing to the LP P&L totals."
+            style={{
+              fontSize: 10, padding: "2px 7px",
+              border: `1px solid ${C.green}55`, background: `${C.green}11`,
+              color: C.green, letterSpacing: "0.12em",
+            }}
+          >
+            ON-CHAIN
+          </span>
+        )}
       </div>
+
+      {np.onChainAvailable && (
+        <div style={{
+          fontSize: 11, color: C.text, marginBottom: 12,
+          opacity: 0.75, lineHeight: 1.5,
+        }}>
+          On-chain data is authoritative for this position — your saved entry
+          is shown for reference and isn&apos;t contributing to the LP P&amp;L
+          totals above. Set both to 0 to remove.
+        </div>
+      )}
 
       {/* Fees line — green checkmark + amount when fees were retrieved,
           amber note when they weren't (rate-limit / empty activity scan).
@@ -419,7 +445,7 @@ export default function ManualEntriesSection({
         fontSize: 12, color: C.green, letterSpacing: "0.18em",
         textTransform: "uppercase", marginBottom: 6,
       }}>
-        // <span style={{ color: C.greenDim }}>POSITIONS REQUIRING YOUR INPUT</span>
+        {"// "}<span style={{ color: C.greenDim }}>POSITIONS REQUIRING YOUR INPUT</span>
       </div>
       <div style={{
         fontSize: 12, color: C.text, lineHeight: 1.6, marginBottom: 14,

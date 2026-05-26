@@ -586,57 +586,116 @@ export default function Analytics() {
   //   delta is the only thing this layer needs to inject into Net P&L)
   // Zero-zero entries are ignored — they exist as soft-deletes from the
   // schema's UNIQUE constraint (no DELETE endpoint).
+  //
+  // CRITICAL: positions that ALREADY have on-chain data in `lpPnl.perPosition`
+  // are skipped here — those positions' initialValue / closingValue / fees
+  // come from on-chain events (computePositionPnL), which is the authoritative
+  // source. Without this skip, a saved manual entry for a position whose
+  // on-chain fetch later succeeded would double-count: once in lpPnl.initialValue
+  // (on-chain) and once here (manual). That's what produced the $89,860 Total
+  // Deposited bug — position 401954 had both $7,879 on-chain initialValue and
+  // an $11,776 manual entry, contributing $19,655 from one position.
   const manualContribution = useMemo(() => {
     let depositSum = 0;
     let withdrawalSum = 0;
-    for (const e of Object.values(manualEntries.entriesByPositionId)) {
+    const usedEntryIds: string[] = [];
+    const skippedEntryIds: string[] = [];
+    for (const [posId, e] of Object.entries(manualEntries.entriesByPositionId)) {
       if (e.depositUsd <= 0 && e.withdrawalUsd <= 0) continue;
+      if (lpPnl.perPosition[posId]) {
+        // On-chain data is authoritative — skip this entry from totals.
+        skippedEntryIds.push(posId);
+        continue;
+      }
       depositSum += e.depositUsd;
       withdrawalSum += e.withdrawalUsd;
+      usedEntryIds.push(posId);
+    }
+    if (typeof window !== "undefined" && (usedEntryIds.length > 0 || skippedEntryIds.length > 0)) {
+      console.log(
+        `[analytics] manualContribution — used=${usedEntryIds.length} skipped=${skippedEntryIds.length} ` +
+        `depositSum=$${depositSum.toFixed(2)} withdrawalSum=$${withdrawalSum.toFixed(2)}`,
+      );
+      if (usedEntryIds.length > 0) console.log("  used entries (no on-chain data):", usedEntryIds);
+      if (skippedEntryIds.length > 0) console.log("  skipped entries (on-chain data authoritative):", skippedEntryIds);
     }
     return {
       depositSum,
       withdrawalSum,
       netDelta: withdrawalSum - depositSum,
     };
-  }, [manualEntries.entriesByPositionId]);
+  }, [manualEntries.entriesByPositionId, lpPnl.perPosition]);
 
-  // Positions that need manual input: excluded by useLpPnl (no deposit history,
-  // value_overflow, etc.) where manual entry can plausibly fix the gap.
+  // Positions that need manual input. Two paths into this list:
   //
-  // We include positions REGARDLESS of whether fees were retrieved — under
-  // heavy rate-limit a position can have its entire activity fetch return 0
-  // events, which means fees AND deposits are both missing. Those positions
-  // are exactly the ones the user wants to manually enter; gating on fees > 0
-  // hid them silently.
+  // 1. Position is in `lpPnl.excludedPositions` with a manual-entry-eligible
+  //    reason (no deposit history, value_overflow, etc.) — user needs to
+  //    enter values so the position contributes to Net P&L.
   //
-  // We DO exclude positions whose exclusion reason indicates manual entry
-  // won't help: unsupported protocols (need protocol implementation), transport
-  // errors (retryable — refreshing the page may fix), and missing current
-  // prices (Net P&L still works without them but the broader page is broken).
+  // 2. Position has a saved manual entry from a PRIOR session — user wants
+  //    to see / edit / delete it even if on-chain data later became available
+  //    (e.g. the sequential-chain fix lands and previously-empty fetches now
+  //    return events). Without this path, saved entries are invisible after
+  //    the on-chain side recovers, and the user can't manage them.
+  //
+  // For path 2 positions, the per-position card surfaces an info note that
+  // on-chain data is now authoritative (see ManualEntryCard). The card stays
+  // editable so the user can choose to zero out the saved entry if desired.
+  //
+  // Excluded reasons that manual entry can't fix are still filtered out
+  // (unsupported protocols, transport errors, missing current prices).
   const MANUAL_ENTRY_BLOCKED_REASON_FRAGMENTS = [
-    "not yet supported", // unsupported protocol / no activity URL
-    "Failed to load",     // HTTP / timeout / network — retryable
-    "Current price",      // current price data unavailable
+    "not yet supported",
+    "Failed to load",
+    "Current price",
   ];
   const needsInputPositions = useMemo<NeedsInputPosition[]>(() => {
     const seen = new Set<string>();
     const out: NeedsInputPosition[] = [];
+
+    // Path 1 — currently excluded positions (manual-entry-eligible reasons).
     for (const ep of lpPnl.excludedPositions) {
-      // Use position id (not pair name) for dedup — the same wallet can have
+      // Dedup by position id, never by pair name — same wallet can have
       // multiple closed positions in the same pair (e.g. 4× HYPE/USDC on
       // ProjectX, each with its own NFT tokenId).
       if (seen.has(ep.id)) continue;
-      seen.add(ep.id);
-      // Skip reasons that manual entry can't fix.
       if (MANUAL_ENTRY_BLOCKED_REASON_FRAGMENTS.some((frag) => ep.reason.includes(frag))) {
         continue;
       }
+      seen.add(ep.id);
       const feesUsd = feesByPositionId.get(ep.id) ?? 0;
-      out.push({ excluded: ep, feesUsd });
+      out.push({ excluded: ep, feesUsd, onChainAvailable: false });
+    }
+
+    // Path 2 — positions with saved manual entries that aren't already
+    // listed via path 1. These either have on-chain data now (in perPosition)
+    // OR have neither (e.g. position no longer in the user's wallet list).
+    for (const [posId, _entry] of Object.entries(manualEntries.entriesByPositionId)) {
+      void _entry;
+      if (seen.has(posId)) continue;
+      // Find the position's metadata. Try positions[] first (preferred),
+      // then synthesize a minimal fallback from the position id parts.
+      const pos = positions.find((p) => p.id === posId);
+      if (!pos) continue;
+      seen.add(posId);
+      const feesUsd = feesByPositionId.get(posId) ?? 0;
+      const onChain = !!lpPnl.perPosition[posId];
+      out.push({
+        excluded: {
+          id: posId,
+          pair: pos.pair,
+          protocol: pos.protocol,
+          chain: pos.chain,
+          reason: onChain
+            ? "On-chain data available — saved entry overridden"
+            : "Saved manually",
+        },
+        feesUsd,
+        onChainAvailable: onChain,
+      });
     }
     return out;
-  }, [lpPnl.excludedPositions, feesByPositionId]);
+  }, [lpPnl.excludedPositions, lpPnl.perPosition, feesByPositionId, manualEntries.entriesByPositionId, positions]);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");

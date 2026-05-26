@@ -608,6 +608,36 @@ function aggregate(
   const netPnl = currentValue + closingValue + feesCollected + feesUnclaimed - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
 
+  // Per-position contribution log — fires every time `aggregate()` runs (every
+  // landed fetch + every refresh tick). Lets you trace EXACTLY which position
+  // is adding what to Total Deposited / Net P&L when those numbers look off.
+  // Logs only when there's at least one included position (avoids log spam
+  // during the empty-state loading phase before any fetch lands).
+  if (inflight === 0 && included > 0) {
+    const breakdown = Object.entries(perPosition).map(([id, d]) => ({
+      id,
+      isClosed: d.isClosed,
+      initial: Number(d.initialValue.toFixed(2)),
+      current: Number(d.currentValue.toFixed(2)),
+      closing: Number(d.closingValue.toFixed(2)),
+      feesClaimed: Number(d.feesCollected.toFixed(2)),
+      ilUSD: Number(d.ilUSD.toFixed(2)),
+      netPnl: Number(d.netPnlUSD.toFixed(2)),
+    }));
+    console.log(
+      `[useLpPnl] aggregate — included=${included} excluded=${excluded} errored=${errored} ` +
+      `initial=$${initialValue.toFixed(2)} current=$${currentValue.toFixed(2)} ` +
+      `closing=$${closingValue.toFixed(2)} ilUSD=$${ilUSD.toFixed(2)} netPnl=$${netPnl.toFixed(2)}`,
+    );
+    console.table(breakdown);
+    if (excludedPositions.length > 0) {
+      console.log(
+        `[useLpPnl] excluded positions:`,
+        excludedPositions.map((ep) => `${ep.id} (${ep.protocol}/${ep.chain}) — ${ep.reason}`),
+      );
+    }
+  }
+
   return {
     initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
     ilUSD, netPnl, netPnlPct, included, excluded,
