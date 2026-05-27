@@ -24,6 +24,16 @@ export interface LpPnlResult {
   feesCollected: number;
   feesUnclaimed: number;
   ilUSD: number;
+  /**
+   * Realised gain/loss from CLOSED positions: Σ (closingValue − initialValue)
+   * across positions where `data.isClosed === true` AND the position's chain
+   * is in the EVM whitelist. Solana / Sui closed positions are excluded
+   * because their on-chain close artefacts (NFT burn / Move object destroy)
+   * make exit-value reconstruction unreliable — including them would mis-
+   * report as a near-100% loss (closingValue=0, initialValue>0).
+   * Sign: positive = realised gain, negative = realised loss.
+   */
+  capitalGL: number;
   netPnl: number;
   netPnlPct: number;
   included: number;
@@ -52,7 +62,7 @@ export interface LpPnlResult {
 
 const EMPTY: LpPnlResult = {
   initialValue: 0, currentValue: 0, closingValue: 0, feesCollected: 0, feesUnclaimed: 0,
-  ilUSD: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
+  ilUSD: 0, capitalGL: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
   errored: 0, errorReasons: [], isLoading: false,
   perPosition: {},
   excludedPositions: [],
@@ -522,7 +532,19 @@ function aggregate(
   unsupportedRejections: ExcludedPosition[],
 ): LpPnlResult {
   let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
+  let capitalGL = 0;
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
+  // Chains whose closed-position withdrawal events we trust on-chain.
+  // EVM routes emit withdrawal events from DecreaseLiquidity logs with
+  // historically-derived USD (via deriveDepositPrices), so closingValue
+  // is reliable. Solana destroys position NFTs on close and Sui destroys
+  // Move position objects → no readable withdrawal artifact → skip.
+  // Chain literals match exactly what each position route emits in pos.chain
+  // (e.g. "HyperEVM" — NOT "Hyperliquid L1" which is only the DefiLlama
+  // project lookup string in app/api/hyperswap/route.ts).
+  const CAPITAL_GL_CHAINS = new Set([
+    "HyperEVM", "Base", "Arbitrum", "Optimism", "Polygon", "Ethereum", "BNB Chain",
+  ]);
   const errorReasons = new Set<string>();
   // Per-position record built from the same map the totals come from — any
   // consumer that reads perPosition[id] gets a number that, summed across
@@ -590,6 +612,17 @@ function aggregate(
         currentValue += d.currentValue;
         feesUnclaimed += d.feesUnclaimed;
         ilUSD += d.ilUSD;
+      } else {
+        // Realised capital G/L from CLOSED positions on EVM chains only —
+        // see CAPITAL_GL_CHAINS at the top of aggregate() for the chain
+        // whitelist rationale. positionMeta is populated for every
+        // position that passed the eligibility filter, so meta should
+        // always be present here; defensive `?.` keeps us safe if a
+        // future code path ever bypasses metadata.
+        const chain = positionMeta.get(id)?.chain;
+        if (chain && CAPITAL_GL_CHAINS.has(chain)) {
+          capitalGL += d.closingValue - d.initialValue;
+        }
       }
       included += 1;
       perPosition[id] = d;
@@ -616,11 +649,15 @@ function aggregate(
   // resultsMap, but the user still deserves to see them in the warning.
   excludedPositions.push(...unsupportedRejections);
 
-  // Net P&L derived strictly from the displayed fields per the LP P&L card
-  // semantics: open Current + lifetime Fees + open Unclaimed − open Initial.
-  // closingValue is no longer a term (closed positions don't contribute their
-  // realised value to the headline either).
-  const netPnl = currentValue + feesCollected + feesUnclaimed - initialValue;
+  // Net P&L mirrors the analytics LP P&L card formula:
+  //   open Current + lifetime Fees + open Unclaimed + realised capitalGL
+  //   − open Initial.
+  // capitalGL folds closed-position outcomes (closingValue − initialValue
+  // on EVM only) into the headline so a wallet that's churned its open
+  // positions still sees its realised gains/losses in Net P&L — without
+  // having to also bake closed-position initials into Total Deposited or
+  // closing values into Current Value.
+  const netPnl = currentValue + feesCollected + feesUnclaimed + capitalGL - initialValue;
   const netPnlPct = initialValue > 0 ? (netPnl / initialValue) * 100 : 0;
 
   // Per-position contribution log — fires every time `aggregate()` runs (every
@@ -642,7 +679,8 @@ function aggregate(
     console.log(
       `[useLpPnl] aggregate — included=${included} excluded=${excluded} errored=${errored} ` +
       `initial=$${initialValue.toFixed(2)} current=$${currentValue.toFixed(2)} ` +
-      `closing=$${closingValue.toFixed(2)} ilUSD=$${ilUSD.toFixed(2)} netPnl=$${netPnl.toFixed(2)}`,
+      `closing=$${closingValue.toFixed(2)} ilUSD=$${ilUSD.toFixed(2)} ` +
+      `capitalGL=$${capitalGL.toFixed(2)} netPnl=$${netPnl.toFixed(2)}`,
     );
     console.table(breakdown);
     if (excludedPositions.length > 0) {
@@ -655,7 +693,7 @@ function aggregate(
 
   return {
     initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
-    ilUSD, netPnl, netPnlPct, included, excluded,
+    ilUSD, capitalGL, netPnl, netPnlPct, included, excluded,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
     perPosition,

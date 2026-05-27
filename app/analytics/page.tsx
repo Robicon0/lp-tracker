@@ -1411,7 +1411,7 @@ export default function Analytics() {
                 className="ana-lp-pnl"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(6, 1fr)",
+                  gridTemplateColumns: "repeat(7, 1fr)",
                 }}
               >
                 {/* While ANY LP position is still being fetched/computed
@@ -1422,13 +1422,18 @@ export default function Analytics() {
                     counter increments and the red banner below explains
                     which positions couldn't load.
 
-                    Scoping rule (matches commit 5299075):
+                    Scoping rule:
                       Total Deposited / Current Value / Fees Unclaimed / IL
                         → OPEN positions only (useLpPnl.aggregate excludes
                           closed positions from these fields by design).
                       Fees Collected → ALL positions (open + closed lifetime).
+                      Capital G/L → CLOSED positions only, EVM whitelist
+                        (HyperEVM, Base, Arbitrum, Optimism, Polygon,
+                        Ethereum, BNB Chain). Solana / Sui skipped — their
+                        on-chain close artifacts (NFT burn / Move object
+                        destroy) make closingValue unreliable.
                       Net P&L = Current + Fees Collected + Fees Unclaimed
-                                − Total Deposited. */}
+                                + Capital G/L − Total Deposited. */}
                 {(() => {
                   // Fees Collected uses the LIFETIME number from the Fee Income
                   // pipeline (same eventsMap + walletLevelFees that drive the
@@ -1437,8 +1442,14 @@ export default function Analytics() {
                   // wallet-level Bluefin fees from destroyed Sui objects, so
                   // it's the authoritative lifetime fee total.
                   const lifetimeFeesCollected = feeIncome.totalAllTime;
+                  // Net P&L folds in realised capital G/L from closed EVM
+                  // positions (lpPnl.capitalGL = Σ closingValue − initialValue
+                  // for closed positions whose chain is in the EVM whitelist).
+                  // Without this term, a wallet that's churned its open
+                  // positions would see Net P&L drop to ~0 even when fees +
+                  // realised gains made the portfolio profitable.
                   const adjustedNetPnl =
-                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
+                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed + lpPnl.capitalGL - lpPnl.initialValue;
                   const adjustedNetPnlPct =
                     lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
                   // IL tooltip — dynamic, built from live numbers (matches
@@ -1474,6 +1485,13 @@ export default function Analytics() {
                     sub: "claimed lifetime (at claim-time price)",
                   },
                   { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "open positions, pending on-chain" },
+                  {
+                    label: "Capital G/L",
+                    val: fmt$Signed(lpPnl.capitalGL),
+                    color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright,
+                    sub: "closed positions, EVM only",
+                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains only (HyperEVM, Base, Arbitrum). Solana and Sui closed position exit data is not yet available on-chain.",
+                  },
                   {
                     label: "Imperm. Loss",
                     val: fmt$Signed(-lpPnl.ilUSD),
