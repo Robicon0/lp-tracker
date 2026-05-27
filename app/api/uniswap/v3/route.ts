@@ -185,11 +185,17 @@ async function getPosition(rpc: string, nftManager: string, tokenId: bigint): Pr
   // Decode 12 return values (each 32 bytes = 64 hex chars)
   const readWord = (i: number) => hex.slice(i * 64, (i + 1) * 64);
   const toAddress = (word: string) => '0x' + word.slice(24).toLowerCase();
+  // ABI encodes int24 SIGN-EXTENDED to 32 bytes — so tick -887272 comes
+  // back as 0xffff…fffff264d8 (high 29 bytes are 0xff to indicate negative).
+  // Reading the full 256-bit word and subtracting 0x1000000 gave a value
+  // near 2^256 for any negative tick, which then poisoned downstream tick
+  // math (deriveDepositPrices produced astronomical prices → value_overflow
+  // for the whole position). Fix: take only the LAST 3 bytes (6 hex chars)
+  // and sign-extend from int24. Same pattern documented for HyperEVM.
   const toInt24 = (word: string) => {
-    const val = BigInt('0x' + word);
-    const MAX = BigInt('0x7fffff');
-    if (val > MAX) return Number(val - BigInt('0x1000000'));
-    return Number(val);
+    const last3 = word.slice(-6);
+    const val = parseInt(last3, 16);
+    return val >= 0x800000 ? val - 0x1000000 : val;
   };
   
   // word 0: nonce (uint96)

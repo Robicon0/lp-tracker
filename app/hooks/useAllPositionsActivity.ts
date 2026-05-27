@@ -65,7 +65,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 //     now retries failed topics individually and aggregates partial successes;
 //     this bump forces a fresh fetch so browsers with empty cached entries
 //     pick up the new behaviour.
-function cacheKey(id: string) { return `analytics-activity-v4-${id}`; }
+// Bumped v4 → v5: same reason as lp-pnl-events-v2 — Uniswap V3 closed
+// positions had cached events whose usdAtTime was computed against bad
+// ticks (int24 sign-extension bug in /api/uniswap/v3). Fresh fetches
+// after the fix flow through automatically.
+function cacheKey(id: string) { return `analytics-activity-v5-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

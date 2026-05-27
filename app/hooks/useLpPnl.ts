@@ -283,7 +283,14 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // Live values (pos.value, pos.price0/1, pos.fees) are always taken from the
 // latest positions snapshot, so prices stay fresh while history loads instantly.
 
-const CACHE_KEY_PREFIX = "lp-pnl-events-v1-";
+// Bumped v1 → v2: the v1 entries for Uniswap V3 closed positions cached
+// events whose usdAtTime had been computed against a broken tickLower /
+// tickUpper (the int24 decoder in /api/uniswap/v3 sign-extended into the
+// upper uint256 instead of int24, so ticks came through as ~2^256 →
+// parseInt truncated to 1 → deriveDepositPrices produced a 10^12 pool
+// price → cached usdAtTime ≈ $10^12 → value_overflow). Bumping forces a
+// fresh fetch with the fixed decoder.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v2-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

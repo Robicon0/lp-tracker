@@ -21,7 +21,9 @@ interface CacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function cacheKey(chain: string, tokenId: string) {
-  return `uni-activity-v2-${chain}-${tokenId}`;
+  // v3 invalidates events cached with broken-tick usdAtTime (int24
+  // sign-extension bug in /api/uniswap/v3, fixed in the position route).
+  return `uni-activity-v3-${chain}-${tokenId}`;
 }
 
 function readCache(chain: string, tokenId: string): UniswapActivityData | null {
