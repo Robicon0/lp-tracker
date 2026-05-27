@@ -924,9 +924,8 @@ export default function Analytics() {
            CSS-only — no logic, no data, no functionality changes. */
         @media (max-width: 768px) {
           .docs-help-btn { display: none !important; }
-          /* 3 cells stack vertically on mobile — 1fr 1fr would orphan the
-             third cell on its own row with empty space beside it. */
-          .ana-lp-pnl { grid-template-columns: 1fr !important; }
+          /* 6 cells collapse to 2 columns × 3 rows on mobile. */
+          .ana-lp-pnl { grid-template-columns: 1fr 1fr !important; }
           .ana-income-pair { grid-template-columns: 1fr !important; }
           .ana-income-source-inner { flex-direction: column !important; }
           .ana-chain-mo { display: none !important; }
@@ -1382,11 +1381,11 @@ export default function Analytics() {
               </div>
             </SectionFrame>
 
-            {/* ── PORTFOLIO SUMMARY ─────────────────────────────────────── */}
+            {/* ── LP PROFIT & LOSS ──────────────────────────────────────── */}
             <SectionFrame
               id="section-lp-pnl"
-              title="Portfolio Summary"
-              sub="Verified on-chain data across all positions"
+              title="LP Profit & Loss"
+              sub="Aggregated from on-chain deposit & fee events across all LP positions"
               action={
                 lpPnl.isLoading ? (
                   <span
@@ -1412,7 +1411,7 @@ export default function Analytics() {
                 className="ana-lp-pnl"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gridTemplateColumns: "repeat(6, 1fr)",
                 }}
               >
                 {/* While ANY LP position is still being fetched/computed
@@ -1423,27 +1422,50 @@ export default function Analytics() {
                     counter increments and the red banner below explains
                     which positions couldn't load.
 
-                    The grid is now 3 cells (Current Value | Fees Collected |
-                    Fees Unclaimed). Total Deposited / IL / Net P&L were
-                    removed because they all depend on historical deposit
-                    data, which isn't reliably retrievable on every chain
-                    (HyperEVM closed positions older than DRPC's 5M-block
-                    window, BSC archive gaps, etc.) — partial data made the
-                    headline misleading. The 3 remaining fields are all
-                    derived from data we can always retrieve on-chain. */}
+                    Scoping rule (matches commit 5299075):
+                      Total Deposited / Current Value / Fees Unclaimed / IL
+                        → OPEN positions only (useLpPnl.aggregate excludes
+                          closed positions from these fields by design).
+                      Fees Collected → ALL positions (open + closed lifetime).
+                      Net P&L = Current + Fees Collected + Fees Unclaimed
+                                − Total Deposited. */}
                 {(() => {
                   // Fees Collected uses the LIFETIME number from the Fee Income
                   // pipeline (same eventsMap + walletLevelFees that drive the
                   // chart in SECTION 2). useLpPnl.feesCollected sees per-position
                   // events only; feeIncome.totalAllTime additionally folds in
-                  // wallet-level Bluefin fees from destroyed Sui objects, so it's
-                  // the authoritative lifetime fee total.
-                  //
-                  // Current Value and Fees Unclaimed come straight from useLpPnl
-                  // and are open-positions-only by aggregator design (closed
-                  // positions have currentValue=0 and feesUnclaimed=0 anyway).
+                  // wallet-level Bluefin fees from destroyed Sui objects, so
+                  // it's the authoritative lifetime fee total.
                   const lifetimeFeesCollected = feeIncome.totalAllTime;
+                  const adjustedNetPnl =
+                    lpPnl.currentValue + lifetimeFeesCollected + lpPnl.feesUnclaimed - lpPnl.initialValue;
+                  const adjustedNetPnlPct =
+                    lpPnl.initialValue > 0 ? (adjustedNetPnl / lpPnl.initialValue) * 100 : 0;
+                  // IL tooltip — dynamic, built from live numbers (matches
+                  // CLAUDE.md "LP P&L IL tooltip with real numbers" rule).
+                  const ilUsdAbs = Math.abs(lpPnl.ilUSD);
+                  const hodlValue = lpPnl.currentValue - lpPnl.ilUSD; // ilUSD = currentValue − hodlValue
+                  const totalFeesEarned = lifetimeFeesCollected + lpPnl.feesUnclaimed;
+                  const ilTooltip = lpPnl.ilUSD >= 0
+                    ? `Your current LP value (${fmt$(lpPnl.currentValue)}) is higher than your HODL value (${fmt$(hodlValue)}) by ${fmt$(ilUsdAbs)}. The AMM rebalancing has worked in your favour. Combined with ${fmt$(totalFeesEarned)} fees earned your total return is strong.\n\nFormula: IL = Current LP Value − HODL Value`
+                    : `Your current LP value (${fmt$(lpPnl.currentValue)}) is lower than your HODL value (${fmt$(hodlValue)}) by ${fmt$(ilUsdAbs)}. This is your impermanent loss. Your fees earned (${fmt$(totalFeesEarned)}) ${totalFeesEarned >= ilUsdAbs ? "fully" : "partially"} offset this loss. IL may recover if prices return to entry levels.\n\nFormula: IL = Current LP Value − HODL Value`;
                   return ([
+                  {
+                    label: "Total Deposited",
+                    // "~" marker when an OPEN position contributing to the
+                    // totals is using the HyperEVM fallback (current value as
+                    // deposit estimate because eth_getLogs couldn't reach the
+                    // deposit block). With HYPEREVM_ARCHIVE_RPC (Chainstack
+                    // nanoreth, full history from block 0) wired in,
+                    // estimatedPositionCount should be ~0 for HyperEVM —
+                    // closed positions now reach Tier 2 successfully.
+                    val: `${lpPnl.estimatedPositionCount > 0 ? "~" : ""}${fmt$(lpPnl.initialValue)}`,
+                    color: C.textBright,
+                    sub: "at deposit prices, open positions only",
+                    tooltip: lpPnl.estimatedPositionCount > 0
+                      ? `${lpPnl.estimatedPositionCount} position${lpPnl.estimatedPositionCount === 1 ? "" : "s"} using estimated deposit value — Deposit price unavailable, using current value as estimate.`
+                      : undefined,
+                  },
                   { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market" },
                   {
                     label: "Fees Collected",
@@ -1452,6 +1474,19 @@ export default function Analytics() {
                     sub: "claimed lifetime (at claim-time price)",
                   },
                   { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "open positions, pending on-chain" },
+                  {
+                    label: "Imperm. Loss",
+                    val: fmt$Signed(-lpPnl.ilUSD),
+                    color: -lpPnl.ilUSD > 0 ? C.red : C.green,
+                    sub: "Σ(HODL − Current), open positions only",
+                    tooltip: ilTooltip,
+                  },
+                  {
+                    label: "Net P&L",
+                    val: fmt$Signed(adjustedNetPnl),
+                    color: adjustedNetPnl >= 0 ? C.cyan : C.red,
+                    sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
+                  },
                 ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string }>);
                 })().map((c, i, arr) => (
                   <div
@@ -1503,6 +1538,57 @@ export default function Analytics() {
                     "@keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }",
                 }}
               />
+
+              {/* Excluded-positions warning — every position NOT contributing
+                  to the totals (unsupported protocols, missing-data positions,
+                  transport errors after retries). Shown only after loading
+                  resolves so the user doesn't see it flash during fetch. */}
+              {!lpPnl.isLoading && lpPnl.excludedPositions.length > 0 && (
+                <div
+                  style={{
+                    margin: "0 26px 18px",
+                    border: "1px solid rgba(255,170,0,0.25)",
+                    background: "rgba(255,170,0,0.04)",
+                    padding: "12px 16px",
+                    fontFamily: FONT,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "#ffaa00",
+                      letterSpacing: "0.04em",
+                      marginBottom: 8,
+                    }}
+                  >
+                    ⚠ {lpPnl.excludedPositions.length} position
+                    {lpPnl.excludedPositions.length === 1 ? "" : "s"} could not
+                    be fully calculated and {lpPnl.excludedPositions.length === 1 ? "is" : "are"} excluded from totals:
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {lpPnl.excludedPositions.map((ep) => (
+                      <div
+                        key={`${ep.id}-${ep.reason}`}
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,170,0,0.85)",
+                          letterSpacing: "0.02em",
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        <span style={{ color: "#ffaa00", fontWeight: 600 }}>
+                          {ep.pair}
+                        </span>
+                        <span style={{ opacity: 0.7 }}>
+                          {" "}({ep.protocol} · {ep.chain})
+                        </span>
+                        <span style={{ opacity: 0.7 }}> — </span>
+                        <span>{ep.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {lpPnl.errored > 0 && (
                 <div
