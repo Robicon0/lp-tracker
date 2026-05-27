@@ -28,6 +28,22 @@ const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingecko
   '0xadcb2f358eae6492f61a5f87eb8893d09391d160': { symbol: 'WHYPE', decimals: 18, coingeckoId: 'hyperliquid' },
   '0xb88339cb7199b77e23db6e890353e22632ba630f': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
   '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
+  // USD₮0 (Tether USD on HyperEVM) — priced via Tether's CoinGecko ID so the
+  // route resolves to ~$1 like USDC. Without this entry the position route
+  // emits price0/price1=0 for any HYPE/USD₮0 pair, which fails the
+  // missing_current_prices check in computePositionPnL and excludes the
+  // position from LP P&L totals.
+  '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb': { symbol: 'USDT', decimals: 6, coingeckoId: 'tether' },
+};
+
+// Force a specific display symbol regardless of what the on-chain symbol()
+// call returns. By design, fetchTokenInfo prefers on-chain truth (so branded
+// glyphs like "USD₮0" render as-is). This override is the explicit
+// "show the human-readable symbol instead" escape hatch — used sparingly,
+// only for tokens whose on-chain symbol is a stylized variant of a
+// well-known asset (Tether's USD₮0 trademark glyph → "USDT").
+const SYMBOL_OVERRIDES: Record<string, string> = {
+  '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb': 'USDT',
 };
 
 // 0x5555...5555 is a pseudo-address used inside V3 pool slots to represent
@@ -197,14 +213,21 @@ async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; d
     // address tag so the UI isn't blank.
     if (!symbol) symbol = known?.symbol ?? tokenAddress.slice(2, 8).toUpperCase();
 
+    // SYMBOL_OVERRIDES takes the LAST word — applied after both the on-chain
+    // read and the fallback so branded glyphs are normalized regardless of
+    // which branch produced the symbol.
+    const override = SYMBOL_OVERRIDES[lower];
+    if (override) symbol = override;
+
     const decimals = decResult && decResult !== '0x'
       ? parseInt(decResult, 16)
       : (known?.decimals ?? 18);
 
     return { symbol, decimals };
   } catch {
+    const override = SYMBOL_OVERRIDES[lower];
     return {
-      symbol: known?.symbol ?? tokenAddress.slice(2, 8).toUpperCase(),
+      symbol: override ?? known?.symbol ?? tokenAddress.slice(2, 8).toUpperCase(),
       decimals: known?.decimals ?? 18,
     };
   }

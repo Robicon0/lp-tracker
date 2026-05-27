@@ -39,6 +39,7 @@ const TOPIC_COLLECT = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab176563273
 const STABLECOINS = new Set([
   '0xb88339cb7199b77e23db6e890353e22632ba630f', // USDC
   '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca', // USDC (alternate)
+  '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb', // USD₮0 (Tether USD on HyperEVM)
 ]);
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
