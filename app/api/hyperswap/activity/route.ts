@@ -6,10 +6,11 @@ import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePr
 // TIER 1 (PRIMARY): Etherscan V2 with chainid=999 — archive-backed full history.
 //   Requires ETHERSCAN_API_KEY env var. Free tier: 5 req/sec, 100K/day.
 //   Endpoint: https://api.etherscan.io/v2/api?chainid=999&module=logs&action=getLogs
-// TIER 2 (FALLBACK): DRPC public eth_getLogs over the last SCAN_DEPTH blocks.
-//   Used when Etherscan is unavailable, rate-limited, errors, or the key is
-//   not configured. Pruning means deposits older than ~SCAN_DEPTH blocks
-//   won't be recoverable here.
+// TIER 2 (FALLBACK): Chainstack nanoreth archive endpoint via
+//   HYPEREVM_ARCHIVE_RPC — full history from block 0 (replaces the prior
+//   DRPC endpoint, which only retained ~40h of history and silently dropped
+//   deposits for older closed positions). Used when Etherscan is
+//   unavailable, rate-limited, errors, or the key is not configured.
 // TIER 3 (LAST RESORT): `buildFallbackPnL` in app/hooks/useLpPnl.ts —
 //   synthesizes a PnL using current value as deposit estimate when both
 //   tiers above return zero events. Lives at the consumer layer (not in
@@ -21,11 +22,10 @@ const ETHERSCAN_TIMEOUT_MS = 10_000;
 
 // Public HyperEVM RPC: used only for eth_getBlockByNumber (timestamps) — limits to 1000 blocks for eth_getLogs
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
-// DRPC: used for eth_getLogs fallback — supports 10k-block ranges on free tier
-const DRPC_URL = 'https://hyperliquid.drpc.org';
-// How many blocks to scan back from current block for activity history (~2.5 months at ~1.1s/block)
+// How many blocks to scan back from current block for activity history (~2.5 months at ~1.1s/block).
+// Chainstack nanoreth archive handles full history; this cap bounds chunk fan-out.
 const SCAN_DEPTH = 5_000_000;
-// DRPC's max block range per eth_getLogs request
+// Archive RPC max block range per eth_getLogs request
 const LOG_CHUNK = 10_000;
 // Max concurrent eth_getLogs requests (avoid rate-limiting)
 const LOG_CONCURRENCY = 20;
@@ -83,8 +83,12 @@ async function rpcCallHyperEVM(body: object): Promise<{ result?: unknown; error?
   return res.json();
 }
 
-async function rpcCallDRPC(body: object): Promise<{ result?: unknown; error?: { message: string } }> {
-  const res = await fetch(DRPC_URL, {
+async function rpcCallArchive(body: object): Promise<{ result?: unknown; error?: { message: string } }> {
+  const url = process.env.HYPEREVM_ARCHIVE_RPC;
+  if (!url) {
+    return { error: { message: 'HYPEREVM_ARCHIVE_RPC not configured' } };
+  }
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -95,10 +99,10 @@ async function rpcCallDRPC(body: object): Promise<{ result?: unknown; error?: { 
   return res.json();
 }
 
-// Fetch one 10k-block chunk of logs via DRPC.
+// Fetch one 10k-block chunk of logs via the archive RPC.
 // topic[0]=null (any V3 event), topic[1]=tokenIdHex (indexed)
 async function fetchLogsChunk(nftManager: string, tokenIdHex: string, from: number, to: number): Promise<RawLog[]> {
-  const result = await rpcCallDRPC({
+  const result = await rpcCallArchive({
     jsonrpc: '2.0',
     method: 'eth_getLogs',
     params: [{
@@ -110,7 +114,7 @@ async function fetchLogsChunk(nftManager: string, tokenIdHex: string, from: numb
     id: 1,
   });
   if (result.error) {
-    console.error(`[hyperswap/activity] DRPC getLogs error ${from}-${to}:`, result.error.message);
+    console.error(`[hyperswap/activity] archive getLogs error ${from}-${to}:`, result.error.message);
     return [];
   }
   return (result.result as RawLog[]) ?? [];
@@ -171,14 +175,14 @@ async function fetchOneEtherscanTopic(
 //     pairing in the parent route can't subtract withdrawal amounts from
 //     Collect events, so Collect amounts in close txs leak into fee totals
 //     (e.g. position 388173 fees inflated from $68 → $8,196 in testing).
-//     Decrease failure forces full fallback to DRPC.
+//     Decrease failure forces full fallback to the archive RPC.
 //   - Collect (optional): if dropped, fee_claim events are missing but no
 //     other event is mis-valued.
 //
 // Returns null when:
-//   - ETHERSCAN_API_KEY is unset (caller skips to DRPC)
+//   - ETHERSCAN_API_KEY is unset (caller skips to archive RPC)
 //   - Any topic returned the "Invalid API Key" signature (key is wrong —
-//     retrying won't help, full DRPC fallback is correct)
+//     retrying won't help, full archive RPC fallback is correct)
 //   - DecreaseLiquidity topic still failed after retry (correctness gate)
 //   - ALL THREE topics still failed after retry
 // "No records found" comes back as status:"0" with that exact message — NOT
@@ -189,7 +193,7 @@ async function fetchLogsViaEtherscan(
 ): Promise<RawLog[] | null> {
   const apiKey = process.env.ETHERSCAN_API_KEY;
   if (!apiKey) {
-    console.log('[hyperswap/activity] source=etherscan SKIP — ETHERSCAN_API_KEY not set, will use DRPC');
+    console.log('[hyperswap/activity] source=etherscan SKIP — ETHERSCAN_API_KEY not set, will use archive RPC');
     return null;
   }
 
@@ -212,8 +216,8 @@ async function fetchLogsViaEtherscan(
       console.error(
         '[hyperswap/activity] source=etherscan INVALID_API_KEY — ETHERSCAN_API_KEY ' +
         'is rejected by Etherscan V2. Check for duplicate keys in .env.local (dotenv ' +
-        'keeps the LAST definition) and on Vercel. Tier 2 DRPC will run but cannot ' +
-        'reach blocks older than its 5M scan window — closed positions will see 0 events.',
+        'keeps the LAST definition) and on Vercel. Tier 2 archive RPC will run if ' +
+        'HYPEREVM_ARCHIVE_RPC is configured.',
       );
       return null;
     }
@@ -238,8 +242,8 @@ async function fetchLogsViaEtherscan(
     // Collect events in close txs — without it, Collect amounts in close
     // txs leak into fee totals (verified live: position 388173 fees went
     // from $68 → $8,196 when Decrease topic was rate-limited and dropped).
-    // If Decrease failed, fall back to DRPC for the whole position rather
-    // than emitting wrong fee numbers.
+    // If Decrease failed, fall back to the archive RPC for the whole
+    // position rather than emitting wrong fee numbers.
     const all: RawLog[] = [];
     let failed = 0;
     const DECREASE_IDX = 1; // topics array order: [INCREASE, DECREASE, COLLECT]
@@ -251,7 +255,7 @@ async function fetchLogsViaEtherscan(
         if (i === DECREASE_IDX) decreaseOk = true;
       } else {
         failed += 1;
-        const note = i === DECREASE_IDX ? ' (REQUIRED — falling back to DRPC for correctness)' : '';
+        const note = i === DECREASE_IDX ? ' (REQUIRED — falling back to archive RPC for correctness)' : '';
         console.warn(
           `[hyperswap/activity] source=etherscan ${topicNames[i]} FAILED after retry: ${r.reason} — ` +
           `events from this topic missing for tokenId ${tokenIdHex}${note}`,
@@ -260,12 +264,12 @@ async function fetchLogsViaEtherscan(
     }
 
     if (failed === 3) {
-      console.warn('[hyperswap/activity] source=etherscan ALL_TOPICS_FAILED — falling back to DRPC');
+      console.warn('[hyperswap/activity] source=etherscan ALL_TOPICS_FAILED — falling back to archive RPC');
       return null;
     }
     if (!decreaseOk) {
       // Decrease is load-bearing for fee separation. Don't return partial logs
-      // here — DRPC scan is more reliable for THIS position than wrong fees.
+      // here — archive scan is more reliable for THIS position than wrong fees.
       return null;
     }
 
@@ -277,19 +281,27 @@ async function fetchLogsViaEtherscan(
   } catch (err) {
     clearTimeout(timer);
     const isAbort = err instanceof Error && err.name === 'AbortError';
-    console.warn(`[hyperswap/activity] source=etherscan ${isAbort ? 'TIMEOUT' : 'THREW'} — falling back to DRPC:`, err);
+    console.warn(`[hyperswap/activity] source=etherscan ${isAbort ? 'TIMEOUT' : 'THREW'} — falling back to archive RPC:`, err);
     return null;
   }
 }
 
-// TIER 2: DRPC eth_getLogs over the last SCAN_DEPTH blocks, chunked LOG_CHUNK at
-// a time. HyperEVM public RPC caps at 1000 blocks per call; DRPC allows 10k.
-async function fetchLogsViaDRPC(nftManager: string, tokenIdHex: string): Promise<RawLog[]> {
+// TIER 2: Chainstack nanoreth archive eth_getLogs (via HYPEREVM_ARCHIVE_RPC),
+// over the last SCAN_DEPTH blocks, chunked LOG_CHUNK at a time. HyperEVM
+// public RPC caps at 1000 blocks per call; the archive endpoint allows 10k
+// and has full history back to block 0 (unlike the prior DRPC endpoint,
+// which only retained ~40h and silently dropped older closed positions).
+async function fetchLogsViaArchive(nftManager: string, tokenIdHex: string): Promise<RawLog[]> {
+  if (!process.env.HYPEREVM_ARCHIVE_RPC) {
+    console.error('[hyperswap/activity] source=archive SKIP — HYPEREVM_ARCHIVE_RPC env var not set');
+    return [];
+  }
+
   // Get current block from the reliable public RPC
   const blockRes = await rpcCallHyperEVM({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 });
   const latestBlock = parseInt((blockRes.result as string) ?? '0x0', 16);
   if (!latestBlock) {
-    console.error('[hyperswap/activity] source=drpc Failed to get latest block number');
+    console.error('[hyperswap/activity] source=archive Failed to get latest block number');
     return [];
   }
 
@@ -298,7 +310,7 @@ async function fetchLogsViaDRPC(nftManager: string, tokenIdHex: string): Promise
   for (let b = fromBlock; b <= latestBlock; b += LOG_CHUNK) {
     ranges.push([b, Math.min(b + LOG_CHUNK - 1, latestBlock)]);
   }
-  console.log(`[hyperswap/activity] source=drpc scanning ${ranges.length} chunks (blocks ${fromBlock}–${latestBlock})`);
+  console.log(`[hyperswap/activity] source=archive scanning ${ranges.length} chunks (blocks ${fromBlock}–${latestBlock})`);
 
   // Fetch in parallel batches
   const allLogs: RawLog[] = [];
@@ -310,16 +322,17 @@ async function fetchLogsViaDRPC(nftManager: string, tokenIdHex: string): Promise
     allLogs.push(...results.flat());
   }
 
-  console.log(`[hyperswap/activity] source=drpc OK — ${allLogs.length} logs for tokenId ${tokenIdHex}`);
+  console.log(`[hyperswap/activity] source=archive OK — ${allLogs.length} logs for tokenId ${tokenIdHex}`);
   return allLogs;
 }
 
-// Try Etherscan V2 first (archive-backed full history); fall back to DRPC if
-// Etherscan is rate-limited, times out, errors, or the API key isn't set.
+// Try Etherscan V2 first (archive-backed full history); fall back to the
+// Chainstack archive RPC if Etherscan is rate-limited, times out, errors,
+// or the API key isn't set.
 async function fetchLogs(nftManager: string, tokenIdHex: string): Promise<RawLog[]> {
   const etherscanLogs = await fetchLogsViaEtherscan(nftManager, tokenIdHex);
   if (etherscanLogs !== null) return etherscanLogs;
-  return fetchLogsViaDRPC(nftManager, tokenIdHex);
+  return fetchLogsViaArchive(nftManager, tokenIdHex);
 }
 
 async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, number>> {
