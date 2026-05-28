@@ -28,6 +28,10 @@ const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingecko
   '0xadcb2f358eae6492f61a5f87eb8893d09391d160': { symbol: 'WHYPE', decimals: 18, coingeckoId: 'hyperliquid' },
   '0xb88339cb7199b77e23db6e890353e22632ba630f': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
   '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
+  // Third Circle-native USDC contract on HyperEVM — without this entry,
+  // HYPE/USDC positions on this pool got price=0 for the USDC side and were
+  // excluded from LP P&L via missing_current_prices.
+  '0x3061caa1ce7c018ce68eae5795b2086cfdb4e148': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
   // USD₮0 (Tether USD on HyperEVM) — priced via Tether's CoinGecko ID so the
   // route resolves to ~$1 like USDC. Without this entry the position route
   // emits price0/price1=0 for any HYPE/USD₮0 pair, which fails the
@@ -390,6 +394,55 @@ async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, numbe
   return fetchCachedCoinGeckoPrices(coingeckoIds);
 }
 
+// ── Dynamic CoinGecko symbol → ID resolver (24h module-level cache) ──────────
+// LAST-RESORT price fallback for HyperEVM tokens NOT in KNOWN_TOKENS. The
+// hardcoded KNOWN_TOKENS fast path above is unchanged — this only fires for
+// tokens whose on-chain symbol() resolved but have no coingeckoId hint.
+//
+// We hit CoinGecko's /search directly (same server-side pattern as
+// fetchCachedCoinGeckoPrices in app/lib/priceCache.ts) rather than the
+// /api/prices?endpoint=search proxy — the proxy exists for browser CORS,
+// and server-calling-self needs a fragile absolute base URL. Both ultimately
+// query the same CoinGecko search endpoint.
+//
+// Cache (symbol → id) lives 24h and caches null misses too, so an
+// unindexed/typo symbol is never re-searched within the window. Graceful:
+// any failure resolves to null → caller leaves the price at 0 and the
+// position still renders (never throws, never excludes).
+const CG_ID_CACHE = new Map<string, { id: string | null; expiresAt: number }>();
+const CG_ID_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function resolveCoingeckoIdBySymbol(symbol: string): Promise<string | null> {
+  const key = symbol.toUpperCase().trim();
+  if (!key) return null;
+  const cached = CG_ID_CACHE.get(key);
+  if (cached && Date.now() < cached.expiresAt) return cached.id;
+
+  let id: string | null = null;
+  try {
+    const res = await fetch(
+      `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(key)}`,
+      { cache: 'no-store', headers: { Accept: 'application/json' } },
+    );
+    if (res.ok) {
+      const data = (await res.json()) as {
+        coins?: Array<{ id: string; symbol: string; market_cap_rank?: number | null }>;
+      };
+      const coins = data.coins ?? [];
+      // CoinGecko search is market-cap ordered; take the first EXACT symbol
+      // match, preferring a ranked coin (filters out unranked dust that
+      // squats a popular ticker), falling back to any exact match.
+      const ranked = coins.find((c) => c.symbol?.toUpperCase() === key && c.market_cap_rank != null);
+      const anyMatch = coins.find((c) => c.symbol?.toUpperCase() === key);
+      id = ranked?.id ?? anyMatch?.id ?? null;
+    }
+  } catch {
+    id = null;
+  }
+  CG_ID_CACHE.set(key, { id, expiresAt: Date.now() + CG_ID_TTL_MS });
+  return id;
+}
+
 interface PoolStats { apy: number; tvlUsd: number; volumeUsd1d: number }
 
 async function fetchHyperSwapPoolData(): Promise<{
@@ -528,6 +581,34 @@ export async function GET(request: Request) {
     const apyData = poolData.apys;
     const poolStatsData = poolData.stats;
 
+    // Dynamic CoinGecko symbol-search fallback (purely additive). For any
+    // token that resolved an on-chain symbol but has no coingeckoId AND no
+    // price from the known path, search CoinGecko by symbol (24h-cached) and
+    // fetch its price. Keyed by the same raw token address used below so the
+    // per-position price read can fall back to it. Graceful: unresolved
+    // tokens simply stay at price 0 and the position still renders.
+    const cgFallbackPrices: Record<string, number> = {};
+    const unresolvedAddrs = allTokenAddrs.filter((addr) => {
+      const info = tokenInfoMap[addr];
+      const knownPrice = info?.coingeckoId ? (prices[info.coingeckoId] || 0) : 0;
+      return !!info && !info.coingeckoId && knownPrice <= 0 && !!info.symbol;
+    });
+    if (unresolvedAddrs.length > 0) {
+      const resolved = await Promise.all(
+        unresolvedAddrs.map(async (addr) => ({
+          addr,
+          id: await resolveCoingeckoIdBySymbol(tokenInfoMap[addr].symbol),
+        })),
+      );
+      const idsToFetch = [...new Set(resolved.map((r) => r.id).filter((x): x is string => !!x))];
+      if (idsToFetch.length > 0) {
+        const dynPrices = await fetchPrices(idsToFetch);
+        for (const { addr, id } of resolved) {
+          if (id && dynPrices[id] > 0) cgFallbackPrices[addr] = dynPrices[id];
+        }
+      }
+    }
+
     const positions = allRaw.map(({ tokenId, pos, protocol }, i) => {
       const t0Info = tokenInfoMap[pos.token0] || { symbol: pos.token0.slice(2, 8), decimals: 18, coingeckoId: '' };
       const t1Info = tokenInfoMap[pos.token1] || { symbol: pos.token1.slice(2, 8), decimals: 18, coingeckoId: '' };
@@ -539,8 +620,12 @@ export async function GET(request: Request) {
         pos.liquidity, sqrtPriceX96, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals,
       );
 
-      const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
-      const price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
+      // Known fast-path price first; fall back to the dynamic CG symbol
+      // search result (keyed by token address) for tokens not in KNOWN_TOKENS.
+      const known0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
+      const known1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
+      const price0 = known0 > 0 ? known0 : (cgFallbackPrices[pos.token0] || 0);
+      const price1 = known1 > 0 ? known1 : (cgFallbackPrices[pos.token1] || 0);
       const value = amount0 * price0 + amount1 * price1;
 
       // Total fees = settled (tokensOwed) + pending (feeGrowthInside math)

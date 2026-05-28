@@ -40,6 +40,7 @@ const STABLECOINS = new Set([
   '0xb88339cb7199b77e23db6e890353e22632ba630f', // USDC
   '0x24ac48bf01fd6cb1c3836d08b3edc70a9c4380ca', // USDC (alternate)
   '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb', // USD₮0 (Tether USD on HyperEVM)
+  '0x3061caa1ce7c018ce68eae5795b2086cfdb4e148', // USDC (third Circle-native contract)
 ]);
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';

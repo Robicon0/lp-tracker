@@ -312,7 +312,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // cleanly (single-sided AND two-sided deposits were already handled
 // correctly by deriveDepositPrices + computePositionPnL). The bump
 // discards the stale exclusion so the position re-fetches and is included.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v4-";
+// Bumped v4 → v5: HYPE/USDC positions on the third Circle-native USDC
+// contract (0x3061caa1…) cached events with price=0 for the USDC side
+// (contract wasn't in hyperswap KNOWN_TOKENS) → missing_current_prices
+// exclusion. Adding the contract + a dynamic CG symbol-search fallback
+// fixes the price; the bump forces a fresh fetch worldwide.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v5-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {
