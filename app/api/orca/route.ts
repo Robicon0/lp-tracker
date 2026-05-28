@@ -20,6 +20,12 @@ const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingecko
   '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs': { symbol: 'ETH', decimals: 8, coingeckoId: 'ethereum' },
   'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': { symbol: 'BONK', decimals: 5, coingeckoId: 'bonk' },
   'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1ABCDE': { symbol: 'ORCA', decimals: 6, coingeckoId: 'orca' },
+  // RENDER on Solana — real mint is rndriz…, NOT 7vfCXTUXx5… (that's
+  // Wormhole ETH above). CoinGecko ID is 'render-token' ('render' 404s).
+  // decimals verified on-chain via Helius getAsset = 8.
+  'rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof': { symbol: 'RENDER', decimals: 8, coingeckoId: 'render-token' },
+  // Fartcoin (pump.fun token) — decimals verified on-chain = 6.
+  '9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump': { symbol: 'Fartcoin', decimals: 6, coingeckoId: 'fartcoin' },
 };
 
 async function solanaRpc(method: string, params: unknown[]): Promise<unknown> {

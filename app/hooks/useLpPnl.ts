@@ -300,7 +300,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // parseInt truncated to 1 → deriveDepositPrices produced a 10^12 pool
 // price → cached usdAtTime ≈ $10^12 → value_overflow). Bumping forces a
 // fresh fetch with the fixed decoder.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v2-";
+// Bumped v2 → v3: Orca SOL/RENDER and SOL/Fartcoin positions had cached
+// events computed when those tokens had no price (excluded with
+// missing_current_prices). Adding them to Orca's KNOWN_TOKENS fixes the
+// price; the bump forces every user worldwide to re-fetch fresh events
+// without manually clearing localStorage.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v3-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {
