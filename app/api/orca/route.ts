@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { fetchPricesByUnknownTokens } from '../../lib/cgSymbolResolve';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -475,6 +476,28 @@ export async function GET(request: Request) {
     const allPrices: Record<string, number> = { ...prices };
     for (const [mint, info] of Object.entries(dasTokens)) {
       if (!allPrices[mint] && info.price > 0) allPrices[mint] = info.price;
+    }
+
+    // LAST-RESORT: any pool-side token still without a price gets a
+    // dynamic CoinGecko symbol-search lookup. Hits the long-tail of SPL
+    // tokens (RENDER, Fartcoin, …) whose CoinGecko ID isn't in
+    // KNOWN_TOKENS and whose Helius DAS pricing returned 0. Resolver is
+    // cached 24h per symbol so concurrent positions sharing the same
+    // unknown token only trigger one CG search each. On miss/error the
+    // helper returns {} and the price stays 0 — position still surfaces
+    // (computePositionPnL handles missing prices gracefully now that the
+    // route never fabricates fake prices).
+    const cgFallbackTokens: Array<{ key: string; symbol: string }> = [];
+    for (const mint of allMints) {
+      if (allPrices[mint] && allPrices[mint] > 0) continue;
+      const sym = KNOWN_TOKENS[mint]?.symbol || dasTokens[mint]?.symbol || '';
+      if (sym) cgFallbackTokens.push({ key: mint, symbol: sym });
+    }
+    if (cgFallbackTokens.length > 0) {
+      const cgPrices = await fetchPricesByUnknownTokens(cgFallbackTokens);
+      for (const [mint, price] of Object.entries(cgPrices)) {
+        if (!allPrices[mint] || allPrices[mint] <= 0) allPrices[mint] = price;
+      }
     }
 
     // 8. Transform to shared position shape

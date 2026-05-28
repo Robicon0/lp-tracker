@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { fetchPricesByUnknownTokens } from '../../lib/cgSymbolResolve';
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -528,6 +529,23 @@ export async function GET(request: Request) {
     const apyData = poolData.apys;
     const poolStatsData = poolData.stats;
 
+    // LAST-RESORT CG symbol-search for HyperEVM tokens not in KNOWN_TOKENS
+    // (coingeckoId is empty for those — the symbol came from on-chain
+    // symbol() via fetchTokenInfo). 24h cache per symbol in the helper
+    // dedupes across positions sharing the same long-tail token. Graceful
+    // no-op on miss (price stays 0, position still surfaces).
+    const cgFallbackInputs: Array<{ key: string; symbol: string }> = [];
+    for (const addr of allTokenAddrs) {
+      const info = tokenInfoMap[addr];
+      const known = info?.coingeckoId ? prices[info.coingeckoId] : 0;
+      if (info && (!known || known <= 0) && info.symbol) {
+        cgFallbackInputs.push({ key: addr, symbol: info.symbol });
+      }
+    }
+    const cgFallbackPrices = cgFallbackInputs.length > 0
+      ? await fetchPricesByUnknownTokens(cgFallbackInputs)
+      : {};
+
     const positions = allRaw.map(({ tokenId, pos, protocol }, i) => {
       const t0Info = tokenInfoMap[pos.token0] || { symbol: pos.token0.slice(2, 8), decimals: 18, coingeckoId: '' };
       const t1Info = tokenInfoMap[pos.token1] || { symbol: pos.token1.slice(2, 8), decimals: 18, coingeckoId: '' };
@@ -539,8 +557,13 @@ export async function GET(request: Request) {
         pos.liquidity, sqrtPriceX96, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals,
       );
 
-      const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
-      const price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
+      // Prefer the hardcoded coingeckoId path; fall back to the CG
+      // symbol-search prices (computed once above) for any token still
+      // missing a price. cgFallbackPrices is keyed by token address.
+      const known0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
+      const known1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
+      const price0 = known0 > 0 ? known0 : (cgFallbackPrices[pos.token0] || 0);
+      const price1 = known1 > 0 ? known1 : (cgFallbackPrices[pos.token1] || 0);
       const value = amount0 * price0 + amount1 * price1;
 
       // Total fees = settled (tokensOwed) + pending (feeGrowthInside math)

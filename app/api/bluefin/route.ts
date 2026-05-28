@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { fetchPricesByUnknownTokens } from '../../lib/cgSymbolResolve';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -301,6 +302,21 @@ export async function GET(request: Request) {
       }),
     );
 
+    // LAST-RESORT CG symbol-search fallback for Sui coin types not in
+    // KNOWN_COINS. Uses the on-chain symbol from suix_getCoinMetadata
+    // (already populated in coinMetaMap above) OR the trailing ::SYMBOL
+    // segment of the coin type as a backstop. 24h cache per symbol in
+    // the helper dedupes across positions. Graceful no-op on miss.
+    const cgFallbackInputs: Array<{ key: string; symbol: string }> = [];
+    for (const ct of coinTypes) {
+      if (priceData[ct] && priceData[ct] > 0) continue;
+      const sym = coinMetaMap[ct]?.symbol || ct.split('::').pop() || '';
+      if (sym) cgFallbackInputs.push({ key: ct, symbol: sym });
+    }
+    const cgFallbackPrices = cgFallbackInputs.length > 0
+      ? await fetchPricesByUnknownTokens(cgFallbackInputs)
+      : {};
+
     // Build ticks table ID map per pool
     const poolTicksTableIds: Record<string, string> = {};
     for (const [poolId, poolFields] of Object.entries(poolMap)) {
@@ -361,8 +377,8 @@ export async function GET(request: Request) {
         ? calculateAmounts(liquidity, tickLower, tickUpper, sqrtPriceX64, decimalsA, decimalsB)
         : { amount0: 0, amount1: 0 };
 
-      const priceA = priceData[coinTypeA] || 0;
-      const priceB = priceData[coinTypeB] || 0;
+      const priceA = priceData[coinTypeA] || cgFallbackPrices[coinTypeA] || 0;
+      const priceB = priceData[coinTypeB] || cgFallbackPrices[coinTypeB] || 0;
       const value = amount0 * priceA + amount1 * priceB;
 
       // Calculate pending fees using fee growth inside (Uniswap V3 style)

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
+import { fetchPricesByUnknownTokens } from '../../../lib/cgSymbolResolve';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -371,9 +372,24 @@ async function fetchPositionsForChain(
         );
         
         // Get prices
-        const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
-        const price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
-        
+        let price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
+        let price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
+
+        // LAST-RESORT CG symbol-search fallback for tokens not in
+        // KNOWN_TOKENS — fetches the long tail of EVM altcoins by their
+        // on-chain symbol. The cgSymbolResolve helper caches symbol→ID
+        // resolutions for 24h so two positions in the same wallet that
+        // share an unknown token only trigger one CoinGecko search.
+        // Graceful failure: returns 0 on miss, position still surfaces.
+        const cgFallbackTokens: Array<{ key: string; symbol: string }> = [];
+        if (price0 <= 0 && t0Info.symbol) cgFallbackTokens.push({ key: pos.token0, symbol: t0Info.symbol });
+        if (price1 <= 0 && t1Info.symbol) cgFallbackTokens.push({ key: pos.token1, symbol: t1Info.symbol });
+        if (cgFallbackTokens.length > 0) {
+          const cgPrices = await fetchPricesByUnknownTokens(cgFallbackTokens);
+          if (cgPrices[pos.token0] > 0) price0 = cgPrices[pos.token0];
+          if (cgPrices[pos.token1] > 0) price1 = cgPrices[pos.token1];
+        }
+
         const value = (amount0 * price0) + (amount1 * price1);
         
         // Calculate fees value
