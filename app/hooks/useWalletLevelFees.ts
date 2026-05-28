@@ -40,8 +40,30 @@ interface BluefinContext {
   priceB: number;
 }
 
+// Fallback coin context for a Sui wallet that has NO open Bluefin position
+// to read real coin types / prices from (i.e. all its Bluefin positions are
+// closed and their on-chain objects destroyed). The Bluefin activity route
+// in wallet-scope mode only emits fee/reward events; for fee_claim USD it
+// uses amount0*priceA + amount1*priceB, so priceB=1 anchors the USDC side
+// (the dominant fee leg for SUI/USDC pools). priceA=0 means SUI-denominated
+// fee value isn't counted — accepted as graceful (USDC-side fees are still
+// recovered, which is strictly better than dropping the whole wallet).
+const SUI_FALLBACK = {
+  coinTypeA: "0x2::sui::SUI",
+  coinTypeB: "0x5d4b302506645c37ff133b98c4b50a4ae4614bb0aef5ba1e3af8bc33af2a9d5f::coin::COIN",
+  decimalsA: 9,
+  decimalsB: 6,
+  priceA: 0,
+  priceB: 1,
+} as const;
+
 export function useWalletLevelFees(
   positions: AerodromePosition[],
+  // Sui wallet addresses (connected + watched) to ALWAYS scan for Bluefin
+  // fee history, even when no open Bluefin position exists for them. Without
+  // this, a wallet whose Bluefin positions are all closed never gets its
+  // lifetime fees fetched.
+  suiWalletAddresses?: string[],
 ): { events: TaggedFeeEvent[]; isLoading: boolean } {
   const [events, setEvents] = useState<TaggedFeeEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -72,6 +94,17 @@ export function useWalletLevelFees(
           });
         }
       }
+    }
+
+    // For any Sui wallet address NOT already covered by an open Bluefin
+    // position, add a fallback context so its (closed-position) fee history
+    // is still fetched. Dedupe case-insensitively against the open-position
+    // wallets so we never double-fetch the same wallet.
+    const coveredLower = new Set([...bluefinByWallet.keys()].map((k) => k.toLowerCase()));
+    for (const addr of suiWalletAddresses ?? []) {
+      if (!addr || coveredLower.has(addr.toLowerCase())) continue;
+      coveredLower.add(addr.toLowerCase());
+      bluefinByWallet.set(addr, { account: addr, ...SUI_FALLBACK });
     }
 
     const fetches: Array<Promise<TaggedFeeEvent[]>> = [];
@@ -118,7 +151,7 @@ export function useWalletLevelFees(
     return () => {
       cancelled = true;
     };
-  }, [positions]);
+  }, [positions, suiWalletAddresses]);
 
   return { events, isLoading };
 }

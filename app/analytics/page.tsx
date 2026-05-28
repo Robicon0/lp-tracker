@@ -594,7 +594,17 @@ export default function Analytics() {
   // position set instead. useLpPnl receives filteredPositions per spec (its
   // localStorage cache + incremental accumulation makes filter toggles cheap).
   const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
-  const { events: walletLevelFees } = useWalletLevelFees(positions);
+  // All Sui wallet addresses (connected + watched) — passed to
+  // useWalletLevelFees so Bluefin lifetime fees are fetched even when every
+  // Bluefin position is closed (no open position to read the address from).
+  // Memoized so the hook's effect doesn't re-run on every render.
+  const suiWalletAddresses = useMemo(() => {
+    const addrs: string[] = [];
+    if (suiAddress) addrs.push(suiAddress);
+    for (const w of watchedWallets) if (w.chain === "sui") addrs.push(w.address);
+    return [...new Set(addrs.map((a) => a.toLowerCase()))];
+  }, [suiAddress, watchedWallets]);
+  const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses);
   const lpPnl = useLpPnl(filteredPositions);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
