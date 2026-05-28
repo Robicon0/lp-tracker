@@ -644,9 +644,13 @@ export default function Analytics() {
   const feeIncome = useMemo(() => {
     interface FlatFee { ts: number; usd: number; protocol: string; chain: string; dedupeKey: string; }
     const flat: FlatFee[] = [];
-    // Built from FILTERED positions — events whose posId isn't in the
-    // filtered set are skipped, so fees narrow to the active filter.
-    const posById = new Map(filteredPositions.map((p) => [p.id, p]));
+    // Fee income is ALWAYS lifetime across ALL positions — built from the
+    // FULL unfiltered positions array (NOT filteredPositions) so closed
+    // positions are never dropped. The active chain/protocol filter is
+    // applied explicitly inside the loop below instead. This decouples fee
+    // income from filteredPositions: even if filteredPositions ever gains a
+    // status/value predicate, lifetime fees stay complete.
+    const posById = new Map(positions.map((p) => [p.id, p]));
 
     const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) => {
       if (e.txHash) return `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`;
@@ -673,6 +677,11 @@ export default function Analytics() {
     for (const [posId, events] of eventsMap.entries()) {
       const pos = posById.get(posId);
       if (!pos) continue;
+      // Respect active chain/protocol filters for fee income too — but a
+      // CLOSED position whose chain/protocol matches the filter still
+      // contributes (we never skip on status / current value).
+      if (selectedChains.size > 0 && !selectedChains.has(pos.chain)) continue;
+      if (selectedProtocols.size > 0 && !selectedProtocols.has(pos.protocol)) continue;
       for (const e of events) push(pos.protocol, pos.chain, e);
     }
     for (const t of walletLevelFees) push(t.protocol, t.chain, t.event);
@@ -733,7 +742,7 @@ export default function Analytics() {
     const peakDay = Math.max(0, ...Array.from(byDay.values()));
 
     return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay };
-  }, [eventsMap, filteredPositions, rangeCutoff, activeRange, walletLevelFees]);
+  }, [eventsMap, positions, selectedChains, selectedProtocols, rangeCutoff, activeRange, walletLevelFees]);
 
   // Unfiltered lifetime claimed-fees total — reference for the filter banner.
   // Mirrors feeIncome.totalAllTime's dedupe but over ALL positions, so the
