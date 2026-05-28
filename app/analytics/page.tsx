@@ -604,7 +604,23 @@ export default function Analytics() {
     for (const w of watchedWallets) if (w.chain === "sui") addrs.push(w.address);
     return [...new Set(addrs.map((a) => a.toLowerCase()))];
   }, [suiAddress, watchedWallets]);
-  const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses);
+  // Live SUI spot price for the closed-wallet Bluefin fee fallback. Fetched
+  // once on mount via the /api/prices CoinGecko proxy (60s-cached server
+  // side); defaults to 0 on failure so the fallback degrades gracefully to
+  // USDC-side-only fee valuation.
+  const [suiPrice, setSuiPrice] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/prices?ids=sui&vs_currencies=usd")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const px = d?.sui?.usd;
+        if (!cancelled && typeof px === "number" && px > 0) setSuiPrice(px);
+      })
+      .catch(() => { /* graceful — leave suiPrice at 0 */ });
+    return () => { cancelled = true; };
+  }, []);
+  const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice);
   const lpPnl = useLpPnl(filteredPositions);
 
   // ── Sort + view state ──────────────────────────────────────────────────────

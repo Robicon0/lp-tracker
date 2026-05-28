@@ -44,16 +44,16 @@ interface BluefinContext {
 // to read real coin types / prices from (i.e. all its Bluefin positions are
 // closed and their on-chain objects destroyed). The Bluefin activity route
 // in wallet-scope mode only emits fee/reward events; for fee_claim USD it
-// uses amount0*priceA + amount1*priceB, so priceB=1 anchors the USDC side
-// (the dominant fee leg for SUI/USDC pools). priceA=0 means SUI-denominated
-// fee value isn't counted — accepted as graceful (USDC-side fees are still
-// recovered, which is strictly better than dropping the whole wallet).
+// uses amount0*priceA + amount1*priceB, so priceB=1 anchors the USDC side.
+// priceA (the SUI spot price) is injected by the caller via the `suiPrice`
+// arg so the SUI-denominated leg is valued correctly; it defaults to 0
+// (USDC side only) when no price is available — still better than dropping
+// the whole wallet.
 const SUI_FALLBACK = {
   coinTypeA: "0x2::sui::SUI",
   coinTypeB: "0x5d4b302506645c37ff133b98c4b50a4ae4614bb0aef5ba1e3af8bc33af2a9d5f::coin::COIN",
   decimalsA: 9,
   decimalsB: 6,
-  priceA: 0,
   priceB: 1,
 } as const;
 
@@ -64,6 +64,9 @@ export function useWalletLevelFees(
   // this, a wallet whose Bluefin positions are all closed never gets its
   // lifetime fees fetched.
   suiWalletAddresses?: string[],
+  // Live SUI spot price (USD) — used as priceA for the closed-wallet fallback
+  // context so SUI-denominated fees are valued correctly instead of $0.
+  suiPrice?: number,
 ): { events: TaggedFeeEvent[]; isLoading: boolean } {
   const [events, setEvents] = useState<TaggedFeeEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -104,7 +107,7 @@ export function useWalletLevelFees(
     for (const addr of suiWalletAddresses ?? []) {
       if (!addr || coveredLower.has(addr.toLowerCase())) continue;
       coveredLower.add(addr.toLowerCase());
-      bluefinByWallet.set(addr, { account: addr, ...SUI_FALLBACK });
+      bluefinByWallet.set(addr, { account: addr, ...SUI_FALLBACK, priceA: suiPrice && suiPrice > 0 ? suiPrice : 0 });
     }
 
     const fetches: Array<Promise<TaggedFeeEvent[]>> = [];
@@ -136,7 +139,11 @@ export function useWalletLevelFees(
       return;
     }
 
-    const key = Array.from(bluefinByWallet.keys()).sort().join("|");
+    // Include suiPrice in the dedupe key so when the SUI spot price arrives
+    // asynchronously (after the initial fetch ran with priceA=0), the
+    // wallet-scope scan re-fires with the correct fallback price instead of
+    // being skipped as "already fetched".
+    const key = Array.from(bluefinByWallet.keys()).sort().join("|") + `::sui${suiPrice ?? 0}`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
@@ -151,7 +158,7 @@ export function useWalletLevelFees(
     return () => {
       cancelled = true;
     };
-  }, [positions, suiWalletAddresses]);
+  }, [positions, suiWalletAddresses, suiPrice]);
 
   return { events, isLoading };
 }
