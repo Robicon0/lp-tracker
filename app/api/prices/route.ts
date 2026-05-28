@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCgIdBySymbol } from "../../lib/cgSymbolResolve";
 
 // Server-side proxy for CoinGecko API — avoids CORS errors from browser clients.
 // All client-side code should call /api/prices?... instead of api.coingecko.com directly.
@@ -29,18 +28,7 @@ export async function GET(request: NextRequest) {
   try {
     let url: string;
 
-    if (endpoint === "search") {
-      // Dynamic symbol → CoinGecko-ID resolver. Used by the price-fallback
-      // path in protocol routes (Orca, Uniswap V3, etc.) when a token isn't
-      // in the route's hardcoded KNOWN_TOKENS map. Delegates to the shared
-      // lib resolver, which has its own 24h cache, so this endpoint never
-      // hits CoinGecko more than once per (symbol, server-instance, day).
-      // Returns { id: "render-token" | null } — null means "no exact-symbol
-      // match was found; treat price as unknown and continue".
-      const query = searchParams.get("query") || "";
-      const id = await resolveCgIdBySymbol(query);
-      return NextResponse.json({ id, query });
-    } else if (endpoint === "simple/price") {
+    if (endpoint === "simple/price") {
       const ids = searchParams.get("ids") || "";
       const vs = searchParams.get("vs_currencies") || "usd";
       const include24h = searchParams.get("include_24hr_change") === "true";

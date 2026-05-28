@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { fetchPricesByUnknownTokens } from '../../lib/cgSymbolResolve';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -345,22 +344,6 @@ export async function GET(request: Request) {
     const allPrices: Record<string, number> = { ...prices };
     for (const [mint, info] of Object.entries(dasTokens)) {
       if (!allPrices[mint] && info.price > 0) allPrices[mint] = info.price;
-    }
-
-    // LAST-RESORT CG search fallback for long-tail SPL tokens — see Orca
-    // route for full rationale. 24h cache per symbol, graceful no-op on
-    // miss/error (price stays 0, position still surfaces).
-    const cgFallbackTokens: Array<{ key: string; symbol: string }> = [];
-    for (const mint of allMints) {
-      if (allPrices[mint] && allPrices[mint] > 0) continue;
-      const sym = TOKENS[mint]?.symbol || dasTokens[mint]?.symbol || '';
-      if (sym) cgFallbackTokens.push({ key: mint, symbol: sym });
-    }
-    if (cgFallbackTokens.length > 0) {
-      const cgPrices = await fetchPricesByUnknownTokens(cgFallbackTokens);
-      for (const [mint, price] of Object.entries(cgPrices)) {
-        if (!allPrices[mint] || allPrices[mint] <= 0) allPrices[mint] = price;
-      }
     }
 
     // 5. Transform to shared position shape

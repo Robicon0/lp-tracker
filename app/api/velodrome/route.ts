@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { fetchPricesByUnknownTokens } from '../../lib/cgSymbolResolve';
-import { fetchErc20InfoBatch, type Erc20Info } from '../../lib/erc20Info';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -201,42 +199,16 @@ export async function GET(request: Request) {
       fetchPoolAPYs(),
     ]);
 
-    // 3b. Unknown-token enrichment (same pattern as Aerodrome): for any
-    // pool-side token not in TOKENS, fetch on-chain symbol/decimals and
-    // resolve a CG price via symbol search. Long-tail OP altcoins now
-    // contribute to P&L instead of being excluded as missing_current_prices.
-    const seenAddrs = new Set<string>();
-    const unknownAddrs: string[] = [];
-    for (const tokens of Object.values(poolTokens)) {
-      for (const addr of [tokens.token0, tokens.token1]) {
-        const lower = addr.toLowerCase();
-        if (TOKENS[lower] || seenAddrs.has(lower)) continue;
-        seenAddrs.add(lower);
-        unknownAddrs.push(lower);
-      }
-    }
-    const erc20Info: Record<string, Erc20Info> = unknownAddrs.length > 0
-      ? await fetchErc20InfoBatch(OPTIMISM_RPC, unknownAddrs)
-      : {};
-    const cgFallbackInputs = Object.entries(erc20Info).map(([addr, info]) => ({ key: addr, symbol: info.symbol }));
-    const cgFallbackPrices = cgFallbackInputs.length > 0
-      ? await fetchPricesByUnknownTokens(cgFallbackInputs)
-      : {};
-
     // 4. Transform to LPPosition format
     const positions = rawPositions.map((raw) => {
       const tokens = poolTokens[raw.lp];
-      const t0Lower = tokens?.token0.toLowerCase() ?? '';
-      const t1Lower = tokens?.token1.toLowerCase() ?? '';
-      const t0Info = tokens ? TOKENS[t0Lower] : null;
-      const t1Info = tokens ? TOKENS[t1Lower] : null;
-      const t0Dyn = t0Lower ? erc20Info[t0Lower] : null;
-      const t1Dyn = t1Lower ? erc20Info[t1Lower] : null;
+      const t0Info = tokens ? TOKENS[tokens.token0] : null;
+      const t1Info = tokens ? TOKENS[tokens.token1] : null;
 
-      const t0Symbol = t0Info?.symbol || t0Dyn?.symbol || 'TOKEN0';
-      const t1Symbol = t1Info?.symbol || t1Dyn?.symbol || 'TOKEN1';
-      const t0Decimals = t0Info?.decimals ?? t0Dyn?.decimals ?? 18;
-      const t1Decimals = t1Info?.decimals ?? t1Dyn?.decimals ?? 18;
+      const t0Symbol = t0Info?.symbol || 'TOKEN0';
+      const t1Symbol = t1Info?.symbol || 'TOKEN1';
+      const t0Decimals = t0Info?.decimals || 18;
+      const t1Decimals = t1Info?.decimals || 18;
 
       // Calculate token amounts (unstaked + staked)
       const amount0 = Number(BigInt(raw.amount0) + BigInt(raw.staked0)) / (10 ** t0Decimals);
@@ -246,11 +218,9 @@ export async function GET(request: Request) {
       const fees0 = Number(raw.unstaked_earned0) / (10 ** t0Decimals);
       const fees1 = Number(raw.unstaked_earned1) / (10 ** t1Decimals);
 
-      // Get prices — hardcoded TOKENS first, then CG symbol-search fallback.
-      const known0 = tokens ? (prices[tokens.token0] || 0) : 0;
-      const known1 = tokens ? (prices[tokens.token1] || 0) : 0;
-      const price0 = known0 > 0 ? known0 : (cgFallbackPrices[t0Lower] || 0);
-      const price1 = known1 > 0 ? known1 : (cgFallbackPrices[t1Lower] || 0);
+      // Get prices
+      const price0 = tokens ? (prices[tokens.token0] || 0) : 0;
+      const price1 = tokens ? (prices[tokens.token1] || 0) : 0;
 
       // Dollar values
       const value = (amount0 * price0) + (amount1 * price1);

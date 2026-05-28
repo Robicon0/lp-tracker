@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { fetchPricesByUnknownTokens } from '../../lib/cgSymbolResolve';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -229,25 +228,8 @@ export async function GET(request: Request) {
           pos.liquidity, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals
         );
 
-        let price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
-        let price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
-
-        // LAST-RESORT CG symbol-search fallback for BSC long-tail tokens
-        // not in KNOWN_TOKENS. Inline per-position (same pattern as
-        // Uniswap V3); 24h cache in the helper dedupes across positions.
-        const cgFallbackTokens: Array<{ key: string; symbol: string }> = [];
-        if (price0 <= 0 && t0Info.symbol && t0Info.symbol !== 'UNKNOWN') {
-          cgFallbackTokens.push({ key: pos.token0, symbol: t0Info.symbol });
-        }
-        if (price1 <= 0 && t1Info.symbol && t1Info.symbol !== 'UNKNOWN') {
-          cgFallbackTokens.push({ key: pos.token1, symbol: t1Info.symbol });
-        }
-        if (cgFallbackTokens.length > 0) {
-          const cgPrices = await fetchPricesByUnknownTokens(cgFallbackTokens);
-          if (cgPrices[pos.token0] > 0) price0 = cgPrices[pos.token0];
-          if (cgPrices[pos.token1] > 0) price1 = cgPrices[pos.token1];
-        }
-
+        const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
+        const price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
         const value  = amount0 * price0 + amount1 * price1;
 
         const fees0  = Number(pos.tokensOwed0) / (10 ** t0Info.decimals);
