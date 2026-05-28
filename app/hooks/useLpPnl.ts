@@ -305,7 +305,14 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // missing_current_prices). Adding them to Orca's KNOWN_TOKENS fixes the
 // price; the bump forces every user worldwide to re-fetch fresh events
 // without manually clearing localStorage.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v3-";
+// Bumped v3 → v4: HyperEVM positions (e.g. ProjectX token 393471) cached
+// a `no_deposits` exclusion from BEFORE the Tier-2 archive RPC swap to
+// Chainstack — their deposit event was older than the prior DRPC ~40h
+// window and unretrievable. The deposit is now fetchable and computes
+// cleanly (single-sided AND two-sided deposits were already handled
+// correctly by deriveDepositPrices + computePositionPnL). The bump
+// discards the stale exclusion so the position re-fetches and is included.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v4-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {
