@@ -537,10 +537,65 @@ export default function Analytics() {
     return [...aavePositions, ...externalLendingPositions];
   }, [walletTokens, aaveRates, externalLendingPositions]);
 
+  // ── Sidebar filter state (chains + protocols, multi-select) ────────────────
+  // Empty sets = no filter = full portfolio view (identical to pre-filter).
+  const [selectedChains, setSelectedChains] = useState<Set<string>>(new Set());
+  const [selectedProtocols, setSelectedProtocols] = useState<Set<string>>(new Set());
+  const filterActive = selectedChains.size > 0 || selectedProtocols.size > 0;
+
+  const toggleChain = (chain: string) => {
+    setSelectedChains((prev) => {
+      const next = new Set(prev);
+      if (next.has(chain)) next.delete(chain); else next.add(chain);
+      return next;
+    });
+  };
+  const toggleProtocol = (protocol: string) => {
+    setSelectedProtocols((prev) => {
+      const next = new Set(prev);
+      if (next.has(protocol)) next.delete(protocol); else next.add(protocol);
+      return next;
+    });
+  };
+  const clearFilters = () => {
+    setSelectedChains(new Set());
+    setSelectedProtocols(new Set());
+  };
+
+  // Positions narrowed to the active filter. When both chain AND protocol
+  // filters are set a position must match BOTH. When neither is set we
+  // return the original array reference so downstream memos don't recompute.
+  const filteredPositions = useMemo(() => {
+    if (!filterActive) return positions;
+    return positions.filter((p) => {
+      const chainOk = selectedChains.size === 0 || selectedChains.has(p.chain);
+      const protoOk = selectedProtocols.size === 0 || selectedProtocols.has(p.protocol);
+      return chainOk && protoOk;
+    });
+  }, [positions, selectedChains, selectedProtocols, filterActive]);
+
+  // Lending narrowed to the active filter (STEP 4: chain filter narrows
+  // lending). Uses the same chain/protocol predicate as positions so a
+  // protocol-only filter that doesn't match any lending protocol hides
+  // lending entirely — keeps the filtered view coherent.
+  const filteredLendingPositions = useMemo(() => {
+    if (!filterActive) return lendingPositions;
+    return lendingPositions.filter((lp) => {
+      const chainOk = selectedChains.size === 0 || selectedChains.has(lp.chain);
+      const protoOk = selectedProtocols.size === 0 || selectedProtocols.has(lp.protocol);
+      return chainOk && protoOk;
+    });
+  }, [lendingPositions, selectedChains, selectedProtocols, filterActive]);
+
   // ── Activity data ──────────────────────────────────────────────────────────
+  // The activity hooks (perfMap / eventsMap / walletLevelFees) stay on the
+  // FULL positions array — they own data-fetching and must not refetch when
+  // a filter toggles; the consuming memos slice their output by the filtered
+  // position set instead. useLpPnl receives filteredPositions per spec (its
+  // localStorage cache + incremental accumulation makes filter toggles cheap).
   const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
   const { events: walletLevelFees } = useWalletLevelFees(positions);
-  const lpPnl = useLpPnl(positions);
+  const lpPnl = useLpPnl(filteredPositions);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -568,11 +623,19 @@ export default function Analytics() {
     }
   }
 
-  // ── Portfolio totals ──────────────────────────────────────────────────────
-  const totalLpValue = positions.reduce((s, p) => s + p.value, 0);
-  const totalLpFees  = positions.reduce((s, p) => s + p.fees, 0);
-  const totalLendingValue = lendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
+  // ── Portfolio totals (FILTERED — drive the top-stat cards & headline) ──────
+  const totalLpValue = filteredPositions.reduce((s, p) => s + p.value, 0);
+  const totalLpFees  = filteredPositions.reduce((s, p) => s + p.fees, 0);
+  const totalLendingValue = filteredLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
   const totalPortfolioValue = totalLpValue + totalLendingValue;
+
+  // ── Unfiltered reference totals (for the "of X total" filter banner) ───────
+  // Always computed from the FULL positions/lending so the comparison numbers
+  // in the banner are stable regardless of the active filter. When no filter
+  // is active these equal the filtered totals above (zero visual difference).
+  const allLpValue = positions.reduce((s, p) => s + p.value, 0);
+  const allLendingValue = lendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
+  const allPortfolioValue = allLpValue + allLendingValue;
 
   const activeRange   = TIME_RANGES.find((r) => r.key === rangeKey) ?? TIME_RANGES[2];
   const rangeCutoff   = Date.now() - activeRange.ms;
@@ -581,7 +644,9 @@ export default function Analytics() {
   const feeIncome = useMemo(() => {
     interface FlatFee { ts: number; usd: number; protocol: string; chain: string; dedupeKey: string; }
     const flat: FlatFee[] = [];
-    const posById = new Map(positions.map((p) => [p.id, p]));
+    // Built from FILTERED positions — events whose posId isn't in the
+    // filtered set are skipped, so fees narrow to the active filter.
+    const posById = new Map(filteredPositions.map((p) => [p.id, p]));
 
     const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) => {
       if (e.txHash) return `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`;
@@ -668,22 +733,65 @@ export default function Analytics() {
     const peakDay = Math.max(0, ...Array.from(byDay.values()));
 
     return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay };
-  }, [eventsMap, positions, rangeCutoff, activeRange, walletLevelFees]);
+  }, [eventsMap, filteredPositions, rangeCutoff, activeRange, walletLevelFees]);
 
-  // ── Daily income ───────────────────────────────────────────────────────────
+  // Unfiltered lifetime claimed-fees total — reference for the filter banner.
+  // Mirrors feeIncome.totalAllTime's dedupe but over ALL positions, so the
+  // "(of $X total)" comparison stays stable. Pure CPU over already-fetched
+  // eventsMap — no extra network.
+  const feesAllTime = useMemo(() => {
+    const posById = new Map(positions.map((p) => [p.id, p]));
+    const seen = new Set<string>();
+    let total = 0;
+    const add = (
+      protocol: string,
+      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string },
+    ) => {
+      if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
+      const usd = e.usdAtTime ?? 0;
+      if (!Number.isFinite(usd) || usd <= 0) return;
+      const key = e.txHash
+        ? `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`
+        : `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      total += usd;
+    };
+    for (const [posId, events] of eventsMap.entries()) {
+      const pos = posById.get(posId);
+      if (!pos) continue;
+      for (const e of events) add(pos.protocol, e);
+    }
+    for (const t of walletLevelFees) add(t.protocol, t.event);
+    return total;
+  }, [eventsMap, positions, walletLevelFees]);
+
+  // ── Daily income (FILTERED) ────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {
-    const activeLp = positions.filter((p) => p.apy > 0 && p.value > 0);
+    const activeLp = filteredPositions.filter((p) => p.apy > 0 && p.value > 0);
     const yearlyLp = activeLp.reduce((s, p) => s + (p.value * p.apy) / 100, 0);
     let yearlyLending = 0;
-    for (const lp of lendingPositions) {
+    for (const lp of filteredLendingPositions) {
       if (lp.supplyApy != null && lp.totalSupplied > 0) {
         yearlyLending += (lp.totalSupplied * lp.supplyApy) / 100;
       }
     }
     return { dailyLpIncome: yearlyLp / 365, dailyLendingIncome: yearlyLending / 365 };
-  }, [positions, lendingPositions]);
+  }, [filteredPositions, filteredLendingPositions]);
 
   const totalDailyIncome = dailyLpIncome + dailyLendingIncome;
+
+  // Unfiltered daily income — reference for the filter banner.
+  const allDailyIncome = useMemo(() => {
+    const yearlyLp = positions
+      .filter((p) => p.apy > 0 && p.value > 0)
+      .reduce((s, p) => s + (p.value * p.apy) / 100, 0);
+    let yearlyLending = 0;
+    for (const lp of lendingPositions) {
+      if (lp.supplyApy != null && lp.totalSupplied > 0) yearlyLending += (lp.totalSupplied * lp.supplyApy) / 100;
+    }
+    return (yearlyLp + yearlyLending) / 365;
+  }, [positions, lendingPositions]);
 
   const incomeWindow = useMemo(() => {
     const periodDays = incomePeriod === "D" ? 1 : incomePeriod === "M" ? 30 : 365;
@@ -694,7 +802,7 @@ export default function Analytics() {
 
   // ── Actual APR (value-weighted) ────────────────────────────────────────────
   const actualAPRData = useMemo(() => {
-    const activeWithValue = positions.filter((p) => p.value > 0 && p.status !== "Closed");
+    const activeWithValue = filteredPositions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activeWithValue.length === 0) return { apr: 0, totalValue: 0 };
     let weightedSum = 0;
     let totalVal = 0;
@@ -707,11 +815,11 @@ export default function Analytics() {
       }
     }
     return { apr: totalVal > 0 ? weightedSum / totalVal : 0, totalValue: totalVal };
-  }, [positions, perfMap]);
+  }, [filteredPositions, perfMap]);
 
   // ── Portfolio health score ─────────────────────────────────────────────────
   const healthScore = useMemo(() => {
-    const activePositions = positions.filter((p) => p.value > 0 && p.status !== "Closed");
+    const activePositions = filteredPositions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activePositions.length === 0) return null;
     const inRangeCount = activePositions.filter((p) => p.status === "In Range").length;
     const inRangeScore = (inRangeCount / activePositions.length) * 40;
@@ -734,34 +842,34 @@ export default function Analytics() {
     const ilMagnitude = Math.abs(Math.min(0, ilPct));
     const ilScore = Math.max(0, 1 - ilMagnitude / 5) * 15;
     return Math.round(inRangeScore + feeScore + chainScore + ilScore);
-  }, [positions, perfMap, lpPnl.initialValue, lpPnl.ilUSD]);
+  }, [filteredPositions, perfMap, lpPnl.initialValue, lpPnl.ilUSD]);
 
   // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const p of positions) {
+    for (const p of filteredPositions) {
       if (p.value > 0) m[p.chain] = (m[p.chain] ?? 0) + p.value;
     }
-    for (const lp of lendingPositions) {
+    for (const lp of filteredLendingPositions) {
       if (lp.totalSupplied > 0) m[lp.chain] = (m[lp.chain] ?? 0) + lp.totalSupplied;
     }
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [positions, lendingPositions]);
+  }, [filteredPositions, filteredLendingPositions]);
 
   const protocolExposure = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const p of positions) {
+    for (const p of filteredPositions) {
       if (p.value > 0) m[p.protocol] = (m[p.protocol] ?? 0) + p.value;
     }
-    for (const lp of lendingPositions) {
+    for (const lp of filteredLendingPositions) {
       if (lp.totalSupplied > 0) m[lp.protocol] = (m[lp.protocol] ?? 0) + lp.totalSupplied;
     }
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [positions, lendingPositions]);
+  }, [filteredPositions, filteredLendingPositions]);
 
   const incomeByChain = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const p of positions) {
+    for (const p of filteredPositions) {
       if (p.status === "Closed" || p.value <= 0) continue;
       if (p.apy > 0) {
         const daily = (p.value * p.apy) / 100 / 365;
@@ -771,12 +879,12 @@ export default function Analytics() {
       }
     }
     return Object.entries(m).map(([chain, daily]) => ({ chain, daily })).sort((a, b) => b.daily - a.daily);
-  }, [positions]);
+  }, [filteredPositions]);
 
   // ── Sorted position table ──────────────────────────────────────────────────
   const sortedPositions = useMemo(() => {
     const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1 };
-    const items = positions
+    const items = filteredPositions
       .filter((p) => p.status !== "Closed" && p.value > 0)
       .map((p) => {
         const perf = perfMap.get(p.id);
@@ -800,10 +908,10 @@ export default function Analytics() {
       }
       return sortDir === "desc" ? -cmp : cmp;
     });
-  }, [positions, sortKey, sortDir, perfMap]);
+  }, [filteredPositions, sortKey, sortDir, perfMap]);
 
   const { topPerformers, bottomPerformers } = useMemo(() => {
-    const active = positions.filter((p) => p.value > 0).map((p) => {
+    const active = filteredPositions.filter((p) => p.value > 0).map((p) => {
       const perf = perfMap.get(p.id);
       const displayAPR = perf?.actualAPR ?? p.apy;
       const isEstimated = !perf || perf.isEstimated;
@@ -811,7 +919,7 @@ export default function Analytics() {
     }).filter((p) => p.displayAPR > 0);
     const sorted = [...active].sort((a, b) => b.displayAPR - a.displayAPR);
     return { topPerformers: sorted.slice(0, 3), bottomPerformers: sorted.slice(-3).reverse() };
-  }, [positions, perfMap]);
+  }, [filteredPositions, perfMap]);
 
   const chainWarning = useMemo(() => {
     if (chainExposure.length === 0 || totalPortfolioValue === 0) return null;
@@ -979,6 +1087,11 @@ export default function Analytics() {
           onSectionChange={handleSectionChange}
           activeProtocols={activeProtocols}
           activeChains={activeChains}
+          selectedChains={selectedChains}
+          selectedProtocols={selectedProtocols}
+          onChainToggle={toggleChain}
+          onProtocolToggle={toggleProtocol}
+          onClearFilters={clearFilters}
         />
 
         <main className="scroll-thin md:ml-[200px]" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
@@ -1041,6 +1154,64 @@ export default function Analytics() {
               (20px top / 32px bottom). */}
           <div style={{ padding: "20px 0 32px" }}>
 
+            {/* ── FILTER INDICATOR BANNER ─────────────────────────────────
+                Renders only when a chain/protocol filter is active. Shows
+                the active filter terms + headline metrics as
+                "filtered (of X total)" so the user can compare the slice
+                against the full portfolio. The "total" side always uses the
+                unfiltered reference values (allPortfolioValue / allDailyIncome
+                / feesAllTime). When no filter is active this block is absent
+                — zero visual difference from the pre-filter page. */}
+            {filterActive && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px 22px",
+                  margin: "0 0 20px",
+                  padding: "12px 18px",
+                  border: `1px solid ${C.amber}44`,
+                  background: "rgba(255,170,0,0.05)",
+                  fontFamily: FONT,
+                }}
+              >
+                <span style={{ fontSize: 12, color: C.amber, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  Filtered:
+                </span>
+                <span style={{ fontSize: 13, color: C.amber, letterSpacing: "0.02em" }}>
+                  {[
+                    [...selectedChains].join(", "),
+                    [...selectedProtocols].join(", "),
+                  ].filter(Boolean).join(" · ")}
+                </span>
+                <span style={{ flex: 1 }} />
+                {([
+                  { label: "Portfolio", val: fmtCompact(totalPortfolioValue), total: fmtCompact(allPortfolioValue) },
+                  { label: "Daily Income", val: fmt$(totalDailyIncome), total: fmt$(allDailyIncome) },
+                  { label: "Fees Collected", val: fmt$(feeIncome.totalAllTime), total: fmt$(feesAllTime) },
+                ]).map((c) => (
+                  <span key={c.label} style={{ fontSize: 12, color: C.textMid, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>
+                    {c.label}:{" "}
+                    <span style={{ color: C.textBright, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.val}</span>
+                    <span style={{ color: C.text, opacity: 0.7 }}> (of {c.total} total)</span>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  style={{
+                    fontFamily: FONT, fontSize: 11, fontWeight: 700,
+                    letterSpacing: "0.1em", textTransform: "uppercase",
+                    padding: "5px 12px", cursor: "pointer",
+                    border: `1px solid ${C.amber}66`, background: "transparent", color: C.amber,
+                  }}
+                >
+                  ✕ Clear
+                </button>
+              </div>
+            )}
+
             {/* TOP STATS STRIP — 5 cells */}
             <div
               className="ana-top-stats"
@@ -1100,7 +1271,7 @@ export default function Analytics() {
                   </div>
                 )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {isLoading ? <Skel w={140} h={11} /> : `${positions.filter((p) => p.fees > 0).length} positions with fees`}
+                  {isLoading ? <Skel w={140} h={11} /> : `${filteredPositions.filter((p) => p.fees > 0).length} positions with fees`}
                 </div>
               </div>
 
@@ -2116,7 +2287,7 @@ export default function Analytics() {
                     {!isLoading && !activityLoading && sortedPositions.length === 0 && (
                       <tr>
                         <td colSpan={9} style={{ padding: 32, textAlign: "center", color: C.text, fontSize: 14 }}>
-                          No active LP positions
+                          {filterActive ? "No positions match this filter" : "No active LP positions"}
                         </td>
                       </tr>
                     )}
@@ -2125,13 +2296,13 @@ export default function Analytics() {
               </div>
 
               {/* Lending positions summary rows */}
-              {lendingPositions.length > 0 && (
+              {filteredLendingPositions.length > 0 && (
                 <div style={{ borderTop: `1px solid ${C.border}`, padding: "16px 26px" }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 12 }}>
                     Lending Positions
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {lendingPositions.map((lp) => {
+                    {filteredLendingPositions.map((lp) => {
                       const color = PROTOCOL_COLORS[lp.protocol] ?? C.text;
                       return (
                         <div

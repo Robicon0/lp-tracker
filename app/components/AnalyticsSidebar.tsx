@@ -69,6 +69,13 @@ interface Props {
   onSectionChange: (id: AnalyticsSection) => void;
   activeProtocols: Set<string>;
   activeChains: Set<string>;
+  // Filter state — chains/protocols the user has selected. Empty sets =
+  // no filter = show everything (page looks identical to pre-filter).
+  selectedChains: Set<string>;
+  selectedProtocols: Set<string>;
+  onChainToggle: (chain: string) => void;
+  onProtocolToggle: (protocol: string) => void;
+  onClearFilters: () => void;
 }
 
 export default function AnalyticsSidebar({
@@ -76,7 +83,13 @@ export default function AnalyticsSidebar({
   onSectionChange,
   activeProtocols,
   activeChains,
+  selectedChains,
+  selectedProtocols,
+  onChainToggle,
+  onProtocolToggle,
+  onClearFilters,
 }: Props) {
+  const filterActive = selectedChains.size > 0 || selectedProtocols.size > 0;
   const sectionWrap: CSSProperties = {
     padding: "20px 0 12px",
     borderBottom: `1px solid ${C.border}`,
@@ -177,50 +190,103 @@ export default function AnalyticsSidebar({
         })}
       </div>
 
-      {/* PROTOCOLS */}
+      {/* CLEAR ALL — only when at least one chain/protocol filter is active */}
+      {filterActive && (
+        <div style={{ padding: "12px 0", borderBottom: `1px solid ${C.border}` }}>
+          <button
+            type="button"
+            onClick={onClearFilters}
+            style={{ ...itemBase, color: C.amber, fontWeight: 700 }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,170,0,0.08)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          >
+            <span style={{ ...iconStyle, color: C.amber }}>✕</span>
+            Clear All
+          </button>
+        </div>
+      )}
+
+      {/* PROTOCOLS — interactive multi-select filters */}
       <div style={sectionWrap}>
         <div style={labelStyle}>Protocols</div>
         {PROTOCOL_LIST.map((p) => {
           const live = activeProtocols.has(p);
+          const selected = selectedProtocols.has(p);
+
+          // Unavailable (not in wallet) — dimmed, non-clickable (unchanged).
+          if (!live) {
+            return (
+              <div
+                key={p}
+                style={{ ...itemBase, cursor: "default", color: C.text, opacity: 0.55 }}
+              >
+                <span style={{ width: 3, height: 3, background: C.text, flexShrink: 0, marginLeft: 5, marginRight: 5 }} />
+                {p}
+              </div>
+            );
+          }
+
           return (
-            <div
+            <button
               key={p}
-              style={{
-                ...itemBase,
-                cursor: "default",
-                color: live ? C.textMid : C.text,
-                opacity: live ? 1 : 0.55,
+              type="button"
+              onClick={() => onProtocolToggle(p)}
+              style={selected ? { ...itemActive } : { ...itemBase }}
+              onMouseEnter={(e) => {
+                if (!selected) { e.currentTarget.style.color = "#e8e8e8"; e.currentTarget.style.background = C.bg2; }
+              }}
+              onMouseLeave={(e) => {
+                if (!selected) { e.currentTarget.style.color = C.textMid; e.currentTarget.style.background = "transparent"; }
               }}
             >
               <span
                 style={{
                   width: 3,
                   height: 3,
-                  background: live ? C.green : C.text,
+                  background: C.green,
                   flexShrink: 0,
                   marginLeft: 5,
                   marginRight: 5,
+                  boxShadow: selected ? `0 0 6px ${C.green}` : "none",
                 }}
               />
               {p}
-            </div>
+            </button>
           );
         })}
       </div>
 
-      {/* CHAINS */}
+      {/* CHAINS — interactive multi-select filters */}
       <div style={{ ...sectionWrap, borderBottom: "none" }}>
         <div style={labelStyle}>Chains</div>
         {CHAIN_LIST.map((ch) => {
           const live = activeChains.has(ch.name);
+          const selected = selectedChains.has(ch.name);
+
+          // Unavailable (not in wallet) — dimmed, non-clickable (unchanged).
+          if (!live) {
+            return (
+              <div
+                key={ch.name}
+                style={{ ...itemBase, cursor: "default", color: C.text, opacity: 0.55 }}
+              >
+                <span style={{ width: 7, height: 7, background: ch.color, flexShrink: 0, boxShadow: "none", opacity: 0.35 }} />
+                {ch.name}
+              </div>
+            );
+          }
+
           return (
-            <div
+            <button
               key={ch.name}
-              style={{
-                ...itemBase,
-                cursor: "default",
-                color: live ? C.textMid : C.text,
-                opacity: live ? 1 : 0.55,
+              type="button"
+              onClick={() => onChainToggle(ch.name)}
+              style={selected ? { ...itemActive } : { ...itemBase }}
+              onMouseEnter={(e) => {
+                if (!selected) { e.currentTarget.style.color = "#e8e8e8"; e.currentTarget.style.background = C.bg2; }
+              }}
+              onMouseLeave={(e) => {
+                if (!selected) { e.currentTarget.style.color = C.textMid; e.currentTarget.style.background = "transparent"; }
               }}
             >
               <span
@@ -229,12 +295,11 @@ export default function AnalyticsSidebar({
                   height: 7,
                   background: ch.color,
                   flexShrink: 0,
-                  boxShadow: live ? `0 0 4px ${ch.color}88` : "none",
-                  opacity: live ? 1 : 0.35,
+                  boxShadow: selected ? `0 0 8px ${ch.color}` : `0 0 4px ${ch.color}88`,
                 }}
               />
               {ch.name}
-            </div>
+            </button>
           );
         })}
       </div>
