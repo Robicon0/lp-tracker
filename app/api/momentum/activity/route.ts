@@ -13,7 +13,15 @@ import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
-const MOMENTUM_PKG = '0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860';
+// Momentum package address allowlist. Only one published package is known
+// and verified live (events carry this original defining address across
+// upgrades). Kept as an array so additional versions can be appended without
+// touching the filter logic. Matched by PACKAGE — NOT event name alone —
+// because Cetus emits identically-named AddLiquidityEvent / RemoveLiquidityEvent,
+// so a name-only filter would cross-capture Cetus events as Momentum activity.
+const MOMENTUM_PKGS = [
+  '0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860', // verified live
+];
 
 const STABLECOINS = new Set([
   '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::usdc',
@@ -166,7 +174,7 @@ export async function GET(request: Request) {
       const ts = tx.timestampMs ? Math.floor(parseInt(tx.timestampMs, 10) / 1000) : 0;
 
       for (const ev of tx.events) {
-        if (!ev.type.startsWith(MOMENTUM_PKG)) continue;
+        if (!MOMENTUM_PKGS.some((pkg) => ev.type.startsWith(pkg))) continue;
         const pj = ev.parsedJson ?? {};
         const evPosId = (pj.position_id as string) ?? '';
         if (!walletScope && evPosId !== positionId) continue;

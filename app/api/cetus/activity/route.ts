@@ -12,9 +12,21 @@ import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
-// Cetus CLMM package. Move type identity is preserved across package
-// upgrades, so events always carry this original address prefix.
-const CETUS_PKG = '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb';
+// Cetus CLMM package addresses across known versions. On Sui, type identity
+// is normally preserved across UPGRADES (events keep their original defining
+// address — verified live: current events still carry 0x1eabed72…), but Cetus
+// has shipped multiple package versions, so we match an ALLOWLIST of all known
+// Cetus package addresses to stay resilient if a future version emits events
+// under a new defining address.
+//
+// We match on PACKAGE (not event name alone) on purpose: Momentum emits
+// identically-named `AddLiquidityEvent` / `RemoveLiquidityEvent`, so a
+// name-only filter would wrongly capture Momentum's events as Cetus activity.
+const CETUS_PKGS = [
+  '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb', // original (verified live)
+  '0x587614620d0d30aed66d86ffd3ba385a661a86aa573a4d579017068f561c6d8f', // v1.25.0
+  '0x3b9f8d381c22bfcf7e4e6469f57a4d10d2087bbfae05248650b08fd5dff0434d', // v1.50.0
+];
 
 // Known Sui stablecoins (lowercase) — same set as the Bluefin route.
 const STABLECOINS = new Set([
@@ -142,7 +154,7 @@ export async function GET(request: Request) {
       const ts = tx.timestampMs ? Math.floor(parseInt(tx.timestampMs, 10) / 1000) : 0;
 
       for (const ev of tx.events) {
-        if (!ev.type.startsWith(CETUS_PKG)) continue;
+        if (!CETUS_PKGS.some((pkg) => ev.type.startsWith(pkg))) continue;
         const pj = ev.parsedJson ?? {};
         // Cetus position object id is in the `position` field.
         const evPosId = (pj.position as string) ?? '';
