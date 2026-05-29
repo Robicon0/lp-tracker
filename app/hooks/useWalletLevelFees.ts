@@ -133,59 +133,17 @@ export function useWalletLevelFees(
       );
     }
 
-    // Cetus + Momentum wallet-scope fee scans. Same idea as Bluefin: fire a
-    // positionId=all scan per Sui wallet so fees from fully-closed positions
-    // (object destroyed) are recovered. Cetus/Momentum position routes don't
-    // expose coin types, so we use the SUI_FALLBACK context with the live SUI
-    // price (priceB=1 anchors the USDC side; priceA=suiPrice the SUI side).
-    // The scan returns only fee_claim/reward_claim events; the analytics Fee
-    // Income memo dedupes by (protocol, txHash, amount0, amount1) so any
-    // open-position fees also seen by the per-position scan aren't doubled.
-    const suiWalletSet = new Map<string, string>(); // lowercase → original
-    const addSui = (a?: string) => { if (a) suiWalletSet.set(a.toLowerCase(), a); };
-    for (const a of bluefinByWallet.keys()) addSui(a);
-    for (const p of positions) if (p.chain === "Sui") addSui(p.walletAddress);
-    for (const a of suiWalletAddresses ?? []) addSui(a);
-
-    const suiPriceA = suiPrice && suiPrice > 0 ? suiPrice : 0;
-    const SUI_PROTOS: Array<[string, string]> = [
-      ["Cetus", "/api/cetus/activity"],
-      ["Momentum", "/api/momentum/activity"],
-    ];
-    for (const acct of suiWalletSet.values()) {
-      for (const [proto, base] of SUI_PROTOS) {
-        const url =
-          `${base}?positionId=all` +
-          `&account=${encodeURIComponent(acct)}` +
-          `&coinTypeA=${encodeURIComponent(SUI_FALLBACK.coinTypeA)}` +
-          `&coinTypeB=${encodeURIComponent(SUI_FALLBACK.coinTypeB)}` +
-          `&decimalsA=${SUI_FALLBACK.decimalsA}&decimalsB=${SUI_FALLBACK.decimalsB}` +
-          `&priceA=${suiPriceA}&priceB=${SUI_FALLBACK.priceB}`;
-        fetches.push(
-          fetch(url)
-            .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-            .then((j) => (j.events ?? []).map((e) => ({ event: e, protocol: proto, chain: "Sui" })))
-            .catch((err) => {
-              console.error(`[wallet-fees ${proto.toLowerCase()}] fetch failed:`, err);
-              return [];
-            }),
-        );
-      }
-    }
-
     if (fetches.length === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
     }
 
-    // Include every scanned wallet (Bluefin contexts + Cetus/Momentum Sui
-    // wallets) AND suiPrice in the dedupe key so the scans re-fire when the
-    // wallet set changes OR when the SUI spot price arrives asynchronously
-    // (the initial run may have used priceA=0).
-    const key =
-      [...new Set([...bluefinByWallet.keys(), ...suiWalletSet.keys()])].sort().join("|") +
-      `::sui${suiPrice ?? 0}`;
+    // Include suiPrice in the dedupe key so when the SUI spot price arrives
+    // asynchronously (after the initial fetch ran with priceA=0), the
+    // wallet-scope scan re-fires with the correct fallback price instead of
+    // being skipped as "already fetched".
+    const key = Array.from(bluefinByWallet.keys()).sort().join("|") + `::sui${suiPrice ?? 0}`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
