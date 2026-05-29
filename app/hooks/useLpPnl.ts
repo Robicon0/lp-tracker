@@ -342,7 +342,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // (contract wasn't in hyperswap KNOWN_TOKENS) → missing_current_prices
 // exclusion. Adding the contract + a dynamic CG symbol-search fallback
 // fixes the price; the bump forces a fresh fetch worldwide.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v5-";
+// Bumped v5 → v6: Cetus per-position deposits/withdrawals were cached empty
+// (route looked for the wrong event name/package — the real liquidity events
+// are AddLiquidityV2Event/RemoveLiquidityV2Event from pkg 0xdb5cd62a06c7…).
+// The Cetus route rewrite captures them; the bump discards stale empty/zero
+// caches so positions re-fetch with full deposit history.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v6-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

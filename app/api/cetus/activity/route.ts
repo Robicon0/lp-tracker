@@ -1,29 +1,24 @@
 import { NextResponse } from 'next/server';
+import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 
-// Cetus CLMM activity route.
+// Cetus CLMM activity route — follows the EXACT same pattern as
+// app/api/bluefin/activity/route.ts (suix_queryTransactionBlocks FromAddress
+// → sui_multiGetTransactionBlocks showEvents → filter by package allowlist →
+// parse events). Differences from Bluefin are only the protocol specifics:
+//   - package allowlist (CETUS_PKGS, multiple versions)
+//   - event names (Add/RemoveLiquidity[V2]Event, CollectFeeEvent)
+//   - position-object id is in the `position` field (NOT `position_id`)
 //
-// IMPLEMENTATION NOTE — why NOT the @cetusprotocol/cetus-sui-clmm-sdk:
-// That SDK is a transaction-BUILDING / current-state-READING toolkit (Pool,
-// Position, Swap, Rewarder modules — getPosition / getPositionList read the
-// CURRENT position object). It has NO position-transaction-history method;
-// historical activity comes from Cetus's off-chain indexer API or directly
-// from chain events. So per the task's CRITICAL fallback we query on-chain
-// events via `suix_queryEvents` (event-indexed, fewer round-trips and smaller
-// payloads than scanning every tx via suix_queryTransactionBlocks — which is
-// what previously MISSED deposits).
-//
-// ROOT CAUSE of the missing deposits (verified live on-chain): Cetus emits its
-// liquidity events as `pool::AddLiquidityV2Event` / `pool::RemoveLiquidityV2Event`
-// from a SEPARATE newer package `0xdb5cd62a…`, NOT `AddLiquidityEvent` from the
-// original `0x1eabed72…`. The old filter looked for the wrong name AND wrong
-// package, so deposits/withdrawals were never found. Fees still come from
-// `0x1eabed72…::pool::CollectFeeEvent`. Both packages are in the allowlist and
-// both V2 + legacy names are matched.
+// Verified on-chain: Cetus emits liquidity as `pool::AddLiquidityV2Event` /
+// `pool::RemoveLiquidityV2Event` from package 0xdb5cd62a06c7…, and fees as
+// `pool::CollectFeeEvent` from the original 0x1eabed72…. (The V2 package
+// address is the on-chain-verified 0xdb5cd62a06c79695…, NOT 0xdb5cd62a4b7c….)
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
-// Cetus package addresses (allowlist). Matched by PACKAGE — never by event
-// name alone — because Momentum emits identically-named liquidity events.
+// Cetus package addresses (allowlist of known versions). Matched by PACKAGE,
+// never by event name alone — Momentum emits identically-named
+// AddLiquidityEvent / RemoveLiquidityEvent.
 const CETUS_PKGS = [
   '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb', // original — CollectFeeEvent / Open/ClosePositionEvent
   '0xdb5cd62a06c79695bfc9982eb08534706d3752fe123b48e0144f480209b3117f', // V2 pool — Add/RemoveLiquidityV2Event (verified live)
@@ -31,24 +26,31 @@ const CETUS_PKGS = [
   '0x3b9f8d381c22bfcf7e4e6469f57a4d10d2087bbfae05248650b08fd5dff0434d', // v1.50.0
 ];
 
-// Cetus event short-names → our event type. V2 names are what current Cetus
-// emits; legacy names kept for older positions.
+// Event short-names → activity type. V2 names are what current Cetus emits;
+// legacy (non-V2) names kept for older positions.
 const DEPOSIT_NAMES = new Set(['AddLiquidityV2Event', 'AddLiquidityEvent']);
 const WITHDRAW_NAMES = new Set(['RemoveLiquidityV2Event', 'RemoveLiquidityEvent']);
-const FEE_NAMES = new Set(['CollectFeeEvent']);
 
-export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
+// Known Sui stablecoins (lowercase) — same set as the Bluefin route.
+const STABLECOINS = new Set([
+  '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::usdc',
+  '0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::coin', // USDT
+  '0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::coin', // wUSDC
+]);
+
+export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim';
 
 export interface ActivityEvent {
   type: ActivityEventType;
-  txHash: string;
-  timestamp: number;
-  amount0: number;
-  amount1: number;
-  usdAtTime: number | null;
+  txHash: string;           // Sui transaction digest
+  timestamp: number;        // unix seconds
+  amount0: number;          // coin_a amount (human-readable)
+  amount1: number;          // coin_b amount
+  usdAtTime: number | null; // null if price unavailable
   price0AtTime: number | null;
   price1AtTime: number | null;
-  cumulativeFeeUSD: number;
+  cumulativeFeeUSD: number; // running total of fee USD; 0 for non-fee events
+  rewardSymbol?: string;    // unused for Cetus (kept for interface parity)
 }
 
 interface ActivityResponse {
@@ -57,13 +59,6 @@ interface ActivityResponse {
   netInvested1: number;
   totalFees0: number;
   totalFees1: number;
-}
-
-interface SuiEvent {
-  id: { txDigest: string; eventSeq: string };
-  type: string;
-  parsedJson: Record<string, unknown>;
-  timestampMs?: string;
 }
 
 async function suiRpc(method: string, params: unknown[]) {
@@ -76,39 +71,49 @@ async function suiRpc(method: string, params: unknown[]) {
   return json.result;
 }
 
-// Fetch all events emitted by transactions SENT by `account`, via the
-// event-indexed `suix_queryEvents` API (newest-first). Paginates to full
-// history; bails gracefully on any page error (returns what it has so far).
-interface EventCursor { txDigest: string; eventSeq: string }
-interface QueryEventsPage {
-  data?: SuiEvent[];
-  nextCursor?: EventCursor | null;
-  hasNextPage?: boolean;
+// Fetch all wallet transaction digests, paginating through all pages.
+async function fetchAllDigests(account: string): Promise<string[]> {
+  const digests: string[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const result = await suiRpc('suix_queryTransactionBlocks', [
+      { filter: { FromAddress: account } },
+      cursor,
+      50,
+      true, // descending (newest first)
+    ]) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
+
+    if (!result) break;
+    digests.push(...result.data.map((t) => t.digest));
+    cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
+  } while (cursor);
+
+  return digests;
 }
 
-async function fetchSenderEvents(account: string): Promise<SuiEvent[]> {
-  const events: SuiEvent[] = [];
-  let cursor: EventCursor | null = null;
-  const MAX_PAGES = 200; // safety bound (×50 = 10k events) to stay within fn timeout
+interface SuiTxBlock {
+  digest: string;
+  timestampMs: string;
+  events: Array<{ type: string; parsedJson: Record<string, unknown> }>;
+}
 
-  for (let page = 0; page < MAX_PAGES; page++) {
-    let result: QueryEventsPage | null = null;
-    try {
-      result = (await suiRpc('suix_queryEvents', [
-        { Sender: account },
-        cursor,
-        50,
-        true, // descending (newest first)
-      ])) as QueryEventsPage | null;
-    } catch {
-      break; // graceful: stop paginating, keep what we have
-    }
-    if (!result?.data) break;
-    events.push(...result.data);
-    if (!result.hasNextPage || !result.nextCursor) break;
-    cursor = result.nextCursor;
+// Batch-fetch transaction blocks with events (25 at a time).
+async function fetchTransactionEvents(digests: string[]): Promise<SuiTxBlock[]> {
+  const results: SuiTxBlock[] = [];
+  const BATCH = 25;
+
+  for (let i = 0; i < digests.length; i += BATCH) {
+    const batch = digests.slice(i, i + BATCH);
+    const txBlocks = await suiRpc('sui_multiGetTransactionBlocks', [
+      batch,
+      { showEvents: true, showInput: false, showEffects: false, showObjectChanges: false, showBalanceChanges: false },
+    ]) as SuiTxBlock[] | null;
+
+    if (txBlocks) results.push(...txBlocks);
   }
-  return events;
+
+  return results;
 }
 
 export async function GET(request: Request) {
@@ -117,19 +122,33 @@ export async function GET(request: Request) {
   const account = searchParams.get('account') ?? '';
   const decimalsA = parseInt(searchParams.get('decimalsA') ?? '9', 10);
   const decimalsB = parseInt(searchParams.get('decimalsB') ?? '6', 10);
+  const coinTypeA = searchParams.get('coinTypeA') ?? '';
+  const coinTypeB = searchParams.get('coinTypeB') ?? '';
   const fallbackA = parseFloat(searchParams.get('priceA') ?? '0');
   const fallbackB = parseFloat(searchParams.get('priceB') ?? '0');
+  const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
+  const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
 
   if (!positionId || !account) {
     return NextResponse.json({ error: 'positionId and account required' }, { status: 400 });
   }
-  // Wallet-scope mode (positionId="all"): only fee_claim events, aggregated
-  // across every Cetus position the wallet ever held (recovers fees from
-  // fully-closed/destroyed positions).
+  // Wallet-scope mode (positionId="all"): fee events across every Cetus
+  // position this wallet ever interacted with — including fully-closed ones
+  // whose object is destroyed (per-position scans can't see those). Deposits/
+  // withdrawals are omitted here (ambiguous across pools). Mirrors Bluefin.
   const walletScope = positionId === 'all';
 
   try {
-    const allEvents = await fetchSenderEvents(account);
+    const allDigests = await fetchAllDigests(account);
+
+    if (allDigests.length === 0) {
+      return NextResponse.json({
+        events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
+      } as ActivityResponse);
+    }
+
+    const allTxBlocks = await fetchTransactionEvents(allDigests);
+
     const scaleA = BigInt(10) ** BigInt(decimalsA);
     const scaleB = BigInt(10) ** BigInt(decimalsB);
 
@@ -146,55 +165,77 @@ export async function GET(request: Request) {
     let withdrawn0 = 0n, withdrawn1 = 0n;
     let fees0 = 0n, fees1 = 0n;
 
-    for (const ev of allEvents) {
-      const parts = ev.type.split('::');
-      const pkg = parts[0];
-      if (!CETUS_PKGS.includes(pkg)) continue;
-      const evName = parts[parts.length - 1];
+    for (const tx of allTxBlocks) {
+      if (!tx?.events) continue;
+      const ts = tx.timestampMs ? Math.floor(parseInt(tx.timestampMs, 10) / 1000) : 0;
 
-      const pj = ev.parsedJson ?? {};
-      // Cetus position-object id lives in the `position` field across all
-      // liquidity + fee events.
-      const evPosId = (pj.position as string) ?? '';
-      if (!walletScope && evPosId !== positionId) continue;
+      for (const ev of tx.events) {
+        if (!CETUS_PKGS.some((pkg) => ev.type.startsWith(pkg))) continue;
+        const pj = ev.parsedJson ?? {};
+        // Cetus carries the position-object id in `position` (NOT position_id).
+        const evPosId = (pj.position as string) ?? '';
+        if (!walletScope && evPosId !== positionId) continue;
 
-      let type: ActivityEventType;
-      if (FEE_NAMES.has(evName)) type = 'fee_claim';
-      else if (DEPOSIT_NAMES.has(evName)) type = 'deposit';
-      else if (WITHDRAW_NAMES.has(evName)) type = 'withdrawal';
-      else continue;
+        const evName = ev.type.split('::').pop() ?? '';
 
-      // Wallet-scope aggregates fees only (deposits/withdrawals are
-      // pool-specific and ambiguous across positions).
-      if (walletScope && type !== 'fee_claim') continue;
+        // Wallet-scope only aggregates fee events.
+        if (walletScope && evName !== 'CollectFeeEvent') continue;
 
-      const a0 = BigInt((pj.amount_a as string) ?? '0');
-      const a1 = BigInt((pj.amount_b as string) ?? '0');
-      const ts = ev.timestampMs ? Math.floor(parseInt(ev.timestampMs, 10) / 1000) : 0;
+        if (DEPOSIT_NAMES.has(evName)) {
+          const a0 = BigInt((pj.amount_a as string) ?? '0');
+          const a1 = BigInt((pj.amount_b as string) ?? '0');
+          deposited0 += a0; deposited1 += a1;
+          rawEvents.push({ type: 'deposit', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
 
-      if (type === 'deposit') { deposited0 += a0; deposited1 += a1; }
-      else if (type === 'withdrawal') { withdrawn0 += a0; withdrawn1 += a1; }
-      else { fees0 += a0; fees1 += a1; }
+        } else if (WITHDRAW_NAMES.has(evName)) {
+          const a0 = BigInt((pj.amount_a as string) ?? '0');
+          const a1 = BigInt((pj.amount_b as string) ?? '0');
+          withdrawn0 += a0; withdrawn1 += a1;
+          rawEvents.push({ type: 'withdrawal', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
 
-      rawEvents.push({ type, txHash: ev.id.txDigest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+        } else if (evName === 'CollectFeeEvent') {
+          const a0 = BigInt((pj.amount_a as string) ?? '0');
+          const a1 = BigInt((pj.amount_b as string) ?? '0');
+          fees0 += a0; fees1 += a1;
+          rawEvents.push({ type: 'fee_claim', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+        }
+      }
     }
 
-    // Oldest-first for cumulative fee running total.
+    // Sort chronologically (oldest first) to compute cumulative fees correctly.
     rawEvents.sort((a, b) => a.timestamp - b.timestamp);
 
+    const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scaleA);
       const amount1 = Number(ev.amount1Raw) / Number(scaleB);
 
-      // Value at current pool-token prices (priceA/priceB from CoinGecko,
-      // passed by the caller). Cetus per-position price derivation isn't
-      // available here (the position route doesn't expose coin types), so
-      // current prices are used for every event type.
-      const price0AtTime = fallbackA || null;
-      const price1AtTime = fallbackB || null;
+      let price0AtTime: number | null = null;
+      let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
-      if (fallbackA > 0 || fallbackB > 0) usdAtTime = amount0 * fallbackA + amount1 * fallbackB;
+
+      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks && coinTypeA && coinTypeB) {
+        const derived = deriveDepositPrices(
+          amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
+          coinTypeA, coinTypeB, STABLECOINS,
+        );
+        if (derived) {
+          price0AtTime = derived.price0;
+          price1AtTime = derived.price1;
+          usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+        }
+      }
+
+      if (usdAtTime == null) {
+        // fee_claim, or deposit/withdrawal where derivation was unavailable:
+        // value at current pool-token prices.
+        price0AtTime = fallbackA || null;
+        price1AtTime = fallbackB || null;
+        if (fallbackA > 0 || fallbackB > 0) {
+          usdAtTime = amount0 * fallbackA + amount1 * fallbackB;
+        }
+      }
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim') {
@@ -202,10 +243,21 @@ export async function GET(request: Request) {
         cumulativeFeeUSD = runningFeeUSD;
       }
 
-      return { type: ev.type, txHash: ev.txHash, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, cumulativeFeeUSD };
+      return {
+        type: ev.type,
+        txHash: ev.txHash,
+        timestamp: ev.timestamp,
+        amount0,
+        amount1,
+        usdAtTime,
+        price0AtTime,
+        price1AtTime,
+        cumulativeFeeUSD,
+      };
     });
 
-    events.reverse(); // newest-first for display
+    // Reverse to newest-first for display.
+    events.reverse();
 
     return NextResponse.json({
       events,
@@ -216,8 +268,9 @@ export async function GET(request: Request) {
     } as ActivityResponse);
   } catch (err) {
     console.error('[cetus/activity] Unexpected error:', err);
-    // Graceful: empty events rather than 500 so the analytics/detail page
-    // never breaks on a Cetus RPC hiccup.
-    return NextResponse.json({ events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0 } as ActivityResponse);
+    return NextResponse.json(
+      { error: 'Failed to fetch Cetus activity', details: String(err) },
+      { status: 500 },
+    );
   }
 }
