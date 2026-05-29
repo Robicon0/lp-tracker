@@ -67,6 +67,7 @@ Requires `NEXT_PUBLIC_ALCHEMY_KEY` in `.env.local` for RPC calls and wallet bala
 Optional:
 - `POSTGRES_URL` / `POSTGRES_URL_NON_POOLING` — Vercel Postgres / Neon connection strings for the (currently unused) snapshot tables. When absent, `/api/snapshots/save`, `/api/snapshots/range`, and `/api/cron/daily-snapshot` gracefully return `db_not_configured`. No UI consumes these anymore — the hero P&L reads from localStorage.
 - `CRON_SECRET` — Vercel auto-injects this as `Authorization: Bearer <CRON_SECRET>` for `/api/cron/daily-snapshot`. When set, unauthenticated requests to the cron endpoint return 401.
+- `SUI_RPC_URL` — Sui JSON-RPC endpoint used by ALL Sui routes (Cetus / Bluefin / Momentum position + activity routes, `/api/sui/balances`). **Now set to the Alchemy Sui archive RPC** (`https://sui-mainnet.g.alchemy.com/v2/<ALCHEMY_KEY>`) in `.env.local` and on Vercel (Production + Development; Preview pending — see below). Falls back to the public `https://fullnode.mainnet.sui.io:443` when unset. The public fullnode rate-limits and prunes older transaction history, which capped the wallet-scope fee scans (`positionId=all` in the Cetus/Momentum/Bluefin activity routes that paginate the FULL `suix_queryTransactionBlocks` history). The Alchemy archive endpoint returns full tx history with higher rate limits, so closed-position lifetime fees on Sui are now recoverable in full. Verified the endpoint supports `suix_queryTransactionBlocks` + pagination. **Vercel Preview env was NOT set** — the installed Vercel CLI (54.1.0) rejects the non-interactive `--value --yes` form for preview-all-branches (returns `action_required`); set it via the dashboard or after `npm i -g vercel@latest` with `vercel env add SUI_RPC_URL preview --value '<url>' --yes`.
 
 ## Portfolio snapshots (daily Neon + client-push hybrid)
 
@@ -134,9 +135,9 @@ The analytics page computes portfolio-wide LP P&L entirely on-chain — there is
 3. Velodrome (Optimism) — Sugar contract with selector `0xedbd33bf` ✅
 4. Raydium CLMM (Solana) — Helius RPC, program `CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK` ✅
 5. Orca Whirlpools (Solana) — Helius RPC, Token2022 NFTs ✅
-6. Cetus CLMM (Sui) — Sui public RPC, position type `::position::Position` ✅
-7. Bluefin (Sui) — Sui public RPC, Q64 fee math, APY from Bluefin's own API ✅
-8. Momentum (Sui) — Sui public RPC, package `0x70285592...`, Q64 fee math ✅
+6. Cetus CLMM (Sui) — Alchemy Sui archive RPC (`SUI_RPC_URL`), position type `::position::Position` ✅
+7. Bluefin (Sui) — Alchemy Sui archive RPC (`SUI_RPC_URL`), Q64 fee math, APY from Bluefin's own API ✅
+8. Momentum (Sui) — Alchemy Sui archive RPC (`SUI_RPC_URL`), package `0x70285592...`, Q64 fee math ✅
 9. HyperSwap V3 (HyperEVM) — public RPC `https://rpc.hyperliquid.xyz/evm`, NFT manager `0x6eda206207c09e5428f281761ddc0d300851fbc8` ✅
 10. KittenSwap (HyperEVM) — same RPC, NFT manager `0xb9201e89f94a01ff13ad4caecf43a2e232513754` ✅
 11. ProjectX / PRJX (HyperEVM) — same RPC, NFT manager `0xead19ae861c29bbb2101e834922b2feee69b9091` ✅
