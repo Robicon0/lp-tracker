@@ -177,6 +177,7 @@ const ACTIVITY_PROTOCOLS = new Set([
   "Aerodrome", "Bluefin", "Orca", "Raydium",
   "HyperSwap", "KittenSwap", "ProjectX",
   "Uniswap V3", "Velodrome", "PancakeSwap V3",
+  "Cetus", "Momentum",
 ]);
 
 // ── Build activity API URL ──────────────────────────────────────────────────
@@ -212,6 +213,30 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.walletAddress) p.set("account", pos.walletAddress);
     appendTicks();
     return `/api/bluefin/activity?${p}`;
+  }
+  if (pos.protocol === "Cetus") {
+    p.set("positionId", pos.id.replace("cetus-", ""));
+    p.set("decimalsA", String(pos.token0Decimals ?? 9));
+    p.set("decimalsB", String(pos.token1Decimals ?? 6));
+    if (pos.coinTypeA) p.set("coinTypeA", pos.coinTypeA);
+    if (pos.coinTypeB) p.set("coinTypeB", pos.coinTypeB);
+    if (pos.price0 != null) p.set("priceA", String(pos.price0));
+    if (pos.price1 != null) p.set("priceB", String(pos.price1));
+    if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
+    return `/api/cetus/activity?${p}`;
+  }
+  if (pos.protocol === "Momentum") {
+    p.set("positionId", pos.id.replace("momentum-", ""));
+    p.set("decimalsA", String(pos.token0Decimals ?? 9));
+    p.set("decimalsB", String(pos.token1Decimals ?? 6));
+    if (pos.coinTypeA) p.set("coinTypeA", pos.coinTypeA);
+    if (pos.coinTypeB) p.set("coinTypeB", pos.coinTypeB);
+    if (pos.price0 != null) p.set("priceA", String(pos.price0));
+    if (pos.price1 != null) p.set("priceB", String(pos.price1));
+    if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
+    return `/api/momentum/activity?${p}`;
   }
   if (pos.protocol === "Orca") {
     p.set("positionId", pos.id.replace("orca-", ""));
