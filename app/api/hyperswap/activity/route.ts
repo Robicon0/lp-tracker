@@ -27,8 +27,14 @@ const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 const SCAN_DEPTH = 5_000_000;
 // Archive RPC max block range per eth_getLogs request
 const LOG_CHUNK = 10_000;
-// Max concurrent eth_getLogs requests (avoid rate-limiting)
-const LOG_CONCURRENCY = 20;
+// Max concurrent eth_getLogs requests. Kept low (3) because the Chainstack
+// free plan caps at 25 RPS — when several HyperEVM positions load at once
+// each fires its own fetchLogsViaArchive, so a high per-position concurrency
+// multiplied across positions blew past the limit ("exceeded the RPS limit").
+const LOG_CONCURRENCY = 3;
+// Delay between concurrent batches so simultaneous position fetches don't all
+// hammer Chainstack at once and trip the shared RPS limit.
+const ARCHIVE_BATCH_DELAY_MS = 200;
 
 // Standard Uni V3 event topic0 hashes — same for all V3 forks
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
@@ -314,9 +320,12 @@ async function fetchLogsViaArchive(nftManager: string, tokenIdHex: string): Prom
   }
   console.log(`[hyperswap/activity] source=archive scanning ${ranges.length} chunks (blocks ${fromBlock}–${latestBlock})`);
 
-  // Fetch in parallel batches
+  // Fetch in parallel batches, with a small delay BETWEEN batches so that
+  // simultaneous per-position fetches don't collectively exceed Chainstack's
+  // shared RPS limit.
   const allLogs: RawLog[] = [];
   for (let i = 0; i < ranges.length; i += LOG_CONCURRENCY) {
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, ARCHIVE_BATCH_DELAY_MS));
     const batch = ranges.slice(i, i + LOG_CONCURRENCY);
     const results = await Promise.all(
       batch.map(([f, t]) => fetchLogsChunk(nftManager, tokenIdHex, f, t))
