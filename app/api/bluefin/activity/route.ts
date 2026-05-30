@@ -5,6 +5,17 @@ const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443'
 
 const BLUEFIN_PKG = '0x3492c874c1e3b3e2984e8c41b589e642d4d0a5d6459e5a9cfc2d52fd7c89c267';
 
+// Sui object type of a Bluefin Position. Same value used by
+// app/api/bluefin/route.ts. Used in wallet-scope mode to filter fee/reward
+// events down to positions the user actually owns — necessary because
+// routers/aggregators may emit UserFeeCollected / UserRewardCollected
+// against OTHER users' position objects from within a tx the user signed.
+// TRADE-OFF: this also excludes positions the user has FULLY CLOSED, since
+// the on-chain object is destroyed; the original "recover destroyed-object
+// fees" intent of wallet-scope is sacrificed for foreign-position correctness.
+const BLUEFIN_POSITION_TYPE =
+  '0x3492c874c1e3b3e2984e8c41b589e642d4d0a5d6459e5a9cfc2d52fd7c89c267::position::Position';
+
 // Known Sui stablecoins (lowercase for comparison)
 const STABLECOINS = new Set([
   '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::usdc',
@@ -51,6 +62,30 @@ async function suiRpc(method: string, params: unknown[]) {
   });
   const json = await res.json();
   return json.result;
+}
+
+// Fetch the set of Bluefin Position object IDs currently owned by `account`.
+// Wallet-scope mode uses this to drop fee/reward events emitted against
+// positions the user does NOT own (router/aggregator scenarios). Mirrors the
+// pagination pattern in app/api/bluefin/route.ts.
+async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const result = await suiRpc('suix_getOwnedObjects', [
+      account,
+      { filter: { StructType: BLUEFIN_POSITION_TYPE }, options: { showType: false, showContent: false } },
+      cursor,
+      50,
+    ]) as { data: Array<{ data?: { objectId?: string } }>; nextCursor: string | null; hasNextPage: boolean } | null;
+    if (!result?.data) break;
+    for (const item of result.data) {
+      const id = item?.data?.objectId;
+      if (id) ids.add(id);
+    }
+    cursor = result.hasNextPage ? result.nextCursor : null;
+  } while (cursor);
+  return ids;
 }
 
 
@@ -132,6 +167,11 @@ export async function GET(request: Request) {
       } as ActivityResponse);
     }
 
+    // Wallet-scope only: fetch the set of Bluefin Position object IDs the
+    // wallet currently owns. Per-position mode already filters by
+    // parsedJson.position_id === positionId, so this RPC is skipped there.
+    const ownedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
+
     const allTxBlocks = await fetchTransactionEvents(allDigests);
 
     const scaleA = BigInt(10) ** BigInt(decimalsA);
@@ -167,8 +207,12 @@ export async function GET(request: Request) {
         // In wallet-scope mode only emit fee + reward events — deposits /
         // withdrawals are pool-specific and not useful when aggregating
         // across multiple destroyed positions.
-        if (walletScope && evName !== 'UserFeeCollected' && evName !== 'UserRewardCollected') {
-          continue;
+        if (walletScope) {
+          if (evName !== 'UserFeeCollected' && evName !== 'UserRewardCollected') continue;
+          // Reject events whose `position_id` is not in the wallet's current
+          // owned set — filters out fee/reward events emitted by routers /
+          // aggregators acting on positions the user does NOT own.
+          if (!ownedPositionIds.has(evPosId)) continue;
         }
 
         if (evName === 'LiquidityProvided') {

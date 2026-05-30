@@ -333,7 +333,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // route at /api/cetus/activity with the verified 3-package allowlist + V2 event
 // names + reward_claim parsing). Skipping v6 — destination version per spec to
 // keep CLAUDE.md/the changelog aligned with the user's mental model of the bump.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v7-";
+// Bumped v7 → v8: Cetus + Bluefin wallet-scope routes now filter fee/reward
+// events to positions the wallet currently owns (suix_getOwnedObjects-backed),
+// rejecting router/aggregator-emitted events against OTHER users' positions.
+// Cached pre-fix wallet-scope entries may include those foreign-position fees,
+// so we force a fresh fetch worldwide.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v8-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

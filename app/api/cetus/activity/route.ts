@@ -26,6 +26,12 @@ const CETUS_PKGS = [
   '0xdc67d6de3f00051c505da10d8f6fbab3b3ec21ec65f0dc22a2f36c13fc102110', // V2 rewards (CollectRewardV2Event)
 ];
 
+// Sui object type of a Cetus Position. Same value used by app/api/cetus/route.ts
+// — Move type identity is preserved across Cetus package upgrades, so this
+// single string matches every Position the wallet currently owns.
+const CETUS_POSITION_TYPE =
+  '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb::position::Position';
+
 // Known Sui stablecoin coin types (lowercase) — used by deriveDepositPrices
 // for deposit/withdrawal pricing when ticks + coin types are present. Same
 // set as the Bluefin route.
@@ -78,6 +84,38 @@ async function suiRpc(method: string, params: unknown[]) {
   });
   const json = await res.json();
   return json.result;
+}
+
+// Fetch the set of Cetus Position object IDs currently owned by `account`.
+// Used in wallet-scope mode to filter fee/reward events down to positions the
+// user actually owns — necessary because routers / aggregators may emit
+// CollectFeeEvent / CollectRewardV2Event against OTHER users' position
+// objects from within a tx the user signed (e.g. auto-compounder or vault
+// flows). Mirrors the pagination pattern in app/api/cetus/route.ts.
+//
+// TRADE-OFF: this also excludes positions the user has FULLY CLOSED, since
+// the on-chain object is destroyed and suix_getOwnedObjects no longer
+// returns it. Wallet-scope was originally designed to recover fees from
+// destroyed objects; ownership-filtering trades that recovery for
+// correctness against the foreign-position case. Acceptable per spec.
+async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const result = await suiRpc('suix_getOwnedObjects', [
+      account,
+      { filter: { StructType: CETUS_POSITION_TYPE }, options: { showType: false, showContent: false } },
+      cursor,
+      50,
+    ]) as { data: Array<{ data?: { objectId?: string } }>; nextCursor: string | null; hasNextPage: boolean } | null;
+    if (!result?.data) break;
+    for (const item of result.data) {
+      const id = item?.data?.objectId;
+      if (id) ids.add(id);
+    }
+    cursor = result.hasNextPage ? result.nextCursor : null;
+  } while (cursor);
+  return ids;
 }
 
 // Fetch all wallet transaction digests, paginating through all pages.
@@ -166,6 +204,13 @@ export async function GET(request: Request) {
       } as ActivityResponse);
     }
 
+    // Wallet-scope only: fetch the set of Cetus Position object IDs the
+    // wallet currently owns, used below to filter out fee/reward events
+    // emitted against OTHER users' positions (router/aggregator scenarios).
+    // Per-position mode already filters by parsedJson.position === positionId,
+    // so this call is skipped to save an RPC roundtrip.
+    const ownedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
+
     const allTxBlocks = await fetchTransactionEvents(allDigests);
 
     const scaleA = BigInt(10) ** BigInt(decimalsA);
@@ -201,8 +246,12 @@ export async function GET(request: Request) {
 
         // Wallet-scope only aggregates fee + reward events — deposits /
         // withdrawals are pool-specific and not useful across positions.
-        if (walletScope && evName !== 'CollectFeeEvent' && evName !== 'CollectRewardV2Event') {
-          continue;
+        if (walletScope) {
+          if (evName !== 'CollectFeeEvent' && evName !== 'CollectRewardV2Event') continue;
+          // Reject events whose `position` is not in the wallet's current
+          // owned set. Filters out fee/reward events emitted by routers /
+          // aggregators acting on positions the user does NOT own.
+          if (!ownedPositionIds.has(evPosId)) continue;
         }
 
         if (evName === 'AddLiquidityV2Event') {
