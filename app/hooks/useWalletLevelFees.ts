@@ -133,17 +133,54 @@ export function useWalletLevelFees(
       );
     }
 
+    // Cetus wallet-scope fee + reward scans — same model as Bluefin above.
+    // Cetus position objects don't expose coinTypeA / coinTypeB, so we always
+    // use the SUI_FALLBACK context (priceA = live SUI, priceB = 1). The
+    // analytics Fee Income memo dedupes by (protocol, txHash, amount0, amount1)
+    // and pushes per-position events BEFORE wallet-level ones, so OPEN
+    // positions keep their accurate per-position decimals and the wallet-scope
+    // pass only adds net-new fees from fully-closed positions.
+    const suiWallets = new Map<string, string>(); // lowercase → original casing
+    const addSui = (a?: string) => { if (a) suiWallets.set(a.toLowerCase(), a); };
+    for (const a of bluefinByWallet.keys()) addSui(a);
+    for (const p of positions) if (p.chain === "Sui") addSui(p.walletAddress);
+    for (const a of suiWalletAddresses ?? []) addSui(a);
+
+    const suiPriceA = suiPrice && suiPrice > 0 ? suiPrice : 0;
+    for (const acct of suiWallets.values()) {
+      const cetusUrl =
+        `/api/cetus/activity?positionId=all` +
+        `&account=${encodeURIComponent(acct)}` +
+        `&coinTypeA=${encodeURIComponent(SUI_FALLBACK.coinTypeA)}` +
+        `&coinTypeB=${encodeURIComponent(SUI_FALLBACK.coinTypeB)}` +
+        `&decimalsA=${SUI_FALLBACK.decimalsA}&decimalsB=${SUI_FALLBACK.decimalsB}` +
+        `&priceA=${suiPriceA}&priceB=${SUI_FALLBACK.priceB}`;
+      fetches.push(
+        fetch(cetusUrl)
+          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
+          .then((j) =>
+            (j.events ?? []).map((e) => ({ event: e, protocol: "Cetus", chain: "Sui" })),
+          )
+          .catch((err) => {
+            console.error("[wallet-fees cetus] fetch failed:", err);
+            return [];
+          }),
+      );
+    }
+
     if (fetches.length === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
     }
 
-    // Include suiPrice in the dedupe key so when the SUI spot price arrives
-    // asynchronously (after the initial fetch ran with priceA=0), the
-    // wallet-scope scan re-fires with the correct fallback price instead of
-    // being skipped as "already fetched".
-    const key = Array.from(bluefinByWallet.keys()).sort().join("|") + `::sui${suiPrice ?? 0}`;
+    // Include EVERY scanned wallet (Bluefin contexts + Cetus Sui wallets) AND
+    // suiPrice in the dedupe key — so the scans re-fire when the wallet set
+    // changes OR when the SUI spot price arrives asynchronously (the initial
+    // pass may have used priceA=0).
+    const key =
+      [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort().join("|") +
+      `::sui${suiPrice ?? 0}`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 

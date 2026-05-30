@@ -174,7 +174,7 @@ const HYPEREVM_NFT_MANAGERS: Record<string, string> = {
 // ── Supported protocols ─────────────────────────────────────────────────────
 
 const ACTIVITY_PROTOCOLS = new Set([
-  "Aerodrome", "Bluefin", "Orca", "Raydium",
+  "Aerodrome", "Bluefin", "Cetus", "Orca", "Raydium",
   "HyperSwap", "KittenSwap", "ProjectX",
   "Uniswap V3", "Velodrome", "PancakeSwap V3",
 ]);
@@ -212,6 +212,18 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.walletAddress) p.set("account", pos.walletAddress);
     appendTicks();
     return `/api/bluefin/activity?${p}`;
+  }
+  if (pos.protocol === "Cetus") {
+    p.set("positionId", pos.id.replace("cetus-", ""));
+    p.set("decimalsA", String(pos.token0Decimals ?? 9));
+    p.set("decimalsB", String(pos.token1Decimals ?? 6));
+    if (pos.coinTypeA) p.set("coinTypeA", pos.coinTypeA);
+    if (pos.coinTypeB) p.set("coinTypeB", pos.coinTypeB);
+    if (pos.price0 != null) p.set("priceA", String(pos.price0));
+    if (pos.price1 != null) p.set("priceB", String(pos.price1));
+    if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
+    return `/api/cetus/activity?${p}`;
   }
   if (pos.protocol === "Orca") {
     p.set("positionId", pos.id.replace("orca-", ""));
@@ -317,7 +329,11 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // (contract wasn't in hyperswap KNOWN_TOKENS) → missing_current_prices
 // exclusion. Adding the contract + a dynamic CG symbol-search fallback
 // fixes the price; the bump forces a fresh fetch worldwide.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v5-";
+// Bumped v5 → v7: Cetus per-position activity is now supported (Bluefin-pattern
+// route at /api/cetus/activity with the verified 3-package allowlist + V2 event
+// names + reward_claim parsing). Skipping v6 — destination version per spec to
+// keep CLAUDE.md/the changelog aligned with the user's mental model of the bump.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v7-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {
