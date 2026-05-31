@@ -44,7 +44,7 @@ const HYPEREVM_PROTOCOLS = new Set(["HyperSwap", "KittenSwap", "ProjectX"]);
 // ── Supported protocols (those with activity APIs) ──────────────────────────
 
 const ACTIVITY_PROTOCOLS = new Set([
-  "Aerodrome", "Bluefin", "Orca", "Raydium",
+  "Aerodrome", "Bluefin", "Cetus", "Orca", "Raydium",
   "HyperSwap", "KittenSwap", "ProjectX",
   "Uniswap V3", "Velodrome", "PancakeSwap V3",
 ]);
@@ -124,6 +124,21 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price1 != null) params.set("priceB", String(pos.price1));
     if (pos.walletAddress) params.set("account", pos.walletAddress);
     return `/api/bluefin/activity?${params}`;
+  }
+
+  if (pos.protocol === "Cetus") {
+    const objId = pos.id.replace("cetus-", "");
+    params.set("positionId", objId);
+    params.set("decimalsA", String(pos.token0Decimals ?? 9));
+    params.set("decimalsB", String(pos.token1Decimals ?? 6));
+    if (pos.coinTypeA) params.set("coinTypeA", pos.coinTypeA);
+    if (pos.coinTypeB) params.set("coinTypeB", pos.coinTypeB);
+    if (pos.price0 != null) params.set("priceA", String(pos.price0));
+    if (pos.price1 != null) params.set("priceB", String(pos.price1));
+    if (pos.walletAddress) params.set("account", pos.walletAddress);
+    if (pos.tickLower != null) params.set("tickLower", String(pos.tickLower));
+    if (pos.tickUpper != null) params.set("tickUpper", String(pos.tickUpper));
+    return `/api/cetus/activity?${params}`;
   }
 
   if (pos.protocol === "Orca") {

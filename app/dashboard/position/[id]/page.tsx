@@ -18,6 +18,7 @@ import { useHyperSwapActivity } from "../../../hooks/useHyperSwapActivity";
 import { useUniswapActivity } from "../../../hooks/useUniswapActivity";
 import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
 import { usePancakeSwapActivity } from "../../../hooks/usePancakeSwapActivity";
+import { useCetusActivity } from "../../../hooks/useCetusActivity";
 import { computePositionPnL } from "../../../lib/positionPnl";
 import InfoTooltip from "../../../components/InfoTooltip";
 
@@ -395,8 +396,16 @@ export default function PositionDetail() {
     pos?.tickLower, pos?.tickUpper,
   );
 
+  const cetusObjId = pos?.protocol === 'Cetus' ? pos.id.replace('cetus-', '') : null;
+  const { data: cetusActivity, isLoading: cetusActivityLoading, error: cetusActivityError } = useCetusActivity(
+    cetusObjId, pos?.token0Decimals ?? 9, pos?.token1Decimals ?? 6,
+    pos?.coinTypeA, pos?.coinTypeB, pos?.price0, pos?.price1, pos?.walletAddress,
+    pos?.tickLower, pos?.tickUpper,
+  );
+
   const activity = pos?.protocol === 'Aerodrome' ? aeroActivity
     : pos?.protocol === 'Bluefin' ? bluefinActivity
+    : pos?.protocol === 'Cetus' ? cetusActivity
     : pos?.protocol === 'Orca' ? orcaActivity
     : pos?.protocol === 'Raydium' ? raydiumActivity
     : isHyperEVM ? hyperswapActivity
@@ -406,6 +415,7 @@ export default function PositionDetail() {
     : null;
   const activityLoading = pos?.protocol === 'Aerodrome' ? aeroActivityLoading
     : pos?.protocol === 'Bluefin' ? bluefinActivityLoading
+    : pos?.protocol === 'Cetus' ? cetusActivityLoading
     : pos?.protocol === 'Orca' ? orcaActivityLoading
     : pos?.protocol === 'Raydium' ? raydiumActivityLoading
     : isHyperEVM ? hyperswapActivityLoading
@@ -415,13 +425,14 @@ export default function PositionDetail() {
     : false;
   const activityError = pos?.protocol === 'Aerodrome' ? aeroActivityError
     : pos?.protocol === 'Bluefin' ? bluefinActivityError
+    : pos?.protocol === 'Cetus' ? cetusActivityError
     : pos?.protocol === 'Orca' ? orcaActivityError
     : pos?.protocol === 'Raydium' ? raydiumActivityError
     : isHyperEVM ? hyperswapActivityError
     : pos?.protocol === 'Uniswap V3' ? uniswapActivityError
     : pos?.protocol === 'Velodrome' ? velodromeActivityError
     : null;
-  const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3'].includes(pos?.protocol ?? '') || isHyperEVM;
+  const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3', 'Cetus', 'Momentum'].includes(pos?.protocol ?? '') || isHyperEVM;
   const activityPending = isActivityProtocol && !activity && !activityError;
 
   // Build fee accumulation chart from on-chain activity fee_claim events.
