@@ -64,10 +64,11 @@ async function suiRpc(method: string, params: unknown[]) {
   return json.result;
 }
 
-// Fetch the set of Bluefin Position object IDs currently owned by `account`.
-// Wallet-scope mode uses this to drop fee/reward events emitted against
-// positions the user does NOT own (router/aggregator scenarios). Mirrors the
-// pagination pattern in app/api/bluefin/route.ts.
+// Fetch the set of Bluefin Position object IDs CURRENTLY owned by `account`.
+// This is one half of the wallet-scope "ever owned" set; the other half is
+// built in-memory from LiquidityProvided entries in the wallet's tx history
+// (see the pre-loop in GET below) so closed/destroyed positions still
+// contribute. Mirrors the pagination pattern in app/api/bluefin/route.ts.
 async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
   const ids = new Set<string>();
   let cursor: string | null = null;
@@ -167,12 +168,38 @@ export async function GET(request: Request) {
       } as ActivityResponse);
     }
 
-    // Wallet-scope only: fetch the set of Bluefin Position object IDs the
-    // wallet currently owns. Per-position mode already filters by
-    // parsedJson.position_id === positionId, so this RPC is skipped there.
-    const ownedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
+    // Wallet-scope only: build the set of Bluefin Position object IDs the
+    // wallet has EVER owned, used below to filter fee/reward events down to
+    // positions the wallet actually opened (rejects router/aggregator-emitted
+    // events against OTHER users' positions) while still keeping fees from
+    // positions the wallet opened and later fully closed.
+    //
+    // Source 1: suix_getOwnedObjects → currently-owned (open) positions.
+    // Source 2 (added below after allTxBlocks loads): LiquidityProvided
+    // events in the wallet's tx history → catches closed/destroyed positions.
+    //
+    // Per-position mode already filters by parsedJson.position_id === positionId,
+    // so neither source is consulted there.
+    const everOwnedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
 
     const allTxBlocks = await fetchTransactionEvents(allDigests);
+
+    // Source 2: single in-memory pass over the already-fetched tx blocks to
+    // collect every position the wallet has ever opened (LiquidityProvided
+    // fires on every add-liquidity, including the initial open). No extra RPC.
+    // Must complete BEFORE the main event loop so fee/reward filtering sees
+    // the full union.
+    if (walletScope) {
+      for (const tx of allTxBlocks) {
+        if (!tx?.events) continue;
+        for (const ev of tx.events) {
+          if (!ev.type.startsWith(BLUEFIN_PKG)) continue;
+          if (!ev.type.endsWith('::LiquidityProvided')) continue;
+          const id = (ev.parsedJson?.position_id as string) ?? '';
+          if (id) everOwnedPositionIds.add(id);
+        }
+      }
+    }
 
     const scaleA = BigInt(10) ** BigInt(decimalsA);
     const scaleB = BigInt(10) ** BigInt(decimalsB);
@@ -209,10 +236,12 @@ export async function GET(request: Request) {
         // across multiple destroyed positions.
         if (walletScope) {
           if (evName !== 'UserFeeCollected' && evName !== 'UserRewardCollected') continue;
-          // Reject events whose `position_id` is not in the wallet's current
-          // owned set — filters out fee/reward events emitted by routers /
-          // aggregators acting on positions the user does NOT own.
-          if (!ownedPositionIds.has(evPosId)) continue;
+          // Reject events whose `position_id` is not in the wallet's
+          // ever-owned set (currently-owned ∪ ever-opened-via-tx-history).
+          // Filters out fee/reward events emitted by routers / aggregators
+          // acting on positions the user does NOT own, while keeping fees
+          // from positions the user opened and later closed.
+          if (!everOwnedPositionIds.has(evPosId)) continue;
         }
 
         if (evName === 'LiquidityProvided') {

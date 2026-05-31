@@ -86,18 +86,11 @@ async function suiRpc(method: string, params: unknown[]) {
   return json.result;
 }
 
-// Fetch the set of Cetus Position object IDs currently owned by `account`.
-// Used in wallet-scope mode to filter fee/reward events down to positions the
-// user actually owns — necessary because routers / aggregators may emit
-// CollectFeeEvent / CollectRewardV2Event against OTHER users' position
-// objects from within a tx the user signed (e.g. auto-compounder or vault
-// flows). Mirrors the pagination pattern in app/api/cetus/route.ts.
-//
-// TRADE-OFF: this also excludes positions the user has FULLY CLOSED, since
-// the on-chain object is destroyed and suix_getOwnedObjects no longer
-// returns it. Wallet-scope was originally designed to recover fees from
-// destroyed objects; ownership-filtering trades that recovery for
-// correctness against the foreign-position case. Acceptable per spec.
+// Fetch the set of Cetus Position object IDs CURRENTLY owned by `account`.
+// This is one half of the wallet-scope "ever owned" set; the other half is
+// built in-memory from OpenPositionEvent entries in the wallet's tx history
+// (see the pre-loop in GET below) so closed/destroyed positions still
+// contribute. Mirrors the pagination pattern in app/api/cetus/route.ts.
 async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
   const ids = new Set<string>();
   let cursor: string | null = null;
@@ -204,14 +197,38 @@ export async function GET(request: Request) {
       } as ActivityResponse);
     }
 
-    // Wallet-scope only: fetch the set of Cetus Position object IDs the
-    // wallet currently owns, used below to filter out fee/reward events
-    // emitted against OTHER users' positions (router/aggregator scenarios).
+    // Wallet-scope only: build the set of Cetus Position object IDs the
+    // wallet has EVER owned, used below to filter out fee/reward events
+    // emitted against OTHER users' positions (router/aggregator scenarios)
+    // while still keeping fees from positions the user opened and later
+    // fully closed (object destroyed).
+    //
+    // The set unions two sources:
+    //   (1) suix_getOwnedObjects → currently-owned (open) positions
+    //   (2) OpenPositionEvent entries in the tx history we're about to
+    //       fetch anyway → catches closed/destroyed positions too
+    //
     // Per-position mode already filters by parsedJson.position === positionId,
-    // so this call is skipped to save an RPC roundtrip.
-    const ownedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
+    // so neither source is consulted there.
+    const everOwnedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
 
     const allTxBlocks = await fetchTransactionEvents(allDigests);
+
+    // Source 2: collect position IDs from OpenPositionEvent in tx history.
+    // Single in-memory pass — no extra RPCs (allTxBlocks is already loaded).
+    // Must complete BEFORE the main event loop below so fee/reward filtering
+    // sees the full union.
+    if (walletScope) {
+      for (const tx of allTxBlocks) {
+        if (!tx?.events) continue;
+        for (const ev of tx.events) {
+          if (!CETUS_PKGS.some((pkg) => ev.type.startsWith(pkg))) continue;
+          if (!ev.type.endsWith('::OpenPositionEvent')) continue;
+          const id = (ev.parsedJson?.position as string) ?? '';
+          if (id) everOwnedPositionIds.add(id);
+        }
+      }
+    }
 
     const scaleA = BigInt(10) ** BigInt(decimalsA);
     const scaleB = BigInt(10) ** BigInt(decimalsB);
@@ -248,10 +265,12 @@ export async function GET(request: Request) {
         // withdrawals are pool-specific and not useful across positions.
         if (walletScope) {
           if (evName !== 'CollectFeeEvent' && evName !== 'CollectRewardV2Event') continue;
-          // Reject events whose `position` is not in the wallet's current
-          // owned set. Filters out fee/reward events emitted by routers /
-          // aggregators acting on positions the user does NOT own.
-          if (!ownedPositionIds.has(evPosId)) continue;
+          // Reject events whose `position` is not in the wallet's
+          // ever-owned set (currently-owned ∪ ever-opened-via-tx-history).
+          // Filters out fee/reward events emitted by routers / aggregators
+          // acting on positions the user does NOT own, while keeping fees
+          // from positions the user opened and later closed.
+          if (!everOwnedPositionIds.has(evPosId)) continue;
         }
 
         if (evName === 'AddLiquidityV2Event') {
