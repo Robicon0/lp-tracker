@@ -49,7 +49,7 @@ export interface LpPnlResult {
   perPosition: Record<string, PositionPnLData>;
   // Every position that's NOT contributing to the totals — surfaced verbatim
   // in the analytics warning banner so the user knows why their totals look
-  // lower than expected. Includes: unsupported protocols (Cetus, Momentum),
+  // lower than expected. Includes: unsupported protocols (Momentum),
   // missing-data positions (no_deposits, missing_deposit_prices), and
   // transport-error positions after all retries failed.
   excludedPositions: ExcludedPosition[];
@@ -338,7 +338,11 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // rejecting router/aggregator-emitted events against OTHER users' positions.
 // Cached pre-fix wallet-scope entries may include those foreign-position fees,
 // so we force a fresh fetch worldwide.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v8-";
+// Bumped v8 → v9: useCetusActivity per-position cache bumped v1→v2 to force
+// fresh fetches after pagination + wallet-scope ownership fix. useLpPnl uses
+// its own activity-fetch path (buildActivityUrl), so bump here too so any
+// stale lp-pnl Cetus event caches are discarded alongside the hook caches.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v9-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {
@@ -682,7 +686,7 @@ function aggregate(
     }
   }
 
-  // Append unsupported-protocol rejections (Cetus, Momentum, etc.) — these
+  // Append unsupported-protocol rejections (Momentum, etc.) — these
   // never make it through the eligibility filter so they have no entry in
   // resultsMap, but the user still deserves to see them in the warning.
   excludedPositions.push(...unsupportedRejections);
@@ -759,7 +763,7 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
   // banner can reference excluded positions by name. Updated each useEffect.
   const positionMetaRef = useRef<Map<string, PositionMeta>>(new Map());
   // Positions rejected at the eligibility step for "unsupported protocol"
-  // (Cetus, Momentum, anything not in ACTIVITY_PROTOCOLS). Surfaced in the
+  // (Momentum, anything not in ACTIVITY_PROTOCOLS). Surfaced in the
   // warning banner so the user knows P&L isn't calculated for them.
   const unsupportedRejectionsRef = useRef<ExcludedPosition[]>([]);
 
@@ -784,7 +788,7 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
       const isClosed = p.status === "Closed";
 
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) {
-        // Surface unsupported protocols (Cetus, Momentum, etc.) ONLY if the
+        // Surface unsupported protocols (Momentum, etc.) ONLY if the
         // position is active — closed/zero-value rejected ones aren't
         // interesting to flag. Prevents the warning from listing dust.
         if (!isClosed && p.value > 0) {

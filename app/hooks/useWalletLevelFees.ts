@@ -110,6 +110,44 @@ export function useWalletLevelFees(
       bluefinByWallet.set(addr, { account: addr, ...SUI_FALLBACK, priceA: suiPrice && suiPrice > 0 ? suiPrice : 0 });
     }
 
+    // Cetus wallet-scope fee + reward scans — same model as Bluefin above.
+    // Cetus position objects don't expose coinTypeA / coinTypeB, so we always
+    // use the SUI_FALLBACK context (priceA = live SUI, priceB = 1). The
+    // analytics Fee Income memo dedupes by (protocol, txHash, amount0, amount1)
+    // and pushes per-position events BEFORE wallet-level ones, so OPEN
+    // positions keep their accurate per-position decimals and the wallet-scope
+    // pass only adds net-new fees from fully-closed positions.
+    //
+    // Collect every unique Sui wallet from three sources so the scans fire
+    // even when ALL of a protocol's positions are closed (and thus might not
+    // appear as open positions in `positions`):
+    //   1. bluefinByWallet.keys()  — wallets with Bluefin positions
+    //   2. positions where chain === "Sui"  — covers Cetus / Momentum / closed
+    //   3. suiWalletAddresses passed in  — connected + watched Sui wallets
+    const suiWallets = new Map<string, string>(); // lowercase → original casing
+    const addSui = (a?: string) => { if (a) suiWallets.set(a.toLowerCase(), a); };
+    for (const a of bluefinByWallet.keys()) addSui(a);
+    for (const p of positions) if (p.chain === "Sui") addSui(p.walletAddress);
+    for (const a of suiWalletAddresses ?? []) addSui(a);
+
+    const suiPriceA = suiPrice && suiPrice > 0 ? suiPrice : 0;
+
+    // Compute the dedup key BEFORE creating any fetch() promises so we never
+    // fire HTTP requests when neither the wallet set nor the SUI price has
+    // changed since the last successful fetch. Previously the key check
+    // happened AFTER fetch() calls were already issued, causing redundant
+    // network traffic on every dependency re-evaluation.
+    const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
+    if (allWalletKeys.length === 0) {
+      setEvents([]);
+      setIsLoading(false);
+      return;
+    }
+    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}`;
+    if (key === fetchedKeyRef.current) return;
+    fetchedKeyRef.current = key;
+
+    // Build fetches only after confirming the key changed.
     const fetches: Array<Promise<TaggedFeeEvent[]>> = [];
 
     for (const ctx of bluefinByWallet.values()) {
@@ -133,20 +171,6 @@ export function useWalletLevelFees(
       );
     }
 
-    // Cetus wallet-scope fee + reward scans — same model as Bluefin above.
-    // Cetus position objects don't expose coinTypeA / coinTypeB, so we always
-    // use the SUI_FALLBACK context (priceA = live SUI, priceB = 1). The
-    // analytics Fee Income memo dedupes by (protocol, txHash, amount0, amount1)
-    // and pushes per-position events BEFORE wallet-level ones, so OPEN
-    // positions keep their accurate per-position decimals and the wallet-scope
-    // pass only adds net-new fees from fully-closed positions.
-    const suiWallets = new Map<string, string>(); // lowercase → original casing
-    const addSui = (a?: string) => { if (a) suiWallets.set(a.toLowerCase(), a); };
-    for (const a of bluefinByWallet.keys()) addSui(a);
-    for (const p of positions) if (p.chain === "Sui") addSui(p.walletAddress);
-    for (const a of suiWalletAddresses ?? []) addSui(a);
-
-    const suiPriceA = suiPrice && suiPrice > 0 ? suiPrice : 0;
     for (const acct of suiWallets.values()) {
       const cetusUrl =
         `/api/cetus/activity?positionId=all` +
@@ -167,22 +191,6 @@ export function useWalletLevelFees(
           }),
       );
     }
-
-    if (fetches.length === 0) {
-      setEvents([]);
-      setIsLoading(false);
-      return;
-    }
-
-    // Include EVERY scanned wallet (Bluefin contexts + Cetus Sui wallets) AND
-    // suiPrice in the dedupe key — so the scans re-fire when the wallet set
-    // changes OR when the SUI spot price arrives asynchronously (the initial
-    // pass may have used priceA=0).
-    const key =
-      [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort().join("|") +
-      `::sui${suiPrice ?? 0}`;
-    if (key === fetchedKeyRef.current) return;
-    fetchedKeyRef.current = key;
 
     let cancelled = false;
     setIsLoading(true);

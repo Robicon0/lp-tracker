@@ -20,8 +20,12 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// v2: invalidates entries cached by the initial route version (route was
+// subsequently updated to ensure full Sui tx-history pagination and correct
+// wallet-scope ownership filtering). Bump again when the route behaviour
+// changes in a way that would alter cached event lists.
 function cacheKey(positionId: string) {
-  return `cetus-activity-v1-${positionId}`;
+  return `cetus-activity-v2-${positionId}`;
 }
 
 function readCache(positionId: string): CetusActivityData | null {
