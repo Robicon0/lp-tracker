@@ -69,7 +69,13 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // positions had cached events whose usdAtTime was computed against bad
 // ticks (int24 sign-extension bug in /api/uniswap/v3). Fresh fetches
 // after the fix flow through automatically.
-function cacheKey(id: string) { return `analytics-activity-v5-${id}`; }
+// Bumped v5 → v6: Cetus per-position activity now flows through this hook
+// (added to ACTIVITY_PROTOCOLS). Cetus route now returns coinTypeA/coinTypeB
+// on the position object so the activity URL receives them; previously
+// cached Cetus entries (if any browser happened to fetch them under a
+// future code path) would have empty-events because the route returned
+// 400 on missing coinTypeA — bump invalidates them defensively.
+function cacheKey(id: string) { return `analytics-activity-v6-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

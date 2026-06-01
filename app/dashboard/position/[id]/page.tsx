@@ -556,7 +556,7 @@ export default function PositionDetail() {
 
   // Tx URL builder
   const txUrl = (hash: string): string => {
-    if (pos.protocol === 'Bluefin') return `https://suivision.xyz/txblock/${hash}`;
+    if (pos.chain === 'Sui') return `https://suivision.xyz/txblock/${hash}`;
     if (pos.protocol === 'Orca' || pos.protocol === 'Raydium') return `https://solscan.io/tx/${hash}`;
     if (HYPEREVM_PROTOCOLS.has(pos.protocol)) return `https://hyperevmscan.io/tx/${hash}`;
     if (pos.chain === 'Arbitrum') return `https://arbiscan.io/tx/${hash}`;
