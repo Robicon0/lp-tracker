@@ -24,8 +24,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // subsequently updated to ensure full Sui tx-history pagination and correct
 // wallet-scope ownership filtering). Bump again when the route behaviour
 // changes in a way that would alter cached event lists.
+// v3: Cetus activity route now values fee_claim / reward_claim against
+// historical SUI price at the claim's date (instead of today's spot).
+// Cached events from v2 carry wrong-era SUI valuations.
 function cacheKey(positionId: string) {
-  return `cetus-activity-v2-${positionId}`;
+  return `cetus-activity-v3-${positionId}`;
 }
 
 function readCache(positionId: string): CetusActivityData | null {

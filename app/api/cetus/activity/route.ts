@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
+import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
 
 // Cetus CLMM activity route — follows the EXACT same pattern as
 // app/api/bluefin/activity/route.ts. All Cetus specifics below were verified
@@ -312,6 +313,28 @@ export async function GET(request: Request) {
     // Sort chronologically (oldest first) so the cumulative fee total is correct.
     rawEvents.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Historical SUI pricing for fee_claim / reward_claim — see Bluefin
+    // activity route for full rationale. Detects which side of the pool is
+    // SUI (`0x2::sui::SUI`, case-insensitive) and prewarms the shared
+    // per-date cache in parallel for every claim timestamp.
+    const suiCanonical = '0x2::sui::sui';
+    const suiSideIsA = coinTypeA.toLowerCase() === suiCanonical;
+    const suiSideIsB = coinTypeB.toLowerCase() === suiCanonical;
+    if (suiSideIsA || suiSideIsB) {
+      const histTimestamps: number[] = [];
+      for (const e of rawEvents) {
+        if (e.type === 'fee_claim') {
+          histTimestamps.push(e.timestamp);
+        } else if (e.type === 'reward_claim') {
+          const sym = (e.rewardSymbol ?? '').trim().toUpperCase();
+          if (sym === 'SUI') histTimestamps.push(e.timestamp);
+        }
+      }
+      if (histTimestamps.length > 0) {
+        await prewarmSuiPricesForTimestamps(histTimestamps);
+      }
+    }
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
@@ -345,18 +368,30 @@ export async function GET(request: Request) {
 
       // Reward claim pricing — same rules as Bluefin's UserRewardCollected:
       //   (1) reward symbol is a known stablecoin → $1
-      //   (2) reward symbol matches the trailing segment of coinTypeA → priceA
-      //   (3) reward symbol matches the trailing segment of coinTypeB → priceB
-      //   (4) otherwise null (uncounted — better than wrong)
+      //   (2) reward symbol is SUI → historical SUI price at claim date
+      //       (falls back to current side-price if the historical fetch
+      //       failed)
+      //   (3) reward symbol matches the trailing segment of coinTypeA → priceA
+      //   (4) reward symbol matches the trailing segment of coinTypeB → priceB
+      //   (5) otherwise null (uncounted — better than wrong)
       if (ev.type === 'reward_claim') {
         const sym = (ev.rewardSymbol ?? '').trim();
         const symUp = sym.toUpperCase();
         const symA = coinTypeA.split('::').pop()?.toUpperCase() ?? '';
         const symB = coinTypeB.split('::').pop()?.toUpperCase() ?? '';
         let pxReward: number | null = null;
-        if (STABLE_SYMBOLS.has(sym) || STABLE_SYMBOLS.has(symUp)) pxReward = 1;
-        else if (symUp && symUp === symA && fallbackA > 0) pxReward = fallbackA;
-        else if (symUp && symUp === symB && fallbackB > 0) pxReward = fallbackB;
+        if (STABLE_SYMBOLS.has(sym) || STABLE_SYMBOLS.has(symUp)) {
+          pxReward = 1;
+        } else if (symUp === 'SUI') {
+          const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
+          if (hist != null) pxReward = hist;
+          else if (symUp === symA && fallbackA > 0) pxReward = fallbackA;
+          else if (symUp === symB && fallbackB > 0) pxReward = fallbackB;
+        } else if (symUp && symUp === symA && fallbackA > 0) {
+          pxReward = fallbackA;
+        } else if (symUp && symUp === symB && fallbackB > 0) {
+          pxReward = fallbackB;
+        }
         if (pxReward != null) {
           price0AtTime = pxReward;
           price1AtTime = null;
@@ -368,11 +403,25 @@ export async function GET(request: Request) {
         }
       } else if (usdAtTime == null) {
         // fee_claim / withdrawal / deposit where deriveDepositPrices was
-        // unavailable: value at current pool-token prices (priceA/priceB).
-        price0AtTime = fallbackA || null;
-        price1AtTime = fallbackB || null;
-        if (fallbackA > 0 || fallbackB > 0) {
-          usdAtTime = amount0 * fallbackA + amount1 * fallbackB;
+        // unavailable. For fee_claim: substitute historical SUI price on
+        // the SUI side when the cache has it (prewarmed above); the other
+        // side stays at current fallback (USDC is $1; other non-SUI tokens
+        // get their current price as a last-resort approximation).
+        let pxA = fallbackA;
+        let pxB = fallbackB;
+        if (ev.type === 'fee_claim') {
+          if (suiSideIsA) {
+            const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
+            if (hist != null) pxA = hist;
+          } else if (suiSideIsB) {
+            const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
+            if (hist != null) pxB = hist;
+          }
+        }
+        price0AtTime = pxA || null;
+        price1AtTime = pxB || null;
+        if (pxA > 0 || pxB > 0) {
+          usdAtTime = amount0 * pxA + amount1 * pxB;
         }
       }
 

@@ -347,7 +347,11 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // SUI(A)/USDC(B) static fallback that mis-priced USDC/SUI pools and
 // inflated USD values by orders of magnitude. Bump invalidates any
 // lp-pnl event caches that captured those wrong USD values.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v10-";
+// Bumped v10 → v11: Sui activity routes (Cetus + Bluefin) now value
+// fee_claim and reward_claim events against historical SUI price at the
+// claim's date (CoinGecko coins/sui/history), not today's spot. Any cached
+// events that captured wrong-era SUI prices need a fresh fetch.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v11-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

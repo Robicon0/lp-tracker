@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
+import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -285,6 +286,33 @@ export async function GET(request: Request) {
     // Sort chronologically (oldest first) to compute cumulative fees correctly
     rawEvents.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Historical SUI pricing for fee_claim / reward_claim: a claim made when
+    // SUI was $1 should NOT be valued at today's $3.50 spot. Detect which
+    // side of the pool is SUI (canonical short form `0x2::sui::SUI`,
+    // case-insensitive) and prewarm the per-date cache in parallel for every
+    // claim timestamp. After this awaits, the map below can read prices
+    // synchronously via getCachedSuiPriceForTimestamp(). Deposits and
+    // withdrawals keep using deriveDepositPrices + current fallback (their
+    // historical pricing is recovered from on-chain sqrtPrice when ticks
+    // are passed; the fallback at current prices is a last resort).
+    const suiCanonical = '0x2::sui::sui';
+    const suiSideIsA = coinTypeA.toLowerCase() === suiCanonical;
+    const suiSideIsB = coinTypeB.toLowerCase() === suiCanonical;
+    if (suiSideIsA || suiSideIsB) {
+      const histTimestamps: number[] = [];
+      for (const e of rawEvents) {
+        if (e.type === 'fee_claim') {
+          histTimestamps.push(e.timestamp);
+        } else if (e.type === 'reward_claim') {
+          const sym = (e.rewardSymbol ?? '').trim().toUpperCase();
+          if (sym === 'SUI') histTimestamps.push(e.timestamp);
+        }
+      }
+      if (histTimestamps.length > 0) {
+        await prewarmSuiPricesForTimestamps(histTimestamps);
+      }
+    }
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
@@ -320,18 +348,30 @@ export async function GET(request: Request) {
       // often NOT the pool's token A, so applying fallbackA would give a
       // wildly wrong USD value. Rules:
       //   (1) known stablecoin reward symbol → $1
-      //   (2) reward symbol matches the last path segment of coinTypeA
+      //   (2) reward symbol is SUI → historical SUI price at the claim's
+      //       date (falls back to current side-price if the historical
+      //       fetch failed)
+      //   (3) reward symbol matches the last path segment of coinTypeA
       //       or coinTypeB → use the matching fallback
-      //   (3) otherwise leave usdAtTime null (uncounted, better than wrong)
+      //   (4) otherwise leave usdAtTime null (uncounted, better than wrong)
       if (ev.type === 'reward_claim') {
         const sym = (ev.rewardSymbol ?? '').trim();
         const symUp = sym.toUpperCase();
         const symA = coinTypeA.split('::').pop()?.toUpperCase() ?? '';
         const symB = coinTypeB.split('::').pop()?.toUpperCase() ?? '';
         let pxReward: number | null = null;
-        if (STABLE_SYMBOLS.has(sym) || STABLE_SYMBOLS.has(symUp)) pxReward = 1;
-        else if (symUp && symUp === symA && fallbackA > 0) pxReward = fallbackA;
-        else if (symUp && symUp === symB && fallbackB > 0) pxReward = fallbackB;
+        if (STABLE_SYMBOLS.has(sym) || STABLE_SYMBOLS.has(symUp)) {
+          pxReward = 1;
+        } else if (symUp === 'SUI') {
+          const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
+          if (hist != null) pxReward = hist;
+          else if (symUp === symA && fallbackA > 0) pxReward = fallbackA;
+          else if (symUp === symB && fallbackB > 0) pxReward = fallbackB;
+        } else if (symUp && symUp === symA && fallbackA > 0) {
+          pxReward = fallbackA;
+        } else if (symUp && symUp === symB && fallbackB > 0) {
+          pxReward = fallbackB;
+        }
         if (pxReward != null) {
           price0AtTime = pxReward;
           price1AtTime = null;
@@ -342,12 +382,26 @@ export async function GET(request: Request) {
           usdAtTime = null;
         }
       } else if (usdAtTime == null) {
-        // fee_claim / withdrawal / deposit where derivation was unavailable:
-        // value at current pool-token prices.
-        price0AtTime = fallbackA || null;
-        price1AtTime = fallbackB || null;
-        if (fallbackA > 0 || fallbackB > 0) {
-          usdAtTime = amount0 * fallbackA + amount1 * fallbackB;
+        // fee_claim / withdrawal / deposit where derivation was unavailable.
+        // For fee_claim: substitute historical SUI price on the SUI side
+        // when the cache has it (prewarmed above); other side stays at
+        // current fallback (USDC is $1, other non-SUI tokens are valued at
+        // their current price — last-resort fallback, NOT historical).
+        let pxA = fallbackA;
+        let pxB = fallbackB;
+        if (ev.type === 'fee_claim') {
+          if (suiSideIsA) {
+            const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
+            if (hist != null) pxA = hist;
+          } else if (suiSideIsB) {
+            const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
+            if (hist != null) pxB = hist;
+          }
+        }
+        price0AtTime = pxA || null;
+        price1AtTime = pxB || null;
+        if (pxA > 0 || pxB > 0) {
+          usdAtTime = amount0 * pxA + amount1 * pxB;
         }
       }
 

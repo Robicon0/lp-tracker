@@ -21,7 +21,9 @@ interface CacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function cacheKey(positionId: string) {
-  return `bluefin-activity-v2-${positionId}`;
+  // v3: Bluefin activity route now values fee_claim / reward_claim against
+  // historical SUI price at the claim's date instead of today's spot.
+  return `bluefin-activity-v3-${positionId}`;
 }
 
 function readCache(positionId: string): BluefinActivityData | null {

@@ -75,7 +75,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // cached Cetus entries (if any browser happened to fetch them under a
 // future code path) would have empty-events because the route returned
 // 400 on missing coinTypeA — bump invalidates them defensively.
-function cacheKey(id: string) { return `analytics-activity-v6-${id}`; }
+// Bumped v6 → v7: Sui activity routes (Cetus + Bluefin) now value
+// fee_claim / reward_claim events against historical SUI price at the
+// claim's date (CoinGecko coins/sui/history) instead of today's spot.
+// Cached events from v6 carry wrong-era SUI valuations.
+function cacheKey(id: string) { return `analytics-activity-v7-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {
