@@ -275,15 +275,23 @@ function computePerformance(
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
+export interface PositionMeta { protocol: string; chain: string; }
+
 export function useAllPositionsActivity(
   positions: AerodromePosition[],
 ): {
   perfMap: Map<string, PositionPerformance>;
   eventsMap: Map<string, ActivityEvent[]>;
+  // Defensive parallel map populated alongside eventsMap. Lets callers
+  // attribute events to their protocol/chain even if the live `positions`
+  // array briefly drops the id between the eventsMap fetch and the consumer
+  // memo's render (e.g. wallet disconnect-reconnect race).
+  metaMap: Map<string, PositionMeta>;
   isLoading: boolean;
 } {
   const [perfMap, setPerfMap] = useState<Map<string, PositionPerformance>>(new Map());
   const [eventsMap, setEventsMap] = useState<Map<string, ActivityEvent[]>>(new Map());
+  const [metaMap, setMetaMap] = useState<Map<string, PositionMeta>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   // Track which set of position IDs we've already fetched for
   const fetchedForRef = useRef<string>("");
@@ -404,15 +412,24 @@ export function useAllPositionsActivity(
       }
     }
 
+    // Snapshot protocol/chain per eligible position at fetch time so the
+    // metaMap survives downstream positions-array changes that drop ids
+    // before the consumer memo re-runs.
+    const metaSnapshot = new Map<string, PositionMeta>();
+    for (const p of eligible) {
+      metaSnapshot.set(p.id, { protocol: p.protocol, chain: p.chain });
+    }
+
     Promise.all(fetches).then((results) => {
       if (cancelled) return;
       setPerfMap(new Map(results.map(([id, perf]) => [id, perf])));
       setEventsMap(new Map(results.map(([id, , events]) => [id, events])));
+      setMetaMap(metaSnapshot);
       setIsLoading(false);
     });
 
     return () => { cancelled = true; };
   }, [positions]);
 
-  return { perfMap, eventsMap, isLoading };
+  return { perfMap, eventsMap, metaMap, isLoading };
 }

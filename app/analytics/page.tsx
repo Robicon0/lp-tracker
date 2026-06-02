@@ -593,7 +593,7 @@ export default function Analytics() {
   // a filter toggles; the consuming memos slice their output by the filtered
   // position set instead. useLpPnl receives filteredPositions per spec (its
   // localStorage cache + incremental accumulation makes filter toggles cheap).
-  const { perfMap, eventsMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
+  const { perfMap, eventsMap, metaMap: activityMetaMap, isLoading: activityLoading } = useAllPositionsActivity(positions);
   // All Sui wallet addresses (connected + watched) — passed to
   // useWalletLevelFees so Bluefin lifetime fees are fetched even when every
   // Bluefin position is closed (no open position to read the address from).
@@ -701,14 +701,21 @@ export default function Analytics() {
     };
 
     for (const [posId, events] of eventsMap.entries()) {
-      const pos = posById.get(posId);
-      if (!pos) continue;
+      // Primary attribution: live positions array. Fallback: metaMap
+      // snapshot captured at fetch time — survives the (rare) race where
+      // `positions` briefly drops an id between the eventsMap fetch and
+      // the next memo run (wallet disconnect-reconnect, etc.). Without
+      // this fallback such events would silently disappear from lifetime
+      // totals.
+      const live = posById.get(posId);
+      const meta = live ?? activityMetaMap.get(posId);
+      if (!meta) continue;
       // Respect active chain/protocol filters for fee income too — but a
       // CLOSED position whose chain/protocol matches the filter still
       // contributes (we never skip on status / current value).
-      if (selectedChains.size > 0 && !selectedChains.has(pos.chain)) continue;
-      if (selectedProtocols.size > 0 && !selectedProtocols.has(pos.protocol)) continue;
-      for (const e of events) push(pos.protocol, pos.chain, e);
+      if (selectedChains.size > 0 && !selectedChains.has(meta.chain)) continue;
+      if (selectedProtocols.size > 0 && !selectedProtocols.has(meta.protocol)) continue;
+      for (const e of events) push(meta.protocol, meta.chain, e);
     }
     for (const t of walletLevelFees) push(t.protocol, t.chain, t.event);
 
@@ -768,7 +775,7 @@ export default function Analytics() {
     const peakDay = Math.max(0, ...Array.from(byDay.values()));
 
     return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay };
-  }, [eventsMap, positions, selectedChains, selectedProtocols, rangeCutoff, activeRange, walletLevelFees]);
+  }, [eventsMap, positions, selectedChains, selectedProtocols, rangeCutoff, activeRange, walletLevelFees, activityMetaMap]);
 
   // Unfiltered lifetime claimed-fees total — reference for the filter banner.
   // Mirrors feeIncome.totalAllTime's dedupe but over ALL positions, so the
@@ -793,13 +800,17 @@ export default function Analytics() {
       total += usd;
     };
     for (const [posId, events] of eventsMap.entries()) {
-      const pos = posById.get(posId);
-      if (!pos) continue;
-      for (const e of events) add(pos.protocol, e);
+      // Same primary/fallback pattern as feeIncome above — never let an
+      // eventsMap entry whose pos briefly disappeared from `positions`
+      // silently drop out of the lifetime reference total.
+      const live = posById.get(posId);
+      const meta = live ?? activityMetaMap.get(posId);
+      if (!meta) continue;
+      for (const e of events) add(meta.protocol, e);
     }
     for (const t of walletLevelFees) add(t.protocol, t.event);
     return total;
-  }, [eventsMap, positions, walletLevelFees]);
+  }, [eventsMap, positions, walletLevelFees, activityMetaMap]);
 
   // ── Daily income (FILTERED) ────────────────────────────────────────────────
   const { dailyLpIncome, dailyLendingIncome } = useMemo(() => {

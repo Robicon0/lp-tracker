@@ -132,7 +132,7 @@ function getManageUrl(protocol: string): string {
   if (protocol.includes("Orca"))       return "https://www.orca.so/portfolio";
   if (protocol.includes("Raydium"))    return "https://raydium.io/portfolio/";
   if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/liquidity-pools";
-  if (protocol.includes("Cetus"))      return "https://app.cetus.zone/position";
+  if (protocol.includes("Cetus"))      return "https://app.cetus.zone/pools?tab=positions";
   if (protocol.includes("Momentum"))   return "https://app.mmt.finance";
   if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.fi/pool";
   if (protocol.includes("KittenSwap")) return "https://www.kittenswap.org";
@@ -236,9 +236,25 @@ export default function PositionDetail() {
   const t1  = pos?.token1Symbol ?? "Token1";
 
   // Price range
+  // NOTE: when token0 is stable (USDC), tickToUSD returns `1/raw` — the
+  // inversion FLIPS the price ordering vs the tick ordering: higher tick →
+  // LOWER inverted price. So for inverted-stable pools (e.g. Cetus's
+  // canonical USDC/SUI where USDC=token0), tickLower actually produces the
+  // maximum USD price and tickUpper produces the minimum — the bug the
+  // user reported as "Cetus range bar shows max < current". Take
+  // Math.min/max so the labels reflect the actual numeric ordering
+  // regardless of which token is stable. Non-inverted pools (WETH/USDC
+  // with USDC=token1, Aerodrome/Velodrome/Uniswap) have tickLower<tickUpper
+  // → rawLower<rawUpper already, so this is a no-op for them.
   const hasRange    = pos != null && pos.tickLower != null && pos.tickUpper != null;
-  const minPriceUSD = hasRange && pos ? tickToUSD(pos.tickLower!, pos) : null;
-  const maxPriceUSD = hasRange && pos ? tickToUSD(pos.tickUpper!, pos) : null;
+  const priceAtLowerTick = hasRange && pos ? tickToUSD(pos.tickLower!, pos) : null;
+  const priceAtUpperTick = hasRange && pos ? tickToUSD(pos.tickUpper!, pos) : null;
+  const minPriceUSD = priceAtLowerTick != null && priceAtUpperTick != null
+    ? Math.min(priceAtLowerTick, priceAtUpperTick)
+    : priceAtLowerTick;
+  const maxPriceUSD = priceAtLowerTick != null && priceAtUpperTick != null
+    ? Math.max(priceAtLowerTick, priceAtUpperTick)
+    : priceAtUpperTick;
   const curPriceUSD = pos ? getCurrentPrice(pos) : null;
 
   // Range-bar fill percentage. The previous Math.max(2, Math.min(98, …))
