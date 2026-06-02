@@ -342,7 +342,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // fresh fetches after pagination + wallet-scope ownership fix. useLpPnl uses
 // its own activity-fetch path (buildActivityUrl), so bump here too so any
 // stale lp-pnl Cetus event caches are discarded alongside the hook caches.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v9-";
+// Bumped v9 → v10: Cetus wallet-scope fee scan now uses per-wallet pool
+// context (real coinTypeA/B from open positions) instead of the
+// SUI(A)/USDC(B) static fallback that mis-priced USDC/SUI pools and
+// inflated USD values by orders of magnitude. Bump invalidates any
+// lp-pnl event caches that captured those wrong USD values.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v10-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

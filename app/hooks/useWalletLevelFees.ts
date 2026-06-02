@@ -30,7 +30,7 @@ interface RawActivityResponse {
   events?: ActivityEvent[];
 }
 
-interface BluefinContext {
+interface SuiPoolContext {
   account: string;
   coinTypeA: string;
   coinTypeB: string;
@@ -40,21 +40,36 @@ interface BluefinContext {
   priceB: number;
 }
 
-// Fallback coin context for a Sui wallet that has NO open Bluefin position
-// to read real coin types / prices from (i.e. all its Bluefin positions are
-// closed and their on-chain objects destroyed). The Bluefin activity route
-// in wallet-scope mode only emits fee/reward events; for fee_claim USD it
-// uses amount0*priceA + amount1*priceB, so priceB=1 anchors the USDC side.
-// priceA (the SUI spot price) is injected by the caller via the `suiPrice`
-// arg so the SUI-denominated leg is valued correctly; it defaults to 0
-// (USDC side only) when no price is available — still better than dropping
-// the whole wallet.
-const SUI_FALLBACK = {
+// Bluefin fallback context — Bluefin pools are conventionally SUI(A)/USDC(B).
+// Used for Sui wallets with no open Bluefin position. `priceA` is injected
+// at call site from the live SUI spot.
+const BLUEFIN_FALLBACK = {
   coinTypeA: "0x2::sui::SUI",
   coinTypeB: "0x5d4b302506645c37ff133b98c4b50a4ae4614bb0aef5ba1e3af8bc33af2a9d5f::coin::COIN",
   decimalsA: 9,
   decimalsB: 6,
   priceB: 1,
+} as const;
+
+// Cetus fallback context — Cetus's canonical USDC/SUI pool is USDC(A,6) /
+// SUI(B,9), the REVERSE of Bluefin's ordering. Wallets whose Cetus positions
+// are all closed have no open position to read the real ordering from, so
+// without this distinct fallback the wallet-scope scan would price USDC
+// amounts as SUI (and vice versa) — inflating reported fees by orders of
+// magnitude when token decimals + price both flip together (e.g. $10 →
+// $10,000 from a single fee_claim where amount_a was actually 10·10^6 USDC
+// scaled against decimalsA=9). `priceB` (SUI) is injected at call site.
+//
+// Wallets in `cetusByWallet` (built from open Cetus positions in `positions`)
+// take precedence over this fallback — the real per-position context is
+// always preferred when available, mirroring how Bluefin per-wallet contexts
+// are built.
+const CETUS_FALLBACK = {
+  coinTypeA: "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+  coinTypeB: "0x2::sui::SUI",
+  decimalsA: 6,
+  decimalsB: 9,
+  priceA: 1,
 } as const;
 
 export function useWalletLevelFees(
@@ -78,7 +93,7 @@ export function useWalletLevelFees(
     // the USD fallback for any fee events from that wallet (fee events from
     // other Bluefin pools in the same wallet will get approximate USD, but
     // that's strictly better than dropping them).
-    const bluefinByWallet = new Map<string, BluefinContext>();
+    const bluefinByWallet = new Map<string, SuiPoolContext>();
     for (const p of positions) {
       if (p.protocol !== "Bluefin") continue;
       if (!p.walletAddress || !p.coinTypeA || !p.coinTypeB) continue;
@@ -99,6 +114,32 @@ export function useWalletLevelFees(
       }
     }
 
+    // Cetus per-wallet context, derived from OPEN Cetus positions (now that
+    // the Cetus route returns coinTypeA/coinTypeB on every position). This
+    // replaces the previous always-SUI_FALLBACK behaviour that mis-priced
+    // USDC/SUI fees by orders of magnitude when the actual pool ordering was
+    // USDC(A)/SUI(B). Keyed by LOWERCASE wallet address so the loop below
+    // can look up case-insensitively against suiWallets's preserved-casing
+    // values.
+    const cetusByWalletLower = new Map<string, SuiPoolContext>();
+    for (const p of positions) {
+      if (p.protocol !== "Cetus") continue;
+      if (!p.walletAddress || !p.coinTypeA || !p.coinTypeB) continue;
+      const lower = p.walletAddress.toLowerCase();
+      const existing = cetusByWalletLower.get(lower);
+      if (!existing || p.value > 0) {
+        cetusByWalletLower.set(lower, {
+          account: p.walletAddress,
+          coinTypeA: p.coinTypeA,
+          coinTypeB: p.coinTypeB,
+          decimalsA: p.token0Decimals ?? 6,
+          decimalsB: p.token1Decimals ?? 9,
+          priceA: p.price0 ?? 0,
+          priceB: p.price1 ?? 0,
+        });
+      }
+    }
+
     // For any Sui wallet address NOT already covered by an open Bluefin
     // position, add a fallback context so its (closed-position) fee history
     // is still fetched. Dedupe case-insensitively against the open-position
@@ -107,7 +148,7 @@ export function useWalletLevelFees(
     for (const addr of suiWalletAddresses ?? []) {
       if (!addr || coveredLower.has(addr.toLowerCase())) continue;
       coveredLower.add(addr.toLowerCase());
-      bluefinByWallet.set(addr, { account: addr, ...SUI_FALLBACK, priceA: suiPrice && suiPrice > 0 ? suiPrice : 0 });
+      bluefinByWallet.set(addr, { account: addr, ...BLUEFIN_FALLBACK, priceA: suiPrice && suiPrice > 0 ? suiPrice : 0 });
     }
 
     // Cetus wallet-scope fee + reward scans — same model as Bluefin above.
@@ -133,17 +174,25 @@ export function useWalletLevelFees(
     const suiPriceA = suiPrice && suiPrice > 0 ? suiPrice : 0;
 
     // Compute the dedup key BEFORE creating any fetch() promises so we never
-    // fire HTTP requests when neither the wallet set nor the SUI price has
-    // changed since the last successful fetch. Previously the key check
-    // happened AFTER fetch() calls were already issued, causing redundant
-    // network traffic on every dependency re-evaluation.
+    // fire HTTP requests when neither the wallet set, the SUI price, nor any
+    // wallet's Cetus pool ordering has changed since the last successful
+    // fetch. Previously the key check happened AFTER fetch() calls were
+    // already issued, causing redundant network traffic on every dependency
+    // re-evaluation. Cetus context signature uses only coinTypeA/B (not
+    // prices) so per-minute price refreshes don't trigger expensive
+    // wallet-scope tx-history rescans — events cached from a slightly older
+    // price are acceptable for lifetime fee totals.
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
     if (allWalletKeys.length === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
     }
-    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}`;
+    const cetusSig = [...cetusByWalletLower.entries()]
+      .map(([w, c]) => `${w}:${c.coinTypeA}:${c.coinTypeB}`)
+      .sort()
+      .join(",");
+    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
@@ -172,13 +221,23 @@ export function useWalletLevelFees(
     }
 
     for (const acct of suiWallets.values()) {
+      // Prefer the real per-wallet Cetus context (from an open position);
+      // fall back to USDC(A)/SUI(B) ordering only when no open Cetus
+      // position exists for this wallet. The fallback's priceB picks up the
+      // live SUI spot so the SUI leg of any fee_claim is valued correctly.
+      const realCtx = cetusByWalletLower.get(acct.toLowerCase());
+      const ctx: SuiPoolContext = realCtx ?? {
+        account: acct,
+        ...CETUS_FALLBACK,
+        priceB: suiPriceA,
+      };
       const cetusUrl =
         `/api/cetus/activity?positionId=all` +
-        `&account=${encodeURIComponent(acct)}` +
-        `&coinTypeA=${encodeURIComponent(SUI_FALLBACK.coinTypeA)}` +
-        `&coinTypeB=${encodeURIComponent(SUI_FALLBACK.coinTypeB)}` +
-        `&decimalsA=${SUI_FALLBACK.decimalsA}&decimalsB=${SUI_FALLBACK.decimalsB}` +
-        `&priceA=${suiPriceA}&priceB=${SUI_FALLBACK.priceB}`;
+        `&account=${encodeURIComponent(ctx.account)}` +
+        `&coinTypeA=${encodeURIComponent(ctx.coinTypeA)}` +
+        `&coinTypeB=${encodeURIComponent(ctx.coinTypeB)}` +
+        `&decimalsA=${ctx.decimalsA}&decimalsB=${ctx.decimalsB}` +
+        `&priceA=${ctx.priceA}&priceB=${ctx.priceB}`;
       fetches.push(
         fetch(cetusUrl)
           .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
