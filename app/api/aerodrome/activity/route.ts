@@ -356,17 +356,20 @@ export async function GET(request: Request) {
     // Sort chronologically to compute cumulative fees (oldest first)
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
-    // Resolve the pool's historical sqrtPriceX96 for every unique fee_claim
-    // block — that gives us the EXACT token0/token1 prices at the moment the
-    // claim was confirmed on-chain. No CoinGecko, no averaging.
-    const feeBlocks = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.blockNumber);
-    const histPrices = pool && feeBlocks.length > 0
+    // Resolve the pool's historical sqrtPriceX96 for EVERY unique event
+    // block (deposits + withdrawals + fee claims) — that gives the EXACT
+    // token0/token1 prices at the moment each event was confirmed on-chain.
+    // No CoinGecko, no averaging. Critical for single-sided withdrawals
+    // (one amount is 0): deriveDepositPrices's tick-boundary estimate is
+    // wildly wrong there; the historical sqrtPrice is correct.
+    const allBlocks = rawEvents.map((e) => e.blockNumber);
+    const histPrices = pool && allBlocks.length > 0
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({
             rpc: TENDERLY_RPC, pool, token0, token1,
             decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
           });
-          try { return await resolver.resolveMany(feeBlocks); }
+          try { return await resolver.resolveMany(allBlocks); }
           catch (err) { console.error('[aerodrome/activity] hist price resolve failed:', err); return null; }
         })()
       : null;
@@ -381,16 +384,29 @@ export async function GET(request: Request) {
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
 
-      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
-        // Derive prices from V3 math — no CoinGecko needed
-        const derived = deriveDepositPrices(
-          amount0, amount1, tickLower!, tickUpper!, t0d, t1d,
-          token0, token1, STABLECOINS,
-        );
-        if (derived) {
-          price0AtTime = derived.price0;
-          price1AtTime = derived.price1;
-          usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+      // For deposits/withdrawals, try historical sqrtPrice at the block
+      // FIRST. Only fall back to deriveDepositPrices's tick estimate when
+      // the resolver has no entry for this block.
+      if (ev.type === 'deposit' || ev.type === 'withdrawal') {
+        if (histPrices) {
+          const hex = '0x' + ev.blockNumber.toString(16);
+          const hp = histPrices.get(hex);
+          if (hp) {
+            price0AtTime = hp.price0Usd;
+            price1AtTime = hp.price1Usd;
+            usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
+          }
+        }
+        if (usdAtTime == null && hasTicks) {
+          const derived = deriveDepositPrices(
+            amount0, amount1, tickLower!, tickUpper!, t0d, t1d,
+            token0, token1, STABLECOINS,
+          );
+          if (derived) {
+            price0AtTime = derived.price0;
+            price1AtTime = derived.price1;
+            usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+          }
         }
       }
 

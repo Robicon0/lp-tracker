@@ -351,7 +351,14 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // fee_claim and reward_claim events against historical SUI price at the
 // claim's date (CoinGecko coins/sui/history), not today's spot. Any cached
 // events that captured wrong-era SUI prices need a fresh fetch.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v11-";
+// Bumped v11 → v12: EVM V3 activity routes (Aerodrome, Velodrome, Uniswap,
+// HyperSwap, PancakeSwap) now resolve historical sqrtPriceX96 at the
+// block of EVERY event (deposits + withdrawals + fee claims), not just
+// fee claims. Previously deposits/withdrawals fell through to
+// deriveDepositPrices's tick-boundary estimate which is wildly wrong for
+// single-sided events (one amount is 0). Bump invalidates any cached
+// events that captured those wrong USD values.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v12-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

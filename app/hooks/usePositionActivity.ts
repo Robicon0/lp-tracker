@@ -20,8 +20,10 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// v3: route now resolves historical sqrtPrice for deposits/withdrawals
+// too (not just fee claims).
 function cacheKey(positionId: string) {
-  return `aero-activity-v2-${positionId}`;
+  return `aero-activity-v3-${positionId}`;
 }
 
 function readCache(positionId: string): PositionActivityData | null {

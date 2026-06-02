@@ -29,8 +29,11 @@ const PROTOCOL_NFT_MANAGERS: Record<string, string> = {
 
 // v2 key: invalidates entries cached before tickLower/tickUpper were passed
 // through for V3 price derivation.
+// v4: route now resolves historical sqrtPrice for deposits/withdrawals
+// too (not just fee claims). Stale v3 entries carry wrong USD values
+// for single-sided deposits/withdrawals.
 function cacheKey(positionId: string) {
-  return `hyperswap-activity-v3-${positionId}`;
+  return `hyperswap-activity-v4-${positionId}`;
 }
 
 function readCache(positionId: string): HyperSwapActivityData | null {

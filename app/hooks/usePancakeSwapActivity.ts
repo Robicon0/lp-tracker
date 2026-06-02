@@ -20,8 +20,10 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// v3: route now resolves historical sqrtPrice for deposits/withdrawals
+// too (not just fee claims).
 function cacheKey(tokenId: string) {
-  return `cake-activity-v2-${tokenId}`;
+  return `cake-activity-v3-${tokenId}`;
 }
 
 function readCache(tokenId: string): PancakeSwapActivityData | null {

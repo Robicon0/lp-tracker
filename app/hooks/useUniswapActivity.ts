@@ -23,7 +23,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 function cacheKey(chain: string, tokenId: string) {
   // v3 invalidates events cached with broken-tick usdAtTime (int24
   // sign-extension bug in /api/uniswap/v3, fixed in the position route).
-  return `uni-activity-v3-${chain}-${tokenId}`;
+  // v4: route now resolves historical sqrtPrice for deposits/withdrawals
+  // too (not just fee claims).
+  return `uni-activity-v4-${chain}-${tokenId}`;
 }
 
 function readCache(chain: string, tokenId: string): UniswapActivityData | null {

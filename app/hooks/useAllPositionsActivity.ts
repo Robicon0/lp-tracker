@@ -79,7 +79,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // fee_claim / reward_claim events against historical SUI price at the
 // claim's date (CoinGecko coins/sui/history) instead of today's spot.
 // Cached events from v6 carry wrong-era SUI valuations.
-function cacheKey(id: string) { return `analytics-activity-v7-${id}`; }
+// Bumped v7 → v8: EVM V3 activity routes (Aerodrome, Velodrome, Uniswap,
+// HyperSwap, PancakeSwap) now resolve historical sqrtPriceX96 at the
+// block of EVERY event (deposits + withdrawals + fee claims). Cached
+// events from v7 carry wrong USD values for single-sided deposits and
+// withdrawals where the old tick-boundary estimate was off.
+function cacheKey(id: string) { return `analytics-activity-v8-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

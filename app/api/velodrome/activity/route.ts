@@ -306,16 +306,19 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
-    // Resolve pool's historical sqrtPriceX96 at each unique fee_claim block
-    // so each claim's USD = amount0*price0_at_block + amount1*price1_at_block.
-    const feeBlocks = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.blockNumber);
-    const histPrices = pool && feeBlocks.length > 0
+    // Resolve pool's historical sqrtPriceX96 at EVERY unique event block
+    // (deposits + withdrawals + fee claims) so each event's USD =
+    // amount0*price0_at_block + amount1*price1_at_block. Critical for
+    // single-sided withdrawals where deriveDepositPrices's tick estimate
+    // is wildly wrong.
+    const allBlocks = rawEvents.map((e) => e.blockNumber);
+    const histPrices = pool && allBlocks.length > 0
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({
             rpc: TENDERLY_RPC, pool, token0, token1,
             decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
           });
-          try { return await resolver.resolveMany(feeBlocks); }
+          try { return await resolver.resolveMany(allBlocks); }
           catch (err) { console.error('[velodrome/activity] hist price resolve failed:', err); return null; }
         })()
       : null;
@@ -330,15 +333,29 @@ export async function GET(request: Request) {
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
 
-      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
-        const derived = deriveDepositPrices(
-          amount0, amount1, tickLower!, tickUpper!, t0d, t1d,
-          token0, token1, STABLECOINS,
-        );
-        if (derived) {
-          price0AtTime = derived.price0;
-          price1AtTime = derived.price1;
-          usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+      // For deposits/withdrawals, try historical sqrtPrice at the block
+      // FIRST. Only fall back to deriveDepositPrices's tick estimate when
+      // the resolver has no entry for this block.
+      if (ev.type === 'deposit' || ev.type === 'withdrawal') {
+        if (histPrices) {
+          const hex = '0x' + ev.blockNumber.toString(16);
+          const hp = histPrices.get(hex);
+          if (hp) {
+            price0AtTime = hp.price0Usd;
+            price1AtTime = hp.price1Usd;
+            usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
+          }
+        }
+        if (usdAtTime == null && hasTicks) {
+          const derived = deriveDepositPrices(
+            amount0, amount1, tickLower!, tickUpper!, t0d, t1d,
+            token0, token1, STABLECOINS,
+          );
+          if (derived) {
+            price0AtTime = derived.price0;
+            price1AtTime = derived.price1;
+            usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+          }
         }
       }
 
