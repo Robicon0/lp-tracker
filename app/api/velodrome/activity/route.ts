@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
+import { prewarmTokenPrices, getCachedTokenPriceForTimestamp } from '../../../lib/cgPriceHistory';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
@@ -39,6 +40,17 @@ const STABLECOINS = new Set([
   '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58', // USDT
   '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1', // DAI
 ]);
+
+// CoinGecko historical-daily-price IDs for non-stablecoin tokens on Optimism.
+// Drives fee_claim usdAtTime so claims are valued at market price on the day
+// of the claim instead of the pool's internal sqrtPriceX96 ratio. Tokens
+// unmapped here fall through to the sqrtPrice resolver.
+const CG_IDS: Record<string, string> = {
+  '0x4200000000000000000000000000000000000006': 'ethereum',           // WETH on OP
+  '0x4200000000000000000000000000000000000042': 'optimism',           // OP token
+  '0x9560e827af36c94d2ac33a39bce1fe78631088db': 'velodrome-finance',  // VELO
+  '0x68f180fcce6836688e9084f035309e29bf0a2095': 'wrapped-bitcoin',    // WBTC on OP
+};
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
 
@@ -306,11 +318,30 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
+    // Pre-warm CoinGecko historical daily prices for every fee_claim day, for
+    // any non-stablecoin token mapped in CG_IDS. Fee claims must be valued at
+    // the market price on the day of the claim, not the pool's internal
+    // sqrtPriceX96 ratio. Stablecoins anchor at $1 (no fetch).
+    {
+      const feeTimestamps = rawEvents
+        .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
+        .map((e) => e.timestamp);
+      if (feeTimestamps.length > 0) {
+        const cg0 = !STABLECOINS.has(token0) ? CG_IDS[token0] : undefined;
+        const cg1 = !STABLECOINS.has(token1) ? CG_IDS[token1] : undefined;
+        const pairs: Array<{ coingeckoId: string; timestamps: number[] }> = [];
+        if (cg0) pairs.push({ coingeckoId: cg0, timestamps: feeTimestamps });
+        if (cg1) pairs.push({ coingeckoId: cg1, timestamps: feeTimestamps });
+        if (pairs.length > 0) await prewarmTokenPrices(pairs);
+      }
+    }
+
     // Resolve pool's historical sqrtPriceX96 at EVERY unique event block
     // (deposits + withdrawals + fee claims) so each event's USD =
     // amount0*price0_at_block + amount1*price1_at_block. Critical for
     // single-sided withdrawals where deriveDepositPrices's tick estimate
-    // is wildly wrong.
+    // is wildly wrong. (fee_claim events prefer the CoinGecko market-price
+    // path above; this resolver is the fallback when CG has no entry.)
     const allBlocks = rawEvents.map((e) => e.blockNumber);
     const histPrices = pool && allBlocks.length > 0
       ? await (async () => {
@@ -359,7 +390,26 @@ export async function GET(request: Request) {
         }
       }
 
-      if (ev.type === 'fee_claim' && histPrices) {
+      // Fee claims: prefer CoinGecko historical daily market price (actual
+      // value at conversion time). A side counts as priced when it's a
+      // stablecoin ($1) OR a CG id resolved.
+      if (ev.type === 'fee_claim') {
+        const isStable0 = STABLECOINS.has(token0);
+        const isStable1 = STABLECOINS.has(token1);
+        const cg0 = !isStable0 ? CG_IDS[token0] : undefined;
+        const cg1 = !isStable1 ? CG_IDS[token1] : undefined;
+        const p0 = isStable0 ? 1 : (cg0 ? getCachedTokenPriceForTimestamp(cg0, ev.timestamp) : null);
+        const p1 = isStable1 ? 1 : (cg1 ? getCachedTokenPriceForTimestamp(cg1, ev.timestamp) : null);
+        if (p0 != null && p1 != null) {
+          price0AtTime = p0;
+          price1AtTime = p1;
+          usdAtTime = amount0 * p0 + amount1 * p1;
+        }
+      }
+
+      // Fallback: pool sqrtPriceX96 at the claim block (used when CG had no
+      // entry for that day, e.g. token unmapped or date predates CG listing).
+      if (ev.type === 'fee_claim' && usdAtTime == null && histPrices) {
         const hex = '0x' + ev.blockNumber.toString(16);
         const hp = histPrices.get(hex);
         if (hp) {

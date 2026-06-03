@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
+import { prewarmTokenPrices, getCachedTokenPriceForTimestamp } from '../../../lib/cgPriceHistory';
 
 // ── HyperEVM log source — 3-tier fallback chain ─────────────────────────────
 // TIER 1 (PRIMARY): Etherscan V2 with chainid=999 — archive-backed full history.
@@ -48,6 +49,18 @@ const STABLECOINS = new Set([
   '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb', // USD₮0 (Tether USD on HyperEVM)
   '0x3061caa1ce7c018ce68eae5795b2086cfdb4e148', // USDC (third Circle-native contract)
 ]);
+
+// CoinGecko historical-daily-price IDs for non-stablecoin tokens on HyperEVM.
+// Drives fee_claim usdAtTime so claims are valued at market price on the day
+// of the claim instead of the pool's internal sqrtPriceX96 ratio (which can
+// drift from spot). Add new tokens here as they surface in user pairs.
+const CG_IDS: Record<string, string> = {
+  '0x5555555555555555555555555555555555555555': 'hyperliquid', // native HYPE
+  '0xadcb2f358eae6492f61a5f87eb8893d09391d160': 'hyperliquid', // WHYPE
+  '0xfd739d4e423301ce9385c1fb8850539d657c296d': 'hyperliquid', // kHYPE
+  '0xbe6727b535545c67d5caa73dea54865b92cf7907': 'hyperliquid', // beHYPE (best-effort)
+  '0x94e8396e0869c9f2200760af0621afd240e1cf38': 'hyperliquid', // wstHYPE
+};
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
 
@@ -480,6 +493,25 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
+    // Pre-warm CoinGecko historical daily prices for every fee_claim's day,
+    // for any non-stablecoin token mapped in CG_IDS. Fee claims must always
+    // be valued at the market price on the day of the claim, not the pool's
+    // internal sqrtPriceX96 ratio — those can differ meaningfully when the
+    // pool's price diverges from spot. Stablecoins anchor at $1 (no fetch).
+    {
+      const feeTimestamps = rawEvents
+        .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
+        .map((e) => e.timestamp);
+      if (feeTimestamps.length > 0) {
+        const cg0 = !STABLECOINS.has(token0) ? CG_IDS[token0] : undefined;
+        const cg1 = !STABLECOINS.has(token1) ? CG_IDS[token1] : undefined;
+        const pairs: Array<{ coingeckoId: string; timestamps: number[] }> = [];
+        if (cg0) pairs.push({ coingeckoId: cg0, timestamps: feeTimestamps });
+        if (cg1) pairs.push({ coingeckoId: cg1, timestamps: feeTimestamps });
+        if (pairs.length > 0) await prewarmTokenPrices(pairs);
+      }
+    }
+
     // Resolve the pool's historical sqrtPriceX96 at EVERY unique event block
     // (deposits + withdrawals + fee claims) so each event's USD =
     // amount0*price0_at_block + amount1*price1_at_block — accurate for all
@@ -488,6 +520,8 @@ export async function GET(request: Request) {
     // produces wildly wrong USD (e.g. a "0 HYPE + 8,129 USDC" withdrawal
     // can balloon to $8,129+ using tick estimates). The historical-block
     // sqrtPrice gives the exact pool price at the moment the event occurred.
+    // (fee_claim events prefer the CoinGecko market-price path above; this
+    // resolver is the fallback when CG has no entry for that day.)
     const allBlocks = rawEvents.map((e) => e.blockNumber);
     // Public HyperEVM RPC cannot answer eth_call at old blocks — only current
     // state. Use the Chainstack archive RPC when configured so historical
@@ -543,7 +577,28 @@ export async function GET(request: Request) {
         }
       }
 
-      if (ev.type === 'fee_claim' && histPrices) {
+      // Fee claims: prefer CoinGecko historical daily market price (the actual
+      // value the user would receive when converting claimed tokens). Falls
+      // through to the pool's sqrtPriceX96-based price below when CG has no
+      // entry for that day. A side counts as priced when it's a stablecoin
+      // ($1) OR a CG id resolved.
+      if (ev.type === 'fee_claim') {
+        const isStable0 = STABLECOINS.has(token0);
+        const isStable1 = STABLECOINS.has(token1);
+        const cg0 = !isStable0 ? CG_IDS[token0] : undefined;
+        const cg1 = !isStable1 ? CG_IDS[token1] : undefined;
+        const p0 = isStable0 ? 1 : (cg0 ? getCachedTokenPriceForTimestamp(cg0, ev.timestamp) : null);
+        const p1 = isStable1 ? 1 : (cg1 ? getCachedTokenPriceForTimestamp(cg1, ev.timestamp) : null);
+        if (p0 != null && p1 != null) {
+          price0AtTime = p0;
+          price1AtTime = p1;
+          usdAtTime = amount0 * p0 + amount1 * p1;
+        }
+      }
+
+      // Fallback for fee_claim when CoinGecko historical price was unavailable
+      // (e.g. token not mapped in CG_IDS, or date predates CG listing).
+      if (ev.type === 'fee_claim' && usdAtTime == null && histPrices) {
         const hex = '0x' + ev.blockNumber.toString(16);
         const hp = histPrices.get(hex);
         if (hp) {

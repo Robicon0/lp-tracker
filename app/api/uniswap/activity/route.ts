@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
+import { prewarmTokenPrices, getCachedTokenPriceForTimestamp } from '../../../lib/cgPriceHistory';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -115,6 +116,43 @@ const STABLECOINS_BY_CHAIN: Record<string, Set<string>> = {
     '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', // USDC (18 decimals on BSC)
     '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
   ]),
+};
+
+// CoinGecko historical-daily-price IDs for non-stablecoin tokens per chain.
+// Drives fee_claim usdAtTime so claims are valued at market price on the day
+// of the claim instead of the pool's internal sqrtPriceX96 ratio. Tokens
+// unmapped here fall through to the sqrtPrice resolver. Add new tokens here
+// as they surface in user pairs.
+const CG_IDS_BY_CHAIN: Record<string, Record<string, string>> = {
+  ethereum: {
+    '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'ethereum',       // WETH
+    '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': 'wrapped-bitcoin', // WBTC
+    '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984': 'uniswap',        // UNI
+    '0xb50721bcf8d664c30412cfbc6cf7a15145234ad1': 'arbitrum',       // ARB (on eth)
+    '0xae78736cd615f374d3085123a210448e74fc6393': 'rocket-pool-eth', // rETH
+    '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0': 'wrapped-steth',  // wstETH
+  },
+  arbitrum: {
+    '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': 'ethereum',       // WETH
+    '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f': 'wrapped-bitcoin', // WBTC
+    '0x912ce59144191c1204e64559fe8253a0e49e6548': 'arbitrum',       // ARB
+  },
+  polygon: {
+    '0x7ceb23fd6bc0add59e62ac25578270cff1b9f619': 'ethereum',       // WETH
+    '0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6': 'wrapped-bitcoin', // WBTC
+    '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270': 'matic-network',  // WMATIC
+    '0x0000000000000000000000000000000000001010': 'matic-network',  // MATIC (system)
+  },
+  optimism: {
+    '0x4200000000000000000000000000000000000006': 'ethereum',       // WETH
+    '0x4200000000000000000000000000000000000042': 'optimism',       // OP
+    '0x68f180fcce6836688e9084f035309e29bf0a2095': 'wrapped-bitcoin', // WBTC
+  },
+  bnb: {
+    '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': 'binancecoin',    // WBNB
+    '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c': 'bitcoin',        // BTCB (1:1 BTC)
+    '0x2170ed0880ac9a755fd29b2688956bd959f933f8': 'ethereum',       // ETH on BSC
+  },
 };
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
@@ -435,7 +473,26 @@ export async function GET(request: Request) {
     rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
     const stablecoins = STABLECOINS_BY_CHAIN[chain] ?? new Set<string>();
+    const cgIds = CG_IDS_BY_CHAIN[chain] ?? {};
     const tenderlyRpc = TENDERLY_RPCS[chain];
+
+    // Pre-warm CoinGecko historical daily prices for every fee_claim day, for
+    // any non-stablecoin token mapped in cgIds. Fee claims must be valued at
+    // the market price on the day of the claim, not the pool's internal
+    // sqrtPriceX96 ratio. Stablecoins anchor at $1 (no fetch).
+    {
+      const feeTimestamps = rawEvents
+        .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
+        .map((e) => e.timestamp);
+      if (feeTimestamps.length > 0) {
+        const cg0 = !stablecoins.has(token0) ? cgIds[token0] : undefined;
+        const cg1 = !stablecoins.has(token1) ? cgIds[token1] : undefined;
+        const pairs: Array<{ coingeckoId: string; timestamps: number[] }> = [];
+        if (cg0) pairs.push({ coingeckoId: cg0, timestamps: feeTimestamps });
+        if (cg1) pairs.push({ coingeckoId: cg1, timestamps: feeTimestamps });
+        if (pairs.length > 0) await prewarmTokenPrices(pairs);
+      }
+    }
 
     // Resolve pool's sqrtPriceX96 at EVERY unique event block (deposits +
     // withdrawals + fee claims) — that gives the exact token0/token1
@@ -491,7 +548,26 @@ export async function GET(request: Request) {
         }
       }
 
-      if (ev.type === 'fee_claim' && histPrices) {
+      // Fee claims: prefer CoinGecko historical daily market price (actual
+      // value at conversion time). A side counts as priced when it's a
+      // stablecoin ($1) OR a CG id resolved.
+      if (ev.type === 'fee_claim') {
+        const isStable0 = stablecoins.has(token0);
+        const isStable1 = stablecoins.has(token1);
+        const cg0 = !isStable0 ? cgIds[token0] : undefined;
+        const cg1 = !isStable1 ? cgIds[token1] : undefined;
+        const p0 = isStable0 ? 1 : (cg0 ? getCachedTokenPriceForTimestamp(cg0, ev.timestamp) : null);
+        const p1 = isStable1 ? 1 : (cg1 ? getCachedTokenPriceForTimestamp(cg1, ev.timestamp) : null);
+        if (p0 != null && p1 != null) {
+          price0AtTime = p0;
+          price1AtTime = p1;
+          usdAtTime = amount0 * p0 + amount1 * p1;
+        }
+      }
+
+      // Fallback: pool sqrtPriceX96 at the claim block (used when CG had no
+      // entry for that day, e.g. token unmapped or date predates CG listing).
+      if (ev.type === 'fee_claim' && usdAtTime == null && histPrices) {
         const hex = '0x' + ev.blockNumber.toString(16);
         const hp = histPrices.get(hex);
         if (hp) {
