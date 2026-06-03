@@ -489,10 +489,16 @@ export async function GET(request: Request) {
     // can balloon to $8,129+ using tick estimates). The historical-block
     // sqrtPrice gives the exact pool price at the moment the event occurred.
     const allBlocks = rawEvents.map((e) => e.blockNumber);
+    // Public HyperEVM RPC cannot answer eth_call at old blocks — only current
+    // state. Use the Chainstack archive RPC when configured so historical
+    // sqrtPriceX96 lookups actually resolve; fall back to public RPC only when
+    // the archive env var is unset (the resolver will return null for old
+    // blocks in that case and callers fall through to current-price math).
+    const archiveRpc = process.env.HYPEREVM_ARCHIVE_RPC || HYPEREVM_RPC;
     const histPrices = pool && allBlocks.length > 0
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({
-            rpc: HYPEREVM_RPC, pool, token0, token1,
+            rpc: archiveRpc, pool, token0, token1,
             decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
           });
           try { return await resolver.resolveMany(allBlocks); }
