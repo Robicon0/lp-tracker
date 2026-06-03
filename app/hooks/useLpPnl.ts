@@ -198,6 +198,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
     return `/api/aerodrome/activity?${p}`;
   }
@@ -258,6 +259,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
     return `/api/hyperswap/activity?${p}`;
   }
@@ -272,6 +274,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
     return `/api/uniswap/activity?${p}`;
   }
@@ -283,6 +286,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
     return `/api/velodrome/activity?${p}`;
   }
@@ -294,6 +298,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.token1Address) p.set("token1", pos.token1Address);
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
+    if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
     return `/api/pancakeswap/activity?${p}`;
   }
@@ -358,7 +363,15 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // deriveDepositPrices's tick-boundary estimate which is wildly wrong for
 // single-sided events (one amount is 0). Bump invalidates any cached
 // events that captured those wrong USD values.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v12-";
+// Bumped v12 → v13: useLpPnl's buildActivityUrl was NOT forwarding the
+// position's `poolAddress` to EVM V3 activity routes — only
+// useAllPositionsActivity was. As a result every analytics LP P&L fetch
+// hit the route without a `pool` param, so the route skipped the
+// historical sqrtPriceX96 resolver and ALL events (including fee claims)
+// fell back to current-price × amounts. Cached entries from v12 carry
+// that wrong-USD history; bump forces a fresh fetch where the resolver
+// runs and populates accurate per-block prices.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v13-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

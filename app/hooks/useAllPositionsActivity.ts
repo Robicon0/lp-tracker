@@ -84,7 +84,13 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // block of EVERY event (deposits + withdrawals + fee claims). Cached
 // events from v7 carry wrong USD values for single-sided deposits and
 // withdrawals where the old tick-boundary estimate was off.
-function cacheKey(id: string) { return `analytics-activity-v8-${id}`; }
+// Bumped v8 → v9: parity bump with useLpPnl's v12 → v13. useLpPnl was
+// missing the `pool` query param, but useAllPositionsActivity always
+// had `setPool()` wired — so cached v8 entries are technically
+// correct. Bumping anyway so analytics & lp-pnl refresh in lockstep
+// (avoids a window where lifetime fees show one number on the chart
+// and a different number on the LP P&L card).
+function cacheKey(id: string) { return `analytics-activity-v9-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {
