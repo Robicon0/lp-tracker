@@ -485,13 +485,22 @@ export async function GET(request: Request) {
       }
     }
 
-    for (const ev of rawEvents) {
+    // Drop zero-amount fee_claim artifacts (both amounts clamped to 0 by the
+    // Decrease-subtraction pass when a close tx had the position withdrawing
+    // everything and Collect emitted the same amounts). They contribute $0
+    // to totals but inflate the claim count — UI shows "23 claims" when only
+    // 20 had real fees.
+    const cleanRawEvents = rawEvents.filter(
+      (ev) => !(ev.type === 'fee_claim' && ev.amount0Raw === 0n && ev.amount1Raw === 0n),
+    );
+
+    for (const ev of cleanRawEvents) {
       if (ev.type === 'deposit')    { deposited0 += ev.amount0Raw; deposited1 += ev.amount1Raw; }
       if (ev.type === 'withdrawal') { withdrawn0 += ev.amount0Raw; withdrawn1 += ev.amount1Raw; }
       if (ev.type === 'fee_claim')  { fees0 += ev.amount0Raw;      fees1 += ev.amount1Raw;      }
     }
 
-    rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
+    cleanRawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
     // Pre-warm CoinGecko historical daily prices for every fee_claim's day,
     // for any non-stablecoin token mapped in CG_IDS. Fee claims must always
@@ -499,7 +508,7 @@ export async function GET(request: Request) {
     // internal sqrtPriceX96 ratio — those can differ meaningfully when the
     // pool's price diverges from spot. Stablecoins anchor at $1 (no fetch).
     {
-      const feeTimestamps = rawEvents
+      const feeTimestamps = cleanRawEvents
         .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
         .map((e) => e.timestamp);
       if (feeTimestamps.length > 0) {
@@ -522,7 +531,7 @@ export async function GET(request: Request) {
     // sqrtPrice gives the exact pool price at the moment the event occurred.
     // (fee_claim events prefer the CoinGecko market-price path above; this
     // resolver is the fallback when CG has no entry for that day.)
-    const allBlocks = rawEvents.map((e) => e.blockNumber);
+    const allBlocks = cleanRawEvents.map((e) => e.blockNumber);
     // Public HyperEVM RPC cannot answer eth_call at old blocks — only current
     // state. Use the Chainstack archive RPC when configured so historical
     // sqrtPriceX96 lookups actually resolve; fall back to public RPC only when
@@ -542,7 +551,7 @@ export async function GET(request: Request) {
 
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
-    const events: ActivityEvent[] = rawEvents.map((ev) => {
+    const events: ActivityEvent[] = cleanRawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
 

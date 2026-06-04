@@ -463,14 +463,21 @@ export async function GET(request: Request) {
       }
     }
 
-    for (const ev of rawEvents) {
+    // Drop zero-amount fee_claim artifacts (both amounts clamped to 0 by the
+    // Decrease-subtraction pass when a close tx had Collect emitting the same
+    // amounts the user withdrew). Contributes $0 but inflates the claim count.
+    const cleanRawEvents = rawEvents.filter(
+      (ev) => !(ev.type === 'fee_claim' && ev.amount0Raw === 0n && ev.amount1Raw === 0n),
+    );
+
+    for (const ev of cleanRawEvents) {
       if (ev.type === 'deposit')    { deposited0 += ev.amount0Raw; deposited1 += ev.amount1Raw; }
       if (ev.type === 'withdrawal') { withdrawn0 += ev.amount0Raw; withdrawn1 += ev.amount1Raw; }
       if (ev.type === 'fee_claim')  { fees0 += ev.amount0Raw;      fees1 += ev.amount1Raw;      }
     }
 
     // Sort chronologically for cumulative fee calculation
-    rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
+    cleanRawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
     const stablecoins = STABLECOINS_BY_CHAIN[chain] ?? new Set<string>();
     const cgIds = CG_IDS_BY_CHAIN[chain] ?? {};
@@ -481,7 +488,7 @@ export async function GET(request: Request) {
     // the market price on the day of the claim, not the pool's internal
     // sqrtPriceX96 ratio. Stablecoins anchor at $1 (no fetch).
     {
-      const feeTimestamps = rawEvents
+      const feeTimestamps = cleanRawEvents
         .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
         .map((e) => e.timestamp);
       if (feeTimestamps.length > 0) {
@@ -500,7 +507,7 @@ export async function GET(request: Request) {
     // single-sided withdrawals where deriveDepositPrices's tick-boundary
     // estimate is wildly wrong (e.g. "0 token0 + N token1" balloons to
     // amount1 × tick-estimated-price-of-0 instead of amount1 × $1).
-    const allBlocks = rawEvents.map((e) => e.blockNumber);
+    const allBlocks = cleanRawEvents.map((e) => e.blockNumber);
     const histPrices = pool && allBlocks.length > 0 && tenderlyRpc
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({
@@ -514,7 +521,7 @@ export async function GET(request: Request) {
 
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
-    const events: ActivityEvent[] = rawEvents.map((ev) => {
+    const events: ActivityEvent[] = cleanRawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
 

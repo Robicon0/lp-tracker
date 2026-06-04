@@ -358,21 +358,28 @@ export async function GET(request: Request) {
       }
     }
 
-    for (const ev of rawEvents) {
+    // Drop zero-amount fee_claim artifacts (both amounts clamped to 0 by the
+    // Decrease-subtraction pass when a close tx had Collect emitting the same
+    // amounts the user withdrew). Contributes $0 but inflates the claim count.
+    const cleanRawEvents = rawEvents.filter(
+      (ev) => !(ev.type === 'fee_claim' && ev.amount0Raw === 0n && ev.amount1Raw === 0n),
+    );
+
+    for (const ev of cleanRawEvents) {
       if (ev.type === 'deposit')    { deposited0 += ev.amount0Raw; deposited1 += ev.amount1Raw; }
       if (ev.type === 'withdrawal') { withdrawn0 += ev.amount0Raw; withdrawn1 += ev.amount1Raw; }
       if (ev.type === 'fee_claim')  { fees0 += ev.amount0Raw;      fees1 += ev.amount1Raw;      }
     }
 
     // Sort chronologically to compute cumulative fees (oldest first)
-    rawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
+    cleanRawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
     // Pre-warm CoinGecko historical daily prices for every fee_claim day, for
     // any non-stablecoin token mapped in CG_IDS. Fee claims must be valued at
     // the market price on the day of the claim, not the pool's internal
     // sqrtPriceX96 ratio. Stablecoins anchor at $1 (no fetch).
     {
-      const feeTimestamps = rawEvents
+      const feeTimestamps = cleanRawEvents
         .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
         .map((e) => e.timestamp);
       if (feeTimestamps.length > 0) {
@@ -393,7 +400,7 @@ export async function GET(request: Request) {
     // wildly wrong there; the historical sqrtPrice is correct.
     // (fee_claim events prefer the CoinGecko market-price path above; this
     // resolver is the fallback when CG has no entry for that day.)
-    const allBlocks = rawEvents.map((e) => e.blockNumber);
+    const allBlocks = cleanRawEvents.map((e) => e.blockNumber);
     const histPrices = pool && allBlocks.length > 0
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({
@@ -407,7 +414,7 @@ export async function GET(request: Request) {
 
     let runningFeeUSD = 0;
     const hasTicks = tickLower != null && tickUpper != null;
-    const events: ActivityEvent[] = rawEvents.map((ev) => {
+    const events: ActivityEvent[] = cleanRawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
 

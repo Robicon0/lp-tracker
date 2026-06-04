@@ -90,7 +90,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // correct. Bumping anyway so analytics & lp-pnl refresh in lockstep
 // (avoids a window where lifetime fees show one number on the chart
 // and a different number on the LP P&L card).
-function cacheKey(id: string) { return `analytics-activity-v11-${id}`; }
+function cacheKey(id: string) { return `analytics-activity-v12-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

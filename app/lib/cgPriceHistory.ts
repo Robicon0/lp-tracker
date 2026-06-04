@@ -18,10 +18,35 @@
 // stay valid for the life of the server instance. The negative cache prevents
 // re-hammering CoinGecko for token/date pairs the API can't fulfil (e.g. a
 // date predating the token's CG listing).
+//
+// Rate-limit handling: CoinGecko's free tier caps at ~5-30 req/min. A single
+// HyperEVM closed position can imply ~10 unique fee_claim dates; firing all
+// of those in parallel via Promise.all reliably trips a 429 on the latter
+// half. The prewarm path therefore runs at bounded concurrency (default 3
+// in-flight), and individual fetches retry once with backoff on transient
+// failures (429, 5xx, network errors). 404s and 200-with-no-price are
+// permanently cached as misses.
 
 const cache = new Map<string, number>();              // `${id}:${DD-MM-YYYY}` → price
 const inFlight = new Map<string, Promise<number | null>>();
 const negativeCache = new Set<string>();              // permanent misses
+
+// Concurrency = 1: CoinGecko's free tier reliably 429s on parallel bursts
+// (e.g. a ProjectX position with 9 unique fee_claim dates would have most
+// of its later dates throttled at concurrency=3, causing the route to fall
+// back to current-spot prices). Sequential pacing keeps us inside the
+// per-minute envelope.
+const MAX_CONCURRENT_PREWARM = 1;
+// Inter-request gap between sequential prewarm fetches. CG's free tier
+// docs ~10-30 req/min; 1100ms ≈ 54 req/min sustained, well inside the
+// envelope when combined with retries. The gap only applies WITHIN a
+// prewarm batch — single ad-hoc fetchTokenPriceAtDate calls don't pace.
+const PREWARM_GAP_MS = 1100;
+// Retry delays for transient failures (429 / 5xx / network). Progressive
+// backoff — by the fourth retry the per-minute window has rolled over
+// even from sustained pressure. Worst case ~56s wait per failed date,
+// but only when CG is actively rate-limiting.
+const RETRY_DELAYS_MS = [3000, 8000, 15000, 30000];
 
 export function tsToCoinGeckoDate(timestampSeconds: number): string {
   const d = new Date(timestampSeconds * 1000);
@@ -33,6 +58,37 @@ export function tsToCoinGeckoDate(timestampSeconds: number): string {
 
 function keyOf(coingeckoId: string, date: string): string {
   return `${coingeckoId}:${date}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface FetchOutcome {
+  // 'price' = success with USD; 'permanent_miss' = 404 / valid-200-no-price,
+  // populate negativeCache so we never re-fetch; 'transient' = retryable.
+  kind: 'price' | 'permanent_miss' | 'transient';
+  price?: number;
+}
+
+async function fetchOnce(coingeckoId: string, date: string): Promise<FetchOutcome> {
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/${coingeckoId}/history?date=${date}&localization=false`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      // 404 → token doesn't exist or date is pre-listing → permanent
+      if (res.status === 404) return { kind: 'permanent_miss' };
+      // 429 / 5xx / etc. → transient
+      return { kind: 'transient' };
+    }
+    const json = await res.json();
+    const price = json?.market_data?.current_price?.usd;
+    if (typeof price === 'number' && price > 0) return { kind: 'price', price };
+    // 200 OK but no market_data — token existed but no data that day.
+    return { kind: 'permanent_miss' };
+  } catch {
+    return { kind: 'transient' };
+  }
 }
 
 export async function fetchTokenPriceAtDate(
@@ -53,26 +109,24 @@ export async function fetchTokenPriceAtDate(
 
   const promise: Promise<number | null> = (async () => {
     try {
-      const url = `https://api.coingecko.com/api/v3/coins/${coingeckoId}/history?date=${date}&localization=false`;
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) {
-        // 404 = no historical data for that date — record permanently so we
-        // don't hammer the API. Other status codes (429, 5xx) are transient;
-        // don't poison the cache.
-        if (res.status === 404) negativeCache.add(k);
-        return null;
+      let outcome = await fetchOnce(coingeckoId, date);
+      // Retry on transient failures (429 rate-limit, 5xx, network errors) with
+      // progressive backoff. Stops as soon as we get a definitive answer
+      // (price or permanent_miss).
+      for (const delay of RETRY_DELAYS_MS) {
+        if (outcome.kind !== 'transient') break;
+        await sleep(delay);
+        outcome = await fetchOnce(coingeckoId, date);
       }
-      const json = await res.json();
-      const price = json?.market_data?.current_price?.usd;
-      if (typeof price === 'number' && price > 0) {
-        cache.set(k, price);
-        return price;
+      if (outcome.kind === 'price' && typeof outcome.price === 'number') {
+        cache.set(k, outcome.price);
+        return outcome.price;
       }
-      // Valid 200 with no price field (token existed but no market data that
-      // day) is also a permanent miss.
-      negativeCache.add(k);
-      return null;
-    } catch {
+      if (outcome.kind === 'permanent_miss') {
+        negativeCache.add(k);
+      }
+      // 'transient' after all retries → return null but DO NOT poison the
+      // cache, so a future request can try again.
       return null;
     } finally {
       inFlight.delete(k);
@@ -84,15 +138,16 @@ export async function fetchTokenPriceAtDate(
 }
 
 // Pre-warm the cache for every unique (coingeckoId, date) combination implied
-// by the given pairs. Issues one CoinGecko request per unique combo IN
-// PARALLEL. After this resolves, getCachedTokenPriceForTimestamp() returns
-// synchronously for any of those pairs — letting the event-build loop stay
-// synchronous.
+// by the given pairs. Runs at bounded concurrency (MAX_CONCURRENT_PREWARM in
+// flight at once) — uncapped Promise.all reliably triggered 429s on
+// CoinGecko's free tier when a single position implied >5 unique dates.
+// After this resolves, getCachedTokenPriceForTimestamp() returns synchronously
+// for any of those pairs — letting the event-build loop stay synchronous.
 export async function prewarmTokenPrices(
   pairs: Array<{ coingeckoId: string; timestamps: number[] }>,
 ): Promise<void> {
   const seen = new Set<string>();
-  const tasks: Array<Promise<unknown>> = [];
+  const work: Array<{ coingeckoId: string; ts: number }> = [];
   for (const { coingeckoId, timestamps } of pairs) {
     if (!coingeckoId) continue;
     for (const ts of timestamps) {
@@ -105,10 +160,27 @@ export async function prewarmTokenPrices(
       // fetchTokenPriceAtDate computes the same DD-MM-YYYY key.
       const [dd, mm, yyyy] = date.split('-').map(Number);
       const repTs = Math.floor(Date.UTC(yyyy, (mm ?? 1) - 1, dd ?? 1, 12, 0, 0) / 1000);
-      tasks.push(fetchTokenPriceAtDate(coingeckoId, repTs));
+      work.push({ coingeckoId, ts: repTs });
     }
   }
-  if (tasks.length > 0) await Promise.all(tasks);
+  if (work.length === 0) return;
+
+  // Bounded-concurrency worker pool with an inter-request gap. Each worker
+  // pauses PREWARM_GAP_MS between its successive fetches to stay inside CG's
+  // per-minute envelope; with concurrency=1 this paces the entire prewarm.
+  let nextIdx = 0;
+  const workers = Array.from({ length: Math.min(MAX_CONCURRENT_PREWARM, work.length) }, async () => {
+    let first = true;
+    while (true) {
+      const my = nextIdx++;
+      if (my >= work.length) return;
+      if (!first) await sleep(PREWARM_GAP_MS);
+      first = false;
+      const { coingeckoId, ts } = work[my];
+      await fetchTokenPriceAtDate(coingeckoId, ts);
+    }
+  });
+  await Promise.all(workers);
 }
 
 // Synchronous cache lookup — returns null on miss. Use AFTER awaiting
