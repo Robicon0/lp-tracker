@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { resolveCgIds } from '../../lib/cgSymbolSearch';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -300,6 +301,30 @@ export async function GET(request: Request) {
         if (meta) coinMetaMap[ct] = meta;
       }),
     );
+
+    // LAST RESORT: for any coin type not priced via KNOWN_COINS, look up its
+    // symbol via the metadata we just fetched, resolve a CoinGecko ID by
+    // symbol, and merge a real spot price. Purely additive — KNOWN_COINS
+    // fast path is untouched and a null resolution leaves the coin at price
+    // 0 (position still renders with value=0).
+    {
+      const missing = coinTypes.filter((ct) => !(priceData[ct] > 0));
+      const symbolByCt: Record<string, string> = {};
+      for (const ct of missing) {
+        const sym = coinMetaMap[ct]?.symbol;
+        if (sym) symbolByCt[ct] = sym;
+      }
+      const symbolToCgId = await resolveCgIds(Object.values(symbolByCt));
+      const cgIds = [...new Set(Object.values(symbolToCgId))];
+      if (cgIds.length > 0) {
+        const dynamicPrices = await fetchCachedCoinGeckoPrices(cgIds);
+        for (const [ct, sym] of Object.entries(symbolByCt)) {
+          const cgId = symbolToCgId[sym.toUpperCase()];
+          const px = cgId ? dynamicPrices[cgId] : 0;
+          if (px > 0) priceData[ct] = px;
+        }
+      }
+    }
 
     // Build ticks table ID map per pool
     const poolTicksTableIds: Record<string, string> = {};

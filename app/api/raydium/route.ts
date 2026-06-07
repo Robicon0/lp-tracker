@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { resolveCgIds } from '../../lib/cgSymbolSearch';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -344,6 +345,30 @@ export async function GET(request: Request) {
     const allPrices: Record<string, number> = { ...prices };
     for (const [mint, info] of Object.entries(dasTokens)) {
       if (!allPrices[mint] && info.price > 0) allPrices[mint] = info.price;
+    }
+
+    // LAST RESORT: for any unknown mint where DAS returned a symbol but no
+    // usable price, resolve the CoinGecko ID by symbol and fetch a real
+    // spot price. Purely additive — TOKENS and DAS paths above are
+    // untouched, and a null resolution leaves the mint at price 0
+    // (position still renders).
+    const stillMissing = unknownMints.filter((m) => !(allPrices[m] > 0));
+    if (stillMissing.length > 0) {
+      const symbolByMint: Record<string, string> = {};
+      for (const m of stillMissing) {
+        const sym = dasTokens[m]?.symbol;
+        if (sym) symbolByMint[m] = sym;
+      }
+      const symbolToCgId = await resolveCgIds(Object.values(symbolByMint));
+      const cgIds = [...new Set(Object.values(symbolToCgId))];
+      if (cgIds.length > 0) {
+        const dynamicPrices = await fetchCachedCoinGeckoPrices(cgIds);
+        for (const [mint, sym] of Object.entries(symbolByMint)) {
+          const cgId = symbolToCgId[sym.toUpperCase()];
+          const px = cgId ? dynamicPrices[cgId] : 0;
+          if (px > 0) allPrices[mint] = px;
+        }
+      }
     }
 
     // 5. Transform to shared position shape

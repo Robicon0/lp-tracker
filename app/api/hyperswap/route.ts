@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { resolveCgId } from '../../lib/cgSymbolSearch';
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -394,54 +395,15 @@ async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, numbe
   return fetchCachedCoinGeckoPrices(coingeckoIds);
 }
 
-// ── Dynamic CoinGecko symbol → ID resolver (24h module-level cache) ──────────
-// LAST-RESORT price fallback for HyperEVM tokens NOT in KNOWN_TOKENS. The
-// hardcoded KNOWN_TOKENS fast path above is unchanged — this only fires for
-// tokens whose on-chain symbol() resolved but have no coingeckoId hint.
-//
-// We hit CoinGecko's /search directly (same server-side pattern as
-// fetchCachedCoinGeckoPrices in app/lib/priceCache.ts) rather than the
-// /api/prices?endpoint=search proxy — the proxy exists for browser CORS,
-// and server-calling-self needs a fragile absolute base URL. Both ultimately
-// query the same CoinGecko search endpoint.
-//
-// Cache (symbol → id) lives 24h and caches null misses too, so an
-// unindexed/typo symbol is never re-searched within the window. Graceful:
-// any failure resolves to null → caller leaves the price at 0 and the
-// position still renders (never throws, never excludes).
-const CG_ID_CACHE = new Map<string, { id: string | null; expiresAt: number }>();
-const CG_ID_TTL_MS = 24 * 60 * 60 * 1000;
-
-async function resolveCoingeckoIdBySymbol(symbol: string): Promise<string | null> {
-  const key = symbol.toUpperCase().trim();
-  if (!key) return null;
-  const cached = CG_ID_CACHE.get(key);
-  if (cached && Date.now() < cached.expiresAt) return cached.id;
-
-  let id: string | null = null;
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(key)}`,
-      { cache: 'no-store', headers: { Accept: 'application/json' } },
-    );
-    if (res.ok) {
-      const data = (await res.json()) as {
-        coins?: Array<{ id: string; symbol: string; market_cap_rank?: number | null }>;
-      };
-      const coins = data.coins ?? [];
-      // CoinGecko search is market-cap ordered; take the first EXACT symbol
-      // match, preferring a ranked coin (filters out unranked dust that
-      // squats a popular ticker), falling back to any exact match.
-      const ranked = coins.find((c) => c.symbol?.toUpperCase() === key && c.market_cap_rank != null);
-      const anyMatch = coins.find((c) => c.symbol?.toUpperCase() === key);
-      id = ranked?.id ?? anyMatch?.id ?? null;
-    }
-  } catch {
-    id = null;
-  }
-  CG_ID_CACHE.set(key, { id, expiresAt: Date.now() + CG_ID_TTL_MS });
-  return id;
-}
+// Dynamic CoinGecko symbol → ID resolver: last-resort price fallback for
+// HyperEVM tokens NOT in KNOWN_TOKENS. The hardcoded KNOWN_TOKENS fast path
+// above is unchanged — this only fires for tokens whose on-chain symbol()
+// resolved but have no coingeckoId hint. Implementation lives in the shared
+// `app/lib/cgSymbolSearch.ts` module so every chain's position route can use
+// the same cache (Cetus + Bluefin both resolving "WAL" hit one HTTP call).
+// Graceful: a null return leaves the price at 0 and the position still
+// renders with value=0 (never throws, never excludes).
+const resolveCoingeckoIdBySymbol = resolveCgId;
 
 interface PoolStats { apy: number; tvlUsd: number; volumeUsd1d: number }
 
