@@ -37,16 +37,52 @@ const negativeCache = new Set<string>();              // permanent misses
 // back to current-spot prices). Sequential pacing keeps us inside the
 // per-minute envelope.
 const MAX_CONCURRENT_PREWARM = 1;
-// Inter-request gap between sequential prewarm fetches. CG's free tier
-// docs ~10-30 req/min; 1100ms ≈ 54 req/min sustained, well inside the
-// envelope when combined with retries. The gap only applies WITHIN a
-// prewarm batch — single ad-hoc fetchTokenPriceAtDate calls don't pace.
-const PREWARM_GAP_MS = 1100;
 // Retry delays for transient failures (429 / 5xx / network). Progressive
 // backoff — by the fourth retry the per-minute window has rolled over
 // even from sustained pressure. Worst case ~56s wait per failed date,
 // but only when CG is actively rate-limiting.
 const RETRY_DELAYS_MS = [3000, 8000, 15000, 30000];
+
+// ── PROCESS-WIDE rate limiter for ALL CoinGecko history calls ────────────────
+// Sequential prewarm within a single route was not enough: when the analytics
+// page fires Aerodrome + Bluefin + Cetus + Orca + HyperSwap activity routes in
+// parallel, each route runs its OWN sequential prewarm chain. That sums to
+// N×54 req/min on CoinGecko's free tier and the latter half of every chain
+// gets 429'd, wiping usdAtTime to 0 for those fee_claim events — which the
+// analytics fee-income filter drops as `usd <= 0`. The result is Aerodrome
+// and Orca silently disappearing from the protocol breakdown and ProjectX
+// fees over-counting (some dates fell back to current spot).
+//
+// Fix: every CG history HTTP call passes through ONE process-wide FIFO queue
+// with a minimum gap between successive calls. Concurrency 1, no matter how
+// many routes are running in parallel. Retries (3s/8s/15s/30s) also flow
+// through the queue — their long backoffs absorb naturally without blocking
+// other workers (each worker gets its turn in line; a worker waiting on
+// retry doesn't prevent later workers from making progress).
+//
+// Cost: in the WORST case (12 unique HYPE/USDC fee dates from one wallet +
+// nothing else in flight) cold-cache prewarm = ~13s. With Aerodrome + Orca +
+// Bluefin + Cetus events also flowing through the queue, total cold-cache
+// across the whole analytics page might hit 30-60s — but every date succeeds
+// instead of half-failing, and once cached they're instant forever after.
+const GLOBAL_CG_GAP_MS = 1100;
+let globalCgQueueTail: Promise<void> = Promise.resolve();
+let lastGlobalCgCallAt = 0;
+
+export async function withCgPacing<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = globalCgQueueTail;
+  let release: () => void = () => {};
+  globalCgQueueTail = new Promise<void>((resolve) => { release = resolve; });
+  try {
+    await prev;
+    const gap = lastGlobalCgCallAt + GLOBAL_CG_GAP_MS - Date.now();
+    if (gap > 0) await sleep(gap);
+    lastGlobalCgCallAt = Date.now();
+    return await fn();
+  } finally {
+    release();
+  }
+}
 
 export function tsToCoinGeckoDate(timestampSeconds: number): string {
   const d = new Date(timestampSeconds * 1000);
@@ -72,23 +108,28 @@ interface FetchOutcome {
 }
 
 async function fetchOnce(coingeckoId: string, date: string): Promise<FetchOutcome> {
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/${coingeckoId}/history?date=${date}&localization=false`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) {
-      // 404 → token doesn't exist or date is pre-listing → permanent
-      if (res.status === 404) return { kind: 'permanent_miss' };
-      // 429 / 5xx / etc. → transient
+  // Every CG history HTTP call passes through the process-wide queue so
+  // parallel route invocations can't burst CG and trip rate limits. See
+  // withCgPacing comment above.
+  return withCgPacing(async () => {
+    try {
+      const url = `https://api.coingecko.com/api/v3/coins/${coingeckoId}/history?date=${date}&localization=false`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        // 404 → token doesn't exist or date is pre-listing → permanent
+        if (res.status === 404) return { kind: 'permanent_miss' };
+        // 429 / 5xx / etc. → transient
+        return { kind: 'transient' };
+      }
+      const json = await res.json();
+      const price = json?.market_data?.current_price?.usd;
+      if (typeof price === 'number' && price > 0) return { kind: 'price', price };
+      // 200 OK but no market_data — token existed but no data that day.
+      return { kind: 'permanent_miss' };
+    } catch {
       return { kind: 'transient' };
     }
-    const json = await res.json();
-    const price = json?.market_data?.current_price?.usd;
-    if (typeof price === 'number' && price > 0) return { kind: 'price', price };
-    // 200 OK but no market_data — token existed but no data that day.
-    return { kind: 'permanent_miss' };
-  } catch {
-    return { kind: 'transient' };
-  }
+  });
 }
 
 export async function fetchTokenPriceAtDate(
@@ -165,17 +206,15 @@ export async function prewarmTokenPrices(
   }
   if (work.length === 0) return;
 
-  // Bounded-concurrency worker pool with an inter-request gap. Each worker
-  // pauses PREWARM_GAP_MS between its successive fetches to stay inside CG's
-  // per-minute envelope; with concurrency=1 this paces the entire prewarm.
+  // Bounded-concurrency worker pool. The per-worker inter-request gap was
+  // removed when the process-wide CG queue (withCgPacing) was introduced —
+  // the global queue paces ALL CG calls across ALL routes, so any extra
+  // sleep here would just double-count latency.
   let nextIdx = 0;
   const workers = Array.from({ length: Math.min(MAX_CONCURRENT_PREWARM, work.length) }, async () => {
-    let first = true;
     while (true) {
       const my = nextIdx++;
       if (my >= work.length) return;
-      if (!first) await sleep(PREWARM_GAP_MS);
-      first = false;
       const { coingeckoId, ts } = work[my];
       await fetchTokenPriceAtDate(coingeckoId, ts);
     }

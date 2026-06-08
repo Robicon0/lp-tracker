@@ -22,6 +22,8 @@
 // Cache has NO TTL — historical SUI prices for past days are immutable;
 // once fetched they stay valid for the life of the server instance.
 
+import { withCgPacing } from './cgPriceHistory';
+
 const cache = new Map<string, number>();
 const inFlight = new Map<string, Promise<number | null>>();
 
@@ -42,7 +44,11 @@ export async function fetchSuiPriceAtDate(timestampSeconds: number): Promise<num
   const pending = inFlight.get(date);
   if (pending) return pending;
 
-  const promise: Promise<number | null> = (async () => {
+  // All CG history HTTP calls flow through the process-wide queue exported
+  // by cgPriceHistory so Sui's CG calls don't race with EVM routes' CG calls
+  // for the same per-minute rate-limit budget. One worldwide queue, sequential
+  // pacing, all routes share.
+  const promise: Promise<number | null> = withCgPacing(async () => {
     try {
       const url = `https://api.coingecko.com/api/v3/coins/sui/history?date=${date}&localization=false`;
       const res = await fetch(url, { cache: 'no-store' });
@@ -59,7 +65,7 @@ export async function fetchSuiPriceAtDate(timestampSeconds: number): Promise<num
     } finally {
       inFlight.delete(date);
     }
-  })();
+  });
 
   inFlight.set(date, promise);
   return promise;
