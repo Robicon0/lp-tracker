@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedTokenPriceForTimestamp } from '../../../lib/cgPriceHistory';
+import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -519,6 +520,29 @@ export async function GET(request: Request) {
         })()
       : null;
 
+    // PART 1: guarantee a usable current-spot price for the fee_claim
+    // fallback, even when the caller passed p0=0 or p1=0. For any zero
+    // side that has a per-chain cgIds entry, fetch current spot from
+    // CoinGecko's simple/price endpoint. Stablecoins anchor at $1.
+    let currentSpot0 = fallback0;
+    let currentSpot1 = fallback1;
+    {
+      if (currentSpot0 === 0 && stablecoins.has(token0)) currentSpot0 = 1;
+      if (currentSpot1 === 0 && stablecoins.has(token1)) currentSpot1 = 1;
+      const cg0Spot = !stablecoins.has(token0) && currentSpot0 === 0 ? cgIds[token0] : undefined;
+      const cg1Spot = !stablecoins.has(token1) && currentSpot1 === 0 ? cgIds[token1] : undefined;
+      const idsNeeded: string[] = [];
+      if (cg0Spot) idsNeeded.push(cg0Spot);
+      if (cg1Spot) idsNeeded.push(cg1Spot);
+      if (idsNeeded.length > 0) {
+        try {
+          const spots = await fetchCachedCoinGeckoPrices([...new Set(idsNeeded)]);
+          if (cg0Spot && spots[cg0Spot] > 0) currentSpot0 = spots[cg0Spot];
+          if (cg1Spot && spots[cg1Spot] > 0) currentSpot1 = spots[cg1Spot];
+        } catch { /* coerced to 0 by final guard below */ }
+      }
+    }
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = cleanRawEvents.map((ev) => {
@@ -585,11 +609,18 @@ export async function GET(request: Request) {
       }
 
       if (usdAtTime == null) {
-        price0AtTime = fallback0 || null;
-        price1AtTime = fallback1 || null;
-        if (fallback0 > 0 || fallback1 > 0) {
-          usdAtTime = amount0 * fallback0 + amount1 * fallback1;
+        price0AtTime = currentSpot0 || null;
+        price1AtTime = currentSpot1 || null;
+        if (currentSpot0 > 0 || currentSpot1 > 0) {
+          usdAtTime = amount0 * currentSpot0 + amount1 * currentSpot1;
         }
+      }
+
+      // PART 1 FINAL GUARANTEE: fee_claim usdAtTime must never be null —
+      // analytics feeIncome push() drops null events and the protocol
+      // disappears from "Fee Income By Protocol".
+      if (ev.type === 'fee_claim' && usdAtTime == null) {
+        usdAtTime = 0;
       }
 
       let cumulativeFeeUSD = 0;

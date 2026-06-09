@@ -689,8 +689,18 @@ export default function Analytics() {
       e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string },
     ) => {
       if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
-      const usd = e.usdAtTime ?? 0;
-      if (!Number.isFinite(usd) || usd <= 0) return;
+      // PART 2 (paired with the activity-route null→0 guarantee): admit
+      // usdAtTime === 0 so a protocol whose pricing pipeline failed (CG
+      // rate-limit, no CG_IDS, etc.) still surfaces in "Fee Income By
+      // Protocol" — it just contributes $0 instead of vanishing silently.
+      // Reject only null/undefined/NaN/Infinity. Zero-amount fee_claim
+      // artifacts (both amounts genuinely 0) were already filtered out at
+      // the source by cleanRawEvents in each EVM activity route, so any
+      // event reaching here with usd=0 has real on-chain amounts and just
+      // failed to price.
+      if (e.usdAtTime == null) return;
+      const usd = e.usdAtTime;
+      if (!Number.isFinite(usd) || usd < 0) return;
       flat.push({
         ts: e.timestamp * 1000,
         usd,
@@ -753,7 +763,12 @@ export default function Analytics() {
       byKey.set(k, prev);
     }
     const protocols = Array.from(byKey.values())
-      .filter((p) => p.usd > 0)
+      // Admit usd === 0 too — a protocol whose pricing pipeline failed
+      // still has real fee_claim events with non-zero amounts and should
+      // surface in the breakdown (paired with the push() change above
+      // and the activity-route null→0 guarantee). Only drop strictly
+      // negative aggregates (shouldn't happen, but be defensive).
+      .filter((p) => p.usd >= 0)
       .map((p) => ({ ...p, pct: totalWindow > 0 ? (p.usd / totalWindow) * 100 : 0 }))
       .sort((a, b) => b.usd - a.usd);
 
