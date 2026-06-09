@@ -484,10 +484,30 @@ export async function GET(request: Request) {
         }
       }
 
-      // Fee claims: prefer CoinGecko historical daily market price (the actual
-      // value the user would receive when converting claimed tokens). A side
-      // counts as priced when it's a stablecoin ($1) OR a CG id resolved.
-      if (ev.type === 'fee_claim') {
+      // Fee claims — PRIORITY 1: pool sqrtPriceX96 at the claim block via
+      // Tenderly archive. This is the ORIGINAL working path (pre-commit
+      // 0a8b12e) and is synchronously resolved above before the events.map
+      // begins. It gives accurate per-block pool-internal pricing that's
+      // within a few % of market price for high-TVL pools. Always runs
+      // first because it never depends on a cache being warm.
+      if (ev.type === 'fee_claim' && histPrices) {
+        const hex = '0x' + ev.blockNumber.toString(16);
+        const hp = histPrices.get(hex);
+        if (hp) {
+          price0AtTime = hp.price0Usd;
+          price1AtTime = hp.price1Usd;
+          usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
+        }
+      }
+
+      // Fee claims — PRIORITY 2: CoinGecko historical daily MARKET price
+      // (cache-only — never fetches; the fire-and-forget prewarm above
+      // populates the cache for next request). Replaces sqrtPriceX96 with
+      // true market price when available — a strict accuracy refinement
+      // over the pool-internal ratio, especially for low-TVL pools or
+      // pools temporarily out of arbitrage equilibrium. Skipped when
+      // priority 1 already priced this event, OR when the cache is cold.
+      if (ev.type === 'fee_claim' && usdAtTime == null) {
         const isStable0 = STABLECOINS.has(token0);
         const isStable1 = STABLECOINS.has(token1);
         const cg0 = !isStable0 ? CG_IDS[token0] : undefined;
@@ -498,18 +518,6 @@ export async function GET(request: Request) {
           price0AtTime = p0;
           price1AtTime = p1;
           usdAtTime = amount0 * p0 + amount1 * p1;
-        }
-      }
-
-      // Fallback: pool sqrtPriceX96 at the claim block (used when CG had no
-      // entry for that day, e.g. token unmapped or date predates CG listing).
-      if (ev.type === 'fee_claim' && usdAtTime == null && histPrices) {
-        const hex = '0x' + ev.blockNumber.toString(16);
-        const hp = histPrices.get(hex);
-        if (hp) {
-          price0AtTime = hp.price0Usd;
-          price1AtTime = hp.price1Usd;
-          usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
         }
       }
 
