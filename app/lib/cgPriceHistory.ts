@@ -232,3 +232,13 @@ export function getCachedTokenPriceForTimestamp(
   if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return null;
   return cache.get(keyOf(coingeckoId, tsToCoinGeckoDate(timestampSeconds))) ?? null;
 }
+
+// Explicit cache-only lookup — semantically identical to
+// getCachedTokenPriceForTimestamp but named to make intent obvious at the
+// call site: "I will NOT fetch from CoinGecko if this misses; the route
+// must respond within its timeout regardless." Routes that use this should
+// kick off background warming via `void prewarmTokenPrices(...)` so the
+// next request's cache is warm. First-load cold-cache calls fall through
+// to the histPrices (sqrtPriceX96 archive) path, which is also accurate
+// historical pricing — just pool-internal price instead of CG market price.
+export const getCachedOnlyTokenPrice = getCachedTokenPriceForTimestamp;

@@ -371,7 +371,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // fell back to current-price × amounts. Cached entries from v12 carry
 // that wrong-USD history; bump forces a fresh fetch where the resolver
 // runs and populates accurate per-block prices.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v18-";
+const CACHE_KEY_PREFIX = "lp-pnl-events-v19-";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedEntry {

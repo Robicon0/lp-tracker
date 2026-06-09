@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
-import { prewarmTokenPrices, getCachedTokenPriceForTimestamp } from '../../../lib/cgPriceHistory';
+import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
@@ -498,7 +498,9 @@ export async function GET(request: Request) {
         const pairs: Array<{ coingeckoId: string; timestamps: number[] }> = [];
         if (cg0) pairs.push({ coingeckoId: cg0, timestamps: feeTimestamps });
         if (cg1) pairs.push({ coingeckoId: cg1, timestamps: feeTimestamps });
-        if (pairs.length > 0) await prewarmTokenPrices(pairs);
+        // Fire-and-forget — never block the route on CoinGecko. See the
+        // detailed rationale in app/api/aerodrome/activity/route.ts.
+        if (pairs.length > 0) void prewarmTokenPrices(pairs).catch(() => {});
       }
     }
 
@@ -587,8 +589,8 @@ export async function GET(request: Request) {
         const isStable1 = stablecoins.has(token1);
         const cg0 = !isStable0 ? cgIds[token0] : undefined;
         const cg1 = !isStable1 ? cgIds[token1] : undefined;
-        const p0 = isStable0 ? 1 : (cg0 ? getCachedTokenPriceForTimestamp(cg0, ev.timestamp) : null);
-        const p1 = isStable1 ? 1 : (cg1 ? getCachedTokenPriceForTimestamp(cg1, ev.timestamp) : null);
+        const p0 = isStable0 ? 1 : (cg0 ? getCachedOnlyTokenPrice(cg0, ev.timestamp) : null);
+        const p1 = isStable1 ? 1 : (cg1 ? getCachedOnlyTokenPrice(cg1, ev.timestamp) : null);
         if (p0 != null && p1 != null) {
           price0AtTime = p0;
           price1AtTime = p1;
