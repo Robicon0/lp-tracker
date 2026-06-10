@@ -31,6 +31,8 @@
 // direct-CoinGecko pattern as `app/lib/priceCache.ts` and
 // `app/lib/cgPriceHistory.ts` which both call CoinGecko directly.
 
+import { logPrice } from './priceLogger';
+
 const cache = new Map<string, { id: string | null; expiresAt: number }>();
 const inFlight = new Map<string, Promise<string | null>>();
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -41,7 +43,19 @@ export async function resolveCgId(symbol: string | null | undefined): Promise<st
   if (!key) return null;
 
   const cached = cache.get(key);
-  if (cached && Date.now() < cached.expiresAt) return cached.id;
+  if (cached && Date.now() < cached.expiresAt) {
+    logPrice({
+      event: 'price_lookup',
+      caller: 'cgSymbolSearch',
+      token: key,
+      targetTimestamp: 'now',
+      attempts: [{ source: 'symbol-search', token: key, result: null, reason: cached.id ? `resolved_id=${cached.id}` : 'symbol_not_found' }],
+      finalPrice: null,
+      finalSource: cached.id ? 'symbol-search' : null,
+      status: cached.id ? 'ok' : 'failed',
+    });
+    return cached.id;
+  }
 
   const pending = inFlight.get(key);
   if (pending) return pending;
@@ -71,6 +85,16 @@ export async function resolveCgId(symbol: string | null | undefined): Promise<st
       id = null;
     }
     cache.set(key, { id, expiresAt: Date.now() + TTL_MS });
+    logPrice({
+      event: 'price_lookup',
+      caller: 'cgSymbolSearch',
+      token: key,
+      targetTimestamp: 'now',
+      attempts: [{ source: 'symbol-search', token: key, result: null, reason: id ? `resolved_id=${id}` : 'symbol_not_found' }],
+      finalPrice: null,
+      finalSource: id ? 'symbol-search' : null,
+      status: id ? 'ok' : 'failed',
+    });
     inFlight.delete(key);
     return id;
   })();

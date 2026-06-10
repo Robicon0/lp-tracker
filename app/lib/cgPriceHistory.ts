@@ -27,6 +27,8 @@
 // failures (429, 5xx, network errors). 404s and 200-with-no-price are
 // permanently cached as misses.
 
+import { logPrice } from './priceLogger';
+
 const cache = new Map<string, number>();              // `${id}:${DD-MM-YYYY}` → price
 const inFlight = new Map<string, Promise<number | null>>();
 const negativeCache = new Set<string>();              // permanent misses
@@ -142,13 +144,38 @@ export async function fetchTokenPriceAtDate(
   const k = keyOf(coingeckoId, date);
 
   const cached = cache.get(k);
-  if (cached != null) return cached;
-  if (negativeCache.has(k)) return null;
+  if (cached != null) {
+    logPrice({
+      event: 'price_lookup',
+      caller: 'cgPriceHistory',
+      token: coingeckoId,
+      targetTimestamp: timestampSeconds,
+      attempts: [{ source: 'cg-historical-cache', token: coingeckoId, result: cached }],
+      finalPrice: cached,
+      finalSource: 'cg-historical-cache',
+      status: 'ok',
+    });
+    return cached;
+  }
+  if (negativeCache.has(k)) {
+    logPrice({
+      event: 'price_lookup',
+      caller: 'cgPriceHistory',
+      token: coingeckoId,
+      targetTimestamp: timestampSeconds,
+      attempts: [{ source: 'cg-historical-cache', token: coingeckoId, result: null, reason: 'negative_cache' }],
+      finalPrice: null,
+      finalSource: null,
+      status: 'failed',
+    });
+    return null;
+  }
 
   const pending = inFlight.get(k);
   if (pending) return pending;
 
   const promise: Promise<number | null> = (async () => {
+    const __t0 = Date.now();
     try {
       let outcome = await fetchOnce(coingeckoId, date);
       // Retry on transient failures (429 rate-limit, 5xx, network errors) with
@@ -161,11 +188,31 @@ export async function fetchTokenPriceAtDate(
       }
       if (outcome.kind === 'price' && typeof outcome.price === 'number') {
         cache.set(k, outcome.price);
+        logPrice({
+          event: 'price_lookup',
+          caller: 'cgPriceHistory',
+          token: coingeckoId,
+          targetTimestamp: timestampSeconds,
+          attempts: [{ source: 'cg-historical-fetch', token: coingeckoId, result: outcome.price, ms: Date.now() - __t0 }],
+          finalPrice: outcome.price,
+          finalSource: 'cg-historical-fetch',
+          status: 'ok',
+        });
         return outcome.price;
       }
       if (outcome.kind === 'permanent_miss') {
         negativeCache.add(k);
       }
+      logPrice({
+        event: 'price_lookup',
+        caller: 'cgPriceHistory',
+        token: coingeckoId,
+        targetTimestamp: timestampSeconds,
+        attempts: [{ source: 'cg-historical-fetch', token: coingeckoId, result: null, ms: Date.now() - __t0, reason: outcome.kind === 'permanent_miss' ? '404_or_no_data' : 'rate_limit_or_transient' }],
+        finalPrice: null,
+        finalSource: null,
+        status: 'failed',
+      });
       // 'transient' after all retries → return null but DO NOT poison the
       // cache, so a future request can try again.
       return null;

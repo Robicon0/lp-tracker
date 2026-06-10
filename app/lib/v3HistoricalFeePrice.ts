@@ -26,6 +26,8 @@
 //   const out = await resolver.resolveMany([block1, block2, ...]);
 //   const prices = out.get(blockHex); // { price0Usd, price1Usd } | null
 
+import { logPrice } from './priceLogger';
+
 const SLOT0_SELECTOR = "0x3850c7bd"; // slot0()
 
 export interface HistPriceContext {
@@ -113,16 +115,53 @@ export function createHistoricalFeePriceResolver(ctx: HistPriceContext) {
     const result = await ethCallAt(ctx.rpc, ctx.pool, SLOT0_SELECTOR, blockHex);
     if (!result) {
       cache.set(blockHex, null);
+      logPrice({
+        event: 'price_lookup',
+        caller: 'v3HistoricalFeePrice',
+        token: ctx.pool,
+        tokenAddress: ctx.pool,
+        attempts: [{ source: 'sqrtPriceX96', token: ctx.pool, result: null, reason: `rpc_error_or_revert block=${blockHex}` }],
+        finalPrice: null,
+        finalSource: null,
+        status: 'failed',
+      });
       return null;
     }
     const sqrt = decodeSlot0SqrtPriceX96(result);
     if (sqrt == null) {
       cache.set(blockHex, null);
+      logPrice({
+        event: 'price_lookup',
+        caller: 'v3HistoricalFeePrice',
+        token: ctx.pool,
+        tokenAddress: ctx.pool,
+        attempts: [{ source: 'sqrtPriceX96', token: ctx.pool, result: null, reason: `slot0_empty_or_zero block=${blockHex}` }],
+        finalPrice: null,
+        finalSource: null,
+        status: 'failed',
+      });
       return null;
     }
     const human = sqrtPriceX96ToHumanPrice(sqrt, ctx.decimals0, ctx.decimals1);
     const prices = applyStableAnchor(human, ctx.token0, ctx.token1, ctx.stablecoins);
     cache.set(blockHex, prices);
+    logPrice({
+      event: 'price_lookup',
+      caller: 'v3HistoricalFeePrice',
+      token: ctx.pool,
+      tokenAddress: ctx.pool,
+      attempts: [{
+        source: 'sqrtPriceX96',
+        token: ctx.pool,
+        result: prices ? prices.price0Usd : null,
+        reason: prices
+          ? `block=${blockHex} price0=${prices.price0Usd} price1=${prices.price1Usd}`
+          : `no_stablecoin_anchor block=${blockHex}`,
+      }],
+      finalPrice: prices ? prices.price0Usd : null,
+      finalSource: prices ? 'sqrtPriceX96' : null,
+      status: prices ? 'ok' : 'failed',
+    });
     return prices;
   }
 

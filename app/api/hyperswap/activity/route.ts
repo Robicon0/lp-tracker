@@ -3,6 +3,7 @@ import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
+import { logPrice } from '../../../lib/priceLogger';
 
 // ── HyperEVM log source — 3-tier fallback chain ─────────────────────────────
 // TIER 1 (PRIMARY): Etherscan V2 with chainid=999 — archive-backed full history.
@@ -61,6 +62,17 @@ const CG_IDS: Record<string, string> = {
   '0xfd739d4e423301ce9385c1fb8850539d657c296d': 'hyperliquid', // kHYPE
   '0xbe6727b535545c67d5caa73dea54865b92cf7907': 'hyperliquid', // beHYPE (best-effort)
   '0x94e8396e0869c9f2200760af0621afd240e1cf38': 'hyperliquid', // wstHYPE
+};
+
+// [PRICE_LOG] NFT-manager → protocol label, used only to set the `route` field
+// on fee_claim_resolution / route_summary events. The HyperEVM activity route
+// serves HyperSwap / KittenSwap / ProjectX; they differ ONLY by their NFT
+// manager contract (the `nftManager` query param the route already receives).
+// Addresses are the canonical ones defined in app/api/hyperswap/route.ts.
+const NFT_MANAGER_TO_PROTOCOL: Record<string, string> = {
+  '0x6eda206207c09e5428f281761ddc0d300851fbc8': 'hyperswap',
+  '0xb9201e89f94a01ff13ad4caecf43a2e232513754': 'kittenswap',
+  '0xead19ae861c29bbb2101e834922b2feee69b9091': 'projectx',
 };
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim';
@@ -577,6 +589,23 @@ export async function GET(request: Request) {
 
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
+    // [PRICE_LOG] instrumentation (additive only) — per-protocol fee_claim
+    // buckets. Each request is for a single nftManager → single protocol, so
+    // in practice exactly one bucket is populated; the per-protocol structure
+    // honours the "emit one summary per protocol, skip zero" rule for this
+    // shared HyperSwap/KittenSwap/ProjectX route.
+    const __protocol = NFT_MANAGER_TO_PROTOCOL[nftManager.toLowerCase()] ?? nftManager.toLowerCase();
+    const __posId = positionId ?? '';
+    const __buckets = new Map<string, {
+      total: number; resolved: number; failed: number; lookups: number;
+      breakdown: Record<string, number>;
+      failures: Array<{ token: string; blockTimestamp: number; reason: string }>;
+    }>();
+    const __bucket = (p: string) => {
+      let b = __buckets.get(p);
+      if (!b) { b = { total: 0, resolved: 0, failed: 0, lookups: 0, breakdown: {}, failures: [] }; __buckets.set(p, b); }
+      return b;
+    };
     const events: ActivityEvent[] = cleanRawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
@@ -663,6 +692,44 @@ export async function GET(request: Request) {
         cumulativeFeeUSD = runningFeeUSD;
       }
 
+      // [PRICE_LOG] fee_claim resolution — read-only re-derivation of the
+      // winning price source, mirrors the ladder above without altering values.
+      if (ev.type === 'fee_claim') {
+        const __hex = '0x' + ev.blockNumber.toString(16);
+        let __src: string;
+        if (histPrices && histPrices.get(__hex)) {
+          __src = 'sqrtPriceX96';
+        } else {
+          const __s0 = STABLECOINS.has(token0);
+          const __s1 = STABLECOINS.has(token1);
+          const __cg0 = !__s0 ? CG_IDS[token0] : undefined;
+          const __cg1 = !__s1 ? CG_IDS[token1] : undefined;
+          const __p0 = __s0 ? 1 : (__cg0 ? getCachedOnlyTokenPrice(__cg0, ev.timestamp) : null);
+          const __p1 = __s1 ? 1 : (__cg1 ? getCachedOnlyTokenPrice(__cg1, ev.timestamp) : null);
+          if (__p0 != null && __p1 != null) __src = (__s0 && __s1) ? 'stablecoin-fixed' : 'cg-historical-cache';
+          else if (currentSpot0 > 0 || currentSpot1 > 0) __src = 'cg-spot';
+          else __src = 'unknown';
+        }
+        const __b = __bucket(__protocol);
+        __b.total++; __b.lookups++;
+        __b.breakdown[__src] = (__b.breakdown[__src] ?? 0) + 1;
+        const __ok = usdAtTime != null && usdAtTime > 0;
+        if (__ok) __b.resolved++;
+        else { __b.failed++; __b.failures.push({ token: `${token0}/${token1}`, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'no_price_any_source' : 'zero_usd' }); }
+        logPrice({
+          event: 'fee_claim_resolution',
+          route: __protocol,
+          positionId: __posId,
+          blockTimestamp: ev.timestamp,
+          token0: { symbol: token0, address: token0, amount: String(amount0) },
+          token1: { symbol: token1, address: token1, amount: String(amount1) },
+          token0Usd: price0AtTime,
+          token1Usd: price1AtTime,
+          usdAtTime,
+          status: (usdAtTime == null || usdAtTime === 0) ? 'failed_null_usdAtTime' : ((price0AtTime != null && price1AtTime != null) ? 'ok' : 'partial'),
+          notes: `source=${__src} nftManager=${nftManager.toLowerCase()}`,
+        });
+      }
       return {
         type: ev.type,
         txHash: ev.txHash,
@@ -678,6 +745,23 @@ export async function GET(request: Request) {
     });
 
     events.reverse();
+
+    // [PRICE_LOG] route_summary — one per protocol that had claims this request
+    // (skips zero-claim protocols, per the bucketing rule for this shared route)
+    for (const [__proto, __b] of __buckets) {
+      if (__b.total === 0) continue;
+      logPrice({
+        event: 'route_summary',
+        route: __proto,
+        wallet: '',
+        totalClaims: __b.total,
+        resolvedClaims: __b.resolved,
+        failedClaims: __b.failed,
+        totalLookups: __b.lookups,
+        sourceBreakdown: __b.breakdown,
+        failures: __b.failures,
+      });
+    }
 
     const response: ActivityResponse = {
       events,

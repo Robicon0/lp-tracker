@@ -3,6 +3,7 @@ import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
+import { logPrice } from '../../../lib/priceLogger';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
@@ -389,6 +390,12 @@ export async function GET(request: Request) {
 
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
+    // [PRICE_LOG] instrumentation (additive only) — per-request fee_claim counters
+    const __route = 'velodrome';
+    const __posId = positionId ?? '';
+    const __srcBreakdown: Record<string, number> = {};
+    const __failures: Array<{ token: string; blockTimestamp: number; reason: string }> = [];
+    let __totalClaims = 0, __resolvedClaims = 0, __failedClaims = 0, __totalLookups = 0;
     const events: ActivityEvent[] = cleanRawEvents.map((ev) => {
       const amount0 = Number(ev.amount0Raw) / Number(scale0);
       const amount1 = Number(ev.amount1Raw) / Number(scale1);
@@ -476,10 +483,60 @@ export async function GET(request: Request) {
         cumulativeFeeUSD = runningFeeUSD;
       }
 
+      // [PRICE_LOG] fee_claim resolution — read-only re-derivation of the
+      // winning price source, mirrors the ladder above without altering values.
+      if (ev.type === 'fee_claim') {
+        const __hex = '0x' + ev.blockNumber.toString(16);
+        let __src: string;
+        if (histPrices && histPrices.get(__hex)) {
+          __src = 'sqrtPriceX96';
+        } else {
+          const __s0 = STABLECOINS.has(token0);
+          const __s1 = STABLECOINS.has(token1);
+          const __cg0 = !__s0 ? CG_IDS[token0] : undefined;
+          const __cg1 = !__s1 ? CG_IDS[token1] : undefined;
+          const __p0 = __s0 ? 1 : (__cg0 ? getCachedOnlyTokenPrice(__cg0, ev.timestamp) : null);
+          const __p1 = __s1 ? 1 : (__cg1 ? getCachedOnlyTokenPrice(__cg1, ev.timestamp) : null);
+          if (__p0 != null && __p1 != null) __src = (__s0 && __s1) ? 'stablecoin-fixed' : 'cg-historical-cache';
+          else if (currentSpot0 > 0 || currentSpot1 > 0) __src = 'cg-spot';
+          else __src = 'unknown';
+        }
+        __totalClaims++; __totalLookups++;
+        __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
+        const __ok = usdAtTime != null && usdAtTime > 0;
+        if (__ok) __resolvedClaims++;
+        else { __failedClaims++; __failures.push({ token: `${token0}/${token1}`, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'no_price_any_source' : 'zero_usd' }); }
+        logPrice({
+          event: 'fee_claim_resolution',
+          route: __route,
+          positionId: __posId,
+          blockTimestamp: ev.timestamp,
+          token0: { symbol: token0, address: token0, amount: String(amount0) },
+          token1: { symbol: token1, address: token1, amount: String(amount1) },
+          token0Usd: price0AtTime,
+          token1Usd: price1AtTime,
+          usdAtTime,
+          status: (usdAtTime == null || usdAtTime === 0) ? 'failed_null_usdAtTime' : ((price0AtTime != null && price1AtTime != null) ? 'ok' : 'partial'),
+          notes: `source=${__src}`,
+        });
+      }
       return { type: ev.type, txHash: ev.txHash, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, cumulativeFeeUSD };
     });
 
     events.reverse();
+
+    // [PRICE_LOG] route_summary — aggregate of this request's fee_claim pricing
+    logPrice({
+      event: 'route_summary',
+      route: __route,
+      wallet: '',
+      totalClaims: __totalClaims,
+      resolvedClaims: __resolvedClaims,
+      failedClaims: __failedClaims,
+      totalLookups: __totalLookups,
+      sourceBreakdown: __srcBreakdown,
+      failures: __failures,
+    });
 
     return NextResponse.json({
       events,

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
+import { logPrice } from '../../../lib/priceLogger';
+import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 
 // Cetus CLMM activity route — follows the EXACT same pattern as
 // app/api/bluefin/activity/route.ts. All Cetus specifics below were verified
@@ -53,6 +55,61 @@ const STABLE_SYMBOLS = new Set([
 const REWARD_DECIMALS_BY_SYMBOL: Record<string, number> = {
   SUI: 9, CETUS: 9, NAVX: 9, DEEP: 6, USDC: 6, USDT: 6, DAI: 18, WETH: 8, WBTC: 8,
 };
+
+// FIX A: explicit Sui token → CoinGecko ID maps for the two tokens the
+// pool-side fallbacks (priceA/priceB) and symbol-matches-pool-side rules
+// repeatedly miss — SUI (as a coin type or a bare reward symbol) and CETUS
+// (the reward token for almost every Cetus pool, which is rarely one of the
+// pool's own sides). When the claim-time historical SUI price is unavailable,
+// or the reward token isn't a pool side, these resolve to the CURRENT cg-spot
+// price (60s-cached simple/price) so the claim is valued rather than dropped.
+// CETUS → cetus-protocol verified via CoinGecko search (rank #885) and matches
+// KNOWN_TOKENS in app/api/cetus/route.ts.
+const CG_ID_BY_SYMBOL: Record<string, string> = {
+  SUI: 'sui',
+  CETUS: 'cetus-protocol',
+};
+const CG_ID_BY_COINTYPE: Record<string, string> = {
+  '0x2::sui::sui': 'sui',
+  '0x06864a6f921804860930db6ddbe2e16acdf8504495ea7481637a1c8b9a8fe54b::cetus::cetus': 'cetus-protocol',
+};
+
+// FIX A robustness: fetchCachedCoinGeckoPrices returns 0 (and caches nothing)
+// on a transient CoinGecko 429, which under heavy page load would drop EVERY
+// CETUS reward in that request — a rate-limit race identical to the Bluefin
+// one we just fixed. To make CETUS resolution deterministic instead of
+// race-dependent, persist the last-known-good cg-spot per id at module scope
+// (CETUS spot barely moves intraday, so a slightly stale value is correct
+// enough for fee valuation and infinitely better than dropping the claim),
+// and give a single short retry to any id that comes back 0 with no prior
+// good value. Once ANY route call fetches it successfully, every later call in
+// the process reuses it.
+const spotPriceLkg = new Map<string, number>();
+
+async function fetchSpotPrices(ids: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (ids.length === 0) return out;
+  let fetched = await fetchCachedCoinGeckoPrices(ids);
+  // Patient cold-start retries: ONLY for ids that are still 0 AND have no prior
+  // good value in the process-wide LKG. Once an id lands in spotPriceLkg every
+  // later call reuses it (no TTL), so this retry cost is paid at most once per
+  // token per process even through a transient CoinGecko 429 burst. simple/price
+  // is far more budget-efficient than per-day history (1 call prices every CETUS
+  // claim), so a few spaced retries reliably win the rate-limit race.
+  for (const delay of [1500, 3000, 6000]) {
+    const missing = ids.filter((id) => !((fetched[id] ?? 0) > 0) && !((spotPriceLkg.get(id) ?? 0) > 0));
+    if (missing.length === 0) break;
+    await new Promise((r) => setTimeout(r, delay));
+    const retry = await fetchCachedCoinGeckoPrices(missing);
+    fetched = { ...fetched, ...retry };
+  }
+  for (const id of ids) {
+    const v = fetched[id] ?? 0;
+    if (v > 0) spotPriceLkg.set(id, v);
+    out[id] = v > 0 ? v : (spotPriceLkg.get(id) ?? 0);
+  }
+  return out;
+}
 
 export type ActivityEventType = 'deposit' | 'withdrawal' | 'fee_claim' | 'reward_claim';
 
@@ -335,8 +392,36 @@ export async function GET(request: Request) {
       }
     }
 
+    // FIX A: prewarm CURRENT cg-spot for any SUI / CETUS token that appears as
+    // a reward symbol or as a pool side, so the synchronous per-event loop can
+    // resolve them. Uses the 60s-cached simple/price helper (NOT the historical
+    // CG queue), so it adds at most one cheap request per page load.
+    const __cgIdsNeeded = new Set<string>();
+    for (const e of rawEvents) {
+      if (e.type === 'reward_claim') {
+        const cg = CG_ID_BY_SYMBOL[(e.rewardSymbol ?? '').trim().toUpperCase()];
+        if (cg) __cgIdsNeeded.add(cg);
+      }
+    }
+    {
+      const cgA = CG_ID_BY_COINTYPE[coinTypeA.toLowerCase()];
+      const cgB = CG_ID_BY_COINTYPE[coinTypeB.toLowerCase()];
+      if (cgA) __cgIdsNeeded.add(cgA);
+      if (cgB) __cgIdsNeeded.add(cgB);
+    }
+    const spotByCgId: Record<string, number> = __cgIdsNeeded.size > 0
+      ? await fetchSpotPrices([...__cgIdsNeeded])
+      : {};
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
+    // [PRICE_LOG] instrumentation (additive only) — per-request fee/reward counters
+    const __route = 'cetus';
+    const __posId = positionId ?? '';
+    const __wallet = account;
+    const __srcBreakdown: Record<string, number> = {};
+    const __failures: Array<{ token: string; blockTimestamp: number; reason: string }> = [];
+    let __totalClaims = 0, __resolvedClaims = 0, __failedClaims = 0, __totalLookups = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       let amount0: number;
       let amount1: number;
@@ -392,6 +477,18 @@ export async function GET(request: Request) {
         } else if (symUp && symUp === symB && fallbackB > 0) {
           pxReward = fallbackB;
         }
+        // FIX A: a non-stable / non-pool-side reward (CETUS, plus SUI as a net)
+        // → current cg-spot via the CG-id map. cg-spot is used (not claim-time
+        // historical) because on CoinGecko's free tier the per-IP budget is
+        // shared across simple/price AND coins/history; one cheap simple/price
+        // call prices EVERY CETUS claim, whereas per-day history (16+ calls +
+        // 429 retries) saturates the shared budget and starves the spot path
+        // for both CETUS and SUI. The process-wide last-known-good cache
+        // (fetchSpotPrices) makes the value deterministic once fetched.
+        if (pxReward == null) {
+          const cg = CG_ID_BY_SYMBOL[symUp];
+          if (cg && (spotByCgId[cg] ?? 0) > 0) pxReward = spotByCgId[cg];
+        }
         if (pxReward != null) {
           price0AtTime = pxReward;
           price1AtTime = null;
@@ -417,6 +514,11 @@ export async function GET(request: Request) {
             const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
             if (hist != null) pxB = hist;
           }
+          // FIX A: a SUI / CETUS fee side still unpriced (e.g. CETUS/USDC pool,
+          // or SUI when both historical and its spot fallback returned null) →
+          // current cg-spot via the CG-id map.
+          if (pxA === 0) { const cg = CG_ID_BY_COINTYPE[coinTypeA.toLowerCase()]; if (cg && (spotByCgId[cg] ?? 0) > 0) pxA = spotByCgId[cg]; }
+          if (pxB === 0) { const cg = CG_ID_BY_COINTYPE[coinTypeB.toLowerCase()]; if (cg && (spotByCgId[cg] ?? 0) > 0) pxB = spotByCgId[cg]; }
         }
         price0AtTime = pxA || null;
         price1AtTime = pxB || null;
@@ -425,12 +527,78 @@ export async function GET(request: Request) {
         }
       }
 
+      // FIX B: a claim whose only token amount is zero is a real on-chain
+      // artifact (protocol-side rebalance / dust sweep), NOT a pricing failure.
+      // Value it at $0, treat it as resolved, and keep it OUT of the failures
+      // list. Applies to both reward_claim (single token = amount0) and
+      // fee_claim (both sides zero).
+      const __isZeroAmount =
+        (ev.type === 'reward_claim' && amount0 === 0) ||
+        (ev.type === 'fee_claim' && amount0 === 0 && amount1 === 0);
+      if (__isZeroAmount) usdAtTime = 0;
+
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
         runningFeeUSD += usdAtTime ?? 0;
         cumulativeFeeUSD = runningFeeUSD;
       }
 
+      // [PRICE_LOG] fee/reward resolution — read-only source re-derivation,
+      // mirrors the Sui pricing rules above without altering any value.
+      if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
+        __totalClaims++; __totalLookups++;
+        const __tokLabel = ev.type === 'reward_claim' ? (ev.rewardSymbol ?? 'REWARD') : `${coinTypeA}/${coinTypeB}`;
+        if (__isZeroAmount) {
+          // FIX B: resolved-at-zero, never counted as a failure.
+          __srcBreakdown['zero_amount'] = (__srcBreakdown['zero_amount'] ?? 0) + 1;
+          __resolvedClaims++;
+          logPrice({
+            event: 'fee_claim_resolution',
+            route: __route,
+            positionId: __posId,
+            blockTimestamp: ev.timestamp,
+            token0: { symbol: ev.type === 'reward_claim' ? (ev.rewardSymbol ?? 'REWARD') : coinTypeA, address: ev.type === 'reward_claim' ? undefined : coinTypeA, amount: String(amount0) },
+            token1: { symbol: ev.type === 'reward_claim' ? '' : coinTypeB, address: ev.type === 'reward_claim' ? undefined : coinTypeB, amount: String(amount1) },
+            token0Usd: price0AtTime,
+            token1Usd: price1AtTime,
+            usdAtTime: 0,
+            status: 'ok',
+            notes: 'zero_amount',
+          });
+        } else {
+          const __histSui = getCachedSuiPriceForTimestamp(ev.timestamp);
+          let __src: string;
+          if (ev.type === 'reward_claim') {
+            const __sym = (ev.rewardSymbol ?? '').trim();
+            const __symUp = __sym.toUpperCase();
+            if (STABLE_SYMBOLS.has(__sym) || STABLE_SYMBOLS.has(__symUp)) __src = 'stablecoin-fixed';
+            else if (__symUp === 'SUI' && __histSui != null) __src = 'sui-historical';
+            else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
+            else __src = 'unknown';
+          } else {
+            if ((suiSideIsA || suiSideIsB) && __histSui != null && usdAtTime != null && usdAtTime > 0) __src = 'sui-historical';
+            else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
+            else __src = 'unknown';
+          }
+          __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
+          const __ok = usdAtTime != null && usdAtTime > 0;
+          if (__ok) __resolvedClaims++;
+          else { __failedClaims++; __failures.push({ token: __tokLabel, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'no_price_any_source' : 'zero_usd' }); }
+          logPrice({
+            event: 'fee_claim_resolution',
+            route: __route,
+            positionId: __posId,
+            blockTimestamp: ev.timestamp,
+            token0: { symbol: ev.type === 'reward_claim' ? (ev.rewardSymbol ?? 'REWARD') : coinTypeA, address: ev.type === 'reward_claim' ? undefined : coinTypeA, amount: String(amount0) },
+            token1: { symbol: ev.type === 'reward_claim' ? '' : coinTypeB, address: ev.type === 'reward_claim' ? undefined : coinTypeB, amount: String(amount1) },
+            token0Usd: price0AtTime,
+            token1Usd: price1AtTime,
+            usdAtTime,
+            status: (usdAtTime == null || usdAtTime === 0) ? 'failed_null_usdAtTime' : ((price0AtTime != null && (ev.type === 'reward_claim' || price1AtTime != null)) ? 'ok' : 'partial'),
+            notes: `source=${__src} type=${ev.type}`,
+          });
+        }
+      }
       return {
         type: ev.type,
         txHash: ev.txHash,
@@ -447,6 +615,19 @@ export async function GET(request: Request) {
 
     // Newest-first for display.
     events.reverse();
+
+    // [PRICE_LOG] route_summary — aggregate of this request's fee/reward pricing
+    logPrice({
+      event: 'route_summary',
+      route: __route,
+      wallet: __wallet,
+      totalClaims: __totalClaims,
+      resolvedClaims: __resolvedClaims,
+      failedClaims: __failedClaims,
+      totalLookups: __totalLookups,
+      sourceBreakdown: __srcBreakdown,
+      failures: __failures,
+    });
 
     return NextResponse.json({
       events,

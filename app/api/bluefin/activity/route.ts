@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
+import { logPrice } from '../../../lib/priceLogger';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -315,6 +316,13 @@ export async function GET(request: Request) {
 
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
+    // [PRICE_LOG] instrumentation (additive only) — per-request fee/reward counters
+    const __route = 'bluefin';
+    const __posId = positionId ?? '';
+    const __wallet = account;
+    const __srcBreakdown: Record<string, number> = {};
+    const __failures: Array<{ token: string; blockTimestamp: number; reason: string }> = [];
+    let __totalClaims = 0, __resolvedClaims = 0, __failedClaims = 0, __totalLookups = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
       let amount0: number;
       let amount1: number;
@@ -411,6 +419,43 @@ export async function GET(request: Request) {
         cumulativeFeeUSD = runningFeeUSD;
       }
 
+      // [PRICE_LOG] fee/reward resolution — read-only source re-derivation,
+      // mirrors the Sui pricing rules above without altering any value.
+      if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
+        const __histSui = getCachedSuiPriceForTimestamp(ev.timestamp);
+        let __src: string;
+        if (ev.type === 'reward_claim') {
+          const __sym = (ev.rewardSymbol ?? '').trim();
+          const __symUp = __sym.toUpperCase();
+          if (STABLE_SYMBOLS.has(__sym) || STABLE_SYMBOLS.has(__symUp)) __src = 'stablecoin-fixed';
+          else if (__symUp === 'SUI' && __histSui != null) __src = 'sui-historical';
+          else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
+          else __src = 'unknown';
+        } else {
+          if ((suiSideIsA || suiSideIsB) && __histSui != null && usdAtTime != null && usdAtTime > 0) __src = 'sui-historical';
+          else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
+          else __src = 'unknown';
+        }
+        __totalClaims++; __totalLookups++;
+        __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
+        const __ok = usdAtTime != null && usdAtTime > 0;
+        const __tokLabel = ev.type === 'reward_claim' ? (ev.rewardSymbol ?? 'REWARD') : `${coinTypeA}/${coinTypeB}`;
+        if (__ok) __resolvedClaims++;
+        else { __failedClaims++; __failures.push({ token: __tokLabel, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'no_price_any_source' : 'zero_usd' }); }
+        logPrice({
+          event: 'fee_claim_resolution',
+          route: __route,
+          positionId: __posId,
+          blockTimestamp: ev.timestamp,
+          token0: { symbol: ev.type === 'reward_claim' ? (ev.rewardSymbol ?? 'REWARD') : coinTypeA, address: ev.type === 'reward_claim' ? undefined : coinTypeA, amount: String(amount0) },
+          token1: { symbol: ev.type === 'reward_claim' ? '' : coinTypeB, address: ev.type === 'reward_claim' ? undefined : coinTypeB, amount: String(amount1) },
+          token0Usd: price0AtTime,
+          token1Usd: price1AtTime,
+          usdAtTime,
+          status: (usdAtTime == null || usdAtTime === 0) ? 'failed_null_usdAtTime' : ((price0AtTime != null && (ev.type === 'reward_claim' || price1AtTime != null)) ? 'ok' : 'partial'),
+          notes: `source=${__src} type=${ev.type}`,
+        });
+      }
       return {
         type: ev.type,
         txHash: ev.txHash,
@@ -427,6 +472,19 @@ export async function GET(request: Request) {
 
     // Reverse to newest-first for display
     events.reverse();
+
+    // [PRICE_LOG] route_summary — aggregate of this request's fee/reward pricing
+    logPrice({
+      event: 'route_summary',
+      route: __route,
+      wallet: __wallet,
+      totalClaims: __totalClaims,
+      resolvedClaims: __resolvedClaims,
+      failedClaims: __failedClaims,
+      totalLookups: __totalLookups,
+      sourceBreakdown: __srcBreakdown,
+      failures: __failures,
+    });
 
     return NextResponse.json({
       events,

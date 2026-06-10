@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logPrice } from "../../lib/priceLogger";
 
 // Server-side proxy for CoinGecko API — avoids CORS errors from browser clients.
 // All client-side code should call /api/prices?... instead of api.coingecko.com directly.
@@ -25,6 +26,29 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const endpoint = searchParams.get("endpoint") || "simple/price";
 
+  // [PRICE_LOG] instrumentation (additive only): for simple/price responses,
+  // emit one cg-spot price_lookup per requested token id. No-op for any other
+  // endpoint. Does not touch the proxy logic or the returned payload.
+  const logSpotTokens = (data: unknown) => {
+    if (endpoint !== "simple/price") return;
+    const ids = (searchParams.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const obj = (data ?? {}) as Record<string, { usd?: number }>;
+    for (const id of ids) {
+      const price = obj[id]?.usd;
+      const ok = typeof price === "number" && price > 0;
+      logPrice({
+        event: "price_lookup",
+        caller: "/api/prices",
+        token: id,
+        targetTimestamp: "now",
+        attempts: [{ source: "cg-spot", token: id, result: ok ? (price as number) : null, reason: ok ? undefined : "no_price_in_response" }],
+        finalPrice: ok ? (price as number) : null,
+        finalSource: ok ? "cg-spot" : null,
+        status: ok ? "ok" : "failed",
+      });
+    }
+  };
+
   try {
     let url: string;
 
@@ -50,6 +74,7 @@ export async function GET(request: NextRequest) {
     // Return cached response if still fresh
     const cached = cache.get(url);
     if (cached && Date.now() < cached.expiresAt) {
+      logSpotTokens(cached.data);
       return NextResponse.json(cached.data);
     }
 
@@ -60,6 +85,7 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       // On 429, return stale cache if available rather than an error
       if (response.status === 429 && cached) {
+        logSpotTokens(cached.data);
         return NextResponse.json(cached.data);
       }
       return NextResponse.json(
@@ -70,6 +96,7 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
     cache.set(url, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+    logSpotTokens(data);
     return NextResponse.json(data);
   } catch (err) {
     console.error("[api/prices] proxy error:", err);
