@@ -322,6 +322,11 @@ export function useAllPositionsActivity(
       // positions are still scanned per-position for accurate pricing; the
       // wallet-scope pass dedupes against them by protocol::txHash::amounts.)
       if (p.protocol === "Aerodrome" && p.status === "Closed") return false;
+      // Uniswap V3: skip only BURNED positions (recovered via wallet-scope
+      // positionId=all). Closed-but-not-burned positions (held, liquidity=0)
+      // still exist on-chain and keep their accurate per-position scan, so the
+      // currently-held baseline is fully preserved.
+      if (p.protocol === "Uniswap V3" && (p as AerodromePosition & { burned?: boolean }).burned) return false;
       if (seen.has(p.id)) return false;
       seen.add(p.id);
       return true;

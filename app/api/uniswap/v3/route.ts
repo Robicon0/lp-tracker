@@ -1,7 +1,26 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
+import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+
+// Archive RPCs for full-range Transfer-log enumeration (Alchemy free tier caps
+// eth_getLogs at 10 blocks). Tenderly has no BSC gateway, so BNB has no entry
+// and burned-NFT recovery is gracefully skipped there. Mirrors the activity
+// route's TENDERLY_RPCS / DEPLOY_BLOCKS.
+const TENDERLY_RPCS: Record<string, string> = {
+  ethereum: 'https://mainnet.gateway.tenderly.co',
+  arbitrum: 'https://arbitrum.gateway.tenderly.co',
+  polygon:  'https://polygon.gateway.tenderly.co',
+  optimism: 'https://optimism.gateway.tenderly.co',
+};
+const DEPLOY_BLOCKS: Record<string, number> = {
+  ethereum: 12_369_140,
+  arbitrum:    165_216,
+  polygon:  22_761_331,
+  optimism:   3_000_000,
+  bnb:      26_324_000,
+};
 
 // NonfungiblePositionManager + Factory: ON BNB CHAIN THESE ARE DIFFERENT
 // from every other Uniswap V3 deployment — Uniswap deployed to BSC in 2023
@@ -321,6 +340,42 @@ async function fetchUniswapAPYs(): Promise<Record<string, number>> {
   }
 }
 
+// Build a minimal Closed record for a BURNED tokenId (positions() reverts).
+// Returns null if the tokenId still exists (transferred to another owner — not
+// this wallet's closed position). Metadata is intentionally left generic: this
+// is display-only (the dashboard Closed tab) and per-position mint-tx derivation
+// is far too slow to run on every load for active LPs (measured 74s for a wallet
+// with 20 churned positions). Fees from these are recovered via the wallet-scope
+// /api/uniswap/activity?tokenId=all, so value/fees stay 0 here.
+async function buildBurnedPosition(
+  chainKey: string,
+  tokenId: string,
+  account: string,
+): Promise<Record<string, unknown> | null> {
+  const chain = CHAINS[chainKey];
+  // positions() still returns → NFT exists (transferred away), not burned → skip.
+  const stillExists = await getPosition(chain.rpc, chain.nftManager, BigInt(tokenId));
+  if (stillExists) return null;
+  return {
+    id: `uni3-${chainKey}-${tokenId}`,
+    pair: 'Uniswap V3 Position',
+    protocol: 'Uniswap V3',
+    chain: chain.chainName,
+    value: 0, apy: 0, fees: 0,
+    status: 'Closed',
+    burned: true,
+    tokenId,
+    fee: 0,
+    amount0: 0, amount1: 0,
+    token0Symbol: 'TOKEN0', token1Symbol: 'TOKEN1',
+    tickLower: 0, tickUpper: 0,
+    token0Decimals: 18, token1Decimals: 18,
+    liquidity: '0',
+    price0: 0, price1: 0,
+    walletAddress: account,
+  };
+}
+
 async function fetchPositionsForChain(
   chainKey: string,
   account: string,
@@ -425,7 +480,33 @@ async function fetchPositionsForChain(
   } catch (err) {
     console.error(`Error fetching positions on ${chainKey}:`, err);
   }
-  
+
+  // ── Burned-NFT recovery (defensive, additive) ────────────────────────────
+  // Enumerate every tokenId this wallet ever owned on this chain; any NOT
+  // currently held whose positions() reverts is a BURNED position (NFT
+  // destroyed on close). Surface it as Closed (burned:true). Requires an
+  // archive RPC (Tenderly); BNB has none and is skipped gracefully. The
+  // balanceOf/tokenOfOwnerByIndex path above is untouched (incl. closed-but-not-
+  // burned liquidity=0 positions, which still exist and are already returned).
+  const archiveRpc = TENDERLY_RPCS[chainKey];
+  if (archiveRpc) {
+    try {
+      const heldIds = new Set(positions.map((p) => String(p.tokenId)));
+      const everOwned = await getEverOwnedTokenIds(chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0);
+      // Cap candidates so an active LP / market-maker wallet (hundreds of
+      // ever-owned NFTs) can't fan out into hundreds of positions()+receipt
+      // calls and time the route out. Normal users (the defensive target) have
+      // a handful, so the cap never triggers for them.
+      const candidates = everOwned.filter((id) => !heldIds.has(id)).slice(0, 20);
+      const burned = await Promise.all(
+        candidates.map((tokenId) => buildBurnedPosition(chainKey, tokenId, account)),
+      );
+      for (const r of burned) if (r) positions.push(r);
+    } catch (err) {
+      console.error(`[uniswap] burned-recovery failed on ${chainKey}:`, err);
+    }
+  }
+
   return positions;
 }
 

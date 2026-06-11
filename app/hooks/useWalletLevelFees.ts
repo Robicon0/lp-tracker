@@ -100,6 +100,28 @@ const AERODROME_FALLBACK = {
   price1: 1,
 } as const;
 
+// Uniswap V3 (multi-chain) wallet-scope context. Keyed by wallet+chain — the
+// chain key comes from the position id (uni3-{chain}-{tokenId}). Display name
+// is used as the event `chain` tag so wallet-scope events group with the
+// per-position ones in the analytics fee breakdown.
+interface UniV3Context {
+  account: string;
+  chain: string;        // ethereum | arbitrum | polygon | optimism | bnb
+  token0: string;
+  token1: string;
+  decimals0: number;
+  decimals1: number;
+  price0: number;
+  price1: number;
+}
+const UNI_CHAIN_DISPLAY: Record<string, string> = {
+  ethereum: "Ethereum",
+  arbitrum: "Arbitrum",
+  polygon: "Polygon",
+  optimism: "Optimism",
+  bnb: "BNB Chain",
+};
+
 export function useWalletLevelFees(
   positions: AerodromePosition[],
   // Sui wallet addresses (connected + watched) to ALWAYS scan for Bluefin
@@ -235,8 +257,36 @@ export function useWalletLevelFees(
       }
     }
 
+    // Uniswap V3 (multi-chain) wallet-scope: group by (wallet, chain) using the
+    // chain key embedded in the position id; representative context from the
+    // highest-value position on that wallet+chain. Recovers fees from burned
+    // NFTs the position route can't return; deduped against per-position by
+    // (protocol, txHash, amount0, amount1).
+    const uniV3ByWalletChain = new Map<string, UniV3Context>();
+    for (const p of positions) {
+      if (p.protocol !== "Uniswap V3") continue;
+      if (!p.walletAddress) continue;
+      const m = p.id.match(/^uni3-([a-z]+)-/);
+      const chainKey = m?.[1];
+      if (!chainKey) continue;
+      const key = `${p.walletAddress.toLowerCase()}|${chainKey}`;
+      const existing = uniV3ByWalletChain.get(key);
+      if (!existing || (p.value ?? 0) > 0) {
+        uniV3ByWalletChain.set(key, {
+          account: p.walletAddress,
+          chain: chainKey,
+          token0: p.token0Address ?? "",
+          token1: p.token1Address ?? "",
+          decimals0: p.token0Decimals ?? 18,
+          decimals1: p.token1Decimals ?? 18,
+          price0: p.price0 ?? 0,
+          price1: p.price1 ?? 0,
+        });
+      }
+    }
+
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
-    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0) {
+    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
@@ -251,7 +301,11 @@ export function useWalletLevelFees(
       .map((c) => `${c.account.toLowerCase()}:${c.token0}:${c.token1}:${c.pool}`)
       .sort()
       .join(",");
-    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]`;
+    const uniSig = [...uniV3ByWalletChain.values()]
+      .map((c) => `${c.account.toLowerCase()}:${c.chain}:${c.token0}:${c.token1}`)
+      .sort()
+      .join(",");
+    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]` + `::uni[${uniSig}]`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
@@ -330,6 +384,39 @@ export function useWalletLevelFees(
           )
           .catch((err) => {
             console.error("[wallet-fees aerodrome] fetch failed:", err);
+            return [];
+          }),
+      );
+    }
+
+    // Uniswap V3 (multi-chain) wallet-scope fee scan — recovers Collect events
+    // from burned NFTs the position route can't return. One call per (wallet,
+    // chain). Same merge+dedupe path as the scans above.
+    for (const ctx of uniV3ByWalletChain.values()) {
+      const uniUrl =
+        `/api/uniswap/activity?tokenId=all` +
+        `&account=${encodeURIComponent(ctx.account)}` +
+        `&chain=${encodeURIComponent(ctx.chain)}` +
+        `&token0=${encodeURIComponent(ctx.token0)}` +
+        `&token1=${encodeURIComponent(ctx.token1)}` +
+        `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
+        `&p0=${ctx.price0}&p1=${ctx.price1}`;
+      const displayChain = UNI_CHAIN_DISPLAY[ctx.chain] ?? ctx.chain;
+      fetches.push(
+        fetch(uniUrl)
+          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
+          .then((j) =>
+            (j.events ?? [])
+              // Drop decimals-mismatch overflow artifacts: a wallet with MULTIPLE
+              // distinct pairs on one chain has its non-representative pair scaled
+              // by the single representative context, which for a decimals
+              // mismatch yields billions. Real fee claims are far under $50M, so
+              // this strips only the garbage and never a legitimate claim.
+              .filter((e) => Math.abs(e.usdAtTime ?? 0) <= 50_000_000)
+              .map((e) => ({ event: e, protocol: "Uniswap V3", chain: displayChain })),
+          )
+          .catch((err) => {
+            console.error("[wallet-fees uniswap] fetch failed:", err);
             return [];
           }),
       );

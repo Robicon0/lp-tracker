@@ -4,6 +4,7 @@ import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePr
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
+import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -342,19 +343,31 @@ async function fetchLogs(
 
 async function fetchTimestamps(alchemyRpc: string, blockNumbers: number[]): Promise<Record<number, number>> {
   const unique = [...new Set(blockNumbers)];
-  const results = await Promise.all(
-    unique.map(async (bn) => {
-      const res = await rpcPost(alchemyRpc, {
-        jsonrpc: '2.0',
-        method: 'eth_getBlockByNumber',
-        params: [`0x${bn.toString(16)}`, false],
-        id: bn,
-      }) as { result?: { timestamp: string } };
-      const ts = res.result?.timestamp ? parseInt(res.result.timestamp, 16) : 0;
-      return [bn, ts] as [number, number];
-    })
-  );
-  return Object.fromEntries(results);
+  const out: Record<number, number> = {};
+  // Batch (avoid storming the RPC — wallet-scope can imply hundreds of unique
+  // blocks) and wrap each lookup so a transient malformed/429 response yields
+  // ts=0 instead of throwing and 500-ing the whole route.
+  const CONC = 30;
+  for (let i = 0; i < unique.length; i += CONC) {
+    const results = await Promise.all(
+      unique.slice(i, i + CONC).map(async (bn) => {
+        try {
+          const res = await rpcPost(alchemyRpc, {
+            jsonrpc: '2.0',
+            method: 'eth_getBlockByNumber',
+            params: [`0x${bn.toString(16)}`, false],
+            id: bn,
+          }) as { result?: { timestamp: string } };
+          const ts = res.result?.timestamp ? parseInt(res.result.timestamp, 16) : 0;
+          return [bn, ts] as [number, number];
+        } catch {
+          return [bn, 0] as [number, number];
+        }
+      })
+    );
+    for (const [bn, ts] of results) out[bn] = ts;
+  }
+  return out;
 }
 
 
@@ -378,9 +391,21 @@ export async function GET(request: Request) {
   const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
   const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
   const pool      = (searchParams.get('pool') ?? '').toLowerCase();
+  // Wallet-scope mode: tokenId=all (or positionId=all) + account scans EVERY
+  // tokenId this wallet ever owned ON THIS CHAIN (incl. burned NFTs the position
+  // route can't return) and unions their Collect events. Per-tokenId mode is
+  // unchanged. Mirrors the Aerodrome positionId=all pattern.
+  const account = (searchParams.get('account') ?? '').toLowerCase();
+  const walletScope = tokenId === 'all' || searchParams.get('positionId') === 'all';
 
-  if (!chain || !tokenId) {
+  if (!chain) {
+    return NextResponse.json({ error: 'chain required' }, { status: 400 });
+  }
+  if (!walletScope && !tokenId) {
     return NextResponse.json({ error: 'chain and tokenId required' }, { status: 400 });
+  }
+  if (walletScope && !account) {
+    return NextResponse.json({ error: 'account required for tokenId=all' }, { status: 400 });
   }
   if (!BLAST_RPCS[chain]) {
     return NextResponse.json({ error: `Unsupported chain: ${chain}` }, { status: 400 });
@@ -393,8 +418,71 @@ export async function GET(request: Request) {
     const blastRpc   = BLAST_RPCS[chain];
     const alchemyRpc = ALCHEMY_RPCS[chain];
 
-    const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
-    const logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex);
+    let logs: RawLog[];
+    if (walletScope) {
+      // Enumerate every tokenId this wallet ever owned on this chain, then union
+      // their NFT-manager logs with BATCHED array-topic eth_getLogs (topic1 = an
+      // OR list of tokenIds) — ONE archive call per batch, not one per tokenId,
+      // so an active LP with hundreds of positions doesn't fan out into hundreds
+      // of concurrent requests (which rate-limits the archive RPC to empty).
+      // Requires an archive RPC (Tenderly); chains without one (BNB) yield empty
+      // (graceful). MAX_WALLET_IDS bounds the cost for market-maker wallets.
+      const MAX_WALLET_IDS = 30;     // bound tokenId fan-out (market-maker wallets)
+      const MAX_WALLET_LOGS = 1500;  // bound downstream timestamp/price cost
+      const BATCH = 30;
+      const GETLOGS_TIMEOUT_MS = 25_000; // fail fast on whale-sized responses
+      const archiveRpc = TENDERLY_RPCS[chain];
+      const nftManager = NFT_MANAGERS[chain];
+      if (!archiveRpc || !nftManager) {
+        logs = [];
+      } else {
+        const allIds = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
+        const ids = allIds.slice(0, MAX_WALLET_IDS);
+        const fromHex = '0x' + (DEPLOY_BLOCKS[chain] ?? 0).toString(16);
+        const collected: RawLog[] = [];
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const topicIds = ids.slice(i, i + BATCH).map((idStr) => '0x' + BigInt(idStr).toString(16).padStart(64, '0'));
+          // Timeout-guarded so a market-maker wallet whose positions imply a
+          // massive log set fails fast (→ empty) instead of hanging the route.
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), GETLOGS_TIMEOUT_MS);
+          try {
+            const r = await fetch(archiveRpc, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0', method: 'eth_getLogs', params: [{
+                  address: nftManager,
+                  topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], topicIds],
+                  fromBlock: fromHex, toBlock: 'latest',
+                }], id: 1,
+              }),
+              signal: controller.signal,
+            });
+            const j = await r.json() as { result?: RawLog[]; error?: { message: string } };
+            if (!j.error && j.result) collected.push(...j.result);
+            else if (j.error) console.warn('[uniswap/activity] wallet-scope getLogs error:', j.error.message);
+          } catch (e) {
+            console.warn('[uniswap/activity] wallet-scope getLogs timeout/err:', String(e));
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        // Very active LPs can emit thousands of logs — keep the most recent
+        // window so the timestamp/price pipeline stays bounded. Retail wallets
+        // (the defensive target) are far under this and keep everything.
+        if (collected.length > MAX_WALLET_LOGS) {
+          collected.sort((a, b) => parseInt(b.blockNumber, 16) - parseInt(a.blockNumber, 16));
+          logs = collected.slice(0, MAX_WALLET_LOGS);
+        } else {
+          logs = collected;
+        }
+      }
+      console.log(`[uniswap/activity] tokenId=all chain=${chain} account=${account} → ${logs.length} logs`);
+    } else {
+      const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
+      logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex);
+    }
 
     if (logs.length === 0) {
       const empty: ActivityResponse = { events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0 };
