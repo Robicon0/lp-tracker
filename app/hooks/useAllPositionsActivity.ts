@@ -315,6 +315,13 @@ export function useAllPositionsActivity(
     const seen = new Set<string>();
     const eligible = positions.filter((p) => {
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) return false;
+      // Closed Aerodrome positions are recovered via the wallet-scope
+      // positionId=all scan (useWalletLevelFees), not per-position — skip them
+      // here so their fees aren't double-scanned/mis-priced. Mirrors how
+      // Cetus/Bluefin closed positions are wallet-scope only. (Open Aerodrome
+      // positions are still scanned per-position for accurate pricing; the
+      // wallet-scope pass dedupes against them by protocol::txHash::amounts.)
+      if (p.protocol === "Aerodrome" && p.status === "Closed") return false;
       if (seen.has(p.id)) return false;
       seen.add(p.id);
       return true;

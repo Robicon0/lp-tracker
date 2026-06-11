@@ -4,6 +4,7 @@ import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePr
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
+import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy used only for eth_getBlockByNumber / eth_blockNumber — free tier supports this
@@ -263,22 +264,48 @@ export async function GET(request: Request) {
   const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
   const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
   const pool = (searchParams.get('pool') ?? '').toLowerCase();
+  // Wallet-scope mode: positionId=all + account scans EVERY tokenId this wallet
+  // ever owned (incl. burned/closed positions Sugar can no longer return) and
+  // unions their Collect/Increase/Decrease events. Mirrors the Cetus/Bluefin
+  // positionId=all pattern. Per-tokenId mode (numeric positionId) is unchanged.
+  const account = (searchParams.get('account') ?? '').toLowerCase();
+  const walletScope = positionId === 'all';
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
+  }
+  if (walletScope && !account) {
+    return NextResponse.json({ error: 'account required for positionId=all' }, { status: 400 });
   }
   if (!ALCHEMY_KEY) {
     return NextResponse.json({ error: 'Alchemy key not configured' }, { status: 500 });
   }
 
   try {
-    // Pad tokenId to 32-byte hex topic
-    const tokenIdBig = BigInt(positionId);
-    const tokenIdNum = Number(tokenIdBig);
-    const tokenIdHex = '0x' + tokenIdBig.toString(16).padStart(64, '0');
-
-    const logs = await fetchLogs(tokenIdHex, tokenIdNum);
-    console.log(`[aerodrome/activity] tokenId=${positionId} tokenIdHex=${tokenIdHex} → ${logs.length} logs`);
+    let logs: RawLog[];
+    if (walletScope) {
+      // Enumerate every tokenId this wallet ever owned (Transfer→wallet logs),
+      // then union each one's NFT-manager logs. Burned positions' Collect logs
+      // persist on-chain indexed by tokenId, so this recovers fee claims Sugar
+      // can no longer surface. Reuses the same per-tokenId fetchLogs (4-tier
+      // RPC fallback) so no new RPC pattern is introduced.
+      const ids = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK);
+      const groups = await Promise.all(
+        ids.map((idStr) => {
+          const big = BigInt(idStr);
+          return fetchLogs('0x' + big.toString(16).padStart(64, '0'), Number(big));
+        }),
+      );
+      logs = groups.flat();
+      console.log(`[aerodrome/activity] positionId=all account=${account} → ${ids.length} tokenIds, ${logs.length} logs`);
+    } else {
+      // Pad tokenId to 32-byte hex topic
+      const tokenIdBig = BigInt(positionId);
+      const tokenIdNum = Number(tokenIdBig);
+      const tokenIdHex = '0x' + tokenIdBig.toString(16).padStart(64, '0');
+      logs = await fetchLogs(tokenIdHex, tokenIdNum);
+      console.log(`[aerodrome/activity] tokenId=${positionId} tokenIdHex=${tokenIdHex} → ${logs.length} logs`);
+    }
 
     if (logs.length === 0) {
       const empty: ActivityResponse = {

@@ -72,6 +72,34 @@ const CETUS_FALLBACK = {
   priceA: 1,
 } as const;
 
+// Aerodrome (Base) wallet-scope context — EVM analog of the Sui contexts above.
+// Aerodrome Slipstream BURNS the position NFT on full close, so Sugar (position
+// discovery) can't return closed positions; a positionId=all scan of the
+// wallet's ever-owned tokenIds recovers their Collect (fee) events.
+interface EvmPoolContext {
+  account: string;
+  token0: string;
+  token1: string;
+  decimals0: number;
+  decimals1: number;
+  pool: string;
+  price0: number;
+  price1: number;
+}
+// Fallback for wallets whose Aerodrome positions are all closed (no open
+// position to read real token/pool ordering from): Base WETH/USDC CL pool.
+// price0 (WETH) is left 0 — the activity route recovers it via CoinGecko
+// historical (claim-time) + current spot, and USDC anchors at $1.
+const AERODROME_FALLBACK = {
+  token0: "0x4200000000000000000000000000000000000006",
+  token1: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+  decimals0: 18,
+  decimals1: 6,
+  pool: "0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59",
+  price0: 0,
+  price1: 1,
+} as const;
+
 export function useWalletLevelFees(
   positions: AerodromePosition[],
   // Sui wallet addresses (connected + watched) to ALWAYS scan for Bluefin
@@ -182,8 +210,33 @@ export function useWalletLevelFees(
     // prices) so per-minute price refreshes don't trigger expensive
     // wallet-scope tx-history rescans — events cached from a slightly older
     // price are acceptable for lifetime fee totals.
+    // Aerodrome (Base) wallet-scope: group by EVM wallet, representative context
+    // from the highest-value position (prefer open), WETH/USDC fallback for
+    // all-closed wallets. Flows into the analytics feeIncome merge tagged
+    // protocol="Aerodrome" and is deduped by (protocol, txHash, amount0, amount1)
+    // — so the open position's claims (also seen per-position) aren't double-counted.
+    const aerodromeByWallet = new Map<string, EvmPoolContext>();
+    for (const p of positions) {
+      if (p.protocol !== "Aerodrome") continue;
+      if (!p.walletAddress) continue;
+      const lower = p.walletAddress.toLowerCase();
+      const existing = aerodromeByWallet.get(lower);
+      if (!existing || (p.value ?? 0) > 0) {
+        aerodromeByWallet.set(lower, {
+          account: p.walletAddress,
+          token0: p.token0Address ?? AERODROME_FALLBACK.token0,
+          token1: p.token1Address ?? AERODROME_FALLBACK.token1,
+          decimals0: p.token0Decimals ?? AERODROME_FALLBACK.decimals0,
+          decimals1: p.token1Decimals ?? AERODROME_FALLBACK.decimals1,
+          pool: p.poolAddress ?? AERODROME_FALLBACK.pool,
+          price0: p.price0 ?? 0,
+          price1: p.price1 ?? 0,
+        });
+      }
+    }
+
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
-    if (allWalletKeys.length === 0) {
+    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
@@ -192,7 +245,13 @@ export function useWalletLevelFees(
       .map(([w, c]) => `${w}:${c.coinTypeA}:${c.coinTypeB}`)
       .sort()
       .join(",");
-    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]`;
+    // Aerodrome signature: wallet + token/pool ordering only (not prices) so
+    // per-minute price refreshes don't trigger a fresh tx-history rescan.
+    const aeroSig = [...aerodromeByWallet.values()]
+      .map((c) => `${c.account.toLowerCase()}:${c.token0}:${c.token1}:${c.pool}`)
+      .sort()
+      .join(",");
+    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
@@ -246,6 +305,31 @@ export function useWalletLevelFees(
           )
           .catch((err) => {
             console.error("[wallet-fees cetus] fetch failed:", err);
+            return [];
+          }),
+      );
+    }
+
+    // Aerodrome (Base) wallet-scope fee scan — recovers Collect events from
+    // burned-NFT positions Sugar can't return. Same merge+dedupe path as the
+    // Sui scans above.
+    for (const ctx of aerodromeByWallet.values()) {
+      const aeroUrl =
+        `/api/aerodrome/activity?positionId=all` +
+        `&account=${encodeURIComponent(ctx.account)}` +
+        `&token0=${encodeURIComponent(ctx.token0)}` +
+        `&token1=${encodeURIComponent(ctx.token1)}` +
+        `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
+        `&pool=${encodeURIComponent(ctx.pool)}` +
+        `&p0=${ctx.price0}&p1=${ctx.price1}`;
+      fetches.push(
+        fetch(aeroUrl)
+          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
+          .then((j) =>
+            (j.events ?? []).map((e) => ({ event: e, protocol: "Aerodrome", chain: "Base" })),
+          )
+          .catch((err) => {
+            console.error("[wallet-fees aerodrome] fetch failed:", err);
             return [];
           }),
       );

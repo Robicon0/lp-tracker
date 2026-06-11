@@ -1,11 +1,27 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const BASE_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 const SUGAR_ADDRESS = '0x68c19e13618c41158fe4baba1b8fb3a9c74bdb0a';
 const CL_FACTORY = '0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A';
+
+// Closed/burned-position recovery. Sugar only returns currently-held NFTs;
+// Aerodrome Slipstream burns the NFT on full close, so closed positions vanish.
+// We enumerate ever-owned tokenIds via Transfer→wallet logs and return the ones
+// Sugar dropped as Closed records (display-only — fees are recovered via the
+// activity route's positionId=all wallet-scope scan).
+// Tenderly archive RPC is required for full-range eth_getLogs (Alchemy free
+// tier caps at 10 blocks).
+const TENDERLY_RPC = 'https://base.gateway.tenderly.co';
+const NFT_MANAGER = '0x827922686190790b37229fd06084350E74485b72';
+const NFT_DEPLOY_BLOCK = 13_844_000;
+// IncreaseLiquidity (NFT manager) + pool Mint (CL pool) topic0 — used to derive
+// a burned position's pool/tokens/ticks from its mint transaction.
+const INCREASE_TOPIC = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
+const POOL_MINT_TOPIC = '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde';
 
 const FIELDS_PER_POSITION = 15;
 
@@ -66,6 +82,110 @@ async function getPoolTokens(poolAddress: string): Promise<{ token0: string; tok
     console.error('Error fetching pool tokens:', err);
   }
   return null;
+}
+
+// Minimal JSON-RPC helper (returns result or null on any failure).
+async function rpcResult(rpc: string, method: string, params: unknown[]): Promise<unknown> {
+  try {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    return (await res.json()).result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function toInt24Topic(topicHex: string): number {
+  const v = parseInt(topicHex.slice(-6), 16);
+  return v >= 0x800000 ? v - 0x1000000 : v;
+}
+
+// Build Closed-position records for tokenIds the wallet once owned but Sugar no
+// longer returns (NFT burned on full close). Pool / tokens / ticks are derived
+// best-effort from the position's MINT transaction (NFT-manager IncreaseLiquidity
+// → tx receipt → pool Mint log → pool address + ticks → token0()/token1()); on
+// any failure a minimal Closed record is still returned so the position appears
+// in the dashboard Closed tab. Display-only: fees are recovered separately via
+// /api/aerodrome/activity?positionId=all (wallet-scope), so value/fees are 0.
+async function buildClosedPositions(
+  account: string,
+  heldIds: Set<string>,
+  prices: Record<string, number>,
+): Promise<Record<string, unknown>[]> {
+  let everOwned: string[] = [];
+  try {
+    everOwned = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
+  } catch {
+    return [];
+  }
+  const closedIds = everOwned.filter((id) => !heldIds.has(id));
+  if (closedIds.length === 0) return [];
+
+  return Promise.all(closedIds.map(async (tokenId): Promise<Record<string, unknown>> => {
+    const minimal: Record<string, unknown> = {
+      id: `aero-${tokenId}`,
+      pair: 'Aerodrome Position',
+      protocol: 'Aerodrome',
+      chain: 'Base',
+      value: 0, apy: 0, fees: 0,
+      status: 'Closed',
+      depositId: tokenId,
+      amount0: 0, amount1: 0,
+      token0Symbol: 'TOKEN0', token1Symbol: 'TOKEN1',
+      fees0: 0, fees1: 0,
+      tickLower: 0, tickUpper: 0,
+      token0Decimals: 18, token1Decimals: 18,
+      liquidity: '0',
+      price0: 0, price1: 0,
+      walletAddress: account,
+    };
+    try {
+      const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
+      const incLogs = await rpcResult(TENDERLY_RPC, 'eth_getLogs', [{
+        address: NFT_MANAGER,
+        topics: [INCREASE_TOPIC, tokenIdHex],
+        fromBlock: '0x' + NFT_DEPLOY_BLOCK.toString(16),
+        toBlock: 'latest',
+      }]) as Array<{ transactionHash: string; blockNumber: string }> | null;
+      if (!incLogs || incLogs.length === 0) return minimal;
+      incLogs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
+
+      const receipt = await rpcResult(BASE_RPC, 'eth_getTransactionReceipt', [incLogs[0].transactionHash]) as
+        { logs?: Array<{ address: string; topics: string[] }> } | null;
+      const mintLog = receipt?.logs?.find((l) =>
+        l.topics?.[0]?.toLowerCase() === POOL_MINT_TOPIC &&
+        l.address.toLowerCase() !== NFT_MANAGER.toLowerCase());
+      if (!mintLog) return minimal;
+
+      const pool = mintLog.address.toLowerCase();
+      const tickLower = toInt24Topic(mintLog.topics[2]);
+      const tickUpper = toInt24Topic(mintLog.topics[3]);
+      const tokens = await getPoolTokens(pool);
+      if (!tokens) return { ...minimal, poolAddress: pool, tickLower, tickUpper };
+
+      const t0 = TOKENS[tokens.token0];
+      const t1 = TOKENS[tokens.token1];
+      return {
+        ...minimal,
+        pair: `${t0?.symbol ?? 'TOKEN0'} / ${t1?.symbol ?? 'TOKEN1'}`,
+        token0Symbol: t0?.symbol ?? 'TOKEN0',
+        token1Symbol: t1?.symbol ?? 'TOKEN1',
+        token0Decimals: t0?.decimals ?? 18,
+        token1Decimals: t1?.decimals ?? 18,
+        tickLower, tickUpper,
+        price0: prices[tokens.token0] ?? 0,
+        price1: prices[tokens.token1] ?? 0,
+        token0Address: tokens.token0,
+        token1Address: tokens.token1,
+        poolAddress: pool,
+      };
+    } catch {
+      return minimal;
+    }
+  }));
 }
 
 // Fetch prices from CoinGecko
@@ -270,9 +390,16 @@ export async function GET(request: Request) {
       };
     });
 
+    // Recover positions the wallet once owned but Sugar no longer returns
+    // because the NFT was burned on close (Aerodrome Slipstream burns on full
+    // exit). Returned as Closed records so they appear in the dashboard Closed
+    // tab; their fees are recovered via /api/aerodrome/activity?positionId=all.
+    const heldIds = new Set(rawPositions.map((p) => p.id));
+    const closedPositions = await buildClosedPositions(account, heldIds, prices);
+
     return NextResponse.json({
-      positions,
-      count: positions.length,
+      positions: [...positions, ...closedPositions],
+      count: positions.length + closedPositions.length,
       account,
     });
   } catch (error) {
