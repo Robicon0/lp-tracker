@@ -117,6 +117,31 @@ async function rpcCallHyperEVM(body: object): Promise<{ result?: unknown; error?
   return res.json();
 }
 
+// positions(uint256) — same selector as the position route. Used to read the
+// position's CURRENT liquidity (word 7) so the activity route can tell whether
+// THIS request is for a closed position (liquidity === 0). This is a
+// current-state call, which the public HyperEVM RPC answers fine (only
+// HISTORICAL eth_call is unavailable on this chain). Closed positions need
+// awaited CG-historical prewarm (see GET); open positions stay fire-and-forget.
+const POSITIONS_SELECTOR = '0x99fbab88';
+
+async function isPositionClosed(nftManager: string, tokenIdBig: bigint): Promise<boolean> {
+  try {
+    const data = POSITIONS_SELECTOR + tokenIdBig.toString(16).padStart(64, '0');
+    const r = await rpcCallHyperEVM({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: nftManager, data }, 'latest'], id: 1 });
+    const hex = typeof r.result === 'string' ? r.result : '';
+    // Unreadable / reverted (e.g. burned NFT) → treat as closed: awaiting the
+    // CG prewarm is always safe, and an unreadable position we still have logs
+    // for is definitively not open.
+    if (!hex || hex === '0x' || hex.length < 770) return true;
+    const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+    const liquidity = BigInt('0x' + clean.slice(7 * 64, 8 * 64));
+    return liquidity === 0n;
+  } catch {
+    return true;
+  }
+}
+
 async function rpcCallArchive(body: object): Promise<{ result?: unknown; error?: { message: string } }> {
   const url = process.env.HYPEREVM_ARCHIVE_RPC;
   if (!url) {
@@ -520,6 +545,17 @@ export async function GET(request: Request) {
     // be valued at the market price on the day of the claim, not the pool's
     // internal sqrtPriceX96 ratio — those can differ meaningfully when the
     // pool's price diverges from spot. Stablecoins anchor at $1 (no fetch).
+    // HyperEVM has NO archival eth_call (Chainstack plan returns -32002; the
+    // public RPC is non-archival for state), so the sqrtPriceX96 resolver above
+    // cannot supply claim-time prices on this chain — closed-position fee claims
+    // would otherwise fall through to current spot, valuing every historical
+    // claim at today's HYPE price. The ONLY viable claim-time source here is
+    // CoinGecko historical (priority 2 below). For CLOSED positions we therefore
+    // AWAIT the bounded CG-historical prewarm so the cache is warm before the
+    // resolution loop reads it via getCachedOnlyTokenPrice. OPEN positions stay
+    // fire-and-forget (claims are typically recent → spot drift small), per the
+    // fe754c5 rationale — the await applies ONLY to the closed-position path.
+    const isClosed = await isPositionClosed(nftManager, tokenIdBig);
     {
       const feeTimestamps = cleanRawEvents
         .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
@@ -530,9 +566,27 @@ export async function GET(request: Request) {
         const pairs: Array<{ coingeckoId: string; timestamps: number[] }> = [];
         if (cg0) pairs.push({ coingeckoId: cg0, timestamps: feeTimestamps });
         if (cg1) pairs.push({ coingeckoId: cg1, timestamps: feeTimestamps });
-        // Fire-and-forget — never block the route on CoinGecko. See the
-        // detailed rationale in app/api/aerodrome/activity/route.ts.
-        if (pairs.length > 0) void prewarmTokenPrices(pairs).catch(() => {});
+        if (pairs.length > 0) {
+          if (isClosed) {
+            // Closed position: AWAIT the prewarm (bounded set of unique claim
+            // dates), capped by an overall timeout so a pathological date set or
+            // a CG stall can't hang the route — on timeout we proceed with
+            // whatever warmed (remaining claims fall through to current spot,
+            // same as the pre-fix behaviour). The background prewarm keeps
+            // running and fills the cache for the next request regardless.
+            const PREWARM_TIMEOUT_MS = 25_000;
+            const __started = Date.now();
+            const __dateCount = pairs.reduce((n, p) => n + p.timestamps.length, 0);
+            await Promise.race([
+              prewarmTokenPrices(pairs).catch(() => {}),
+              new Promise((resolve) => setTimeout(resolve, PREWARM_TIMEOUT_MS)),
+            ]);
+            console.log(`[hyperswap/activity] closed-position CG prewarm awaited: positionId=${positionId} ts=${__dateCount} ${Date.now() - __started}ms`);
+          } else {
+            // Open position: fire-and-forget (unchanged — see fe754c5).
+            void prewarmTokenPrices(pairs).catch(() => {});
+          }
+        }
       }
     }
 
