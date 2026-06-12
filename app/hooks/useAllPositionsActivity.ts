@@ -322,6 +322,10 @@ export function useAllPositionsActivity(
       // positions are still scanned per-position for accurate pricing; the
       // wallet-scope pass dedupes against them by protocol::txHash::amounts.)
       if (p.protocol === "Aerodrome" && p.status === "Closed") return false;
+      // Velodrome (original Slipstream, Optimism): same as Aerodrome — closed
+      // positions are recovered via the wallet-scope positionId=all scan, so
+      // skip them per-position to avoid double-scan/mis-pricing.
+      if (p.protocol === "Velodrome" && p.status === "Closed") return false;
       // Uniswap V3: skip only BURNED positions (recovered via wallet-scope
       // positionId=all). Closed-but-not-burned positions (held, liquidity=0)
       // still exist on-chain and keep their accurate per-position scan, so the

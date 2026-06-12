@@ -100,6 +100,25 @@ const AERODROME_FALLBACK = {
   price1: 1,
 } as const;
 
+// Velodrome (Optimism) wallet-scope fallback — same role as AERODROME_FALLBACK
+// but for the original Slipstream deployment on Optimism. The canonical
+// Velodrome CL WETH/USDC pool is USDC(token0,6) / WETH(token1,18) — the REVERSE
+// of Aerodrome's Base ordering, because USDC (0x0b2c…) sorts before WETH
+// (0x4200…) on Optimism (verified on-chain via the CL factory). Pool/decimals/
+// price ordering match that real pool so the activity route's sqrtPriceX96
+// resolver anchors correctly. price1 (WETH) is left 0 — the activity route
+// recovers it via CoinGecko historical (claim-time) + current spot; USDC
+// anchors at $1.
+const VELODROME_FALLBACK = {
+  token0: "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+  token1: "0x4200000000000000000000000000000000000006",
+  decimals0: 6,
+  decimals1: 18,
+  pool: "0x9763639de2eed0ef6bc4dd3a2514526060047c8b",
+  price0: 1,
+  price1: 0,
+} as const;
+
 // Uniswap V3 (multi-chain) wallet-scope context. Keyed by wallet+chain — the
 // chain key comes from the position id (uni3-{chain}-{tokenId}). Display name
 // is used as the event `chain` tag so wallet-scope events group with the
@@ -257,6 +276,32 @@ export function useWalletLevelFees(
       }
     }
 
+    // Velodrome (Optimism) wallet-scope — direct analog of the Aerodrome branch
+    // above (Velodrome is the original Slipstream; Aerodrome is its Base fork,
+    // identical NFT-burns-on-close behaviour). Representative context from the
+    // highest-value position (prefer open), USDC/WETH fallback for all-closed
+    // wallets. Tagged protocol="Velodrome" and deduped by
+    // (protocol, txHash, amount0, amount1) against per-position open events.
+    const velodromeByWallet = new Map<string, EvmPoolContext>();
+    for (const p of positions) {
+      if (p.protocol !== "Velodrome") continue;
+      if (!p.walletAddress) continue;
+      const lower = p.walletAddress.toLowerCase();
+      const existing = velodromeByWallet.get(lower);
+      if (!existing || (p.value ?? 0) > 0) {
+        velodromeByWallet.set(lower, {
+          account: p.walletAddress,
+          token0: p.token0Address ?? VELODROME_FALLBACK.token0,
+          token1: p.token1Address ?? VELODROME_FALLBACK.token1,
+          decimals0: p.token0Decimals ?? VELODROME_FALLBACK.decimals0,
+          decimals1: p.token1Decimals ?? VELODROME_FALLBACK.decimals1,
+          pool: p.poolAddress ?? VELODROME_FALLBACK.pool,
+          price0: p.price0 ?? 0,
+          price1: p.price1 ?? 0,
+        });
+      }
+    }
+
     // Uniswap V3 (multi-chain) wallet-scope: group by (wallet, chain) using the
     // chain key embedded in the position id; representative context from the
     // highest-value position on that wallet+chain. Recovers fees from burned
@@ -286,7 +331,7 @@ export function useWalletLevelFees(
     }
 
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
-    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0) {
+    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && velodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
@@ -301,11 +346,17 @@ export function useWalletLevelFees(
       .map((c) => `${c.account.toLowerCase()}:${c.token0}:${c.token1}:${c.pool}`)
       .sort()
       .join(",");
+    // Velodrome signature: wallet + token/pool ordering only (not prices) so
+    // per-minute price refreshes don't trigger a fresh tx-history rescan.
+    const veloSig = [...velodromeByWallet.values()]
+      .map((c) => `${c.account.toLowerCase()}:${c.token0}:${c.token1}:${c.pool}`)
+      .sort()
+      .join(",");
     const uniSig = [...uniV3ByWalletChain.values()]
       .map((c) => `${c.account.toLowerCase()}:${c.chain}:${c.token0}:${c.token1}`)
       .sort()
       .join(",");
-    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]` + `::uni[${uniSig}]`;
+    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]` + `::velo[${veloSig}]` + `::uni[${uniSig}]`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
@@ -384,6 +435,31 @@ export function useWalletLevelFees(
           )
           .catch((err) => {
             console.error("[wallet-fees aerodrome] fetch failed:", err);
+            return [];
+          }),
+      );
+    }
+
+    // Velodrome (Optimism) wallet-scope fee scan — recovers Collect events from
+    // burned-NFT positions Sugar can't return. Same merge+dedupe path as the
+    // Aerodrome scan above (Velodrome is the original Slipstream architecture).
+    for (const ctx of velodromeByWallet.values()) {
+      const veloUrl =
+        `/api/velodrome/activity?positionId=all` +
+        `&account=${encodeURIComponent(ctx.account)}` +
+        `&token0=${encodeURIComponent(ctx.token0)}` +
+        `&token1=${encodeURIComponent(ctx.token1)}` +
+        `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
+        `&pool=${encodeURIComponent(ctx.pool)}` +
+        `&p0=${ctx.price0}&p1=${ctx.price1}`;
+      fetches.push(
+        fetch(veloUrl)
+          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
+          .then((j) =>
+            (j.events ?? []).map((e) => ({ event: e, protocol: "Velodrome", chain: "Optimism" })),
+          )
+          .catch((err) => {
+            console.error("[wallet-fees velodrome] fetch failed:", err);
             return [];
           }),
       );
