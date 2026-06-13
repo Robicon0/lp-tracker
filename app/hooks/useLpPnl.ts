@@ -371,13 +371,25 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // fell back to current-price × amounts. Cached entries from v12 carry
 // that wrong-USD history; bump forces a fresh fetch where the resolver
 // runs and populates accurate per-block prices.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v20-";
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// Bumped v20 → v21: one-time flush of stale entries that were cached as
+// `{events: null}` / empty during a transient route failure (cold serverless,
+// RPC flake) and then shadowed now-healthy route data under the 5-min TTL —
+// the root cause of the Aerodrome + Cetus exclusions in the analytics LP P&L
+// section. Paired with the differentiated-TTL change below so empties expire
+// in 60s instead of 5min going forward.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v21-";
+const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
+const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
 interface CachedEntry {
   ts: number;
   events: Array<Record<string, unknown>> | null; // null = previous fetch returned no events
   reason?: string; // populated when events is null and we want to remember why
+  // Per-entry TTL so an empty result expires fast (60s) while a real events
+  // payload lives the full 5min. Read path uses `ttl ?? CACHE_TTL_MS` so any
+  // legacy entry without the field falls back to the 5min default (moot after
+  // the v21 prefix bump flushes all old entries). Uniform across all chains.
+  ttl?: number;
 }
 
 function cacheGet(posId: string): CachedEntry | null {
@@ -386,7 +398,7 @@ function cacheGet(posId: string): CachedEntry | null {
     const raw = localStorage.getItem(CACHE_KEY_PREFIX + posId);
     if (!raw) return null;
     const entry = JSON.parse(raw) as CachedEntry;
-    if (Date.now() - entry.ts > CACHE_TTL_MS) return null;
+    if (Date.now() - entry.ts > (entry.ttl ?? CACHE_TTL_MS)) return null;
     return entry;
   } catch {
     return null;
@@ -416,12 +428,70 @@ function isTransportError(reason: string): boolean {
 }
 
 // Retry policy: 1 initial attempt + up to 2 retries (per user spec).
-// Backoff: 1s, 2s. Per-attempt timeouts: 30s, 30s, 45s — last attempt
-// gets the most patience to handle slow archival RPCs (Tenderly chain).
-const ATTEMPT_TIMEOUTS_MS = [30_000, 30_000, 45_000];
+// Backoff: 1s, 2s. Per-attempt timeouts: 60s, 60s, 90s — last attempt gets the
+// most patience. Raised from 30/30/45s so legitimately-slow routes don't get
+// abandoned mid-flight: the HyperEVM closed-position activity route awaits a
+// ~25s CoinGecko historical prewarm (be94edf), and archival scans (Tenderly,
+// Sui full tx history) can run long under concurrency — the old budget gave up
+// before the route returned and surfaced healthy positions as errored.
+// Uniform across ALL chains — no per-chain override.
+const ATTEMPT_TIMEOUTS_MS = [60_000, 60_000, 90_000];
 const ATTEMPT_BACKOFF_MS  = [0,      1_000,  2_000];
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ── Per-endpoint client-side concurrency limiter ────────────────────────────
+// Caps concurrent fetches PER activity endpoint pathname (e.g.
+// /api/hyperswap/activity, /api/aerodrome/activity, /api/cetus/activity). Keying
+// by pathname makes it per-chain in EFFECT without a single `if (chain === …)`
+// branch — query params (nftManager distinguishing HyperSwap/KittenSwap/
+// ProjectX, etc.) hit the SAME provider's rate budget so they share one queue.
+// Endpoints on different chains have independent slots and run in parallel.
+//
+// Replaces the prior global concurrency-5 worker pool, which removed the
+// HyperEVM serialization and re-triggered Etherscan-burst empties (4 ProjectX
+// positions firing at once → 12 topic calls → 5 req/sec limit → empty/timeout).
+// MAX_PER_ENDPOINT=2 is uniform across all chains and conservative enough for
+// HyperEVM's Etherscan budget; other chains simply never hit the cap.
+//
+// Module-scope so concurrent hook instances / renders share one fair queue.
+// Race-free semaphore: on release the slot is handed DIRECTLY to the next
+// waiter (count unchanged) rather than decrement-then-reacquire, so the in-use
+// count can never transiently exceed MAX_PER_ENDPOINT.
+const MAX_PER_ENDPOINT = 2;
+const endpointInUse = new Map<string, number>();
+const endpointWaiters = new Map<string, Array<() => void>>();
+
+function endpointKeyOf(activityUrl: string): string {
+  const q = activityUrl.indexOf("?");
+  return q === -1 ? activityUrl : activityUrl.slice(0, q);
+}
+
+async function paceByEndpoint<R>(key: string, fn: () => Promise<R>): Promise<R> {
+  const inUse = endpointInUse.get(key) ?? 0;
+  if (inUse < MAX_PER_ENDPOINT) {
+    endpointInUse.set(key, inUse + 1);
+  } else {
+    // At capacity — park until an in-flight fetch on this endpoint hands us its slot.
+    await new Promise<void>((resolve) => {
+      const w = endpointWaiters.get(key) ?? [];
+      w.push(resolve);
+      endpointWaiters.set(key, w);
+    });
+    // Slot inherited without decrement — count stays the same.
+  }
+  try {
+    return await fn();
+  } finally {
+    const w = endpointWaiters.get(key);
+    if (w && w.length > 0) {
+      // Hand our slot straight to the next waiter (count unchanged).
+      w.shift()!();
+    } else {
+      endpointInUse.set(key, (endpointInUse.get(key) ?? 1) - 1);
+    }
+  }
+}
 
 async function fetchEventsAttempt(
   url: string, tag: string, timeoutMs: number,
@@ -504,13 +574,18 @@ async function fetchAndCompute(
       const result = await fetchEventsAttempt(url, tag, ATTEMPT_TIMEOUTS_MS[attempt]);
       if (result.ok) {
         rawEvents = result.events;
-        cacheSet(pos.id, { ts: Date.now(), events: rawEvents });
+        // Successful fetch with events → full 5min TTL.
+        cacheSet(pos.id, { ts: Date.now(), events: rawEvents, ttl: CACHE_TTL_MS });
         break;
       }
       lastFailure = { reason: result.reason };
-      // Cache definitive empty results so we don't re-fetch.
+      // Cache definitive empty results so we don't re-fetch — but with a SHORT
+      // 60s TTL (not 5min) so a transient empty (cold serverless / RPC flake)
+      // self-heals on the next reload instead of shadowing healthy data for
+      // 5 minutes. Errors/timeouts are never cached (result.cacheable is false
+      // for them), so the next load always retries those fresh.
       if (result.cacheable) {
-        cacheSet(pos.id, { ts: Date.now(), events: null, reason: result.reason });
+        cacheSet(pos.id, { ts: Date.now(), events: null, reason: result.reason, ttl: EMPTY_RESULT_TTL_MS });
         // HyperEVM fallback for fresh empty result — same rationale as the
         // cached-empty branch above.
         if (isHyperEvm && pos.value > 0) {
@@ -895,38 +970,28 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     for (const p of toFetch) inflightRef.current.add(p.id);
     setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
 
-    // HyperEVM sequential chain — Etherscan V2 free tier is 5 req/sec, and
-    // each /api/hyperswap/activity call fires 3 parallel topic requests that
-    // take ~2-3s wall time. A fixed-interval stagger isn't sufficient because
-    // concurrent route calls still overlap at the Etherscan layer — verified
-    // live: 4 positions × 3 topics with even a 700ms stagger leaves 2 of 4
-    // positions empty. Serialise HyperEVM fetches behind a shared promise
-    // chain so the next one only fires after the previous one's Etherscan
-    // calls finish. Non-HyperEVM protocols fire in parallel as before.
+    // Fetch each position, paced PER activity endpoint (paceByEndpoint /
+    // MAX_PER_ENDPOINT). A wallet with many positions on one provider — e.g. 4
+    // HyperEVM positions all on /api/hyperswap/activity sharing Etherscan's
+    // 5 req/sec budget — never bursts: at most MAX_PER_ENDPOINT fetch that
+    // endpoint at once, the rest queue. Endpoints on different chains have
+    // independent slots, so Aerodrome / Cetus / etc. run fully in parallel with
+    // (and during) the throttled HyperEVM window. Each fetch still lands
+    // independently → incremental aggregate, so totals fill in progressively.
     //
-    // This hook AND useAllPositionsActivity both call /api/hyperswap/activity
-    // on the same wallet load — each independently serialises its own
-    // fan-out, and each call carries its own 5-min localStorage cache so
-    // they share upstream pressure only on the very first cold load.
-    let hyperEvmChain: Promise<unknown> = Promise.resolve();
-
-    // Fire fetches — each one lands independently.
+    // Order-independence: results key into resultsRef by pos.id and the hook
+    // returns sums + a per-id Record (never an ordered array; the UI sorts the
+    // positions table itself), so submission order is irrelevant — no need to
+    // restore it. A NEW chain/protocol/token added at buildActivityUrl inherits
+    // this automatically: it's just another item in `toFetch`, keyed by its own
+    // endpoint pathname, with no special-casing.
     for (const pos of toFetch) {
-      const isHyperEvm = HYPEREVM_NFT_MANAGERS[pos.protocol] !== undefined;
-      const run = async () => {
-        if (isHyperEvm) {
-          const previous = hyperEvmChain;
-          let releaseChain!: () => void;
-          hyperEvmChain = new Promise<void>((resolve) => { releaseChain = resolve; });
-          try {
-            await previous;
-            return await fetchAndCompute(pos);
-          } finally {
-            releaseChain();
-          }
-        }
-        return fetchAndCompute(pos);
-      };
+      const activityUrl = buildActivityUrl(pos);
+      // Positions with no activity URL still flow through fetchAndCompute (it
+      // returns {ok:false}); only paced when there's a real endpoint to gate.
+      const run = activityUrl
+        ? () => paceByEndpoint(endpointKeyOf(activityUrl), () => fetchAndCompute(pos))
+        : () => fetchAndCompute(pos);
       run().then((r) => {
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
