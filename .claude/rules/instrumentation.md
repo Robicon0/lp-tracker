@@ -78,6 +78,40 @@ Required fields:
 The ratio `resolved_positions / total_positions` is the primary
 verification metric used in fix prompts. Target is always 100%.
 
+The HyperEVM activity route additionally sets three optional deposit-retrieval
+fields on its `route_summary` (one position per invocation, so each is 0 or 1):
+
+- `deposits_total` — positions whose deposit history was attempted
+- `deposits_resolved` — positions that retrieved deposit history successfully
+- `deposits_failed` — positions that failed all in-route tiers
+
+These are optional and only emitted by the HyperEVM route; other routes that
+emit `route_summary` omit them.
+
+### `deposit_retrieval`
+Emitted once per position per HyperEVM activity-route invocation. Captures
+which tier of the 3-tier deposit-history fallback answered (or that all
+failed), so deposit-retrieval success rate is measurable independently of
+fee-claim pricing. Emitted even when retrieval returns zero events, so total
+failures are observable.
+
+Required fields:
+- `event: "deposit_retrieval"`
+- `protocol` — `projectx`, `hyperswap`, or `kittenswap`
+- `chain` — the chain identifier (currently always `hyperevm`)
+- `position_id` — the NFT token ID / position identifier
+- `tier_used` — `etherscan-v2`, `chainstack-archive`, `client-fallback`, or
+  `none` (the route emits `none` on total failure, which is what triggers the
+  client-side `client-fallback` tier in `useLpPnl.ts`)
+- `result` — `success` or `failure`
+- `latency_ms` — retrieval time across all tiers
+- `events_count` — deposit events retrieved (0 is a valid `success` when a tier
+  answered but the position genuinely has no deposit history)
+
+Optional field (present only on failure):
+- `error_reason` — brief technical cause, e.g. `etherscan-429`,
+  `etherscan-timeout`, `archive-unconfigured`, `all-tiers-exhausted`
+
 ### `lp_pnl_position_lookup`
 Emitted when a single position's P&L is calculated.
 
@@ -123,7 +157,16 @@ must use one of these values:
 | `symbol-search`        | CoinGecko symbol-to-ID lookup                            |
 | `sui-historical`       | Sui-specific historical pricing path                     |
 | `stablecoin-fixed`     | Hardcoded $1 for stablecoins                             |
+| `etherscan-v2-success`       | Deposit history retrieved via Etherscan V2 (Tier 1) |
+| `etherscan-v2-failure`       | Etherscan V2 deposit retrieval failed (Tier 1)      |
+| `chainstack-archive-success` | Deposit history retrieved via Chainstack archive (Tier 2) |
+| `chainstack-archive-failure` | Chainstack archive deposit retrieval failed (Tier 2) |
+| `client-fallback`            | Deposit value synthesized client-side (Tier 3, buildFallbackPnL) |
 | `unknown`              | Resolution failed or source could not be determined      |
+
+The five deposit-retrieval values describe which **log source** answered a
+HyperEVM deposit-history request; they are distinct from the price-resolution
+sources above and pair with the `deposit_retrieval` event's `tier_used` field.
 
 ### Adding a new source
 When a new pricing source is introduced (e.g., a paid CoinGecko key path,

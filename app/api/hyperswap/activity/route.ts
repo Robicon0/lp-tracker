@@ -39,6 +39,53 @@ const LOG_CONCURRENCY = 3;
 // hammer Chainstack at once and trip the shared RPS limit.
 const ARCHIVE_BATCH_DELAY_MS = 200;
 
+// ── Etherscan V2 concurrency gate (Tier 1 rate-limit hardening) ─────────────
+// Etherscan's free tier allows ~5 req/sec. The analytics page loads several
+// HyperEVM positions at once and each position fires 3 topic calls
+// (Increase/Decrease/Collect), so unbounded fan-out easily exceeds the budget
+// and cascades into rate-limit failures that drop deposit history. Cap GLOBAL
+// in-flight Etherscan requests per process / warm function instance at 3
+// (headroom under 5/sec). A slot is held only for the duration of the network
+// call and released across the exponential backoff between retries, so a
+// backing-off request never blocks a fresh one.
+const ETHERSCAN_MAX_CONCURRENT = 3;
+let etherscanInFlight = 0;
+const etherscanWaiters: Array<() => void> = [];
+
+async function acquireEtherscanSlot(): Promise<void> {
+  if (etherscanInFlight < ETHERSCAN_MAX_CONCURRENT) {
+    etherscanInFlight++;
+    return;
+  }
+  // Baton-passing: releaseEtherscanSlot hands the slot straight to us, so the
+  // in-flight count stays constant when a waiter is woken.
+  await new Promise<void>((resolve) => etherscanWaiters.push(resolve));
+}
+
+function releaseEtherscanSlot(): void {
+  const next = etherscanWaiters.shift();
+  if (next) next();          // pass the slot to the next waiter — count unchanged
+  else etherscanInFlight--;  // nobody waiting — free the slot
+}
+
+// Exponential backoff schedule (ms) for Etherscan HTTP 429 / "rate limit"
+// bodies. After the last retry the topic is reported failed and the caller
+// falls through to Tier 2 (Chainstack archive).
+const ETHERSCAN_BACKOFF_MS = [1000, 2000, 4000];
+
+// Etherscan signals rate limiting two ways: a raw HTTP 429, or an HTTP 200 with
+// status:"0", message:"NOTOK", result:"Max calls per sec rate limit reached".
+// Both must trigger backoff/retry, not be treated as a hard failure.
+function isEtherscanRateLimit(reason: string): boolean {
+  const r = reason.toLowerCase();
+  return (
+    r.includes('rate limit') ||
+    r.includes('max calls per sec') ||
+    r.includes('max rate') ||
+    r.includes('429')
+  );
+}
+
 // Standard Uni V3 event topic0 hashes — same for all V3 forks
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
@@ -191,7 +238,7 @@ async function fetchOneEtherscanTopic(
   topic0: string,
   apiKey: string,
   signal: AbortSignal,
-): Promise<{ ok: true; logs: RawLog[] } | { ok: false; reason: string; invalidKey?: boolean }> {
+): Promise<{ ok: true; logs: RawLog[] } | { ok: false; reason: string; invalidKey?: boolean; rateLimited?: boolean }> {
   const u = new URL(ETHERSCAN_V2_URL);
   u.searchParams.set('chainid', ETHERSCAN_CHAIN_ID);
   u.searchParams.set('module', 'logs');
@@ -204,8 +251,15 @@ async function fetchOneEtherscanTopic(
   u.searchParams.set('toBlock', 'latest');
   u.searchParams.set('apikey', apiKey);
 
+  // Hold a concurrency slot only for the duration of the network call.
+  await acquireEtherscanSlot();
   try {
     const res = await fetch(u.toString(), { signal });
+    // A raw HTTP 429 may not carry a JSON body — treat it as a retryable rate
+    // limit before attempting to parse.
+    if (res.status === 429) {
+      return { ok: false, reason: 'http-429', rateLimited: true };
+    }
     const json: { status?: string; message?: string; result?: unknown } = await res.json();
     if (json.status === '1') {
       return { ok: true, logs: Array.isArray(json.result) ? (json.result as RawLog[]) : [] };
@@ -215,16 +269,70 @@ async function fetchOneEtherscanTopic(
     if (msg.includes('No records')) return { ok: true, logs: [] }; // legitimate empty
     const resultStr = typeof json.result === 'string' ? json.result : '';
     const invalidKey = msg === 'NOTOK' && resultStr.toLowerCase().includes('invalid api key');
-    return { ok: false, reason: resultStr || msg || 'unknown', invalidKey };
+    // status:"0" + a "Max calls per sec rate limit reached" body is an HTTP-200
+    // soft rate limit — must be retried, not treated as a hard failure.
+    const reason = resultStr || msg || 'unknown';
+    const rateLimited = !invalidKey && isEtherscanRateLimit(reason);
+    return { ok: false, reason, invalidKey, rateLimited };
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
     return { ok: false, reason: isAbort ? 'timeout' : 'fetch error' };
+  } finally {
+    releaseEtherscanSlot();
   }
 }
 
+// Wraps fetchOneEtherscanTopic with exponential backoff on rate-limit responses
+// (HTTP 429 or the "Max calls per sec" soft limit). Retries at 1s/2s/4s; after
+// the last retry the topic is reported failed and the caller falls through to
+// Tier 2. The concurrency slot is released between attempts (it lives inside
+// fetchOneEtherscanTopic), so a backing-off request never holds a slot while it
+// sleeps. Non-rate-limit failures (invalid key, timeout, network) return
+// immediately — a wait won't help them recover.
+async function fetchEtherscanTopicWithBackoff(
+  nftManager: string,
+  tokenIdHex: string,
+  topic0: string,
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<{ ok: true; logs: RawLog[] } | { ok: false; reason: string; invalidKey?: boolean; rateLimited?: boolean }> {
+  let last: { ok: false; reason: string; invalidKey?: boolean; rateLimited?: boolean } = {
+    ok: false,
+    reason: 'unknown',
+  };
+  for (let attempt = 0; attempt <= ETHERSCAN_BACKOFF_MS.length; attempt++) {
+    const r = await fetchOneEtherscanTopic(nftManager, tokenIdHex, topic0, apiKey, signal);
+    if (r.ok) return r;
+    last = r;
+    // Only rate limits are worth waiting on; everything else is returned now.
+    if (!r.rateLimited || r.invalidKey) return r;
+    if (attempt < ETHERSCAN_BACKOFF_MS.length && !signal.aborted) {
+      console.warn(
+        `[hyperswap/activity] source=etherscan rate-limited (${r.reason}) — ` +
+        `backoff ${ETHERSCAN_BACKOFF_MS[attempt]}ms, retry ${attempt + 1}/${ETHERSCAN_BACKOFF_MS.length}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, ETHERSCAN_BACKOFF_MS[attempt]));
+    } else {
+      break;
+    }
+  }
+  return last;
+}
+
+// Discriminated outcome of the Etherscan (Tier 1) attempt, so the caller can
+// distinguish "skipped" (key unset) from "failed" (rate-limited/timeout) and
+// surface a precise reason in the deposit_retrieval [PRICE_LOG] event.
+type EtherscanOutcome =
+  | { kind: 'ok'; logs: RawLog[] }    // tier answered (logs possibly empty)
+  | { kind: 'skip'; reason: string }  // key unset — expected, not an error
+  | { kind: 'fail'; reason: string }; // tier failed — fall through to Tier 2
+
 // TIER 1: Etherscan V2 getLogs. One call per topic0 (Etherscan requires topic0
 // in the query — there's no "any topic" wildcard). Each topic is fetched
-// independently, retried ONCE after a 1s backoff on transient failure.
+// through fetchEtherscanTopicWithBackoff, which retries rate-limited calls with
+// exponential backoff (1s/2s/4s) and is throttled by the module-level
+// concurrency gate so concurrent positions don't blow past the ~5 req/sec
+// budget.
 //
 // **Per-topic criticality** — partial success is only safe for topics whose
 // absence causes MISSING data (not WRONG data):
@@ -238,22 +346,22 @@ async function fetchOneEtherscanTopic(
 //   - Collect (optional): if dropped, fee_claim events are missing but no
 //     other event is mis-valued.
 //
-// Returns null when:
-//   - ETHERSCAN_API_KEY is unset (caller skips to archive RPC)
-//   - Any topic returned the "Invalid API Key" signature (key is wrong —
-//     retrying won't help, full archive RPC fallback is correct)
-//   - DecreaseLiquidity topic still failed after retry (correctness gate)
-//   - ALL THREE topics still failed after retry
-// "No records found" comes back as status:"0" with that exact message — NOT
-// treated as an error; just means this topic yielded no logs for this position.
+// Returns:
+//   - { kind: 'skip' } when ETHERSCAN_API_KEY is unset (caller goes to archive)
+//   - { kind: 'fail' } when a topic returned the "Invalid API Key" signature,
+//     when DecreaseLiquidity still failed after backoff (correctness gate), or
+//     when ALL THREE topics still failed after backoff. reason captures whether
+//     rate limiting was the cause ("etherscan-429*").
+//   - { kind: 'ok', logs } otherwise (logs may be empty — a legitimate result;
+//     "No records found" is status:"0" with that message, not an error).
 async function fetchLogsViaEtherscan(
   nftManager: string,
   tokenIdHex: string,
-): Promise<RawLog[] | null> {
+): Promise<EtherscanOutcome> {
   const apiKey = process.env.ETHERSCAN_API_KEY;
   if (!apiKey) {
     console.log('[hyperswap/activity] source=etherscan SKIP — ETHERSCAN_API_KEY not set, will use archive RPC');
-    return null;
+    return { kind: 'skip', reason: 'etherscan-key-unset' };
   }
 
   const topics = [TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT];
@@ -262,41 +370,29 @@ async function fetchLogsViaEtherscan(
   const timer = setTimeout(() => controller.abort(), ETHERSCAN_TIMEOUT_MS);
 
   try {
-    // First pass — fire all 3 topic calls in parallel.
-    const firstPass = await Promise.all(
-      topics.map((topic) => fetchOneEtherscanTopic(nftManager, tokenIdHex, topic, apiKey, controller.signal)),
+    // Fire all 3 topic calls; each retries internally with exponential backoff
+    // on rate limits and is throttled by the module-level concurrency gate.
+    const final = await Promise.all(
+      topics.map((topic) =>
+        fetchEtherscanTopicWithBackoff(nftManager, tokenIdHex, topic, apiKey, controller.signal),
+      ),
     );
+    clearTimeout(timer);
 
-    // If ANY first-pass call hit "Invalid API Key", abort the whole tier.
-    // Retrying won't help — operator needs to fix .env.local / Vercel env.
-    const invalidKey = firstPass.find((r) => !r.ok && r.invalidKey);
-    if (invalidKey) {
-      clearTimeout(timer);
+    // If ANY call hit "Invalid API Key", abort the whole tier — retrying won't
+    // help; operator needs to fix .env.local / Vercel env.
+    if (final.some((r) => !r.ok && r.invalidKey)) {
       console.error(
         '[hyperswap/activity] source=etherscan INVALID_API_KEY — ETHERSCAN_API_KEY ' +
         'is rejected by Etherscan V2. Check for duplicate keys in .env.local (dotenv ' +
         'keeps the LAST definition) and on Vercel. Tier 2 archive RPC will run if ' +
         'HYPEREVM_ARCHIVE_RPC is configured.',
       );
-      return null;
+      return { kind: 'fail', reason: 'etherscan-invalid-key' };
     }
 
-    // Retry each failed topic ONCE after a 1s backoff. Etherscan's 5 req/sec
-    // free-tier limit gets hit when analytics fetches multiple closed positions
-    // in parallel (each position = 3 Etherscan calls). Without per-topic retry
-    // a single rate-limited Collect call would discard the successful Increase
-    // + Decrease results and waste the work.
-    const final = await Promise.all(
-      firstPass.map(async (r, i) => {
-        if (r.ok) return r;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        return fetchOneEtherscanTopic(nftManager, tokenIdHex, topics[i], apiKey, controller.signal);
-      }),
-    );
-    clearTimeout(timer);
-
     // Aggregate successful topics; log (but don't fail) the OPTIONAL topics
-    // that still failed after retry. DecreaseLiquidity is REQUIRED because
+    // that still failed after backoff. DecreaseLiquidity is REQUIRED because
     // the parent route relies on it to subtract withdrawal amounts from
     // Collect events in close txs — without it, Collect amounts in close
     // txs leak into fee totals (verified live: position 388173 fees went
@@ -305,6 +401,7 @@ async function fetchLogsViaEtherscan(
     // position rather than emitting wrong fee numbers.
     const all: RawLog[] = [];
     let failed = 0;
+    let rateLimited = false;
     const DECREASE_IDX = 1; // topics array order: [INCREASE, DECREASE, COLLECT]
     let decreaseOk = false;
     for (let i = 0; i < final.length; i++) {
@@ -314,9 +411,10 @@ async function fetchLogsViaEtherscan(
         if (i === DECREASE_IDX) decreaseOk = true;
       } else {
         failed += 1;
+        if (r.rateLimited) rateLimited = true;
         const note = i === DECREASE_IDX ? ' (REQUIRED — falling back to archive RPC for correctness)' : '';
         console.warn(
-          `[hyperswap/activity] source=etherscan ${topicNames[i]} FAILED after retry: ${r.reason} — ` +
+          `[hyperswap/activity] source=etherscan ${topicNames[i]} FAILED after backoff: ${r.reason} — ` +
           `events from this topic missing for tokenId ${tokenIdHex}${note}`,
         );
       }
@@ -324,24 +422,24 @@ async function fetchLogsViaEtherscan(
 
     if (failed === 3) {
       console.warn('[hyperswap/activity] source=etherscan ALL_TOPICS_FAILED — falling back to archive RPC');
-      return null;
+      return { kind: 'fail', reason: rateLimited ? 'etherscan-429' : 'etherscan-all-topics-failed' };
     }
     if (!decreaseOk) {
       // Decrease is load-bearing for fee separation. Don't return partial logs
       // here — archive scan is more reliable for THIS position than wrong fees.
-      return null;
+      return { kind: 'fail', reason: rateLimited ? 'etherscan-429-decrease' : 'etherscan-decrease-failed' };
     }
 
     console.log(
       `[hyperswap/activity] source=etherscan OK — ${all.length} logs for tokenId ${tokenIdHex} ` +
       `(${3 - failed}/3 topics succeeded)`,
     );
-    return all;
+    return { kind: 'ok', logs: all };
   } catch (err) {
     clearTimeout(timer);
     const isAbort = err instanceof Error && err.name === 'AbortError';
     console.warn(`[hyperswap/activity] source=etherscan ${isAbort ? 'TIMEOUT' : 'THREW'} — falling back to archive RPC:`, err);
-    return null;
+    return { kind: 'fail', reason: isAbort ? 'etherscan-timeout' : 'etherscan-error' };
   }
 }
 
@@ -350,10 +448,13 @@ async function fetchLogsViaEtherscan(
 // public RPC caps at 1000 blocks per call; the archive endpoint allows 10k
 // and has full history back to block 0 (unlike the prior DRPC endpoint,
 // which only retained ~40h and silently dropped older closed positions).
-async function fetchLogsViaArchive(nftManager: string, tokenIdHex: string): Promise<RawLog[]> {
+async function fetchLogsViaArchive(
+  nftManager: string,
+  tokenIdHex: string,
+): Promise<{ ok: boolean; logs: RawLog[]; reason?: string }> {
   if (!process.env.HYPEREVM_ARCHIVE_RPC) {
     console.error('[hyperswap/activity] source=archive SKIP — HYPEREVM_ARCHIVE_RPC env var not set');
-    return [];
+    return { ok: false, logs: [], reason: 'archive-unconfigured' };
   }
 
   // Get current block from the reliable public RPC
@@ -361,7 +462,7 @@ async function fetchLogsViaArchive(nftManager: string, tokenIdHex: string): Prom
   const latestBlock = parseInt((blockRes.result as string) ?? '0x0', 16);
   if (!latestBlock) {
     console.error('[hyperswap/activity] source=archive Failed to get latest block number');
-    return [];
+    return { ok: false, logs: [], reason: 'archive-no-block' };
   }
 
   const fromBlock = Math.max(0, latestBlock - SCAN_DEPTH);
@@ -385,16 +486,40 @@ async function fetchLogsViaArchive(nftManager: string, tokenIdHex: string): Prom
   }
 
   console.log(`[hyperswap/activity] source=archive OK — ${allLogs.length} logs for tokenId ${tokenIdHex}`);
-  return allLogs;
+  return { ok: true, logs: allLogs };
+}
+
+// Result of the full deposit-history retrieval across all in-route tiers, used
+// to emit the deposit_retrieval [PRICE_LOG] event. tier_used 'none' means both
+// Etherscan and the archive RPC failed, leaving Tier 3 (client-side
+// buildFallbackPnL in useLpPnl.ts) as the last resort.
+interface FetchLogsResult {
+  logs: RawLog[];
+  tierUsed: 'etherscan-v2' | 'chainstack-archive' | 'none';
+  result: 'success' | 'failure';
+  errorReason?: string;
 }
 
 // Try Etherscan V2 first (archive-backed full history); fall back to the
 // Chainstack archive RPC if Etherscan is rate-limited, times out, errors,
-// or the API key isn't set.
-async function fetchLogs(nftManager: string, tokenIdHex: string): Promise<RawLog[]> {
-  const etherscanLogs = await fetchLogsViaEtherscan(nftManager, tokenIdHex);
-  if (etherscanLogs !== null) return etherscanLogs;
-  return fetchLogsViaArchive(nftManager, tokenIdHex);
+// or the API key isn't set. Reports which tier answered so retrieval success
+// rate is measurable.
+async function fetchLogs(nftManager: string, tokenIdHex: string): Promise<FetchLogsResult> {
+  const es = await fetchLogsViaEtherscan(nftManager, tokenIdHex);
+  if (es.kind === 'ok') {
+    return { logs: es.logs, tierUsed: 'etherscan-v2', result: 'success' };
+  }
+  // Etherscan unavailable (key unset) or failed → Tier 2 archive RPC.
+  const ar = await fetchLogsViaArchive(nftManager, tokenIdHex);
+  if (ar.ok) {
+    return { logs: ar.logs, tierUsed: 'chainstack-archive', result: 'success' };
+  }
+  // Both tiers exhausted — Tier 3 (client-side buildFallbackPnL) takes over.
+  const esReason = es.kind === 'fail' ? es.reason : null;
+  const errorReason =
+    esReason && ar.reason ? `${esReason}+${ar.reason}` :
+    esReason ?? ar.reason ?? 'all-tiers-exhausted';
+  return { logs: [], tierUsed: 'none', result: 'failure', errorReason };
 }
 
 async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, number>> {
@@ -444,7 +569,32 @@ export async function GET(request: Request) {
     const tokenIdBig = BigInt(positionId);
     const tokenIdHex = '0x' + tokenIdBig.toString(16).padStart(64, '0');
 
-    const logs = await fetchLogs(nftManager, tokenIdHex);
+    // [PRICE_LOG] deposit_retrieval — one event per position per invocation,
+    // covering the 3-tier deposit-history fallback. Latency spans all tiers.
+    // Emitted BEFORE the empty early-return so total-failure cases are
+    // observable too. events_count is deposit (IncreaseLiquidity) events; 0 is a
+    // valid success when a tier answered but the position has no deposits.
+    const __retrievalStart = Date.now();
+    const retrieval = await fetchLogs(nftManager, tokenIdHex);
+    const logs = retrieval.logs;
+    const __retrievalMs = Date.now() - __retrievalStart;
+    const __protocol = NFT_MANAGER_TO_PROTOCOL[nftManager.toLowerCase()] ?? nftManager.toLowerCase();
+    const __depositEvents = logs.filter(
+      (l) => (l.topics?.[0] ?? '').toLowerCase() === TOPIC_INCREASE,
+    ).length;
+    logPrice({
+      event: 'deposit_retrieval',
+      protocol: __protocol,
+      chain: 'hyperevm',
+      position_id: positionId,
+      tier_used: retrieval.tierUsed,
+      result: retrieval.result,
+      latency_ms: __retrievalMs,
+      events_count: __depositEvents,
+      ...(retrieval.result === 'failure' && retrieval.errorReason
+        ? { error_reason: retrieval.errorReason }
+        : {}),
+    });
 
     if (logs.length === 0) {
       const empty: ActivityResponse = {
@@ -648,7 +798,6 @@ export async function GET(request: Request) {
     // in practice exactly one bucket is populated; the per-protocol structure
     // honours the "emit one summary per protocol, skip zero" rule for this
     // shared HyperSwap/KittenSwap/ProjectX route.
-    const __protocol = NFT_MANAGER_TO_PROTOCOL[nftManager.toLowerCase()] ?? nftManager.toLowerCase();
     const __posId = positionId ?? '';
     const __buckets = new Map<string, {
       total: number; resolved: number; failed: number; lookups: number;
@@ -814,6 +963,12 @@ export async function GET(request: Request) {
         totalLookups: __b.lookups,
         sourceBreakdown: __b.breakdown,
         failures: __b.failures,
+        // Deposit-history retrieval outcome for this position (one position per
+        // invocation). Lets analysis read deposit success rate off route_summary
+        // alongside the dedicated deposit_retrieval event.
+        deposits_total: 1,
+        deposits_resolved: retrieval.result === 'success' ? 1 : 0,
+        deposits_failed: retrieval.result === 'success' ? 0 : 1,
       });
     }
 

@@ -77,7 +77,10 @@ function userFriendlyReason(reason: string, protocol: string): string {
     if (protocol === "HyperSwap" || protocol === "KittenSwap" || protocol === "ProjectX") {
       // HyperEVM positions taking this branch DESPITE the fallback below
       // means the position has 0 value — fallback only kicks in when value > 0.
-      return "Deposit history unavailable on HyperEVM RPC";
+      // Keep the user-facing text simple; the technical cause (which tier
+      // failed, rate-limit vs timeout) lives in the deposit_retrieval
+      // [PRICE_LOG] event for debugging.
+      return "Deposit history could not be retrieved for this position";
     }
     return "No deposit events found on-chain";
   }
