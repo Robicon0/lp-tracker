@@ -41,15 +41,17 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1: HyperEVM cold-start hardening.**
+**Sprint 2: Account 1 Aerodrome investigation.**
 
-**Goal:** Server-side price cache (Vercel KV free tier or in-memory
-module cache) so the second user inherits the first user's warm CoinGecko
-data. Resolves Account 2 ProjectX exclusion regression where cold-start
-CG saturation drops resolution.
+**Goal:** Diagnostic harness against Account 1 wallets to identify
+missing/wrong/excluded positions (manual ~$57 platform vs hundreds
+expected).
 
-**Status:** Pre-sprint infrastructure work in progress. `.claude/` folder
-restructure underway. Sprint 1 implementation has not yet started.
+**Status:** Not started. Sprint 1 (HyperEVM deposit-retrieval hardening)
+shipped in `e1213bd` — the rate-limit pacing path resolved the Account 2
+ProjectX cold-start exclusion (100% retrieval under 5× concurrent burst),
+so the originally-planned server-side cross-user price cache is deferred
+as a future optimization rather than a blocker (see Known limitations).
 
 ---
 
@@ -58,22 +60,21 @@ restructure underway. Sprint 1 implementation has not yet started.
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **HyperEVM cold-start hardening** (active) — server-side price cache.
-2. **Account 1 Aerodrome investigation** — diagnostic harness against
-   Account 1 wallets to identify missing/wrong/excluded positions
+1. **Account 1 Aerodrome investigation** (active) — diagnostic harness
+   against Account 1 wallets to identify missing/wrong/excluded positions
    (manual ~$57 platform vs hundreds expected).
-3. **Closed Sui position fee recovery** — Sui event indexer on free
+2. **Closed Sui position fee recovery** — Sui event indexer on free
    public RPC. Filter Bluefin/Cetus/Momentum package addresses.
    Reconstruct deposit/withdrawal/fee events from event log (objects
    destroyed but events preserved).
-4. **Momentum activity route** — modeled on Bluefin, uses Sprint 3
+3. **Momentum activity route** — modeled on Bluefin, uses Sprint 3
    indexer.
-5. **Closed Solana position fee recovery** — Solana event indexer using
+4. **Closed Solana position fee recovery** — Solana event indexer using
    free public RPC. Parse Orca/Raydium program instructions from wallet
    transaction history.
-6. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+5. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-7. **UI for closed Sui + Solana positions** — Closed tab support.
+6. **UI for closed Sui + Solana positions** — Closed tab support.
 
 ---
 
@@ -82,6 +83,15 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`e1213bd`** — HyperEVM deposit-retrieval hardening (Sprint 1).
+  Module-level Etherscan V2 concurrency gate (max 3 in-flight, headroom
+  under ~5 req/sec) + exponential backoff (1/2/4s) on HTTP-429 and the
+  HTTP-200 "Max calls per sec" soft-limit body; falls through to
+  Chainstack archive (Tier 2 unchanged) then client fallback (Tier 3).
+  New structured `[PRICE_LOG]` `deposit_retrieval` event + `route_summary`
+  `deposits_*` fields. Verified: 20/20 retrieval success under 5×
+  concurrent burst (Account 2, 4 closed ProjectX), 47 backoffs all
+  recovered, 0 cascading failures, 0 dropped positions.
 - **`751743b`** — Client data layer architectural pass. Per-endpoint
   concurrency limiter (MAX_PER_ENDPOINT=2), increased attempt timeouts
   (60/60/90s), differentiated cache TTL (success 5min, empty 60s,
@@ -98,9 +108,6 @@ shorthand.
 - **`90faaf9`** — Aerodrome burned-NFT recovery via
   `app/lib/evmEverOwnedNftIds.ts`. Recovered 4 closed positions
   worth ~$743 in fees.
-- **`26fd213`** — Cetus token resolution + zero-amount + Sui spot
-  fallback. `0x2::sui::SUI` and CETUS reward token mapped to CG IDs.
-  CETUS uses cg-spot + LKG exception. Result: 32/78 → 81/81.
 
 ---
 
@@ -157,6 +164,20 @@ with similar position shapes. Never wallet-specific framing.
 resolver cannot run on HyperEVM. Claim-time pricing for HyperSwap,
 KittenSwap, ProjectX must use CG-historical awaited for closed
 positions, fire-and-forget for open.
+
+**HyperEVM Tier 2 archive scan is slow under burst.** When Etherscan
+(Tier 1) is exhausted and the Chainstack archive fallback fires, scanning
+~500 chunks (`SCAN_DEPTH` 5M / `LOG_CHUNK` 10k) at `LOG_CONCURRENCY` 3 +
+200ms batch delay can take ~100s per position under concurrent contention
+(now visible via the `deposit_retrieval` event's `latency_ms`, observed in
+`e1213bd` verification). Within Vercel's 300s function budget and only on
+the rare Etherscan-exhaustion path, but a future optimization target.
+
+**Server-side cross-user price cache deferred.** The originally-planned
+Sprint 1 shared CoinGecko price cache (Vercel KV / in-memory module cache)
+was not built — the `e1213bd` rate-limit pacing path resolved the Account 2
+ProjectX cold-start exclusion on its own (100% retrieval under 5× burst).
+Revisit if cold-start CG saturation resurfaces at higher traffic.
 
 **Empty-Sugar edge case (Aerodrome, Velodrome).** For wallets with zero
 open positions, the Sugar contract's enumeration returns empty, causing
