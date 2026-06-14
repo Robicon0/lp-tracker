@@ -1,0 +1,243 @@
+# Architecture Principles
+
+These are the platform-level rules for how DefiDesh is built. Every fix, every
+new feature, every new chain integration must conform. These rules exist
+because DefiDesh serves any user globally — what works for one wallet must
+work for thousands.
+
+## Core principle
+
+DefiDesh is the world's best LP position tracker for any user on any chain.
+Every fix is a platform fix that benefits all current and future users with
+similar position shapes. Never frame a bug as wallet-specific.
+
+---
+
+## Rule 1: Every bug is a platform bug
+
+When a bug is reported (whether by Osho's own wallets, a Twitter user, or
+discovered in logs), the framing is always:
+
+> "X% of users with Y positions on Z chain see wrong values."
+
+**Never** frame as:
+> "My wallet shows wrong fees on Aerodrome."
+
+Reason: wallet-specific framing leads to wallet-specific patches that don't
+generalize. Platform-level framing forces root-cause analysis, which fixes
+all current and future users with the same position shape.
+
+### Test for whether a fix is platform-level
+
+After writing a fix, ask: "Would this fix work correctly for a brand-new
+wallet I've never seen, on the same chain, with the same protocol, with a
+different position size and different token pair?"
+
+If the answer is no, the fix is wallet-specific. Reject it. Find the
+underlying platform-level cause.
+
+---
+
+## Rule 2: No per-chain branches in client code
+
+The mechanism for fetching positions, computing P&L, resolving prices, and
+displaying results must be uniform across all chains. Per-chain `if` branches
+in client code are forbidden.
+
+Per-chain *parameters* (timeouts, concurrency limits, RPC endpoints) are
+allowed and live in config. Per-chain *logic* is not.
+
+### Why this matters
+
+Per-chain branches grow combinatorially. Adding chain N+1 means touching N
+files instead of one config entry. After 10 chains, the codebase becomes
+unmaintainable.
+
+### How to handle chain differences
+
+Chain capabilities differ (HyperEVM has no archival eth_call; Sui/Solana
+destroy position objects on close; EVM keeps NFTs after close). These
+differences are handled in three ways, in order of preference:
+
+1. **Uniform conservative parameters** that accommodate the slowest chain.
+   Example: per-endpoint concurrency limit set to accommodate HyperEVM's
+   5 req/sec Etherscan budget.
+
+2. **Capability detection** at runtime. Example: detect whether archival
+   eth_call is available, fall back to CoinGecko historical if not.
+
+3. **Chain-specific helper modules** (not branches in client code).
+   Example: `app/lib/evmEverOwnedNftIds.ts` is an EVM-only helper, but
+   client code calls it through a uniform interface.
+
+---
+
+## Rule 3: Additive-only changes
+
+All fixes must be additive unless explicitly replacing broken logic.
+
+Adding new instrumentation, new fallback paths, new cache layers, new
+position recovery mechanisms: additive. Allowed by default.
+
+Replacing or deleting existing logic: requires explicit user approval and
+a stop-and-report if the replacement is more than minor.
+
+### Reason
+
+DefiDesh has accumulated load-bearing logic over months. Replacing logic
+without understanding why it was load-bearing has caused production
+regressions (e.g., the concurrency-5 incident that re-broke ProjectX by
+removing HyperEVM serialization that was needed for Etherscan rate limits).
+
+When in doubt, add a new path alongside the existing one. Verify the new
+path works. Only then consider removing the old path.
+
+---
+
+## Rule 4: Every new protocol works everywhere
+
+When a new protocol is integrated (Curve, Balancer, Trader Joe, or any
+future protocol), it must work end-to-end across all of:
+
+- Dashboard (open + closed positions visible)
+- Analytics (lifetime fees included in Fee Income by Protocol)
+- LP P&L (deposits, withdrawals, IL computed correctly)
+- Position detail page (per-position view works)
+- Docs (protocol listed and explained)
+- About page (protocol added to supported list)
+
+A protocol that only works in some of these places is not integrated. It is
+half-integrated. Half-integration is a worse user experience than no
+integration because users see inconsistency.
+
+---
+
+## Rule 5: Every new chain must determine closed-position retrievability
+
+When a new chain is added, the integration must explicitly determine — before
+shipping — which of three categories the chain falls into:
+
+### Category A: Closed positions are retrievable through normal queries
+Example: EVM chains keep the position NFT after close. The NFT is queryable
+via standard `eth_getLogs` and contract calls.
+
+Requirement: integrate closed positions in the **same release** as open
+positions. Do not ship "open only" and promise closed later.
+
+Currently implemented for: Aerodrome (commit 90faaf9), Uniswap V3 (7c60cce),
+Velodrome (6601d38). Helper: `app/lib/evmEverOwnedNftIds.ts`.
+
+### Category B: Closed positions are retrievable through event reconstruction or tx-history parsing
+Example: Sui destroys the position object on close but preserves the event
+log forever on-chain. Solana destroys the position state on close but
+preserves the full transaction history.
+
+Requirement: integrate open positions first. Queue closed-position recovery
+as a separate sprint. Document the temporary gap in the about page so users
+understand why closed positions on that chain are pending.
+
+Currently planned (not yet built):
+- Sui event reconstruction → Sprint 3 (Bluefin, Cetus, Momentum)
+- Solana transaction history parsing → Sprint 5 (Orca, Raydium)
+
+### Category C: Closed positions are not retrievable at all
+Example: a hypothetical chain that destroys all on-chain history at close
+with no events, no transaction logs, no archival access.
+
+Requirement: document the permanent limitation in the about page. Open
+positions only.
+
+No currently supported chains fall into this category.
+
+### Decision rule for new chains
+Before integrating chain N+1, the integrator must answer:
+1. Is the position state preserved after close? (Category A if yes)
+2. If no, are events or transaction history preserved? (Category B if yes)
+3. If no to both, document as Category C.
+
+---
+
+## Rule 6: Conservative parameters accommodate the slowest chain
+
+When choosing global parameters (timeouts, concurrency limits, cache TTLs,
+retry counts), use values that work for the most-constrained chain, not the
+fastest.
+
+### Examples
+
+- **Concurrency**: HyperEVM's Etherscan free-tier budget is 5 req/sec.
+  Per-endpoint concurrency is capped at 2 to leave headroom.
+
+- **Timeouts**: HYPE historical CoinGecko fetches can take 60+ seconds
+  under load. Activity route attempt timeouts are set to 60/60/90s, not
+  the original 30/30/45s.
+
+- **Cache TTLs**: success cached 5 minutes, empty results cached 60 seconds,
+  errors not cached. Empty-result caching prevents stampedes against slow
+  chains; not caching errors allows fast recovery from transient failures.
+
+---
+
+## Rule 7: One active sprint at a time
+
+The active sprint is the only thing being actively implemented. Future
+sprints are queued, not started in parallel.
+
+### Why
+Parallel work on overlapping concerns creates merge conflicts, context-switch
+cost, and half-finished features that ship as inconsistent user experiences.
+The cost of finishing one sprint before starting the next is small. The cost
+of half-finishing five sprints is large.
+
+### How it scales
+This rule is about avoiding parallel work that creates conflicts — not about
+team size.
+
+Currently DefiDesh is built by a single developer (Osho with Claude Code),
+so "one active sprint" is naturally enforced.
+
+When the team grows, this rule evolves: multiple parallel sprints are
+allowed, but only if each sprint has explicit ownership and they touch
+different files. Two sprints touching the same files is never allowed.
+
+The sprint queue lives in CLAUDE.md and is updated only at sprint boundaries
+(after one sprint ships, before the next begins).
+
+---
+
+## Decision tree: "Is this fix platform-level?"
+
+Ask in order:
+
+1. **Does this fix work for any user with similar positions, not just
+   Osho's wallets?**
+   - No → not platform-level, find the root cause
+   - Yes → continue
+
+2. **Does this fix add a per-chain branch to client code?**
+   - Yes → reject, move the logic to a helper module or runtime detection
+   - No → continue
+
+3. **Is this fix additive, or does it replace existing logic?**
+   - Additive → proceed
+   - Replacing → stop, get explicit approval, document why the old logic
+     was wrong
+
+4. **If this fix is for a new protocol or chain, does it work everywhere
+   (dashboard, analytics, LP P&L, position detail, docs, about page)?**
+   - Yes → proceed
+   - No → not done yet
+
+If all four checks pass, the fix is platform-level.
+
+---
+
+## When to amend this file
+
+Amend architecture-principles.md when:
+- A new architectural pattern is established and proven in production
+- An existing principle is demonstrated wrong by evidence
+- A new chain or capability category requires a new structural rule
+
+Do **not** amend this file based on a single bug. Architectural principles
+are stable; bug fixes are not.
