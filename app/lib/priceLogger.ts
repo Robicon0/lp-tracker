@@ -71,6 +71,17 @@ interface RouteSummaryEvent {
   deposits_total?: number;
   deposits_resolved?: number;
   deposits_failed?: number;
+  // True iff EVERY fee claim for this position resolved via a historical
+  // source (cg-historical-cache / sqrtPriceX96 / stablecoin-fixed) — i.e.
+  // zero claims fell through to the "unknown" bucket. False means at least
+  // one claim is unresolved (historical price unavailable). Current spot is
+  // NEVER used for fee claims (pricing-invariants Rule 1), so a false here
+  // signals claims the user should see as "pending price resolution" rather
+  // than mis-valued at spot. Production-observable metric for verifying the
+  // claim-pricing fix at scale. Optional/HyperEVM-route-only, like the
+  // deposits_* fields above. (Lives here, not on deposit_retrieval, because
+  // deposit_retrieval is emitted before pricing runs.)
+  claim_pricing_succeeded?: boolean;
 }
 
 // Emitted once per position per HyperEVM activity-route invocation. Captures

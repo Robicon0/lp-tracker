@@ -47,6 +47,35 @@ For all fee claims on all protocols on all chains:
 - **Never** add hardcoded fallback prices to `/api/prices`. This broke all
   position values to $0.00 in a prior incident.
 
+### Rule 1a: Unresolved fee claims are marked, never spot-valued
+
+If a fee claim's designated historical price is unavailable (cache miss,
+rate-limit, fetch timeout, or no token mapping), the claim **must be marked
+unresolved** — its USD value stays `null`. Falling back to current spot is
+**forbidden for fee-claim valuation under all circumstances on all chains**,
+including when every historical tier has failed. An unresolved claim:
+
+- Contributes **$0** to confident lifetime-fee totals (excluded from the sum —
+  not coerced to $0, not estimated from spot).
+- Is **surfaced to the user** as "N claims pending price resolution" — never
+  silently dropped, never shown as a confident value.
+- Emits a `fee_claim_resolution` [PRICE_LOG] event with `source: "unknown"`
+  and reason `cg-historical-cache-miss-no-spot-fallback`, and sets
+  `route_summary.claim_pricing_succeeded` to `false`.
+
+Rationale: a claim collected weeks ago valued at today's spot systematically
+mis-reports lifetime fees. Account 2's ProjectX HYPE/USDC over-reported
+$2,243.69 vs a manual $1,780.44 (+26%) precisely because ~20 historical claims
+fell through to current spot (~$63/HYPE) instead of claim-date price
+(~$41.73/HYPE). Reference: Sprint 1.5.
+
+This forbids spot as a **fallback**. It does **not** override an exception
+that *designates* spot as a claim's primary method (e.g. the CETUS reward
+token below uses spot + LKG by design — that is the designated source, not a
+fallback). It also does not touch Rule 2: the spot last-resort for deposits/
+withdrawals stays allowed, because those are point-in-time position values,
+not historical earnings.
+
 ### Exceptions to Rule 1
 
 **CETUS reward token (Sui)**

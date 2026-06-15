@@ -689,15 +689,16 @@ export default function Analytics() {
       e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string },
     ) => {
       if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
-      // PART 2 (paired with the activity-route null→0 guarantee): admit
-      // usdAtTime === 0 so a protocol whose pricing pipeline failed (CG
-      // rate-limit, no CG_IDS, etc.) still surfaces in "Fee Income By
-      // Protocol" — it just contributes $0 instead of vanishing silently.
-      // Reject only null/undefined/NaN/Infinity. Zero-amount fee_claim
-      // artifacts (both amounts genuinely 0) were already filtered out at
-      // the source by cleanRawEvents in each EVM activity route, so any
-      // event reaching here with usd=0 has real on-chain amounts and just
-      // failed to price.
+      // A fee claim with no historical valuation arrives here with
+      // usdAtTime === null (pricing-invariants Rule 1a — the activity route
+      // leaves it UNRESOLVED rather than coercing to $0 or valuing at current
+      // spot). Skip it from Fee Income: it must not understate as $0 and must
+      // not inflate at spot. The user is told about it separately via the
+      // "N claims pending price resolution" banner (lpPnl.pendingClaimCount),
+      // so it's surfaced, not silently dropped. A genuinely $0 claim never
+      // reaches here — zero-amount artifacts are filtered at the source by
+      // cleanRawEvents in each activity route — so any usd === 0 below has
+      // real on-chain amounts (legitimately tiny), and we still admit it.
       if (e.usdAtTime == null) return;
       const usd = e.usdAtTime;
       if (!Number.isFinite(usd) || usd < 0) return;
@@ -1836,6 +1837,41 @@ export default function Analytics() {
                         <span>{ep.reason}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pending price-resolution notice — fee claims whose claim-date
+                  historical price could not be resolved. Per pricing-invariants
+                  Rule 1 these are NEVER valued at current spot, so rather than
+                  silently understate lifetime fees we tell the user a value is
+                  pending. Distinct from the excluded-positions banner above:
+                  the position still counts, only some of its fee claims are
+                  unpriced. Shown only after loading resolves. */}
+              {!lpPnl.isLoading && lpPnl.pendingClaimCount > 0 && (
+                <div
+                  style={{
+                    margin: "0 26px 18px",
+                    border: "1px solid rgba(120,170,255,0.25)",
+                    background: "rgba(120,170,255,0.04)",
+                    padding: "12px 16px",
+                    fontFamily: FONT,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "#78aaff",
+                      letterSpacing: "0.04em",
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    ⏳ {lpPnl.pendingClaimCount} claim
+                    {lpPnl.pendingClaimCount === 1 ? "" : "s"} pending price
+                    resolution — claim-date historical price was unavailable, so{" "}
+                    {lpPnl.pendingClaimCount === 1 ? "it is" : "they are"} not yet
+                    included in Fees Collected. This usually resolves on the next
+                    refresh; values are never estimated from the current price.
                   </div>
                 </div>
               )}

@@ -90,7 +90,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // correct. Bumping anyway so analytics & lp-pnl refresh in lockstep
 // (avoids a window where lifetime fees show one number on the chart
 // and a different number on the LP P&L card).
-function cacheKey(id: string) { return `analytics-activity-v13-${id}`; }
+// Bumped v13 → v14: parity with useLpPnl's v21 → v22. HyperEVM fee claims that
+// miss the historical price cache are now left UNRESOLVED (usdAtTime null)
+// instead of valued at current spot (pricing-invariants Rule 1). v13 entries
+// carry the old spot-valued usdAtTime; bump flushes them so claims re-fetch
+// under the corrected ladder and analytics/LP-P&L stay in lockstep.
+function cacheKey(id: string) { return `analytics-activity-v14-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

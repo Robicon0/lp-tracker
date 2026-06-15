@@ -58,6 +58,12 @@ export interface LpPnlResult {
   // because deposit history wasn't recoverable from RPC). The analytics
   // page prefixes the "Total Deposited" card with "~" when this is > 0.
   estimatedPositionCount: number;
+  // Total number of fee claims across all included positions that have NO
+  // historical USD valuation — the activity route left them unresolved rather
+  // than fall back to current spot (pricing-invariants Rule 1). Surfaced in the
+  // analytics UI as "N claims pending price resolution" so the user knows a
+  // fee figure is incomplete (vs. silently understated). 0 in the happy path.
+  pendingClaimCount: number;
 }
 
 const EMPTY: LpPnlResult = {
@@ -67,6 +73,7 @@ const EMPTY: LpPnlResult = {
   perPosition: {},
   excludedPositions: [],
   estimatedPositionCount: 0,
+  pendingClaimCount: 0,
 };
 
 // Map technical exclusion reasons to user-friendly text shown in the warning
@@ -131,6 +138,25 @@ function sumFeeClaimUsd(events: ActivityEventForPnL[]): number {
     if (Number.isFinite(v) && v > 0) sum += v;
   }
   return sum;
+}
+
+// Count fee_claim / reward_claim events with NO historical valuation — neither
+// usdAtTime nor claim-time per-token prices. These are NOT valued at current
+// spot (pricing-invariants Rule 1); they're surfaced as "pending price
+// resolution". Mirrors the skip-conditions in sumFeeClaimUsd so the count and
+// the sum stay consistent. Used on the HyperEVM fallback path, where
+// buildFallbackPnL constructs its own PnL object (computePositionPnL — which
+// also tracks pendingClaimCount — didn't run).
+function countPendingFeeClaims(events: ActivityEventForPnL[]): number {
+  let n = 0;
+  for (const e of events) {
+    if (e.type !== "fee_claim" && e.type !== "reward_claim") continue;
+    const hasUsd = e.usdAtTime != null && Number.isFinite(e.usdAtTime) && e.usdAtTime > 0;
+    const perToken = (e.amount0 ?? 0) * (e.price0AtTime ?? 0) + (e.amount1 ?? 0) * (e.price1AtTime ?? 0);
+    const hasPerToken = Number.isFinite(perToken) && perToken > 0;
+    if (!hasUsd && !hasPerToken) n += 1;
+  }
+  return n;
 }
 
 function buildFallbackPnL(pos: AerodromePosition): PositionPnLData {
@@ -380,7 +406,13 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // the root cause of the Aerodrome + Cetus exclusions in the analytics LP P&L
 // section. Paired with the differentiated-TTL change below so empties expire
 // in 60s instead of 5min going forward.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v21-";
+// Bumped v21 → v22: HyperEVM fee claims that miss the historical price cache
+// are now left UNRESOLVED (usdAtTime/price0/1AtTime all null) instead of being
+// valued at current spot (pricing-invariants Rule 1). v21 entries cached the
+// old spot-valued usdAtTime (which over-reported, e.g. Account 2 ProjectX
+// $2,243 vs manual $1,780); the bump flushes them so claims re-fetch under the
+// corrected ladder.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v22-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
@@ -638,6 +670,7 @@ async function fetchAndCompute(
       const feesFromEvents = sumFeeClaimUsd(events);
       const fallback = buildFallbackPnL(pos);
       fallback.feesCollected = feesFromEvents;
+      fallback.pendingClaimCount = countPendingFeeClaims(events);
       fallback.netPnlUSD = feesFromEvents + pos.fees;
       fallback.netPnlPct = pos.value > 0 ? ((feesFromEvents + pos.fees) / pos.value) * 100 : 0;
       console.log(
@@ -683,6 +716,7 @@ function aggregate(
   let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let capitalGL = 0;
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
+  let pendingClaimCount = 0;
   // Chains whose closed-position withdrawal events we trust on-chain.
   // EVM routes emit withdrawal events from DecreaseLiquidity logs with
   // historically-derived USD (via deriveDepositPrices), so closingValue
@@ -775,6 +809,7 @@ function aggregate(
       }
       included += 1;
       perPosition[id] = d;
+      pendingClaimCount += d.pendingClaimCount ?? 0;
       if (r.fallback) estimatedPositionCount += 1;
     } else {
       const meta = positionMeta.get(id);
@@ -848,6 +883,7 @@ function aggregate(
     perPosition,
     excludedPositions,
     estimatedPositionCount,
+    pendingClaimCount,
   };
 }
 

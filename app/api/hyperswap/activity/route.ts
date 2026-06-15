@@ -724,7 +724,15 @@ export async function GET(request: Request) {
             // whatever warmed (remaining claims fall through to current spot,
             // same as the pre-fix behaviour). The background prewarm keeps
             // running and fills the cache for the next request regardless.
-            const PREWARM_TIMEOUT_MS = 25_000;
+            // 60s (was 25s): under production concurrent CG pressure the
+            // analytics page loads several HyperEVM positions at once, each
+            // racing for CoinGecko's shared per-IP budget, so 25s was too short
+            // and the awaited prewarm timed out — leaving the historical cache
+            // empty and (pre-fix) silently falling through to current spot.
+            // 60s gives headroom without letting the route hang indefinitely.
+            // A persistent cross-request cache (Option C) is the queued
+            // follow-up if 60s proves insufficient at higher traffic.
+            const PREWARM_TIMEOUT_MS = 60_000;
             const __started = Date.now();
             const __dateCount = pairs.reduce((n, p) => n + p.timestamps.length, 0);
             await Promise.race([
@@ -874,7 +882,13 @@ export async function GET(request: Request) {
         }
       }
 
-      if (usdAtTime == null) {
+      // Current-spot fallback applies ONLY to deposits/withdrawals. Fee claims
+      // are DELIBERATELY excluded: valuing a claim collected weeks ago at
+      // today's spot systematically mis-reports lifetime fees (pricing-invariants
+      // Rule 1 — "Never use current spot for fee-claim valuation, on any chain").
+      // An unresolved fee claim stays null below and is surfaced to the user as
+      // "pending price resolution" rather than silently mis-valued.
+      if (usdAtTime == null && ev.type !== 'fee_claim') {
         price0AtTime = currentSpot0 || null;
         price1AtTime = currentSpot1 || null;
         if (currentSpot0 > 0 || currentSpot1 > 0) {
@@ -882,12 +896,14 @@ export async function GET(request: Request) {
         }
       }
 
-      // PART 1 FINAL GUARANTEE: fee_claim usdAtTime must never be null —
-      // analytics feeIncome push() drops null events and the protocol
-      // disappears from "Fee Income By Protocol".
-      if (ev.type === 'fee_claim' && usdAtTime == null) {
-        usdAtTime = 0;
-      }
+      // Fee claims that fell through every historical tier (sqrtPriceX96,
+      // CoinGecko historical cache, stablecoin-fixed) stay UNRESOLVED (null) —
+      // NOT coerced to $0 and NOT valued at current spot (pricing-invariants
+      // Rule 1). Coercing to 0 silently under-counts; spot (removed above)
+      // silently over-counts. Both hide the gap from the user. The consumer
+      // (positionPnl.ts / useLpPnl.ts) counts these null claims and the
+      // analytics UI shows "N claims pending price resolution". price0/1AtTime
+      // also stay null, giving downstream a clean "unresolved" signal.
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim') {
@@ -909,8 +925,12 @@ export async function GET(request: Request) {
           const __cg1 = !__s1 ? CG_IDS[token1] : undefined;
           const __p0 = __s0 ? 1 : (__cg0 ? getCachedOnlyTokenPrice(__cg0, ev.timestamp) : null);
           const __p1 = __s1 ? 1 : (__cg1 ? getCachedOnlyTokenPrice(__cg1, ev.timestamp) : null);
+          // NO cg-spot branch for fee claims (pricing-invariants Rule 1):
+          // when the historical cache misses, the claim is UNRESOLVED, not
+          // valued at current spot. This must mirror the value-resolution
+          // ladder above so the logged source can never read 'cg-spot' for a
+          // fee claim.
           if (__p0 != null && __p1 != null) __src = (__s0 && __s1) ? 'stablecoin-fixed' : 'cg-historical-cache';
-          else if (currentSpot0 > 0 || currentSpot1 > 0) __src = 'cg-spot';
           else __src = 'unknown';
         }
         const __b = __bucket(__protocol);
@@ -918,7 +938,7 @@ export async function GET(request: Request) {
         __b.breakdown[__src] = (__b.breakdown[__src] ?? 0) + 1;
         const __ok = usdAtTime != null && usdAtTime > 0;
         if (__ok) __b.resolved++;
-        else { __b.failed++; __b.failures.push({ token: `${token0}/${token1}`, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'no_price_any_source' : 'zero_usd' }); }
+        else { __b.failed++; __b.failures.push({ token: `${token0}/${token1}`, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'cg-historical-cache-miss-no-spot-fallback' : 'zero_usd' }); }
         logPrice({
           event: 'fee_claim_resolution',
           route: __protocol,
@@ -930,7 +950,8 @@ export async function GET(request: Request) {
           token1Usd: price1AtTime,
           usdAtTime,
           status: (usdAtTime == null || usdAtTime === 0) ? 'failed_null_usdAtTime' : ((price0AtTime != null && price1AtTime != null) ? 'ok' : 'partial'),
-          notes: `source=${__src} nftManager=${nftManager.toLowerCase()}`,
+          notes: `source=${__src} nftManager=${nftManager.toLowerCase()}` +
+            (__src === 'unknown' ? ' reason=cg-historical-cache-miss-no-spot-fallback' : ''),
         });
       }
       return {
@@ -969,6 +990,12 @@ export async function GET(request: Request) {
         deposits_total: 1,
         deposits_resolved: retrieval.result === 'success' ? 1 : 0,
         deposits_failed: retrieval.result === 'success' ? 0 : 1,
+        // True iff every claim resolved via a historical source (no claim fell
+        // through to the 'unknown' bucket). False => at least one claim is
+        // unresolved and shown to the user as "pending price resolution"
+        // (NEVER valued at current spot — pricing-invariants Rule 1). This is
+        // the production-observable metric for verifying the claim-pricing fix.
+        claim_pricing_succeeded: __b.failed === 0,
       });
     }
 

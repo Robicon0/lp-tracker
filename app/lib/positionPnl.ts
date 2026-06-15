@@ -74,6 +74,14 @@ export interface PositionPnLData {
   priceRatioR: number;   // currentRatio / entryRatio (kept for back-compat / display only)
   ilAvailable: boolean;  // whether IL is computable (true iff hodlValue > 0)
   depositTxHashes: string[];
+  // Count of fee_claim / reward_claim events that have NO historical USD
+  // valuation (the activity route left usdAtTime AND both price0/1AtTime null
+  // rather than fall back to current spot — pricing-invariants Rule 1). These
+  // contribute $0 to feesCollected and are surfaced to the user as "N claims
+  // pending price resolution" instead of being silently dropped or mis-valued.
+  // Optional/back-compat: absent === 0 (e.g. buildFallbackPnL constructs its
+  // own PnL object).
+  pendingClaimCount?: number;
 }
 
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
@@ -162,13 +170,20 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const hodlValue = totalAmount0 * price0 + totalAmount1 * price1;
 
   // Fees collected — strict: every claim must have a historical valuation.
+  // A claim with no historical valuation is NOT valued at current spot
+  // (pricing-invariants Rule 1) and NOT counted as $0 — it's tallied as
+  // "pending" so the UI can tell the user a fee value is unresolved rather
+  // than silently understating lifetime fees.
   let feesCollected = 0;
+  let pendingClaimCount = 0;
   for (const e of sorted) {
     if (e.type !== 'fee_claim' && e.type !== 'reward_claim') continue;
     if (e.usdAtTime != null) {
       feesCollected += e.usdAtTime;
     } else if (e.price0AtTime != null && e.price1AtTime != null) {
       feesCollected += e.amount0 * e.price0AtTime + e.amount1 * e.price1AtTime;
+    } else {
+      pendingClaimCount += 1;
     }
   }
 
@@ -197,6 +212,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     priceRatioR,
     ilAvailable,
     depositTxHashes,
+    pendingClaimCount,
   };
 
   // ── IL formula (concentrated liquidity, exact) ────────────────────────
