@@ -45,8 +45,8 @@ updated when versions are bumped.
 
 | Cache key            | Current version | Last bump reason |
 |----------------------|-----------------|------------------|
-| lp-pnl-events        | v21             | Per-endpoint concurrency limiter (commit 751743b) |
-| analytics-activity   | v13             | (verify in code before bumping) |
+| lp-pnl-events        | v22             | HyperEVM fee claims now left unresolved (null) instead of spot-valued (commit f07ff19) |
+| analytics-activity   | v14             | Parity with lp-pnl-events v22 — unresolved-claim null valuation (commit f07ff19) |
 | cetus-activity       | v3              | Cetus V2 deposit/withdrawal event structure |
 | bluefin-activity     | v3              | (verify in code before bumping) |
 

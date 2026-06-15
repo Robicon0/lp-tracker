@@ -83,6 +83,22 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`f07ff19`** — Sprint 1.5: enforce pricing-invariants Rule 1 for
+  HyperEVM fee claims. Removed the current-spot fallback for fee-claim
+  valuation (deposits/withdrawals unchanged — Rule 2 spot last-resort
+  kept); claims that miss every historical tier now stay UNRESOLVED
+  (`usdAtTime` null), never $0, never spot. Prewarm cap 25s→60s. New
+  `route_summary.claim_pricing_succeeded` boolean + `pendingClaimCount`
+  threaded to a "N claims pending price resolution" analytics notice.
+  Cache bumps v21→v22 (lp-pnl-events), v13→v14 (analytics-activity).
+  Root cause: Account 2 ProjectX over-reported $2,243.69 vs manual
+  $1,780.44 (+26%) — 20 HYPE claims valued at spot (~$63) not claim-date
+  (~$41.73) when the awaited prewarm timed out under CG pressure (not
+  double-counting; counts reconcile 19≈20≈19+1). Verified localhost:
+  0 `fee_claim_resolution` events with `source=cg-spot` across 2 cold
+  runs; unresolved claims correctly null + `pending`. Production
+  verification pending (Account 2 analytics; expect cg-spot=0, ProjectX
+  total near $1,780).
 - **`e1213bd`** — HyperEVM deposit-retrieval hardening (Sprint 1).
   Module-level Etherscan V2 concurrency gate (max 3 in-flight, headroom
   under ~5 req/sec) + exponential backoff (1/2/4s) on HTTP-429 and the
@@ -105,9 +121,6 @@ shorthand.
   ordering).
 - **`7c60cce`** — Uniswap V3 burned-NFT recovery. Defensive batched
   `eth_getLogs` with $50M overflow guard.
-- **`90faaf9`** — Aerodrome burned-NFT recovery via
-  `app/lib/evmEverOwnedNftIds.ts`. Recovered 4 closed positions
-  worth ~$743 in fees.
 
 ---
 
@@ -173,11 +186,20 @@ positions, fire-and-forget for open.
 `e1213bd` verification). Within Vercel's 300s function budget and only on
 the rare Etherscan-exhaustion path, but a future optimization target.
 
-**Server-side cross-user price cache deferred.** The originally-planned
-Sprint 1 shared CoinGecko price cache (Vercel KV / in-memory module cache)
-was not built — the `e1213bd` rate-limit pacing path resolved the Account 2
-ProjectX cold-start exclusion on its own (100% retrieval under 5× burst).
-Revisit if cold-start CG saturation resurfaces at higher traffic.
+**Server-side cross-user price cache deferred (now the Sprint 1.5
+follow-up).** The originally-planned Sprint 1 shared CoinGecko price cache
+(Vercel KV / in-memory module cache) was not built — the `e1213bd`
+rate-limit pacing path resolved the Account 2 ProjectX cold-start
+exclusion on its own (100% retrieval under 5× burst). Sprint 1.5
+(`f07ff19`) surfaced a sharper need for it: even with the prewarm cap
+raised to 60s, the awaited CG-historical prewarm can still time out under
+sequential/concurrent CG pressure (observed locally — 2 of 4 ProjectX
+positions hit the 60s cap), leaving some HYPE fee claims UNRESOLVED
+(correctly shown as "pending price resolution", NEVER spot-valued). A
+persistent cross-request price cache ("Option C") is the queued fix so a
+warmed claim-date price survives across requests/positions. Track via
+`route_summary.claim_pricing_succeeded:false` and `pendingClaimCount` in
+production.
 
 **Empty-Sugar edge case (Aerodrome, Velodrome).** For wallets with zero
 open positions, the Sugar contract's enumeration returns empty, causing
@@ -259,8 +281,8 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
-- `lp-pnl-events-v21`
-- `analytics-activity-v13`
+- `lp-pnl-events-v22`
+- `analytics-activity-v14`
 - `cetus-activity-v3`
 - `bluefin-activity-v3`
 
