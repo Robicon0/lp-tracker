@@ -41,20 +41,22 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 2: Account 1 Aerodrome investigation.**
+**Sprint 1.7b: Extend the CLMM fee-growth underflow guard to the remaining
+CLMM protocols.**
 
-**Goal:** Diagnostic harness against Account 1 wallets to identify
-missing/wrong/excluded positions (manual ~$57 platform vs hundreds
-expected).
+**Goal:** Apply the same `(feeGrowthInside − checkpoint)` u128 underflow guard
+shipped for Orca in Sprint 1.7 (`1dd862c`) to **Raydium, Bluefin, Cetus, and
+Momentum**, so out-of-range positions on those protocols also stop producing
+u128-wrapped implausible USD fees. Platform invariant (Rule 1b in
+pricing-invariants.md) is already documented; this is the additive
+implementation across the four remaining routes.
 
-**Status:** Not started (Sprint 2 is now the active/next sprint). Sprint 1.6
-(Upstash Redis persistent price cache) shipped in `5af4d33` — the
-originally-deferred server-side cross-user price cache is now built as Tier 1
-above the in-process historical cache, so a warmed claim-date price survives
-across cold starts and users. With it in place, Sprint 1.5's "claims pending
-price resolution" should no longer appear under production concurrent load
-(verified localhost: Account 2 ProjectX resolves to $1,776.29 vs manual
-$1,780.44, 0 HyperEVM cg-spot).
+**Status:** Not started. Sprint 1.7 (`1dd862c`) shipped the guard for Orca only
+(verified: Account 1 ZEC/USDC `$1.908e24 → $0`, value $5,176 unchanged, 2
+`fee_underflow_detected` events, no regression — Account 2 ProjectX still
+$1,776.29). The bug class is shared: each of Raydium/Bluefin/Cetus/Momentum has
+the same unguarded masked-subtraction pending-fee pattern. Reuse the high-bit
+(`≥ 2^127` → 0) guard form and the `fee_underflow_detected` instrumentation.
 
 ---
 
@@ -63,21 +65,27 @@ $1,780.44, 0 HyperEVM cg-spot).
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Account 1 Aerodrome investigation** (active) — diagnostic harness
+1. **CLMM underflow guard — Raydium/Bluefin/Cetus/Momentum** (active,
+   Sprint 1.7b) — port the Orca pending-fee underflow guard (`1dd862c`) to the
+   four remaining CLMM routes. Additive; reuse the high-bit guard + the
+   `fee_underflow_detected` event.
+2. **USDC/SUI Cetus exclusion inconsistency** (Sprint 1.8) — investigate why a
+   Cetus USDC/SUI position is excluded inconsistently between dashboard and
+   analytics.
+3. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
    against Account 1 wallets to identify missing/wrong/excluded positions
    (manual ~$57 platform vs hundreds expected).
-2. **Closed Sui position fee recovery** — Sui event indexer on free
+4. **Closed Sui position fee recovery** — Sui event indexer on free
    public RPC. Filter Bluefin/Cetus/Momentum package addresses.
    Reconstruct deposit/withdrawal/fee events from event log (objects
    destroyed but events preserved).
-3. **Momentum activity route** — modeled on Bluefin, uses Sprint 3
-   indexer.
-4. **Closed Solana position fee recovery** — Solana event indexer using
+5. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+6. **Closed Solana position fee recovery** — Solana event indexer using
    free public RPC. Parse Orca/Raydium program instructions from wallet
    transaction history.
-5. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+7. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-6. **UI for closed Sui + Solana positions** — Closed tab support.
+8. **UI for closed Sui + Solana positions** — Closed tab support.
 
 ---
 
@@ -86,6 +94,23 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`1dd862c`** — Sprint 1.7: guard CLMM fee-growth underflow in Orca
+  pending-fee math. `calcPendingFee` computed `(feeGrowthInside − checkpoint) &
+  U128_MASK` with no underflow guard; for out-of-range positions the recomputed
+  inside lands marginally below the stored checkpoint, so the unsigned masked
+  subtraction wraps to ~2^128 → × liquidity / decimals × price = sextillion-scale
+  USD fees. Account 1 ZEC/USDC (Orca) read `$1.908e24`, leaking into analytics
+  top-level Unclaimed Fees (`Σ p.fees`) and forcing a `value_overflow` exclusion
+  in LP P&L (via `netPnlUSD`). Fix (additive): `calcPendingFee` returns
+  `{fee, guarded, wrappedDelta}`; high-bit-set delta (`≥ 2^127`) → 0 for that
+  side (a real accrual can't reach 2^127); settled `feeOwedA/B` untouched; both
+  token sides symmetric. New `[PRICE_LOG]` `fee_underflow_detected` (per side) +
+  `fee_plausibility_exceeded` ($1e12 route-boundary cap). Rule 1b added to
+  pricing-invariants.md. No cache bump (`pos.fees` is live, 60s staleTime;
+  `lp-pnl-events-v23` caches activity events only). Verified: ZEC `1.908e24 → $0`
+  (value $5,176 unchanged), 2 underflow events, 0 cap firings; no regression
+  (Account 2 ProjectX $1,776.29, redis hits present, 0 HyperEVM cg-spot).
+  **Scope: Orca only — Raydium/Bluefin/Cetus/Momentum follow in Sprint 1.7b.**
 - **`5af4d33`** — Sprint 1.6: Upstash Redis persistent price cache. New
   `app/lib/redisPriceCache.ts` (Upstash REST) is Tier 1 above the in-process
   historical-price cache in `cgPriceHistory.ts`: `fetchTokenPriceAtDate` checks
@@ -135,10 +160,6 @@ shorthand.
   CG-historical-awaited for closed-position bounded claim-date sets
   with 25s Promise.race cap. ProjectX warm $1,776.29 vs manual
   $1,780.44.
-- **`6601d38`** — Velodrome burned-NFT recovery. Uses
-  `VELODROME_FALLBACK` pool `0x9763...7c8b` (USDC/WETH reversed
-  ordering).
-
 ---
 
 ## Where things live
