@@ -47,11 +47,14 @@ for the specific task.
 missing/wrong/excluded positions (manual ~$57 platform vs hundreds
 expected).
 
-**Status:** Not started. Sprint 1 (HyperEVM deposit-retrieval hardening)
-shipped in `e1213bd` — the rate-limit pacing path resolved the Account 2
-ProjectX cold-start exclusion (100% retrieval under 5× concurrent burst),
-so the originally-planned server-side cross-user price cache is deferred
-as a future optimization rather than a blocker (see Known limitations).
+**Status:** Not started (Sprint 2 is now the active/next sprint). Sprint 1.6
+(Upstash Redis persistent price cache) shipped in `5af4d33` — the
+originally-deferred server-side cross-user price cache is now built as Tier 1
+above the in-process historical cache, so a warmed claim-date price survives
+across cold starts and users. With it in place, Sprint 1.5's "claims pending
+price resolution" should no longer appear under production concurrent load
+(verified localhost: Account 2 ProjectX resolves to $1,776.29 vs manual
+$1,780.44, 0 HyperEVM cg-spot).
 
 ---
 
@@ -83,6 +86,22 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`5af4d33`** — Sprint 1.6: Upstash Redis persistent price cache. New
+  `app/lib/redisPriceCache.ts` (Upstash REST) is Tier 1 above the in-process
+  historical-price cache in `cgPriceHistory.ts`: `fetchTokenPriceAtDate` checks
+  Redis first (cross-instance, cross-user), falls through to in-process +
+  CoinGecko on miss, writes back fire-and-forget (30d TTL). Keyed by
+  coingeckoId (`price:historical:{id}:{YYYYMMDD}`, UTC). No-op stub if env vars
+  absent. CETUS spot+LKG / Sui historical / stablecoins excluded by
+  construction (separate modules / anchored upstream — no per-chain branch).
+  New `[PRICE_LOG]` sources `redis-cache-hit/miss/error` + optional
+  `route_summary.redis_cache_hits/misses` on the 5 EVM activity routes. Cache
+  bumps v22→v23 (lp-pnl-events), v14→v15 (analytics-activity). Verified
+  localhost (Account 2 ProjectX): cold-instance/cold-Redis → 5 misses, all
+  resolved, 0 errors; restart/warm-Redis → 5 hits, 0 miss, identical $372.89;
+  4-position total $1,776.29 (manual $1,780.44, −0.23%); the lone
+  transient-pending HYPE claim (2026-03-13) resolves once warmed and persists
+  in Redis (37.35, 30d TTL). 0 HyperEVM cg-spot (Sprint 1.5 invariant holds).
 - **`f07ff19`** — Sprint 1.5: enforce pricing-invariants Rule 1 for
   HyperEVM fee claims. Removed the current-spot fallback for fee-claim
   valuation (deposits/withdrawals unchanged — Rule 2 spot last-resort
@@ -119,8 +138,6 @@ shorthand.
 - **`6601d38`** — Velodrome burned-NFT recovery. Uses
   `VELODROME_FALLBACK` pool `0x9763...7c8b` (USDC/WETH reversed
   ordering).
-- **`7c60cce`** — Uniswap V3 burned-NFT recovery. Defensive batched
-  `eth_getLogs` with $50M overflow guard.
 
 ---
 
@@ -186,20 +203,21 @@ positions, fire-and-forget for open.
 `e1213bd` verification). Within Vercel's 300s function budget and only on
 the rare Etherscan-exhaustion path, but a future optimization target.
 
-**Server-side cross-user price cache deferred (now the Sprint 1.5
-follow-up).** The originally-planned Sprint 1 shared CoinGecko price cache
-(Vercel KV / in-memory module cache) was not built — the `e1213bd`
-rate-limit pacing path resolved the Account 2 ProjectX cold-start
-exclusion on its own (100% retrieval under 5× burst). Sprint 1.5
-(`f07ff19`) surfaced a sharper need for it: even with the prewarm cap
-raised to 60s, the awaited CG-historical prewarm can still time out under
-sequential/concurrent CG pressure (observed locally — 2 of 4 ProjectX
-positions hit the 60s cap), leaving some HYPE fee claims UNRESOLVED
-(correctly shown as "pending price resolution", NEVER spot-valued). A
-persistent cross-request price cache ("Option C") is the queued fix so a
-warmed claim-date price survives across requests/positions. Track via
-`route_summary.claim_pricing_succeeded:false` and `pendingClaimCount` in
-production.
+**Server-side cross-user price cache — RESOLVED in Sprint 1.6 (`5af4d33`).**
+The persistent cross-request price cache ("Option C") is now built:
+`app/lib/redisPriceCache.ts` wraps the CoinGecko historical path in
+`cgPriceHistory.ts` with Upstash Redis (Tier 1, 30d TTL), so a warmed
+claim-date price survives across cold starts, requests, positions, and users.
+This addresses the Sprint 1.5 failure mode where the awaited CG-historical
+prewarm could time out under concurrent CG pressure (even at the 60s cap),
+leaving HYPE fee claims UNRESOLVED. Prewarm cap left at 60s for now; consider
+lowering to 25s once production cache-hit rate is observed >80% over several
+days (track `route_summary.redis_cache_hits/misses` and
+`claim_pricing_succeeded`). Note: the Upstash DB (`defidesh-price-cache`, free
+tier) is shared across Production/Preview/Development — avoid broad key
+flushes. A genuinely-unpriceable claim date still stays UNRESOLVED by design
+(never spot-valued); Redis only eliminates pending-claims caused by transient
+CG rate-limit/timeout.
 
 **Empty-Sugar edge case (Aerodrome, Velodrome).** For wallets with zero
 open positions, the Sugar contract's enumeration returns empty, causing
@@ -250,6 +268,11 @@ investigating.
 **Hosting and database:**
 - Vercel Pro ($20/month) — auto-deploys from `main`
 - Neon Postgres
+- Upstash Redis (`defidesh-price-cache`, free tier, us-east-1) — persistent
+  historical-price cache (Sprint 1.6). Env: `PRICE_CACHE_KV_REST_API_URL` +
+  `PRICE_CACHE_KV_REST_API_TOKEN` (pass explicitly to the `@upstash/redis`
+  client — it auto-reads only `UPSTASH_*`/`KV_*`, not `PRICE_CACHE_KV_*`).
+  Connected to Production/Preview/Development; shared, so avoid broad flushes.
 
 **RPC providers:**
 - Chainstack `nanoreth` — HyperEVM (`HYPEREVM_ARCHIVE_RPC`)
@@ -281,8 +304,8 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
-- `lp-pnl-events-v22`
-- `analytics-activity-v14`
+- `lp-pnl-events-v23`
+- `analytics-activity-v15`
 - `cetus-activity-v3`
 - `bluefin-activity-v3`
 
