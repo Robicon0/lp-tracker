@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveCgIds } from '../../lib/cgSymbolSearch';
+import { logPrice } from '../../lib/priceLogger';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -282,8 +283,36 @@ function calcFeeGrowthInside(
   return (feeGrowthGlobal - below - above) & U128_MASK;
 }
 
-function calcPendingFee(liquidity: bigint, feeGrowthInside: bigint, checkpoint: bigint): bigint {
-  return (liquidity * ((feeGrowthInside - checkpoint) & U128_MASK)) >> 64n;
+// High bit of a u128. A wrapped (feeGrowthInside − checkpoint) value at or above
+// this is an underflow (the unmasked subtraction would have been negative).
+const U128_HIGH_BIT = 1n << 127n;
+
+// Pending fee for one token side, with a u128 underflow guard (Sprint 1.7).
+//
+// In correct operation the per-position fee-growth delta is a small POSITIVE
+// number: feeGrowthInside only grows while in range, so it is ≥ the stored
+// checkpoint. But for an OUT-OF-RANGE position the recomputed feeGrowthInside
+// can land marginally BELOW the checkpoint, and the unsigned masked subtraction
+// `(feeGrowthInside − checkpoint) & U128_MASK` then wraps to the upper half of
+// u128 (~2^128) instead of producing a small negative. Multiplied by liquidity
+// and scaled by decimals/price, that wrap yields implausible (sextillion-scale)
+// USD fees — the platform-wide bug this guards. A LEGITIMATE accrual can never
+// reach 2^127 (that would imply ~2^63 fee-units per unit of liquidity), so a
+// high-bit-set delta is unambiguously an underflow → 0 fees for that side. This
+// is the standard Uniswap-V3 fee-growth-delta semantics. Settled, already-owed
+// fees are tracked separately in feeOwedA/B and are unaffected by this guard.
+//
+// Applies to EVERY Orca position for EVERY user/wallet — not a per-position fix.
+function calcPendingFee(
+  liquidity: bigint,
+  feeGrowthInside: bigint,
+  checkpoint: bigint,
+): { fee: bigint; guarded: boolean; wrappedDelta: bigint } {
+  const wrappedDelta = (feeGrowthInside - checkpoint) & U128_MASK;
+  if (wrappedDelta >= U128_HIGH_BIT) {
+    return { fee: 0n, guarded: true, wrappedDelta };
+  }
+  return { fee: (liquidity * wrappedDelta) >> 64n, guarded: false, wrappedDelta };
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -546,10 +575,44 @@ export async function GET(request: Request) {
           pos.tickLowerIndex, pos.tickUpperIndex, pool.tickCurrentIndex,
           pool.feeGrowthGlobalB, tf.lowerB, tf.upperB,
         );
-        feesA += Number(calcPendingFee(pos.liquidity, growthInsideA, pos.feeGrowthInsideCheckpointA)) / 10 ** tADecimals;
-        feesB += Number(calcPendingFee(pos.liquidity, growthInsideB, pos.feeGrowthInsideCheckpointB)) / 10 ** tBDecimals;
+        const pendA = calcPendingFee(pos.liquidity, growthInsideA, pos.feeGrowthInsideCheckpointA);
+        const pendB = calcPendingFee(pos.liquidity, growthInsideB, pos.feeGrowthInsideCheckpointB);
+        if (pendA.guarded) {
+          logPrice({
+            event: 'fee_underflow_detected', protocol: 'orca', chain: 'solana',
+            positionId: `orca-${pos.positionPda}`, pair: `${tASymbol} / ${tBSymbol}`,
+            side: 'token0', raw_wrapped_value: pendA.wrappedDelta.toString(), status: 'guarded_to_zero',
+          });
+        }
+        if (pendB.guarded) {
+          logPrice({
+            event: 'fee_underflow_detected', protocol: 'orca', chain: 'solana',
+            positionId: `orca-${pos.positionPda}`, pair: `${tASymbol} / ${tBSymbol}`,
+            side: 'token1', raw_wrapped_value: pendB.wrappedDelta.toString(), status: 'guarded_to_zero',
+          });
+        }
+        feesA += Number(pendA.fee) / 10 ** tADecimals;
+        feesB += Number(pendB.fee) / 10 ** tBDecimals;
       }
-      const feesUsd = feesA * priceA + feesB * priceB;
+      let feesUsd = feesA * priceA + feesB * priceB;
+
+      // Belt-and-suspenders route-boundary guard (Sprint 1.7). The underflow
+      // guard above fixes the known class; this defends every Orca position for
+      // every user against any FUTURE overflow class we haven't anticipated. No
+      // real LP position approaches $1e12 in fees, so a value above that is
+      // definitionally a bug — zero the position's fees rather than poison the
+      // dashboard/analytics totals, and surface it for analysis.
+      const FEE_USD_PLAUSIBILITY_CEILING = 1e12;
+      if (feesUsd > FEE_USD_PLAUSIBILITY_CEILING) {
+        logPrice({
+          event: 'fee_plausibility_exceeded', protocol: 'orca', chain: 'solana',
+          positionId: `orca-${pos.positionPda}`, pair: `${tASymbol} / ${tBSymbol}`,
+          fees_usd: feesUsd, status: 'zeroed',
+        });
+        feesA = 0;
+        feesB = 0;
+        feesUsd = 0;
+      }
 
       // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
       // never filtered out. Status is set to 'Closed' in the returned object.

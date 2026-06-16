@@ -119,11 +119,47 @@ interface DepositRetrievalEvent {
   error_reason?: string; // present only on failure
 }
 
+// Emitted when a CLMM pending-fee calculation detects a u128 underflow in
+// (feeGrowthInside − checkpoint) and guards it to 0 (Sprint 1.7). For an
+// out-of-range position the recomputed feeGrowthInside can land marginally
+// below the stored checkpoint; the unsigned masked subtraction then wraps into
+// the upper half of u128 (~2^128) instead of producing a small negative, which
+// — unguarded — yields implausible (sextillion-scale) USD fees. One event per
+// affected token side. Lets us measure how often the guard fires in production.
+interface FeeUnderflowEvent {
+  event: 'fee_underflow_detected';
+  protocol: string;     // e.g. "orca"
+  chain: string;        // e.g. "solana"
+  positionId: string;
+  pair: string;         // e.g. "ZEC / USDC"
+  side: 'token0' | 'token1';
+  raw_wrapped_value: string;  // the wrapped u128 delta (bigint as decimal string)
+  status: 'guarded_to_zero';
+}
+
+// Belt-and-suspenders route-boundary guard (Sprint 1.7). Even with the
+// per-side underflow guard above, if a position's total USD fees still exceed a
+// plausibility ceiling (no real LP position approaches $1e12 in fees), the
+// position's fees are zeroed in the response rather than poisoning
+// dashboard/analytics totals, and the event is surfaced for analysis. Catches
+// any future overflow class the underflow guard doesn't anticipate.
+interface FeePlausibilityEvent {
+  event: 'fee_plausibility_exceeded';
+  protocol: string;     // e.g. "orca"
+  chain: string;        // e.g. "solana"
+  positionId: string;
+  pair: string;
+  fees_usd: number;     // the implausible value that was rejected
+  status: 'zeroed';
+}
+
 export type PriceLogEvent =
   | LookupEvent
   | FeeClaimResolutionEvent
   | RouteSummaryEvent
-  | DepositRetrievalEvent;
+  | DepositRetrievalEvent
+  | FeeUnderflowEvent
+  | FeePlausibilityEvent;
 
 export function logPrice(event: PriceLogEvent): void {
   // Single-line JSON for grep/parse. Always server-side console.log.

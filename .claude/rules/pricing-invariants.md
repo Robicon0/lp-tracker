@@ -104,6 +104,41 @@ not historical earnings.
 
 ---
 
+## Rule 1b: CLMM pending-fee underflow guard
+
+For **all** Uniswap-V3-style concentrated-liquidity (CLMM) protocols on all
+chains (Orca, Raydium, Bluefin, Cetus, Momentum, HyperSwap/KittenSwap/ProjectX,
+Uniswap V3, Aerodrome, Velodrome, PancakeSwap), the pending-fee calculation
+`(feeGrowthInside − checkpoint)` is an unsigned u128 (or u256) masked
+subtraction and **must guard against underflow**.
+
+In correct operation the per-position fee-growth delta is a small **positive**
+number — `feeGrowthInside` only grows while in range, so it is ≥ the stored
+checkpoint. But for an **out-of-range position** the recomputed
+`feeGrowthInside` can land marginally **below** the checkpoint; the masked
+subtraction then wraps into the upper half of the word (~2^128) instead of
+producing a small negative. Multiplied by liquidity and scaled by
+decimals × price, that wrap yields **implausible (sextillion-scale) USD fees**.
+
+### The invariant
+- If the wrapped `(feeGrowthInside − checkpoint)` has its **high bit set**
+  (≥ 2^127 for u128), it is an underflow → that side's pending fee is **0**,
+  not the wrapped value. A legitimate accrual can never reach 2^127 (that would
+  imply ~2^63 fee-units per unit of liquidity).
+- Settled, already-owed fees (e.g. Orca `feeOwedA/B`) are tracked **separately**
+  and are **not** affected by this guard — only the recomputed pending delta is.
+- In-range positions satisfy `feeGrowthInside ≥ checkpoint` by construction, so
+  the guard never fires for them (no regression).
+
+This is the standard Uniswap-V3 fee-growth-delta semantics. It is a **platform
+bug** affecting any user worldwide with any out-of-range CLMM position — never
+framed per-wallet. Reference: Sprint 1.7 (Orca first; Raydium/Bluefin/Cetus/
+Momentum follow in Sprint 1.7b). A defensive route-boundary plausibility cap
+(zero a position's fees and emit `fee_plausibility_exceeded` if total fees
+exceed ~$1e12) is the belt-and-suspenders complement to the per-side guard.
+
+---
+
 ## Rule 2: Historical P&L, IL, and Initial Value
 
 For deposits, withdrawals, impermanent loss, and initial position value
