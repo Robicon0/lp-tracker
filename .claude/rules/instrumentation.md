@@ -88,6 +88,21 @@ fields on its `route_summary` (one position per invocation, so each is 0 or 1):
 These are optional and only emitted by the HyperEVM route; other routes that
 emit `route_summary` omit them.
 
+The five EVM activity routes that resolve CoinGecko historical prices through
+`cgPriceHistory` (aerodrome, velodrome, uniswap, pancakeswap, hyperswap)
+additionally set two optional persistent-cache fields (Upstash Redis, Sprint 1.6):
+
+- `redis_cache_hits` — historical-price lookups served from Redis this invocation
+- `redis_cache_misses` — lookups that missed Redis and fell through to CoinGecko
+
+Both are computed as a snapshot delta against a baseline captured at handler
+entry (the underlying counters live in `app/lib/redisPriceCache.ts` and are
+process-wide). Under the parallel-route analytics load a single route's delta
+also absorbs other concurrent routes' lookups, so per-route counts are
+**approximate**; the process-wide hit rate `hits / (hits + misses)` — the
+Sprint 1.6 success metric — is exact. Sui/Solana routes that emit
+`route_summary` omit both fields (they don't use `cgPriceHistory`).
+
 ### `deposit_retrieval`
 Emitted once per position per HyperEVM activity-route invocation. Captures
 which tier of the 3-tier deposit-history fallback answered (or that all
@@ -157,6 +172,9 @@ must use one of these values:
 | `symbol-search`        | CoinGecko symbol-to-ID lookup                            |
 | `sui-historical`       | Sui-specific historical pricing path                     |
 | `stablecoin-fixed`     | Hardcoded $1 for stablecoins                             |
+| `redis-cache-hit`      | Historical price returned from the Upstash Redis persistent cache (Sprint 1.6, Tier 1) |
+| `redis-cache-miss`     | Redis had no entry; fell through to in-process cache + CoinGecko (emitted by cgPriceHistory) |
+| `redis-cache-error`    | Redis lookup failed; treated as a miss (emitted by redisPriceCache) |
 | `etherscan-v2-success`       | Deposit history retrieved via Etherscan V2 (Tier 1) |
 | `etherscan-v2-failure`       | Etherscan V2 deposit retrieval failed (Tier 1)      |
 | `chainstack-archive-success` | Deposit history retrieved via Chainstack archive (Tier 2) |

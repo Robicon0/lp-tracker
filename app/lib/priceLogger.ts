@@ -10,6 +10,14 @@ type Source =
   | 'symbol-search'
   | 'sui-historical'
   | 'stablecoin-fixed'
+  // Persistent historical-price cache tier (Upstash Redis, Sprint 1.6).
+  // Sits ABOVE cg-historical-* — a redis-cache-hit means CoinGecko was never
+  // called. redis-cache-miss is emitted by cgPriceHistory before it falls
+  // through to the in-process cache + CoinGecko; redis-cache-error means the
+  // Redis lookup failed and was treated as a miss. See app/lib/redisPriceCache.ts.
+  | 'redis-cache-hit'
+  | 'redis-cache-miss'
+  | 'redis-cache-error'
   // Deposit-history retrieval tiers (HyperEVM activity route). Distinct from
   // price-resolution sources above — they describe which log source answered.
   | 'etherscan-v2-success'
@@ -82,6 +90,15 @@ interface RouteSummaryEvent {
   // deposits_* fields above. (Lives here, not on deposit_retrieval, because
   // deposit_retrieval is emitted before pricing runs.)
   claim_pricing_succeeded?: boolean;
+  // Persistent-cache (Upstash Redis, Sprint 1.6) hit/miss counts for this
+  // invocation, computed as a snapshot delta around the route's work. Optional:
+  // only routes that resolve CoinGecko historical prices via cgPriceHistory
+  // populate them (the Sui/Solana routes that emit route_summary omit them).
+  // The hit rate hits/(hits+misses) is the Sprint 1.6 success metric. Counts
+  // are approximate per-route under concurrent load (the delta absorbs other
+  // routes' lookups too); the process-wide rate is exact.
+  redis_cache_hits?: number;
+  redis_cache_misses?: number;
 }
 
 // Emitted once per position per HyperEVM activity-route invocation. Captures

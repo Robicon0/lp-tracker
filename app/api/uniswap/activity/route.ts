@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
+import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
@@ -379,6 +380,9 @@ function decodeWord(data: string, wordIndex: number): bigint {
 }
 
 export async function GET(request: Request) {
+  // Sprint 1.6: baseline for this invocation's Redis hit/miss delta (the
+  // counters are process-wide; the route_summary emission below subtracts this).
+  const __redisBaseline = redisCacheSnapshot();
   const { searchParams } = new URL(request.url);
   const chain     = searchParams.get('chain') ?? '';       // ethereum | arbitrum | polygon | optimism
   const tokenId   = searchParams.get('tokenId') ?? '';     // numeric NFT tokenId string
@@ -771,6 +775,7 @@ export async function GET(request: Request) {
     events.reverse();
 
     // [PRICE_LOG] route_summary — aggregate of this request's fee_claim pricing
+    const __redisNow = redisCacheSnapshot();
     logPrice({
       event: 'route_summary',
       route: __route,
@@ -781,6 +786,10 @@ export async function GET(request: Request) {
       totalLookups: __totalLookups,
       sourceBreakdown: __srcBreakdown,
       failures: __failures,
+      // Sprint 1.6 persistent-cache hit/miss for this invocation (snapshot
+      // delta vs handler-entry baseline; approximate under concurrent load).
+      redis_cache_hits: __redisNow.hits - __redisBaseline.hits,
+      redis_cache_misses: __redisNow.misses - __redisBaseline.misses,
     });
 
     return NextResponse.json({

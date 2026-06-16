@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
+import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 
@@ -548,6 +549,9 @@ function decodeWord(data: string, wordIndex: number): bigint {
 }
 
 export async function GET(request: Request) {
+  // Sprint 1.6: baseline for this invocation's Redis hit/miss delta (the
+  // counters are process-wide; the route_summary emission below subtracts this).
+  const __redisBaseline = redisCacheSnapshot();
   const { searchParams } = new URL(request.url);
   const positionId = searchParams.get('positionId');   // numeric NFT tokenId
   const nftManager = searchParams.get('nftManager');   // NFT manager contract address
@@ -972,6 +976,7 @@ export async function GET(request: Request) {
 
     // [PRICE_LOG] route_summary — one per protocol that had claims this request
     // (skips zero-claim protocols, per the bucketing rule for this shared route)
+    const __redisNow = redisCacheSnapshot();
     for (const [__proto, __b] of __buckets) {
       if (__b.total === 0) continue;
       logPrice({
@@ -996,6 +1001,10 @@ export async function GET(request: Request) {
         // (NEVER valued at current spot — pricing-invariants Rule 1). This is
         // the production-observable metric for verifying the claim-pricing fix.
         claim_pricing_succeeded: __b.failed === 0,
+        // Sprint 1.6 persistent-cache hit/miss for this invocation (snapshot
+        // delta vs handler-entry baseline; approximate under concurrent load).
+        redis_cache_hits: __redisNow.hits - __redisBaseline.hits,
+        redis_cache_misses: __redisNow.misses - __redisBaseline.misses,
       });
     }
 

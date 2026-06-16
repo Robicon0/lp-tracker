@@ -86,6 +86,13 @@ not historical earnings.
 - With spot + LKG: 81/81 stable under 4× concurrent burst.
 - Reference: commit 26fd213.
 - Revisit if paid CoinGecko key is added.
+- **Excluded from the Upstash Redis persistent price cache (Sprint 1.6).** That
+  cache (`app/lib/redisPriceCache.ts`) wraps only the CoinGecko *historical*
+  path in `cgPriceHistory.ts`. CETUS reward valuation runs through the separate
+  spot + process-local LKG path and never calls that function, so it is excluded
+  by construction — no per-chain branch needed. This is intentional: caching a
+  CETUS price in Redis would defeat the process-local LKG mechanism, which
+  exists precisely because historical is unreliable for this token.
 
 **HyperEVM closed positions (HyperSwap, KittenSwap, ProjectX)**
 - Use CoinGecko historical **awaited** (not fire-and-forget).

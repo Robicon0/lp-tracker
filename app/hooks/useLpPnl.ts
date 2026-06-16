@@ -412,7 +412,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // old spot-valued usdAtTime (which over-reported, e.g. Account 2 ProjectX
 // $2,243 vs manual $1,780); the bump flushes them so claims re-fetch under the
 // corrected ladder.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v22-";
+// Bumped v22 → v23: Sprint 1.6 adds a Tier-1 Upstash Redis persistent price
+// cache above the in-process historical-price cache. Claim valuation FORMULA is
+// unchanged, but the resolution PATH changed — some HyperEVM claims that
+// previously timed out to UNRESOLVED now resolve from warm Redis — so flush v22
+// entries to re-resolve under the new ladder.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v23-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

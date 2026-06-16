@@ -95,7 +95,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // instead of valued at current spot (pricing-invariants Rule 1). v13 entries
 // carry the old spot-valued usdAtTime; bump flushes them so claims re-fetch
 // under the corrected ladder and analytics/LP-P&L stay in lockstep.
-function cacheKey(id: string) { return `analytics-activity-v14-${id}`; }
+// Bumped v14 → v15: parity with useLpPnl's v22 → v23. Sprint 1.6 adds the
+// Tier-1 Upstash Redis persistent price cache above the in-process historical
+// cache; some HyperEVM claims that previously timed out to UNRESOLVED now
+// resolve from warm Redis. Flush v14 entries so analytics & LP-P&L refresh in
+// lockstep under the new ladder.
+function cacheKey(id: string) { return `analytics-activity-v15-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

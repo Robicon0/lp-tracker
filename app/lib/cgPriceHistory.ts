@@ -28,6 +28,11 @@
 // permanently cached as misses.
 
 import { logPrice } from './priceLogger';
+import {
+  isPriceCacheEnabled,
+  getCachedHistoricalPrice,
+  setCachedHistoricalPrice,
+} from './redisPriceCache';
 
 const cache = new Map<string, number>();              // `${id}:${DD-MM-YYYY}` → price
 const inFlight = new Map<string, Promise<number | null>>();
@@ -143,6 +148,34 @@ export async function fetchTokenPriceAtDate(
   const date = tsToCoinGeckoDate(timestampSeconds);
   const k = keyOf(coingeckoId, date);
 
+  // Tier 1: persistent Redis cache (cross-instance, cross-user — Sprint 1.6).
+  // Checked FIRST so a warm Redis entry serves a cold function instance with
+  // zero CoinGecko calls. On a hit we also seed the in-process `cache` so the
+  // synchronous getCachedOnlyTokenPrice() (used by the post-prewarm resolution
+  // loop) finds it. getCachedHistoricalPrice never throws: null means miss OR
+  // error, and we fall through to the in-process (Tier 2) + CoinGecko (Tier 3)
+  // tiers below. (On a warm process the prewarm dedup short-circuits before
+  // this function is even called, so Redis is consulted only on cold paths —
+  // exactly the cross-cold-start case it exists to cover.)
+  if (isPriceCacheEnabled()) {
+    const redisHit = await getCachedHistoricalPrice(coingeckoId, timestampSeconds);
+    if (redisHit != null) {
+      cache.set(k, redisHit); // redis-cache-hit already emitted by redisPriceCache
+      return redisHit;
+    }
+    // Redis miss (or error, treated as miss) — record it, then fall through.
+    logPrice({
+      event: 'price_lookup',
+      caller: 'cgPriceHistory',
+      token: coingeckoId,
+      targetTimestamp: timestampSeconds,
+      attempts: [{ source: 'redis-cache-miss', token: coingeckoId, result: null }],
+      finalPrice: null,
+      finalSource: null,
+      status: 'failed',
+    });
+  }
+
   const cached = cache.get(k);
   if (cached != null) {
     logPrice({
@@ -188,6 +221,14 @@ export async function fetchTokenPriceAtDate(
       }
       if (outcome.kind === 'price' && typeof outcome.price === 'number') {
         cache.set(k, outcome.price);
+        // Tier 1 write-back: persist to Redis so the next cold instance / other
+        // users get an instant hit. Fire-and-forget — never awaited, must not
+        // delay returning the price. setCachedHistoricalPrice swallows its own
+        // errors; the .catch is belt-and-suspenders.
+        if (isPriceCacheEnabled()) {
+          void setCachedHistoricalPrice(coingeckoId, timestampSeconds, outcome.price)
+            .catch((err) => console.warn('[cgPriceHistory] Redis write failed:', err));
+        }
         logPrice({
           event: 'price_lookup',
           caller: 'cgPriceHistory',

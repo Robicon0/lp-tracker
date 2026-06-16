@@ -45,8 +45,8 @@ updated when versions are bumped.
 
 | Cache key            | Current version | Last bump reason |
 |----------------------|-----------------|------------------|
-| lp-pnl-events        | v22             | HyperEVM fee claims now left unresolved (null) instead of spot-valued (commit f07ff19) |
-| analytics-activity   | v14             | Parity with lp-pnl-events v22 — unresolved-claim null valuation (commit f07ff19) |
+| lp-pnl-events        | v23             | Sprint 1.6 — Tier-1 Upstash Redis persistent price cache added above the in-process historical cache; resolution path changed (warm-Redis claims that previously timed out now resolve) |
+| analytics-activity   | v15             | Parity with lp-pnl-events v23 — Sprint 1.6 Redis price-cache tier |
 | cetus-activity       | v3              | Cetus V2 deposit/withdrawal event structure |
 | bluefin-activity     | v3              | (verify in code before bumping) |
 
