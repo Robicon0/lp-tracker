@@ -156,6 +156,33 @@ Required fields:
 - `total_capital_gain_loss_usd`
 - `total_net_pnl_usd`
 
+### `tick_decoder_used`
+Emitted once per CLMM tick-array account read, recording which decoder format
+answered (Sprint 1.7d). Orca ships two on-chain tick-array formats — the legacy
+fixed 9956-byte `TickArray` and the variable-length `DynamicTickArray` (resizes
+with initialized ticks). A decoder that only handles the legacy format silently
+reads 0 for dynamic accounts, collapsing `feeGrowthInside` to 0 and firing the
+Sprint 1.7 underflow guard as a false positive.
+
+Required fields:
+- `event: "tick_decoder_used"`
+- `protocol` — e.g. `orca`
+- `chain` — e.g. `solana`
+- `positionId`
+- `tickArrayAddress`
+- `format` — `legacy_fixed` or `variable_length`
+
+### `unsupported_tick_array_format`
+Emitted when a tick-array account matches NEITHER known format. Returns 0 fee
+growth (existing fallback) and surfaces the unknown account for a follow-up
+sprint. Any occurrence in production warrants investigation (a third format).
+
+Required fields:
+- `event: "unsupported_tick_array_format"`
+- `protocol`, `chain`, `positionId`, `tickArrayAddress`
+- `discriminator` — comma-joined first-8 bytes
+- `account_size`
+
 ---
 
 ## Rule 3: Source enum

@@ -153,13 +153,45 @@ interface FeePlausibilityEvent {
   status: 'zeroed';
 }
 
+// Emitted once per CLMM tick-array account read, recording which decoder format
+// answered (Sprint 1.7d). Orca ships two on-chain tick-array account formats:
+// the legacy fixed 9956-byte `TickArray` and the newer variable-length
+// `DynamicTickArray` (resizes with initialized ticks). A decoder that only
+// handles the legacy format silently reads 0 for dynamic accounts → feeGrowthInside
+// collapses to 0 → the Sprint 1.7 underflow guard fires as a false positive,
+// masking real pending fees. This event lets us see which format each position's
+// tick arrays use in production.
+interface TickDecoderUsedEvent {
+  event: 'tick_decoder_used';
+  protocol: string;        // e.g. "orca"
+  chain: string;           // e.g. "solana"
+  positionId: string;
+  tickArrayAddress: string;
+  format: 'legacy_fixed' | 'variable_length';
+}
+
+// Emitted when a CLMM tick-array account matches NEITHER known format (Sprint
+// 1.7d). Returns 0 fee growth (existing fallback) but surfaces the unknown
+// discriminator + size so a new format can be added in a follow-up sprint.
+interface UnsupportedTickArrayFormatEvent {
+  event: 'unsupported_tick_array_format';
+  protocol: string;
+  chain: string;
+  positionId: string;
+  tickArrayAddress: string;
+  discriminator: string;   // comma-joined first-8 bytes
+  account_size: number;
+}
+
 export type PriceLogEvent =
   | LookupEvent
   | FeeClaimResolutionEvent
   | RouteSummaryEvent
   | DepositRetrievalEvent
   | FeeUnderflowEvent
-  | FeePlausibilityEvent;
+  | FeePlausibilityEvent
+  | TickDecoderUsedEvent
+  | UnsupportedTickArrayFormatEvent;
 
 export function logPrice(event: PriceLogEvent): void {
   // Single-line JSON for grep/parse. Always server-side console.log.

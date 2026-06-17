@@ -217,52 +217,115 @@ async function fetchWhirlpoolData(poolAddress: string): Promise<WhirlpoolData | 
 }
 
 // ── Tick array fee-growth helpers ─────────────────────────────────────────────
-// Orca tick array layout:
-//   [0..8]  discriminator
-//   [8..12] startTickIndex (i32 LE)
-//   [12..]  ticks[88], each tick = 113 bytes:
-//     [0]     initialized (bool)
-//     [1..17] liquidityNet (i128)
-//     [17..33] liquidityGross (u128)
-//     [33..49] feeGrowthOutsideA (u128)
-//     [49..65] feeGrowthOutsideB (u128)
+// Orca ships TWO on-chain tick-array account formats. Both store, per initialized
+// tick, the SAME 113-byte element: [0] tag/initialized, [1..17] liquidityNet,
+// [17..33] liquidityGross, [33..49] feeGrowthOutsideA, [49..65] feeGrowthOutsideB,
+// [65..113] rewardGrowthsOutside[3]. They differ only in HEADER size + tick PACKING:
+//   • Legacy fixed `TickArray` (disc 69,97,189,190,110,7,66,187; size 9956):
+//     header 12 (disc 8 + startTickIndex i32 4); 88 fixed 113-byte ticks at
+//     12 + idx*113; whirlpool pubkey trails the ticks.
+//   • Variable-length `DynamicTickArray` (disc 17,216,246,142,225,199,218,56;
+//     size varies): header 60 (disc 8 + startTickIndex i32 4 + whirlpool pubkey
+//     32 + tickBitmap u128 16); then 88 borsh-enum ticks, each 1 byte
+//     (Uninitialized=tag 0) or 113 bytes (Initialized=tag 1 + 112-byte data).
+//     Account size = 60 + 113*N_init + (88 − N_init). Resizes as ticks init/deinit.
+// Discriminators verified via Anchor sha256("account:<Name>")[:8]; the layout is
+// from the orca-so/whirlpools program source and validated byte-exactly against
+// on-chain account sizes (Account 1 ZEC/USDC: 3956=60+34*113+54, 6980=60+61*113+27).
+// Sprint 1.7d — legacy path unchanged; dynamic path is additive.
 const TICK_ARRAY_SIZE = 88;
 const TICK_BYTES = 113;
-const TICK_ARRAY_DATA_START = 12;
+const TICK_ARRAY_DATA_START = 12;        // legacy header
+const DYN_TICK_ARRAY_DATA_START = 60;    // dynamic header (disc8 + start4 + pubkey32 + bitmap16)
 const U128_MASK = (1n << 128n) - 1n;
+// feeGrowthOutsideA/B offsets WITHIN a 113-byte initialized tick element — same
+// for both formats: tag/init(1) + liquidityNet(16) + liquidityGross(16) = 33.
+const TICK_FG_A_OFFSET = 33;
+const TICK_FG_B_OFFSET = 49;
+const LEGACY_TICK_ARRAY_DISC = Buffer.from([69, 97, 189, 190, 110, 7, 66, 187]);
+const DYNAMIC_TICK_ARRAY_DISC = Buffer.from([17, 216, 246, 142, 225, 199, 218, 56]);
 
 function tickArrayStartIndex(tick: number, tickSpacing: number): number {
   return Math.floor(tick / (TICK_ARRAY_SIZE * tickSpacing)) * (TICK_ARRAY_SIZE * tickSpacing);
+}
+
+type TickArrayFormat = 'legacy_fixed' | 'variable_length' | 'unsupported' | 'missing';
+interface TickFeeOutside {
+  feeGrowthOutsideA: bigint;
+  feeGrowthOutsideB: bigint;
+  format: TickArrayFormat;
+  tickArrayAddress: string;
+  discriminator?: string;  // present only when format === 'unsupported'
+  accountSize?: number;    // present only when format === 'unsupported'
+}
+
+// Legacy fixed-format read: tick element at a fixed offset (unchanged behavior).
+function readLegacyTick(data: Buffer, idxInArray: number): { A: bigint; B: bigint } {
+  const off = TICK_ARRAY_DATA_START + idxInArray * TICK_BYTES;
+  if (off + TICK_BYTES > data.length) return { A: 0n, B: 0n };
+  if (data[off] === 0) return { A: 0n, B: 0n }; // not initialized
+  return { A: readU128LE(data, off + TICK_FG_A_OFFSET), B: readU128LE(data, off + TICK_FG_B_OFFSET) };
+}
+
+// Variable-length (DynamicTickArray) read: walk the borsh enum array from the
+// 60-byte header, advancing 1 byte per Uninitialized tick (tag 0) and 113 bytes
+// per Initialized tick (tag 1), to the requested local index. Returns {0,0} for
+// an uninitialized target (same semantics as legacy). Returns null on a
+// malformed tag / out-of-bounds (caller treats as 'unsupported').
+function readDynamicTick(data: Buffer, idxInArray: number): { A: bigint; B: bigint } | null {
+  let off = DYN_TICK_ARRAY_DATA_START;
+  for (let j = 0; j < idxInArray; j++) {
+    if (off >= data.length) return null;
+    const tag = data[off];
+    if (tag === 0) off += 1;
+    else if (tag === 1) off += TICK_BYTES;
+    else return null; // malformed enum tag
+  }
+  if (off >= data.length) return null;
+  const tag = data[off];
+  if (tag === 0) return { A: 0n, B: 0n };   // target tick uninitialized
+  if (tag !== 1) return null;               // malformed
+  if (off + TICK_BYTES > data.length) return null;
+  return { A: readU128LE(data, off + TICK_FG_A_OFFSET), B: readU128LE(data, off + TICK_FG_B_OFFSET) };
 }
 
 async function fetchTickFeeGrowthOutside(
   whirlpool: string,
   tick: number,
   tickSpacing: number,
-): Promise<{ feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint }> {
-  const zero = { feeGrowthOutsideA: 0n, feeGrowthOutsideB: 0n };
+): Promise<TickFeeOutside> {
+  const startIdx = tickArrayStartIndex(tick, tickSpacing);
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('tick_array'), new PublicKey(whirlpool).toBytes(), Buffer.from(startIdx.toString())],
+    WHIRLPOOL_PROGRAM,
+  );
+  const addr = pda.toBase58();
+  const base = { feeGrowthOutsideA: 0n, feeGrowthOutsideB: 0n, tickArrayAddress: addr };
   try {
-    const startIdx = tickArrayStartIndex(tick, tickSpacing);
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('tick_array'), new PublicKey(whirlpool).toBytes(), Buffer.from(startIdx.toString())],
-      WHIRLPOOL_PROGRAM,
-    );
-    const result = await solanaRpc('getAccountInfo', [pda.toBase58(), { encoding: 'base64' }]) as
+    const result = await solanaRpc('getAccountInfo', [addr, { encoding: 'base64' }]) as
       { value: { data: [string, string] } | null } | null;
-    if (!result?.value?.data) return zero;
+    if (!result?.value?.data) return { ...base, format: 'missing' };
 
     const data = Buffer.from(result.value.data[0], 'base64');
+    const disc = data.subarray(0, 8);
     const idxInArray = (tick - startIdx) / tickSpacing;
-    const tickOffset = TICK_ARRAY_DATA_START + idxInArray * TICK_BYTES;
-    if (tickOffset + TICK_BYTES > data.length) return zero;
-    if (data[tickOffset] === 0) return zero; // not initialized
 
-    return {
-      feeGrowthOutsideA: readU128LE(data, tickOffset + 33),
-      feeGrowthOutsideB: readU128LE(data, tickOffset + 49),
-    };
+    if (disc.equals(LEGACY_TICK_ARRAY_DISC)) {
+      const t = readLegacyTick(data, idxInArray);
+      return { ...base, feeGrowthOutsideA: t.A, feeGrowthOutsideB: t.B, format: 'legacy_fixed' };
+    }
+    if (disc.equals(DYNAMIC_TICK_ARRAY_DISC)) {
+      const t = readDynamicTick(data, idxInArray);
+      if (t === null) {
+        return { ...base, format: 'unsupported', discriminator: Array.from(disc).join(','), accountSize: data.length };
+      }
+      return { ...base, feeGrowthOutsideA: t.A, feeGrowthOutsideB: t.B, format: 'variable_length' };
+    }
+    // Neither known format — surface the unknown account for a follow-up sprint,
+    // fall back to 0 (same as the original missing/uninitialized behavior).
+    return { ...base, format: 'unsupported', discriminator: Array.from(disc).join(','), accountSize: data.length };
   } catch {
-    return zero;
+    return { ...base, format: 'missing' };
   }
 }
 
@@ -488,6 +551,23 @@ export async function GET(request: Request) {
           fetchTickFeeGrowthOutside(pos.whirlpool, pos.tickLowerIndex, pool.tickSpacing),
           fetchTickFeeGrowthOutside(pos.whirlpool, pos.tickUpperIndex, pool.tickSpacing),
         ]);
+        // [PRICE_LOG] record which decoder format answered for each tick array
+        // (Sprint 1.7d). 'missing' (uninitialized/non-existent account) is the
+        // pre-existing zero-fallback and not logged.
+        for (const r of [lower, upper]) {
+          if (r.format === 'legacy_fixed' || r.format === 'variable_length') {
+            logPrice({
+              event: 'tick_decoder_used', protocol: 'orca', chain: 'solana',
+              positionId: `orca-${pos.positionPda}`, tickArrayAddress: r.tickArrayAddress, format: r.format,
+            });
+          } else if (r.format === 'unsupported') {
+            logPrice({
+              event: 'unsupported_tick_array_format', protocol: 'orca', chain: 'solana',
+              positionId: `orca-${pos.positionPda}`, tickArrayAddress: r.tickArrayAddress,
+              discriminator: r.discriminator ?? '', account_size: r.accountSize ?? 0,
+            });
+          }
+        }
         tickFeeMap[pos.positionPda] = {
           lowerA: lower.feeGrowthOutsideA, lowerB: lower.feeGrowthOutsideB,
           upperA: upper.feeGrowthOutsideA, upperB: upper.feeGrowthOutsideB,
