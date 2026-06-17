@@ -41,22 +41,25 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.7b: Extend the CLMM fee-growth underflow guard to the remaining
-CLMM protocols.**
+**Sprint 1.7e: Propagate the CLMM underflow guard to the remaining CLMM
+protocols — WITH per-protocol tick-decoder verification.**
 
-**Goal:** Apply the same `(feeGrowthInside − checkpoint)` u128 underflow guard
-shipped for Orca in Sprint 1.7 (`1dd862c`) to **Raydium, Bluefin, Cetus, and
-Momentum**, so out-of-range positions on those protocols also stop producing
-u128-wrapped implausible USD fees. Platform invariant (Rule 1b in
-pricing-invariants.md) is already documented; this is the additive
-implementation across the four remaining routes.
+**Goal:** Apply the Orca underflow guard (`1dd862c`) to **Raydium, Bluefin,
+Cetus, and Momentum** — but, per the Sprint 1.7c/1.7d lesson, **first verify
+each protocol's tick / fee-growth decoder reads all current on-chain account
+formats**. An underflow firing can be a *symptom of a decoder gap* (as it was
+for Orca's DynamicTickArray), not a benign out-of-range zero. For each
+protocol: confirm the tick-array/fee-growth account layout against an official
+source, add the high-bit (`≥ 2^127` → 0) guard as a safety net, and add
+`tick_decoder_used` / `fee_underflow_detected` instrumentation. Do NOT assume a
+guard-fire means "fees are zero."
 
-**Status:** Not started. Sprint 1.7 (`1dd862c`) shipped the guard for Orca only
-(verified: Account 1 ZEC/USDC `$1.908e24 → $0`, value $5,176 unchanged, 2
-`fee_underflow_detected` events, no regression — Account 2 ProjectX still
-$1,776.29). The bug class is shared: each of Raydium/Bluefin/Cetus/Momentum has
-the same unguarded masked-subtraction pending-fee pattern. Reuse the high-bit
-(`≥ 2^127` → 0) guard form and the `fee_underflow_detected` instrumentation.
+**Status:** Not started. Sprint 1.7 (`1dd862c`) shipped the guard for Orca;
+Sprint 1.7c found the underflow was a *symptom* of an unsupported Orca
+DynamicTickArray format; Sprint 1.7d (`d2ff9d6`) fixed the Orca decoder so the
+guard no longer fires there (ZEC/USDC pending fees $0 → $141.58 real). Each of
+Raydium/Bluefin/Cetus/Momentum shares the unguarded masked-subtraction pattern
+AND may have its own decoder-format gaps to check.
 
 ---
 
@@ -65,27 +68,29 @@ the same unguarded masked-subtraction pending-fee pattern. Reuse the high-bit
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **CLMM underflow guard — Raydium/Bluefin/Cetus/Momentum** (active,
-   Sprint 1.7b) — port the Orca pending-fee underflow guard (`1dd862c`) to the
-   four remaining CLMM routes. Additive; reuse the high-bit guard + the
-   `fee_underflow_detected` event.
+1. **CLMM underflow guard + decoder verification — Raydium/Bluefin/Cetus/
+   Momentum** (active, Sprint 1.7e) — port the Orca underflow guard (`1dd862c`)
+   to the four remaining CLMM routes, but first verify each one's tick/fee-growth
+   decoder handles all current on-chain account formats (per the 1.7c/1.7d
+   DynamicTickArray lesson). Reuse the high-bit guard + `tick_decoder_used` /
+   `fee_underflow_detected` instrumentation.
 2. **USDC/SUI Cetus exclusion inconsistency** (Sprint 1.8) — investigate why a
    Cetus USDC/SUI position is excluded inconsistently between dashboard and
    analytics.
-3. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
+3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
+   closed Sui positions from on-chain events (objects destroyed on close,
+   events preserved).
+4. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
    against Account 1 wallets to identify missing/wrong/excluded positions
    (manual ~$57 platform vs hundreds expected).
-4. **Closed Sui position fee recovery** — Sui event indexer on free
-   public RPC. Filter Bluefin/Cetus/Momentum package addresses.
-   Reconstruct deposit/withdrawal/fee events from event log (objects
-   destroyed but events preserved).
-5. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-6. **Closed Solana position fee recovery** — Solana event indexer using
-   free public RPC. Parse Orca/Raydium program instructions from wallet
-   transaction history.
-7. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+5. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+   indexer; parse Orca/Raydium program instructions from wallet tx history.
+6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
+   (Bluefin/Cetus/Momentum package addresses).
+7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+8. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-8. **UI for closed Sui + Solana positions** — Closed tab support.
+9. **UI for closed Sui + Solana positions** — Closed tab support.
 
 ---
 
@@ -94,6 +99,24 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`d2ff9d6`** — Sprint 1.7d: Orca variable-length (`DynamicTickArray`) tick
+  decoder. Sprint 1.7c found the ZEC/USDC underflow was a *symptom*: Orca ships
+  two tick-array formats, and the route only decoded the legacy fixed 9956-byte
+  `TickArray` (disc 69,97,…; ticks at `12+idx*113`). Pools on the newer
+  variable-length `DynamicTickArray` (disc 17,216,246,142,225,199,218,56; header
+  60 = disc8+startTickIndex4+whirlpool32+tickBitmap16; then 88 borsh-enum ticks,
+  1 byte Uninitialized / 113 Initialized) were read out-of-bounds → `feeGrowthOutside`
+  0 → `feeGrowthInside` 0 → underflow → Sprint 1.7 guard zeroed real fees. Fix
+  (additive): `fetchTickFeeGrowthOutside` dispatches on the account discriminator;
+  legacy path byte-identical; new `readDynamicTick` walks the enum array (fgA/fgB
+  at element+33/+49). Layout from orca-so/whirlpools source; discriminators
+  confirmed via Anchor sha256; validated vs on-chain sizes. New `[PRICE_LOG]`
+  `tick_decoder_used` + `unsupported_tick_array_format`. Guard preserved as a
+  safety net (now never fires for ZEC). Verified: ZEC pending `$0 → $141.58`
+  (real fees, settled still $0), feeGrowthInside > checkpoint, 0 underflow/
+  unsupported events; no regression (Account 2 ProjectX $1,776.29, redis hits,
+  0 cg-spot). No live legacy-format Orca position available to exercise; legacy
+  decode unchanged.
 - **`1dd862c`** — Sprint 1.7: guard CLMM fee-growth underflow in Orca
   pending-fee math. `calcPendingFee` computed `(feeGrowthInside − checkpoint) &
   U128_MASK` with no underflow guard; for out-of-range positions the recomputed
@@ -156,10 +179,6 @@ shorthand.
   concurrency limiter (MAX_PER_ENDPOINT=2), increased attempt timeouts
   (60/60/90s), differentiated cache TTL (success 5min, empty 60s,
   errors uncached), cache version bumped to v21.
-- **`be94edf` / `dae0599`** — HyperEVM/ProjectX claim-time pricing.
-  CG-historical-awaited for closed-position bounded claim-date sets
-  with 25s Promise.race cap. ProjectX warm $1,776.29 vs manual
-  $1,780.44.
 ---
 
 ## Where things live
