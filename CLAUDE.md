@@ -41,25 +41,27 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.7e: Propagate the CLMM underflow guard to the remaining CLMM
-protocols — WITH per-protocol tick-decoder verification.**
+**Sprint 1.8: USDC/SUI Cetus exclusion inconsistency.**
 
-**Goal:** Apply the Orca underflow guard (`1dd862c`) to **Raydium, Bluefin,
-Cetus, and Momentum** — but, per the Sprint 1.7c/1.7d lesson, **first verify
-each protocol's tick / fee-growth decoder reads all current on-chain account
-formats**. An underflow firing can be a *symptom of a decoder gap* (as it was
-for Orca's DynamicTickArray), not a benign out-of-range zero. For each
-protocol: confirm the tick-array/fee-growth account layout against an official
-source, add the high-bit (`≥ 2^127` → 0) guard as a safety net, and add
-`tick_decoder_used` / `fee_underflow_detected` instrumentation. Do NOT assume a
-guard-fire means "fees are zero."
+**Goal:** Investigate why a Cetus USDC/SUI position is excluded inconsistently
+between the dashboard and analytics, and fix the source.
 
-**Status:** Not started. Sprint 1.7 (`1dd862c`) shipped the guard for Orca;
-Sprint 1.7c found the underflow was a *symptom* of an unsupported Orca
-DynamicTickArray format; Sprint 1.7d (`d2ff9d6`) fixed the Orca decoder so the
-guard no longer fires there (ZEC/USDC pending fees $0 → $141.58 real). Each of
-Raydium/Bluefin/Cetus/Momentum shares the unguarded masked-subtraction pattern
-AND may have its own decoder-format gaps to check.
+**Status:** Not started. Sprint 1.7e (`f7842c8`) shipped the shared CLMM
+utilities and applied the underflow guard across every protocol that computes
+pending fees, closing out the 1.7 arc.
+
+**Carry-over from 1.7e (not blockers):**
+- **Bluefin/Momentum guard is live-verification pending.** The guard change is
+  byte-identical for healthy positions (`safeCalcPendingFee.fee` == the prior
+  inline `(delta*liq)>>64` on the non-guarded path) and the shared function is
+  proven via Orca, but no live Sui CLMM test position was available (Account 2
+  Sui has 0; Account 1's full Sui address isn't in records). Eyeball a Bluefin
+  position on the deploy when one is available.
+- **Raydium settled-only.** Raydium shows `tokenFeesOwed` with NO pending-fee
+  accrual (no tick-array calc) — a possible *under-reporting* enhancement, not
+  an underflow concern. Cetus positions route returns `fees: 0`. Neither needs
+  the guard today; both adopt the shared pattern (add-new-protocol SKILL) if/when
+  they start computing pending fees.
 
 ---
 
@@ -68,29 +70,23 @@ AND may have its own decoder-format gaps to check.
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **CLMM underflow guard + decoder verification — Raydium/Bluefin/Cetus/
-   Momentum** (active, Sprint 1.7e) — port the Orca underflow guard (`1dd862c`)
-   to the four remaining CLMM routes, but first verify each one's tick/fee-growth
-   decoder handles all current on-chain account formats (per the 1.7c/1.7d
-   DynamicTickArray lesson). Reuse the high-bit guard + `tick_decoder_used` /
-   `fee_underflow_detected` instrumentation.
-2. **USDC/SUI Cetus exclusion inconsistency** (Sprint 1.8) — investigate why a
-   Cetus USDC/SUI position is excluded inconsistently between dashboard and
-   analytics.
-3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
+1. **USDC/SUI Cetus exclusion inconsistency** (active, Sprint 1.8) —
+   investigate why a Cetus USDC/SUI position is excluded inconsistently between
+   dashboard and analytics.
+2. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
    closed Sui positions from on-chain events (objects destroyed on close,
    events preserved).
-4. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
+3. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
    against Account 1 wallets to identify missing/wrong/excluded positions
    (manual ~$57 platform vs hundreds expected).
-5. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history.
-6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
+5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
    (Bluefin/Cetus/Momentum package addresses).
-7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-8. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+7. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-9. **UI for closed Sui + Solana positions** — Closed tab support.
+8. **UI for closed Sui + Solana positions** — Closed tab support.
 
 ---
 
@@ -99,6 +95,21 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`f7842c8`** — Sprint 1.7e: shared CLMM utilities + apply across protocols.
+  New `app/lib/clmmFeeMath.ts` (`safeCalcPendingFee` underflow guard +
+  `calcFeeGrowthInside` + `emitFeeUnderflow`, moved verbatim from Orca) and
+  `app/lib/clmmTickDecoder.ts` (`solanaCLMMTickRegistry` + `anchorDiscriminator`).
+  Orca refactored to import/register into them (byte-identical to 1.7d); Bluefin
+  and Momentum route their pending-fee math through `safeCalcPendingFee`. Phase A
+  finding: protocols aren't uniform — only Orca/Bluefin/Momentum compute pending
+  fees; Raydium is settled-only and Cetus returns `fees:0` (guard N/A). Sui ticks
+  are JSON dynamic fields (no buffer registry — would be leaky); Solana ticks are
+  binary buffers (registry fits). New `.claude/skills/add-new-protocol/SKILL.md`
+  (Protocol Correctness Contract) + architecture-principles Rule 8 (shared CLMM
+  utils canonical; inline guards/decoders forbidden). Verified: Orca exercises
+  BOTH Solana formats live (legacy_fixed + variable_length), 0 underflow/
+  unsupported; ProjectX $1,776.29, redis hits, 0 cg-spot. Bluefin/Momentum live-
+  verification pending (no test positions). No cache bump.
 - **`d2ff9d6`** — Sprint 1.7d: Orca variable-length (`DynamicTickArray`) tick
   decoder. Sprint 1.7c found the ZEC/USDC underflow was a *symptom*: Orca ships
   two tick-array formats, and the route only decoded the legacy fixed 9956-byte
@@ -175,10 +186,6 @@ shorthand.
   `deposits_*` fields. Verified: 20/20 retrieval success under 5×
   concurrent burst (Account 2, 4 closed ProjectX), 47 backoffs all
   recovered, 0 cascading failures, 0 dropped positions.
-- **`751743b`** — Client data layer architectural pass. Per-endpoint
-  concurrency limiter (MAX_PER_ENDPOINT=2), increased attempt timeouts
-  (60/60/90s), differentiated cache TTL (success 5min, empty 60s,
-  errors uncached), cache version bumped to v21.
 ---
 
 ## Where things live
@@ -205,6 +212,15 @@ shorthand.
   structure (Investigation / Implementation / Verification)
 - `.claude/skills/burned-nft-recovery/SKILL.md` — EVM closed-position
   recovery pattern
+- `.claude/skills/add-new-protocol/SKILL.md` — Protocol Correctness
+  Contract for integrating any new protocol on any chain (shared CLMM
+  utilities, decoder coverage, UI surfaces, wallet security)
+
+**Shared CLMM utilities** (canonical — see architecture-principles Rule 8):
+- `app/lib/clmmFeeMath.ts` — `safeCalcPendingFee` (u128 underflow guard),
+  `calcFeeGrowthInside`, `emitFeeUnderflow`. Used by Orca, Bluefin, Momentum.
+- `app/lib/clmmTickDecoder.ts` — `solanaCLMMTickRegistry` (binary tick-array
+  dispatch) + `anchorDiscriminator`. Solana only; Sui uses JSON extraction.
 
 ---
 
