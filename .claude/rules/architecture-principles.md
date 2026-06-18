@@ -205,6 +205,50 @@ The sprint queue lives in CLAUDE.md and is updated only at sprint boundaries
 
 ---
 
+## Rule 8: Shared CLMM utilities are the canonical pattern
+
+All current and future concentrated-liquidity (CLMM) protocols — on any chain —
+import their fee math from `app/lib/clmmFeeMath.ts` and (for binary-account
+chains) register their tick decoders into the appropriate registry in
+`app/lib/clmmTickDecoder.ts`. **Inline underflow guards and inline tick decoders
+are forbidden in new code.**
+
+This exists because the Sprint 1.7 → 1.7e arc proved two things travel together
+for every CLMM protocol: (1) the u128 fee-growth underflow guard, and (2) verified
+tick/fee-growth decoder coverage. A guard without decoder coverage masks real fees
+(Sprint 1.7c/1.7d: Orca's ZEC/USDC hid ~$141 behind an unsupported tick-array
+format); decoder coverage without a guard lets a malformed read explode to
+sextillions. Extracting both into shared utilities means a new protocol inherits
+the protection by **importing and registering**, not by a developer remembering.
+
+### The canonical imports
+- `safeCalcPendingFee(liquidity, feeGrowthInside, checkpoint)` → `{ fee, guarded,
+  wrappedDelta }` — universal, pure bigint, chain-agnostic.
+- `calcFeeGrowthInside(...)` — the shared Uniswap-V3 fee-growth-inside recomputation.
+- `emitFeeUnderflow(result, ctx)` — logs `fee_underflow_detected` on a guard fire
+  so callers can't forget the instrumentation.
+- `solanaCLMMTickRegistry` + `anchorDiscriminator(name)` — Solana binary
+  tick-array dispatch; each protocol registers a decoder per discriminator.
+
+### Tick decoding is chain-family-specific BY DESIGN (not a leaky abstraction)
+- **Solana** (binary accounts, Anchor discriminators, possible multiple formats):
+  use `solanaCLMMTickRegistry`. Register EVERY known format so a new on-chain
+  format fails loudly (`unsupported_tick_array_format`) rather than silently
+  zeroing fees.
+- **Sui** (Move `Table` of JSON dynamic fields, one format per protocol): NO tick
+  registry — extract JSON fields and feed them straight into the shared fee math.
+  A buffer/discriminator registry would be a leaky abstraction here.
+- **Future chain families** (Aptos, Sei): add a new per-chain-family registry if
+  the chain uses binary tick accounts; otherwise follow the Sui pattern. Never
+  force one registry across chain families.
+
+### A guard fire is a signal, not a zero
+Never treat a `fee_underflow_detected` event as "fees are genuinely zero." It can
+indicate an upstream decoder gap. Verify the decoder before trusting a guarded
+zero. New protocols follow `.claude/skills/add-new-protocol/SKILL.md`.
+
+---
+
 ## Decision tree: "Is this fix platform-level?"
 
 Ask in order:

@@ -3,6 +3,8 @@ import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveCgIds } from '../../lib/cgSymbolSearch';
 import { logPrice } from '../../lib/priceLogger';
+import { safeCalcPendingFee, calcFeeGrowthInside, emitFeeUnderflow } from '../../lib/clmmFeeMath';
+import { solanaCLMMTickRegistry, anchorDiscriminator } from '../../lib/clmmTickDecoder';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -237,13 +239,15 @@ const TICK_ARRAY_SIZE = 88;
 const TICK_BYTES = 113;
 const TICK_ARRAY_DATA_START = 12;        // legacy header
 const DYN_TICK_ARRAY_DATA_START = 60;    // dynamic header (disc8 + start4 + pubkey32 + bitmap16)
-const U128_MASK = (1n << 128n) - 1n;
 // feeGrowthOutsideA/B offsets WITHIN a 113-byte initialized tick element — same
 // for both formats: tag/init(1) + liquidityNet(16) + liquidityGross(16) = 33.
 const TICK_FG_A_OFFSET = 33;
 const TICK_FG_B_OFFSET = 49;
-const LEGACY_TICK_ARRAY_DISC = Buffer.from([69, 97, 189, 190, 110, 7, 66, 187]);
-const DYNAMIC_TICK_ARRAY_DISC = Buffer.from([17, 216, 246, 142, 225, 199, 218, 56]);
+// Sprint 1.7e: the underflow guard (safeCalcPendingFee), feeGrowthInside math
+// (calcFeeGrowthInside), and discriminator dispatch (solanaCLMMTickRegistry) now
+// live in the shared CLMM utilities. The two Orca decoders below register into
+// that registry; discriminators come from anchorDiscriminator('TickArray') /
+// ('DynamicTickArray').
 
 function tickArrayStartIndex(tick: number, tickSpacing: number): number {
   return Math.floor(tick / (TICK_ARRAY_SIZE * tickSpacing)) * (TICK_ARRAY_SIZE * tickSpacing);
@@ -289,6 +293,18 @@ function readDynamicTick(data: Buffer, idxInArray: number): { A: bigint; B: bigi
   return { A: readU128LE(data, off + TICK_FG_A_OFFSET), B: readU128LE(data, off + TICK_FG_B_OFFSET) };
 }
 
+// Register Orca's two tick-array formats into the shared Solana CLMM registry
+// (register-once at module load). This is the canonical "each protocol registers
+// its decoders" pattern — a future Solana CLMM adds itself the same way.
+solanaCLMMTickRegistry.register(
+  anchorDiscriminator('TickArray'), 'legacy_fixed',
+  (data, idx) => { const t = readLegacyTick(data, idx); return { feeGrowthOutsideA: t.A, feeGrowthOutsideB: t.B }; },
+);
+solanaCLMMTickRegistry.register(
+  anchorDiscriminator('DynamicTickArray'), 'variable_length',
+  (data, idx) => { const t = readDynamicTick(data, idx); return t === null ? null : { feeGrowthOutsideA: t.A, feeGrowthOutsideB: t.B }; },
+);
+
 async function fetchTickFeeGrowthOutside(
   whirlpool: string,
   tick: number,
@@ -307,76 +323,30 @@ async function fetchTickFeeGrowthOutside(
     if (!result?.value?.data) return { ...base, format: 'missing' };
 
     const data = Buffer.from(result.value.data[0], 'base64');
-    const disc = data.subarray(0, 8);
     const idxInArray = (tick - startIdx) / tickSpacing;
 
-    if (disc.equals(LEGACY_TICK_ARRAY_DISC)) {
-      const t = readLegacyTick(data, idxInArray);
-      return { ...base, feeGrowthOutsideA: t.A, feeGrowthOutsideB: t.B, format: 'legacy_fixed' };
+    // Dispatch through the shared Solana CLMM tick registry. null === the
+    // account discriminator matched no registered format OR the matched decoder
+    // found a malformed buffer → unsupported (fall back to 0, surface for analysis).
+    const decoded = solanaCLMMTickRegistry.decode(data, idxInArray);
+    if (decoded === null) {
+      return { ...base, format: 'unsupported', discriminator: Array.from(data.subarray(0, 8)).join(','), accountSize: data.length };
     }
-    if (disc.equals(DYNAMIC_TICK_ARRAY_DISC)) {
-      const t = readDynamicTick(data, idxInArray);
-      if (t === null) {
-        return { ...base, format: 'unsupported', discriminator: Array.from(disc).join(','), accountSize: data.length };
-      }
-      return { ...base, feeGrowthOutsideA: t.A, feeGrowthOutsideB: t.B, format: 'variable_length' };
-    }
-    // Neither known format — surface the unknown account for a follow-up sprint,
-    // fall back to 0 (same as the original missing/uninitialized behavior).
-    return { ...base, format: 'unsupported', discriminator: Array.from(disc).join(','), accountSize: data.length };
+    return {
+      ...base,
+      feeGrowthOutsideA: decoded.feeGrowthOutsideA,
+      feeGrowthOutsideB: decoded.feeGrowthOutsideB,
+      format: decoded.format as TickArrayFormat,
+    };
   } catch {
     return { ...base, format: 'missing' };
   }
 }
 
-function calcFeeGrowthInside(
-  tickLower: number,
-  tickUpper: number,
-  tickCurrent: number,
-  feeGrowthGlobal: bigint,
-  feeGrowthOutsideLower: bigint,
-  feeGrowthOutsideUpper: bigint,
-): bigint {
-  const below = tickCurrent >= tickLower
-    ? feeGrowthOutsideLower
-    : (feeGrowthGlobal - feeGrowthOutsideLower) & U128_MASK;
-  const above = tickCurrent < tickUpper
-    ? feeGrowthOutsideUpper
-    : (feeGrowthGlobal - feeGrowthOutsideUpper) & U128_MASK;
-  return (feeGrowthGlobal - below - above) & U128_MASK;
-}
-
-// High bit of a u128. A wrapped (feeGrowthInside − checkpoint) value at or above
-// this is an underflow (the unmasked subtraction would have been negative).
-const U128_HIGH_BIT = 1n << 127n;
-
-// Pending fee for one token side, with a u128 underflow guard (Sprint 1.7).
-//
-// In correct operation the per-position fee-growth delta is a small POSITIVE
-// number: feeGrowthInside only grows while in range, so it is ≥ the stored
-// checkpoint. But for an OUT-OF-RANGE position the recomputed feeGrowthInside
-// can land marginally BELOW the checkpoint, and the unsigned masked subtraction
-// `(feeGrowthInside − checkpoint) & U128_MASK` then wraps to the upper half of
-// u128 (~2^128) instead of producing a small negative. Multiplied by liquidity
-// and scaled by decimals/price, that wrap yields implausible (sextillion-scale)
-// USD fees — the platform-wide bug this guards. A LEGITIMATE accrual can never
-// reach 2^127 (that would imply ~2^63 fee-units per unit of liquidity), so a
-// high-bit-set delta is unambiguously an underflow → 0 fees for that side. This
-// is the standard Uniswap-V3 fee-growth-delta semantics. Settled, already-owed
-// fees are tracked separately in feeOwedA/B and are unaffected by this guard.
-//
-// Applies to EVERY Orca position for EVERY user/wallet — not a per-position fix.
-function calcPendingFee(
-  liquidity: bigint,
-  feeGrowthInside: bigint,
-  checkpoint: bigint,
-): { fee: bigint; guarded: boolean; wrappedDelta: bigint } {
-  const wrappedDelta = (feeGrowthInside - checkpoint) & U128_MASK;
-  if (wrappedDelta >= U128_HIGH_BIT) {
-    return { fee: 0n, guarded: true, wrappedDelta };
-  }
-  return { fee: (liquidity * wrappedDelta) >> 64n, guarded: false, wrappedDelta };
-}
+// calcFeeGrowthInside + the underflow-guarded safeCalcPendingFee now live in
+// app/lib/clmmFeeMath.ts (Sprint 1.7e) and are imported above — shared across
+// every CLMM protocol on every chain. The two functions previously defined here
+// (Sprint 1.7 + 1.7d) were moved there verbatim.
 // ──────────────────────────────────────────────────────────────────────────────
 
 function calculateAmounts(
@@ -655,22 +625,11 @@ export async function GET(request: Request) {
           pos.tickLowerIndex, pos.tickUpperIndex, pool.tickCurrentIndex,
           pool.feeGrowthGlobalB, tf.lowerB, tf.upperB,
         );
-        const pendA = calcPendingFee(pos.liquidity, growthInsideA, pos.feeGrowthInsideCheckpointA);
-        const pendB = calcPendingFee(pos.liquidity, growthInsideB, pos.feeGrowthInsideCheckpointB);
-        if (pendA.guarded) {
-          logPrice({
-            event: 'fee_underflow_detected', protocol: 'orca', chain: 'solana',
-            positionId: `orca-${pos.positionPda}`, pair: `${tASymbol} / ${tBSymbol}`,
-            side: 'token0', raw_wrapped_value: pendA.wrappedDelta.toString(), status: 'guarded_to_zero',
-          });
-        }
-        if (pendB.guarded) {
-          logPrice({
-            event: 'fee_underflow_detected', protocol: 'orca', chain: 'solana',
-            positionId: `orca-${pos.positionPda}`, pair: `${tASymbol} / ${tBSymbol}`,
-            side: 'token1', raw_wrapped_value: pendB.wrappedDelta.toString(), status: 'guarded_to_zero',
-          });
-        }
+        const pendA = safeCalcPendingFee(pos.liquidity, growthInsideA, pos.feeGrowthInsideCheckpointA);
+        const pendB = safeCalcPendingFee(pos.liquidity, growthInsideB, pos.feeGrowthInsideCheckpointB);
+        const uctx = { protocol: 'orca', chain: 'solana', positionId: `orca-${pos.positionPda}`, pair: `${tASymbol} / ${tBSymbol}` } as const;
+        emitFeeUnderflow(pendA, { ...uctx, side: 'token0' });
+        emitFeeUnderflow(pendB, { ...uctx, side: 'token1' });
         feesA += Number(pendA.fee) / 10 ** tADecimals;
         feesB += Number(pendB.fee) / 10 ** tBDecimals;
       }

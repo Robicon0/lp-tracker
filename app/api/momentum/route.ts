@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveCgIds } from '../../lib/cgSymbolSearch';
+import { safeCalcPendingFee, emitFeeUnderflow, type UnderflowLogContext } from '../../lib/clmmFeeMath';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -112,15 +113,20 @@ function calcFeeGrowthInside(
   return (feeGrowthGlobal - below - above) & U128_MASK;
 }
 
-// Momentum uses Q64 scaling (same as Bluefin/Orca)
+// Momentum uses Q64 scaling (same as Bluefin/Orca). Sprint 1.7e: the pending
+// delta now goes through the shared safeCalcPendingFee, which guards the u128
+// underflow and emits fee_underflow_detected on a guard fire. Settled owed_coin
+// fees are added separately and untouched.
 function calcPendingFees(
   owedFee: bigint,
   feeGrowthInside: bigint,
   feeGrowthCheckpoint: bigint,
   liquidity: bigint,
+  ctx: UnderflowLogContext,
 ): bigint {
-  const delta = (feeGrowthInside - feeGrowthCheckpoint) & U128_MASK;
-  return owedFee + ((delta * liquidity) >> 64n);
+  const pending = safeCalcPendingFee(liquidity, feeGrowthInside, feeGrowthCheckpoint);
+  emitFeeUnderflow(pending, ctx);
+  return owedFee + pending.fee;
 }
 
 async function fetchAllMomentumPositions(account: string): Promise<Array<Record<string, unknown>>> {
@@ -372,8 +378,9 @@ export async function GET(request: Request) {
           feeGrowthGlobalY, lowerTickData.feeGrowthOutsideY, upperTickData.feeGrowthOutsideY,
         );
 
-        fees0 = Number(calcPendingFees(owedX, feeGrowthInsideX, feeGrowthCheckpointX, liquidity)) / 10 ** decimalsX;
-        fees1 = Number(calcPendingFees(owedY, feeGrowthInsideY, feeGrowthCheckpointY, liquidity)) / 10 ** decimalsY;
+        const uctx: Omit<UnderflowLogContext, 'side'> = { protocol: 'momentum', chain: 'sui', positionId: `momentum-${pos.objectId as string}`, pair: `${symbolX} / ${symbolY}` };
+        fees0 = Number(calcPendingFees(owedX, feeGrowthInsideX, feeGrowthCheckpointX, liquidity, { ...uctx, side: 'token0' })) / 10 ** decimalsX;
+        fees1 = Number(calcPendingFees(owedY, feeGrowthInsideY, feeGrowthCheckpointY, liquidity, { ...uctx, side: 'token1' })) / 10 ** decimalsY;
       } else {
         // Fallback: snapshotted fees only
         fees0 = Number((pos.owed_coin_x as string) || '0') / 10 ** decimalsX;

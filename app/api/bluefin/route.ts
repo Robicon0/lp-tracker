@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveCgIds } from '../../lib/cgSymbolSearch';
+import { safeCalcPendingFee, emitFeeUnderflow, type UnderflowLogContext } from '../../lib/clmmFeeMath';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -177,15 +178,21 @@ function calcFeeGrowthInside(
   return (feeGrowthGlobal - below - above) & U128_MASK;
 }
 
-// Bluefin uses Q64 scaling (same as Orca): fees = tokenFee + (delta * liquidity) >> 64
+// Bluefin uses Q64 scaling (same as Orca): fees = tokenFee + (delta * liquidity) >> 64.
+// Sprint 1.7e: the pending delta now goes through the shared safeCalcPendingFee,
+// which guards the u128 underflow (out-of-range positions where the recomputed
+// feeGrowthInside lands below the checkpoint) and emits fee_underflow_detected on
+// a guard fire. Settled token_a_fee/token_b_fee are added separately and untouched.
 function calcPendingFees(
   tokenFee: bigint,
   feeGrowthInside: bigint,
   feeGrowthCheckpoint: bigint,
   liquidity: bigint,
+  ctx: UnderflowLogContext,
 ): bigint {
-  const delta = (feeGrowthInside - feeGrowthCheckpoint) & U128_MASK;
-  return tokenFee + ((delta * liquidity) >> 64n);
+  const pending = safeCalcPendingFee(liquidity, feeGrowthInside, feeGrowthCheckpoint);
+  emitFeeUnderflow(pending, ctx);
+  return tokenFee + pending.fee;
 }
 
 // Extract the ticks Table object ID from pool fields
@@ -413,8 +420,9 @@ export async function GET(request: Request) {
           feeGrowthGlobalB, lowerTickData.feeGrowthOutsideB, upperTickData.feeGrowthOutsideB,
         );
 
-        fees0 = Number(calcPendingFees(tokenAFee, feeGrowthInsideA, feeGrowthCheckpointA, liquidity)) / 10 ** decimalsA;
-        fees1 = Number(calcPendingFees(tokenBFee, feeGrowthInsideB, feeGrowthCheckpointB, liquidity)) / 10 ** decimalsB;
+        const uctx: Omit<UnderflowLogContext, 'side'> = { protocol: 'bluefin', chain: 'sui', positionId: `bluefin-${pos.objectId as string}`, pair: `${symbolA} / ${symbolB}` };
+        fees0 = Number(calcPendingFees(tokenAFee, feeGrowthInsideA, feeGrowthCheckpointA, liquidity, { ...uctx, side: 'token0' })) / 10 ** decimalsA;
+        fees1 = Number(calcPendingFees(tokenBFee, feeGrowthInsideB, feeGrowthCheckpointB, liquidity, { ...uctx, side: 'token1' })) / 10 ** decimalsB;
       } else {
         // Fallback: use snapshotted fees only
         fees0 = Number((pos.token_a_fee as string) || '0') / 10 ** decimalsA;
