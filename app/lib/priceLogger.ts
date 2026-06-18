@@ -183,6 +183,30 @@ interface UnsupportedTickArrayFormatEvent {
   account_size: number;
 }
 
+// Emitted once per Cetus position whose pending fees were successfully computed
+// (Sprint 1.8). Cetus stores per-position fee state in the pool's
+// position_manager LinkedTable + tick_manager SkipList (not on the position
+// object), so computing pending fees requires extra dynamic-field reads. This
+// event lets us measure ongoing health of that computation in production.
+interface CetusPendingFeeComputedEvent {
+  event: 'cetus_pending_fee_computed';
+  positionId: string;
+  poolId: string;
+  pending_token0_raw: string;  // bigint as decimal string
+  pending_token1_raw: string;
+  pending_usd_total: number;
+}
+
+// Emitted when a Cetus pending-fee read fails (Sprint 1.8) — the route falls
+// back to the pre-fix $0 display for that position (honest: it's what the user
+// saw before) and surfaces the failure so we can monitor failure rate.
+interface CetusPendingFeeReadFailedEvent {
+  event: 'cetus_pending_fee_read_failed';
+  positionId: string;
+  poolId: string;
+  reason: 'position_info_missing' | 'tick_lower_mismatch' | 'tick_upper_mismatch' | 'rpc_error';
+}
+
 export type PriceLogEvent =
   | LookupEvent
   | FeeClaimResolutionEvent
@@ -191,7 +215,9 @@ export type PriceLogEvent =
   | FeeUnderflowEvent
   | FeePlausibilityEvent
   | TickDecoderUsedEvent
-  | UnsupportedTickArrayFormatEvent;
+  | UnsupportedTickArrayFormatEvent
+  | CetusPendingFeeComputedEvent
+  | CetusPendingFeeReadFailedEvent;
 
 export function logPrice(event: PriceLogEvent): void {
   // Single-line JSON for grep/parse. Always server-side console.log.

@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveCgIds } from '../../lib/cgSymbolSearch';
+import { safeCalcPendingFee, calcFeeGrowthInside, emitFeeUnderflow } from '../../lib/clmmFeeMath';
+import { logPrice } from '../../lib/priceLogger';
+
+// Cetus tick range is [-443636, 443636]; the tick_manager.ticks move_stl SkipList
+// is keyed by a u64 score = tickIndex + 443636 (shifts the signed range to
+// [0, 887272]). Verified empirically against live pools (Sprint 1.8); a defensive
+// returned-index check in fetchCetusTick ensures a future module change fails loudly.
+const CETUS_TICK_SCORE_OFFSET = 443636;
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -209,6 +217,124 @@ async function fetchCetusAPYs(): Promise<Record<string, number>> {
   }
 }
 
+// Descend one struct level: returns a Sui object's `.fields` (or the object
+// itself if it has none). Sui JSON-RPC nests struct fields under `.fields`.
+function suiFields(v: unknown): Record<string, unknown> | null {
+  if (v == null || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  return ((o.fields && typeof o.fields === 'object') ? o.fields : o) as Record<string, unknown>;
+}
+
+// Extract the object id of an inner Table/SkipList held by a manager struct,
+// e.g. cetusTableId(pool.position_manager, 'positions') or (pool.tick_manager, 'ticks').
+function cetusTableId(manager: unknown, key: string): string | null {
+  const mf = suiFields(manager);
+  const inner = suiFields(mf?.[key]);
+  const idStr = (inner?.id as Record<string, unknown> | undefined)?.id;
+  return typeof idStr === 'string' ? idStr : null;
+}
+
+// Fetch one tick's fee_growth_outside from the pool's tick_manager.ticks move_stl
+// SkipList. Key = u64 score (tickIndex + offset). DEFENSIVE GUARD: the returned
+// tick's own index must equal the requested index, else the read is treated as a
+// failure (returns null) — so a future Cetus score-formula change fails loudly
+// rather than silently mis-reading a neighbouring tick.
+async function fetchCetusTick(skipListId: string, tickIndex: number): Promise<{ a: bigint; b: bigint } | null> {
+  const score = (tickIndex + CETUS_TICK_SCORE_OFFSET).toString();
+  const res = await suiRpc('suix_getDynamicFieldObject', [skipListId, { type: 'u64', value: score }]) as
+    { data?: { content?: { fields?: Record<string, unknown> } } } | null;
+  // content.fields = { id, name, value: Node }; Node.fields = { nexts, prev, score, value: Tick }
+  const node = suiFields(res?.data?.content?.fields?.value);
+  const tick = suiFields(node?.value);
+  if (!tick) return null;
+  if (bitsToI32(extractI32Bits(tick.index)) !== tickIndex) return null; // defensive guard
+  return {
+    a: BigInt((tick.fee_growth_outside_a as string) || '0'),
+    b: BigInt((tick.fee_growth_outside_b as string) || '0'),
+  };
+}
+
+// Compute one Cetus position's pending (uncollected) fees. Cetus keeps per-position
+// fee state in the pool's position_manager LinkedTable (PositionInfo: fee_growth_inside
+// checkpoints + fee_owned) and tick fee_growth_outside in the tick_manager SkipList —
+// NOT on the position object — so this needs extra dynamic-field reads. The math is
+// the shared chain-agnostic CLMM math (Sprint 1.7e). Returns token amounts already
+// divided by decimals + a USD total, or null on any read failure (caller falls back
+// to 0). NOTE: PositionInfo.rewards[] (the CETUS reward-token growth) is a SEPARATE
+// path and is intentionally NOT touched here.
+async function computeCetusPendingFees(
+  pos: Record<string, unknown>,
+  pool: Record<string, unknown>,
+  decimalsA: number,
+  decimalsB: number,
+  priceA: number,
+  priceB: number,
+  pair: string,
+): Promise<{ fees0: number; fees1: number; feesUsd: number } | null> {
+  const positionId = pos.objectId as string;
+  const poolId = pos.pool as string;
+  const fail = (reason: 'position_info_missing' | 'tick_lower_mismatch' | 'tick_upper_mismatch' | 'rpc_error') => {
+    logPrice({ event: 'cetus_pending_fee_read_failed', positionId: `cetus-${positionId}`, poolId, reason });
+    return null;
+  };
+  try {
+    const liquidity = BigInt((pos.liquidity as string) || '0');
+    const tickLower = bitsToI32(extractI32Bits(pos.tick_lower_index));
+    const tickUpper = bitsToI32(extractI32Bits(pos.tick_upper_index));
+    const tickCurrent = bitsToI32(extractI32Bits(pool.current_tick_index));
+    const globalA = BigInt((pool.fee_growth_global_a as string) || '0');
+    const globalB = BigInt((pool.fee_growth_global_b as string) || '0');
+    const positionsTableId = cetusTableId(pool.position_manager, 'positions');
+    const ticksSkipListId = cetusTableId(pool.tick_manager, 'ticks');
+    if (!positionsTableId || !ticksSkipListId) return fail('rpc_error');
+
+    // (a) PositionInfo from the pool's position_manager.positions LinkedTable
+    const piRes = await suiRpc('suix_getDynamicFieldObject', [
+      positionsTableId, { type: '0x2::object::ID', value: positionId },
+    ]) as { data?: { content?: { fields?: Record<string, unknown> } } } | null;
+    // LinkedTable node: content.fields = { id, name, value: Node }; Node.fields = { next, prev, value: PositionInfo }
+    const piNode = suiFields(piRes?.data?.content?.fields?.value);
+    const pi = suiFields(piNode?.value);
+    if (!pi) return fail('position_info_missing');
+    const checkpointA = BigInt((pi.fee_growth_inside_a as string) || '0');
+    const checkpointB = BigInt((pi.fee_growth_inside_b as string) || '0');
+    const feeOwnedA = BigInt((pi.fee_owned_a as string) || '0');
+    const feeOwnedB = BigInt((pi.fee_owned_b as string) || '0');
+
+    // (b)(c) lower + upper ticks (defensive index guard inside fetchCetusTick)
+    const lower = await fetchCetusTick(ticksSkipListId, tickLower);
+    if (!lower) return fail('tick_lower_mismatch');
+    const upper = await fetchCetusTick(ticksSkipListId, tickUpper);
+    if (!upper) return fail('tick_upper_mismatch');
+
+    // (d) current feeGrowthInside (shared util; correct for in- and out-of-range)
+    const insideA = calcFeeGrowthInside(tickLower, tickUpper, tickCurrent, globalA, lower.a, upper.a);
+    const insideB = calcFeeGrowthInside(tickLower, tickUpper, tickCurrent, globalB, lower.b, upper.b);
+
+    // (e) pending delta with the shared u128 underflow guard
+    const uctx = { protocol: 'cetus', chain: 'sui', positionId: `cetus-${positionId}`, pair } as const;
+    const pendA = safeCalcPendingFee(liquidity, insideA, checkpointA);
+    const pendB = safeCalcPendingFee(liquidity, insideB, checkpointB);
+    emitFeeUnderflow(pendA, { ...uctx, side: 'token0' });
+    emitFeeUnderflow(pendB, { ...uctx, side: 'token1' });
+
+    // (f) total = settled fee_owned + guarded pending delta
+    const raw0 = feeOwnedA + pendA.fee;
+    const raw1 = feeOwnedB + pendB.fee;
+    const fees0 = Number(raw0) / 10 ** decimalsA;
+    const fees1 = Number(raw1) / 10 ** decimalsB;
+    const feesUsd = fees0 * priceA + fees1 * priceB;
+
+    logPrice({
+      event: 'cetus_pending_fee_computed', positionId: `cetus-${positionId}`, poolId,
+      pending_token0_raw: raw0.toString(), pending_token1_raw: raw1.toString(), pending_usd_total: feesUsd,
+    });
+    return { fees0, fees1, feesUsd };
+  } catch {
+    return fail('rpc_error');
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
@@ -266,6 +392,29 @@ export async function GET(request: Request) {
       }
     }
 
+    // 3b. Compute pending (uncollected) fees per position. Cetus stores
+    // per-position fee state in the pool's position_manager LinkedTable +
+    // tick_manager SkipList (NOT on the position object), so this needs extra
+    // dynamic-field reads — run as a parallel pass so the build map stays sync.
+    // On any read failure a position falls back to 0 (the pre-fix display) and a
+    // cetus_pending_fee_read_failed event is emitted. Shared math (Sprint 1.7e).
+    const cetusFeeMap: Record<string, { fees0: number; fees1: number; feesUsd: number }> = {};
+    await Promise.all(rawPositions.map(async (pos) => {
+      const pool = poolMap[pos.pool as string];
+      if (!pool) return; // no pool data → leave fees at 0
+      const coinTypeA = extractCoinType(pos.coin_type_a);
+      const coinTypeB = extractCoinType(pos.coin_type_b);
+      const metaA = coinMetaMap[coinTypeA];
+      const metaB = coinMetaMap[coinTypeB];
+      const symbolA = metaA?.symbol || coinTypeA.split('::').pop() || 'TOKEN_A';
+      const symbolB = metaB?.symbol || coinTypeB.split('::').pop() || 'TOKEN_B';
+      const result = await computeCetusPendingFees(
+        pos, pool, metaA?.decimals ?? 9, metaB?.decimals ?? 9,
+        priceData[coinTypeA] || 0, priceData[coinTypeB] || 0, `${symbolA} / ${symbolB}`,
+      );
+      if (result) cetusFeeMap[pos.objectId as string] = result;
+    }));
+
     // 4. Build positions.
     // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
     // never filtered out. Status is set to 'Closed' below. Applies to all
@@ -287,6 +436,7 @@ export async function GET(request: Request) {
       const decimalsA = metaA?.decimals ?? 9;
       const decimalsB = metaB?.decimals ?? 9;
 
+      const fee = cetusFeeMap[pos.objectId as string]; // pending fees (Sprint 1.8); undefined → 0 fallback
       const liquidity = BigInt((pos.liquidity as string) || '0');
       // I32 struct: { type: "...::i32::I32", fields: { bits: N } }
       const tickLower = bitsToI32(extractI32Bits(pos.tick_lower_index));
@@ -315,14 +465,14 @@ export async function GET(request: Request) {
         chain: 'Sui',
         value: Math.round(value * 100) / 100,
         apy,
-        fees: 0,
+        fees: fee ? Math.round(fee.feesUsd * 100) / 100 : 0,
         status: (liquidity === 0n ? 'Closed' : inRange ? 'In Range' : 'Out of Range') as 'In Range' | 'Out of Range' | 'Closed',
         amount0: Math.round(amount0 * 1_000_000) / 1_000_000,
         amount1: Math.round(amount1 * 1_000_000) / 1_000_000,
         token0Symbol: symbolA,
         token1Symbol: symbolB,
-        fees0: 0,
-        fees1: 0,
+        fees0: fee ? Math.round(fee.fees0 * 1_000_000) / 1_000_000 : 0,
+        fees1: fee ? Math.round(fee.fees1 * 1_000_000) / 1_000_000 : 0,
         tickLower,
         tickUpper,
         token0Decimals: decimalsA,

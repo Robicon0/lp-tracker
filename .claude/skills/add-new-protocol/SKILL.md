@@ -129,6 +129,18 @@ apply (forcing it would be a leaky abstraction). The Sui pattern is simply:
 `safeCalcPendingFee`.** Verify the dynamic-field shape against the protocol's Move
 struct before trusting it.
 
+**Where per-position fee state lives varies by protocol — check it.** Bluefin and
+Momentum store fee state (`fee_growth_inside` checkpoints + `fee_owned`) directly on
+the position object, so you read it off the position. **Cetus does NOT** — its
+per-position fee state lives in a separate pool-owned `position_manager` LinkedTable
+(`PositionInfo`, keyed by position object ID), and its ticks live in a `move_stl`
+SkipList (keyed by a `u64` score = `tickIndex + 443636`). Such protocols need extra
+`getDynamicFieldObject` reads but use the **same** shared `safeCalcPendingFee` +
+`calcFeeGrowthInside` utilities. See `app/api/cetus/route.ts` (`computeCetusPendingFees`,
+`fetchCetusTick`) for the canonical pattern, including the defensive returned-index
+guard on SkipList reads. Never assume `fees: 0` — confirm whether the protocol even
+computes pending fees (an unimplemented stub silently shows $0 for every user).
+
 ### Future chains (Aptos, Sei, …)
 
 If a new chain family uses binary tick accounts, add a new `{Chain}CLMMTickRegistry`
