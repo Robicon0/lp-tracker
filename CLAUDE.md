@@ -41,31 +41,30 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.8b: Performance Metrics for new positions.**
+**Sprint 1.8c: Slush wallet disconnect on Sui.**
 
-**Goal:** Surface meaningful performance metrics (APR / actual return / age /
-fee yield) for positions, including newly-opened ones where activity history is
-thin. Investigate-first.
+**Goal:** Stop the Sui (Slush) wallet from disconnecting on dashboard→detail
+navigation and on refresh. Fully diagnosed (Sprint 1.8 investigation 2026-06-18):
+1. The dashboard navigates via `window.location.href` ([dashboard/page.tsx:1809,
+   1948], analytics/page.tsx:2360) — a HARD reload that remounts the provider tree.
+2. On the reload, `useWallets()` is transiently empty before Slush re-registers,
+   and `WalletRestoreEffect.tsx:89-100` then DELETES `dapp-kit:wallet-connection-info`,
+   breaking autoConnect → user must manually reconnect.
 
-**Status:** Not started. Sprint 1.8 (`a6a6e75`) shipped Cetus pending-fee
-computation — every Cetus position worldwide now shows real uncollected fees
-(was hardcoded $0 since the original integration, March 2026). With Orca,
-Bluefin, Momentum, and now Cetus all routing through the shared
-`safeCalcPendingFee`/`calcFeeGrowthInside`, all four CLMM families compute
-pending fees correctly.
+**Proposed fix (additive):** (a) replace `window.location.href` with Next
+`router.push` (client nav, no reload); (b) gate the WalletRestoreEffect deletion
+on a STABLE readiness signal (wallets had a chance to register) rather than the
+transient mount-time empty.
+
+**Status:** Not started. Sprint 1.8b (`0b9e3a0`) shipped Performance Metrics +
+Yield/APR projections for new positions (uncollected-based fallback, honest
+source labels). Browser paint for 1.8b not headlessly verifiable — eyeball the
+new ZEC position's projections on the deploy.
 
 **Carry-overs (not blockers):**
-- **Bluefin/Momentum guard live-verification still pending** — no live Sui CLMM
-  position on the queryable wallets this session either (Account 1 Bluefin now
-  reads 0). Byte-identical for healthy positions; eyeball on the deploy when a
-  position is available.
-- **Raydium settled-only** (`tokenFeesOwed`, no pending accrual) — a possible
-  *under-reporting* enhancement, not an underflow concern; adopts the shared
-  pattern (add-new-protocol SKILL) if/when it computes pending fees.
-- **Sprint 1.8c (Slush wallet disconnect)** is queued: prior investigation traced
-  it to the dashboard's `window.location.href` hard-reload + `WalletRestoreEffect`
-  deleting `dapp-kit:wallet-connection-info` on the transient empty-`useWallets()`
-  window.
+- **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
+  position on queryable wallets). Byte-identical for healthy positions.
+- **Raydium settled-only** — possible under-reporting enhancement, not underflow.
 
 ---
 
@@ -74,26 +73,24 @@ pending fees correctly.
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Performance Metrics for new positions** (active, Sprint 1.8b) — surface
-   APR / actual return / age / fee-yield metrics, including for newly-opened
-   positions with thin activity history.
-2. **Slush wallet disconnect on Sui** (Sprint 1.8c) — dashboard `window.location.href`
-   hard-reload + `WalletRestoreEffect` deleting dapp-kit connection state on the
-   transient empty-`useWallets()` window (per prior investigation).
-3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
+1. **Slush wallet disconnect on Sui** (active, Sprint 1.8c) — replace dashboard
+   `window.location.href` with `router.push`; gate the `WalletRestoreEffect`
+   deletion of dapp-kit connection state on a stable readiness signal rather than
+   the transient empty-`useWallets()` window (fully diagnosed; see Active sprint).
+2. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
    closed Sui positions from on-chain events (objects destroyed on close,
    events preserved).
-4. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
+3. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
    against Account 1 wallets to identify missing/wrong/excluded positions
    (manual ~$57 platform vs hundreds expected).
-5. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history.
-6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
+5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
    (Bluefin/Cetus/Momentum package addresses).
-7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-8. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+7. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-9. **UI for closed Sui + Solana positions** — Closed tab support.
+8. **UI for closed Sui + Solana positions** — Closed tab support.
 
 ---
 
@@ -102,6 +99,18 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`0b9e3a0`** — Sprint 1.8b: Performance Metrics + Yield/APR Projections fall
+  back to an uncollected-fees-based estimate for new positions with no claim
+  history (were em-dash / N/A from day 1). New shared `app/lib/positionProjections.ts`
+  (`computePositionProjection`: claims → uncollected → none). Position detail page
+  feeds `actualAPR`/`actualDailyIncome` from it (byte-identical when claims exist)
+  and labels the source honestly (Memory #14): "from uncollected (early estimate)"
+  vs "from real claims". Yield & APR Projections keep the pool-APY path when
+  `hasApr`, else fall back to the uncollected projection (per user decision). Fee
+  Income Rate + Estimated APR untouched. UI-only (no route changes, no cache
+  bump). Verified: canary math (new ZEC $41.65/1d/$4700 → 'uncollected', 323.5%
+  APR, $15,202/yr) + byte-identity for claims; live ZEC input $63.08, apy 0. Browser
+  paint not headlessly verifiable — eyeball on deploy.
 - **`a6a6e75`** — Sprint 1.8: implement Cetus pending-fee computation
   (platform-wide; was hardcoded `fees:0` since the original integration
   `4339ad87`, March 2026 — every Cetus position worldwide showed $0 uncollected).
@@ -184,22 +193,6 @@ shorthand.
   4-position total $1,776.29 (manual $1,780.44, −0.23%); the lone
   transient-pending HYPE claim (2026-03-13) resolves once warmed and persists
   in Redis (37.35, 30d TTL). 0 HyperEVM cg-spot (Sprint 1.5 invariant holds).
-- **`f07ff19`** — Sprint 1.5: enforce pricing-invariants Rule 1 for
-  HyperEVM fee claims. Removed the current-spot fallback for fee-claim
-  valuation (deposits/withdrawals unchanged — Rule 2 spot last-resort
-  kept); claims that miss every historical tier now stay UNRESOLVED
-  (`usdAtTime` null), never $0, never spot. Prewarm cap 25s→60s. New
-  `route_summary.claim_pricing_succeeded` boolean + `pendingClaimCount`
-  threaded to a "N claims pending price resolution" analytics notice.
-  Cache bumps v21→v22 (lp-pnl-events), v13→v14 (analytics-activity).
-  Root cause: Account 2 ProjectX over-reported $2,243.69 vs manual
-  $1,780.44 (+26%) — 20 HYPE claims valued at spot (~$63) not claim-date
-  (~$41.73) when the awaited prewarm timed out under CG pressure (not
-  double-counting; counts reconcile 19≈20≈19+1). Verified localhost:
-  0 `fee_claim_resolution` events with `source=cg-spot` across 2 cold
-  runs; unresolved claims correctly null + `pending`. Production
-  verification pending (Account 2 analytics; expect cg-spot=0, ProjectX
-  total near $1,780).
 ---
 
 ## Where things live
