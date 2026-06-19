@@ -20,6 +20,7 @@ import { useVelodromeActivity } from "../../../hooks/useVelodromeActivity";
 import { usePancakeSwapActivity } from "../../../hooks/usePancakeSwapActivity";
 import { useCetusActivity } from "../../../hooks/useCetusActivity";
 import { computePositionPnL } from "../../../lib/positionPnl";
+import { computePositionProjection } from "../../../lib/positionProjections";
 import InfoTooltip from "../../../components/InfoTooltip";
 
 // ── Terminal palette (matches position.html exactly) ─────────────────────────
@@ -538,10 +539,20 @@ export default function PositionDetail() {
   const firstTs = firstDeposit?.timestamp ?? 0;
   const nowTs = Math.floor(Date.now() / 1000);
   const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
-  const actualAPR = daysActive >= 1 && pos.value > 0 && claimedUSD > 0
-    ? (claimedUSD / pos.value) / (daysActive / 365) * 100
-    : null;
-  const actualDailyIncome = daysActive >= 1 && claimedUSD > 0 ? claimedUSD / daysActive : null;
+  // Forward projection (Sprint 1.8b): prefer real claims; for new positions with
+  // no claim history yet, fall back to an uncollected-fees-based estimate so the
+  // metrics aren't dark from day 1. Byte-identical to the prior inline formulas
+  // when claims exist (source 'claims'); `projection.source` lets the UI label
+  // an uncollected-based estimate honestly (Memory #14).
+  const projection = computePositionProjection({
+    claimedUSD,
+    uncollectedFeesUSD: uncollectedUSD,
+    positionValueUSD: pos.value,
+    daysActive,
+  });
+  const actualAPR = projection.actualApr;
+  const actualDailyIncome = projection.daily;
+  const projFromUncollected = projection.source === 'uncollected';
   const feeIncomePct = pos.value > 0 ? (lifetimeUSD / pos.value) * 100 : 0;
   const daysLabel = daysActive >= 1 ? `${Math.floor(daysActive)}d` : (firstTs > 0 ? '<1d' : '—');
   const openedDate = firstTs > 0 ? new Date(firstTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
@@ -1068,7 +1079,7 @@ export default function PositionDetail() {
                   ),
                   val: activityLoading ? "…" : actualAPR != null ? `~${(actualAPR / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : "—",
                   color: C.green,
-                  sub: "from real claims",
+                  sub: projFromUncollected ? "from uncollected (early estimate)" : "from real claims",
                 },
                 { label: "Estimated APR", val: hasApr ? `~${(pos.apy / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : "N/A", color: C.cyan, sub: "pool APY" },
                 { label: "Position Age", val: daysLabel, color: C.textWhite, sub: openedDate ? `since ${openedDate}` : "tracking age" },
@@ -1109,7 +1120,7 @@ export default function PositionDetail() {
                     ? <>{fmt$(actualDailyIncome * INCOME_MULTIPLIER[aprView])}<span style={{ fontSize: 16, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>{INCOME_SUFFIX[aprView]}</span></>
                     : "—"}
                 </div>
-                <div style={subStyle}>trailing 30d average</div>
+                <div style={subStyle}>{projFromUncollected ? "from uncollected (early estimate)" : "trailing 30d average"}</div>
               </div>
               <div style={{ padding: cellPadding, position: "relative" }}>
                 <div style={{ ...labelStyle, display: "flex", alignItems: "center" }}>
@@ -1447,15 +1458,15 @@ export default function PositionDetail() {
         )}
 
         {/* ── YIELD & APR PROJECTIONS ──────────────────────────────────── */}
-        <Section icon="[%]" title="Yield & APR Projections" sub="Forward-looking estimates based on trailing pool fee rate">
+        <Section icon="[%]" title="Yield & APR Projections" sub={!hasApr && projection.actualApr != null ? "Early estimate from uncollected fees — refines as the position accrues fees and claims" : "Forward-looking estimates based on trailing pool fee rate"}>
           <div style={{ padding: "0 40px 24px" }}>
             <div className="pd-yield-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", border: `1px solid ${C.border}` }}>
               {([
-                { label: "Daily",   div: 365,  amt: dailyUSD,   unit: "day" },
-                { label: "Weekly",  div: 52,   amt: weeklyUSD,  unit: "week" },
-                { label: "Monthly", div: 12,   amt: monthlyUSD, unit: "month" },
-                { label: "Yearly",  div: 1,    amt: yearlyUSD,  unit: "year" },
-              ] as const).map(({ label, div, amt, unit }, i, arr) => (
+                { label: "Daily",   div: 365,  amt: dailyUSD,   proj: projection.daily,   unit: "day" },
+                { label: "Weekly",  div: 52,   amt: weeklyUSD,  proj: projection.weekly,  unit: "week" },
+                { label: "Monthly", div: 12,   amt: monthlyUSD, proj: projection.monthly, unit: "month" },
+                { label: "Yearly",  div: 1,    amt: yearlyUSD,  proj: projection.yearly,  unit: "year" },
+              ] as const).map(({ label, div, amt, proj, unit }, i, arr) => (
                 <div key={label} style={{
                   padding: "22px 24px",
                   borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
@@ -1471,6 +1482,19 @@ export default function PositionDetail() {
                         +{(pos.apy / div).toFixed(div >= 52 ? 3 : 2)}%
                       </div>
                       <div style={subStyle}>{amt != null ? fmt$(amt) : "—"} / {unit}</div>
+                    </>
+                  ) : (projection.actualApr != null && proj != null) ? (
+                    // Sprint 1.8b: no pool APY → project from uncollected fees (early
+                    // estimate). Section sub above labels the source honestly.
+                    <>
+                      <div style={{
+                        fontSize: 30, fontWeight: 700, color: C.green,
+                        textShadow: "0 0 14px rgba(0,255,65,0.2)", letterSpacing: "-0.02em",
+                        fontVariantNumeric: "tabular-nums",
+                      }}>
+                        +{(projection.actualApr / div).toFixed(div >= 52 ? 3 : 2)}%
+                      </div>
+                      <div style={subStyle}>{fmt$(proj)} / {unit}</div>
                     </>
                   ) : (
                     <div style={{ fontSize: 20, color: C.text, opacity: 0.5, fontStyle: "italic" }}>N/A</div>
