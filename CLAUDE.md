@@ -41,27 +41,31 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.8: USDC/SUI Cetus exclusion inconsistency.**
+**Sprint 1.8b: Performance Metrics for new positions.**
 
-**Goal:** Investigate why a Cetus USDC/SUI position is excluded inconsistently
-between the dashboard and analytics, and fix the source.
+**Goal:** Surface meaningful performance metrics (APR / actual return / age /
+fee yield) for positions, including newly-opened ones where activity history is
+thin. Investigate-first.
 
-**Status:** Not started. Sprint 1.7e (`f7842c8`) shipped the shared CLMM
-utilities and applied the underflow guard across every protocol that computes
-pending fees, closing out the 1.7 arc.
+**Status:** Not started. Sprint 1.8 (`a6a6e75`) shipped Cetus pending-fee
+computation — every Cetus position worldwide now shows real uncollected fees
+(was hardcoded $0 since the original integration, March 2026). With Orca,
+Bluefin, Momentum, and now Cetus all routing through the shared
+`safeCalcPendingFee`/`calcFeeGrowthInside`, all four CLMM families compute
+pending fees correctly.
 
-**Carry-over from 1.7e (not blockers):**
-- **Bluefin/Momentum guard is live-verification pending.** The guard change is
-  byte-identical for healthy positions (`safeCalcPendingFee.fee` == the prior
-  inline `(delta*liq)>>64` on the non-guarded path) and the shared function is
-  proven via Orca, but no live Sui CLMM test position was available (Account 2
-  Sui has 0; Account 1's full Sui address isn't in records). Eyeball a Bluefin
-  position on the deploy when one is available.
-- **Raydium settled-only.** Raydium shows `tokenFeesOwed` with NO pending-fee
-  accrual (no tick-array calc) — a possible *under-reporting* enhancement, not
-  an underflow concern. Cetus positions route returns `fees: 0`. Neither needs
-  the guard today; both adopt the shared pattern (add-new-protocol SKILL) if/when
-  they start computing pending fees.
+**Carry-overs (not blockers):**
+- **Bluefin/Momentum guard live-verification still pending** — no live Sui CLMM
+  position on the queryable wallets this session either (Account 1 Bluefin now
+  reads 0). Byte-identical for healthy positions; eyeball on the deploy when a
+  position is available.
+- **Raydium settled-only** (`tokenFeesOwed`, no pending accrual) — a possible
+  *under-reporting* enhancement, not an underflow concern; adopts the shared
+  pattern (add-new-protocol SKILL) if/when it computes pending fees.
+- **Sprint 1.8c (Slush wallet disconnect)** is queued: prior investigation traced
+  it to the dashboard's `window.location.href` hard-reload + `WalletRestoreEffect`
+  deleting `dapp-kit:wallet-connection-info` on the transient empty-`useWallets()`
+  window.
 
 ---
 
@@ -70,23 +74,26 @@ pending fees, closing out the 1.7 arc.
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **USDC/SUI Cetus exclusion inconsistency** (active, Sprint 1.8) —
-   investigate why a Cetus USDC/SUI position is excluded inconsistently between
-   dashboard and analytics.
-2. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
+1. **Performance Metrics for new positions** (active, Sprint 1.8b) — surface
+   APR / actual return / age / fee-yield metrics, including for newly-opened
+   positions with thin activity history.
+2. **Slush wallet disconnect on Sui** (Sprint 1.8c) — dashboard `window.location.href`
+   hard-reload + `WalletRestoreEffect` deleting dapp-kit connection state on the
+   transient empty-`useWallets()` window (per prior investigation).
+3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
    closed Sui positions from on-chain events (objects destroyed on close,
    events preserved).
-3. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
+4. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
    against Account 1 wallets to identify missing/wrong/excluded positions
    (manual ~$57 platform vs hundreds expected).
-4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+5. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history.
-5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
+6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
    (Bluefin/Cetus/Momentum package addresses).
-6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-7. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+8. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-8. **UI for closed Sui + Solana positions** — Closed tab support.
+9. **UI for closed Sui + Solana positions** — Closed tab support.
 
 ---
 
@@ -95,6 +102,22 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`a6a6e75`** — Sprint 1.8: implement Cetus pending-fee computation
+  (platform-wide; was hardcoded `fees:0` since the original integration
+  `4339ad87`, March 2026 — every Cetus position worldwide showed $0 uncollected).
+  Cetus keeps per-position fee state in the pool's `position_manager`
+  LinkedTable (`PositionInfo`: `fee_growth_inside` checkpoints + `fee_owned`),
+  NOT on the position object, and tick `fee_growth_outside` in the `tick_manager`
+  move_stl SkipList (u64 score = `tickIndex + 443636`). New `computeCetusPendingFees`
+  + `fetchCetusTick` (with a defensive returned-index guard) fetch those via
+  `getDynamicFieldObject` and compute through the shared `calcFeeGrowthInside` +
+  `safeCalcPendingFee` + `emitFeeUnderflow`; `total = fee_owned + guarded delta`.
+  New `[PRICE_LOG]` `cetus_pending_fee_computed` + `cetus_pending_fee_read_failed`
+  (fallback to 0 on read failure). CETUS reward spot+LKG untouched (separate
+  activity route; `rewards[]` never read). No cache bump. Verified: Account 1
+  USDC/SUI `$0 → $126.54` (canary $125.09, +1.2%), Account 2 `$260.28`, 0
+  read-failed/underflow; ProjectX $1,776.29, redis hits, 0 cg-spot. SKILL.md +
+  add-new-protocol note for pool-owned fee-table Sui protocols.
 - **`f7842c8`** — Sprint 1.7e: shared CLMM utilities + apply across protocols.
   New `app/lib/clmmFeeMath.ts` (`safeCalcPendingFee` underflow guard +
   `calcFeeGrowthInside` + `emitFeeUnderflow`, moved verbatim from Orca) and
@@ -177,15 +200,6 @@ shorthand.
   runs; unresolved claims correctly null + `pending`. Production
   verification pending (Account 2 analytics; expect cg-spot=0, ProjectX
   total near $1,780).
-- **`e1213bd`** — HyperEVM deposit-retrieval hardening (Sprint 1).
-  Module-level Etherscan V2 concurrency gate (max 3 in-flight, headroom
-  under ~5 req/sec) + exponential backoff (1/2/4s) on HTTP-429 and the
-  HTTP-200 "Max calls per sec" soft-limit body; falls through to
-  Chainstack archive (Tier 2 unchanged) then client fallback (Tier 3).
-  New structured `[PRICE_LOG]` `deposit_retrieval` event + `route_summary`
-  `deposits_*` fields. Verified: 20/20 retrieval success under 5×
-  concurrent burst (Account 2, 4 closed ProjectX), 47 backoffs all
-  recovered, 0 cascading failures, 0 dropped positions.
 ---
 
 ## Where things live
