@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { resolveCgId } from '../../lib/cgSymbolSearch';
+import { resolveToken } from '../../lib/tokenResolver';
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -395,15 +395,10 @@ async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, numbe
   return fetchCachedCoinGeckoPrices(coingeckoIds);
 }
 
-// Dynamic CoinGecko symbol → ID resolver: last-resort price fallback for
-// HyperEVM tokens NOT in KNOWN_TOKENS. The hardcoded KNOWN_TOKENS fast path
-// above is unchanged — this only fires for tokens whose on-chain symbol()
-// resolved but have no coingeckoId hint. Implementation lives in the shared
-// `app/lib/cgSymbolSearch.ts` module so every chain's position route can use
-// the same cache (Cetus + Bluefin both resolving "WAL" hit one HTTP call).
-// Graceful: a null return leaves the price at 0 and the position still
-// renders with value=0 (never throws, never excludes).
-const resolveCoingeckoIdBySymbol = resolveCgId;
+// Last-resort price fallback for HyperEVM tokens NOT in KNOWN_TOKENS is now the
+// shared platform-wide tokenResolver (Sprint 1.10) — see the call site below.
+// The hardcoded KNOWN_TOKENS fast path above is unchanged, so mapped tokens are
+// byte-identical; only the not-in-map path changed.
 
 interface PoolStats { apy: number; tvlUsd: number; volumeUsd1d: number }
 
@@ -556,17 +551,26 @@ export async function GET(request: Request) {
       return !!info && !info.coingeckoId && knownPrice <= 0 && !!info.symbol;
     });
     if (unresolvedAddrs.length > 0) {
+      // Sprint 1.10: resolve via the shared platform-wide tokenResolver
+      // (CoinGecko contract lookup -> on-chain metadata -> symbol search ->
+      // DeFiLlama coverage) instead of symbol-search only. KNOWN_TOKENS fast
+      // path is untouched, so previously-mapped tokens stay byte-identical.
       const resolved = await Promise.all(
         unresolvedAddrs.map(async (addr) => ({
           addr,
-          id: await resolveCoingeckoIdBySymbol(tokenInfoMap[addr].symbol),
+          token: await resolveToken({
+            chain: 'hyperevm',
+            contractAddress: addr,
+            symbolHint: tokenInfoMap[addr].symbol,
+            decimalsHint: tokenInfoMap[addr].decimals,
+          }),
         })),
       );
-      const idsToFetch = [...new Set(resolved.map((r) => r.id).filter((x): x is string => !!x))];
+      const idsToFetch = [...new Set(resolved.map(({ token }) => token.cgId).filter((x): x is string => !!x))];
       if (idsToFetch.length > 0) {
         const dynPrices = await fetchPrices(idsToFetch);
-        for (const { addr, id } of resolved) {
-          if (id && dynPrices[id] > 0) cgFallbackPrices[addr] = dynPrices[id];
+        for (const { addr, token } of resolved) {
+          if (token.cgId && dynPrices[token.cgId] > 0) cgFallbackPrices[addr] = dynPrices[token.cgId];
         }
       }
     }

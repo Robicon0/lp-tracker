@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
+import { resolveToken } from '../../lib/tokenResolver';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -319,16 +320,45 @@ export async function GET(request: Request) {
       fetchPoolAPYs(),
     ]);
 
+    // 3b. (Sprint 1.10 Tier-3 fix) Resolve any pool token NOT in the hardcoded
+    // TOKENS map via the shared platform-wide tokenResolver, so symbol AND
+    // decimals come from on-chain truth — NEVER the old blind decimals=18
+    // default, which silently corrupted amounts for non-18-decimal tokens. A
+    // CoinGecko id is discovered where possible and merged into `prices`.
+    // Mapped tokens are untouched (byte-identical).
+    const resolvedMeta: Record<string, { symbol: string; decimals: number; priceable: boolean }> = {};
+    {
+      const unmapped = [...new Set(
+        Object.values(poolTokens).flatMap((t) => [t.token0, t.token1]),
+      )].filter((addr) => addr && !TOKENS[addr]);
+      if (unmapped.length > 0) {
+        const resolved = await Promise.all(
+          unmapped.map(async (addr) => ({
+            addr,
+            token: await resolveToken({ chain: 'optimism', contractAddress: addr }),
+          })),
+        );
+        const cgIds = [...new Set(resolved.map(({ token }) => token.cgId).filter((x): x is string => !!x))];
+        const cgPrices = cgIds.length > 0 ? await fetchCachedCoinGeckoPrices(cgIds) : {};
+        for (const { addr, token } of resolved) {
+          resolvedMeta[addr] = { symbol: token.symbol, decimals: token.decimals, priceable: token.priceable };
+          if (token.cgId && cgPrices[token.cgId] > 0) prices[addr] = cgPrices[token.cgId];
+        }
+      }
+    }
+
     // 4. Transform to LPPosition format
     const positions = rawPositions.map((raw) => {
       const tokens = poolTokens[raw.lp];
       const t0Info = tokens ? TOKENS[tokens.token0] : null;
       const t1Info = tokens ? TOKENS[tokens.token1] : null;
+      const r0 = tokens ? resolvedMeta[tokens.token0] : undefined;
+      const r1 = tokens ? resolvedMeta[tokens.token1] : undefined;
 
-      const t0Symbol = t0Info?.symbol || 'TOKEN0';
-      const t1Symbol = t1Info?.symbol || 'TOKEN1';
-      const t0Decimals = t0Info?.decimals || 18;
-      const t1Decimals = t1Info?.decimals || 18;
+      const t0Symbol = t0Info?.symbol ?? r0?.symbol ?? 'TOKEN0';
+      const t1Symbol = t1Info?.symbol ?? r1?.symbol ?? 'TOKEN1';
+      const t0Decimals = t0Info?.decimals ?? r0?.decimals ?? 18;
+      const t1Decimals = t1Info?.decimals ?? r1?.decimals ?? 18;
 
       // Calculate token amounts (unstaked + staked)
       const amount0 = Number(BigInt(raw.amount0) + BigInt(raw.staked0)) / (10 ** t0Decimals);

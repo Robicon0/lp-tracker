@@ -183,6 +183,42 @@ Required fields:
 - `discriminator` — comma-joined first-8 bytes
 - `account_size`
 
+### `token_resolver_used`
+Emitted once per token-identity resolution by `app/lib/tokenResolver.ts` (Sprint
+1.10) — the shared platform-wide resolver that replaced per-route hardcoded
+token maps. Lets us monitor, at scale, how the resolver performs: what fraction
+of tokens resolve via the hardcoded constants vs CoinGecko contract lookup vs
+on-chain symbol search, and how long cold-cache discovery takes. The `source`
+here is the RESOLVER CASCADE TIER (distinct from the price-resolution `source`
+enum in Rule 3).
+
+Required fields:
+- `event: "token_resolver_used"`
+- `chain` — `solana` | `sui` | `hyperevm` | `ethereum` | `arbitrum` | `optimism` | `base` | `polygon`
+- `identifier` — the NORMALIZED on-chain id (lowercased EVM addr / base58 mint / normalized Sui type)
+- `source` — `redis-cache` | `hardcoded-constant` | `cg-contract` | `onchain-symbol-search` | `defillama` | `unresolvable`
+- `priceable` — boolean; true iff a CoinGecko id was discovered (stablecoins carry a cgId, so they are priceable)
+- `cgId` — the resolved CoinGecko id, or null
+- `symbol` — always present (on-chain truth / fallback)
+- `decimals` — always present (NEVER a blind 18 default — this is the Tier-3 fix)
+- `latencyMs`
+
+### `token_resolution_failed`
+Emitted when the resolver could NOT discover a CoinGecko id for a token (Sprint
+1.10). The token still renders with correct on-chain symbol + decimals (Option
+A: amount visible, "price unavailable"), so this is a price DISCOVERABILITY gap,
+NOT a crash. Should be RARE; a cluster of these for one chain warrants
+investigation (e.g. a CoinGecko platform regression). `lastSourceTried` is
+`defillama` (exists upstream, not yet priced this sprint) or `unresolvable`.
+
+Required fields:
+- `event: "token_resolution_failed"`
+- `chain`
+- `identifier`
+- `lastSourceTried`
+- `symbol`
+- `decimals`
+
 ---
 
 ## Rule 3: Source enum

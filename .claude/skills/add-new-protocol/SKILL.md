@@ -159,6 +159,32 @@ pricing-invariants Rule 1/1a (never spot-value a historical fee claim) and any
 designated exceptions (e.g. CETUS reward token uses spot + LKG by design — that
 path is NOT routed through Redis or historical).
 
+### Token identity resolution (symbol / decimals / CoinGecko id)
+
+**Do NOT create a per-protocol `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map.**
+Token identity is resolved platform-wide by `app/lib/tokenResolver.ts` (Sprint
+1.10, architecture-principles Rule 9). Pass the on-chain identifier to
+`resolveToken()`:
+
+```ts
+import { resolveToken } from '../../lib/tokenResolver';
+const t = await resolveToken({ chain: 'sui', suiType: coinType });
+// or { chain: 'solana', mint } / { chain: 'base', contractAddress }
+// t.symbol + t.decimals are on-chain truth (decimals is NEVER a blind 18);
+// feed t.cgId into the existing CoinGecko pricing pipeline
+// (fetchCachedCoinGeckoPrices) for spot. If !t.priceable, render the amount
+// with correct decimals and show "price unavailable" (Option A) — never hide
+// the token, never break the page.
+```
+
+The resolver cascade (Redis → hardcoded constants → CoinGecko contract → on-chain
+metadata → CoinGecko symbol search → DeFiLlama coverage) means every user
+worldwide holding any token gets correct identity automatically, with no manual
+list maintenance. Only native chain tokens and canonical stablecoins are pinned
+(in `app/lib/tokenConstants.ts`); add a new chain's native/stable pins there, not
+a per-route map. Resolver coverage is verified via the `token_resolver_used` /
+`token_resolution_failed` `[PRICE_LOG]` events.
+
 ---
 
 ## Step 5 — UI + security surfaces (every one)

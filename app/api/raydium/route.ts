@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { resolveCgIds } from '../../lib/cgSymbolSearch';
+import { resolveToken } from '../../lib/tokenResolver';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -354,18 +354,26 @@ export async function GET(request: Request) {
     // (position still renders).
     const stillMissing = unknownMints.filter((m) => !(allPrices[m] > 0));
     if (stillMissing.length > 0) {
-      const symbolByMint: Record<string, string> = {};
-      for (const m of stillMissing) {
-        const sym = dasTokens[m]?.symbol;
-        if (sym) symbolByMint[m] = sym;
-      }
-      const symbolToCgId = await resolveCgIds(Object.values(symbolByMint));
-      const cgIds = [...new Set(Object.values(symbolToCgId))];
+      // Sprint 1.10: resolve still-unpriced mints (DAS missed them) via the
+      // shared platform-wide tokenResolver — strictly more capable than the
+      // prior symbol-search-only fallback. TOKENS + DAS paths above are
+      // untouched, so previously-priced mints are byte-identical.
+      const resolved = await Promise.all(
+        stillMissing.map(async (m) => ({
+          mint: m,
+          token: await resolveToken({
+            chain: 'solana',
+            mint: m,
+            symbolHint: dasTokens[m]?.symbol,
+            decimalsHint: dasTokens[m]?.decimals,
+          }),
+        })),
+      );
+      const cgIds = [...new Set(resolved.map(({ token }) => token.cgId).filter((x): x is string => !!x))];
       if (cgIds.length > 0) {
         const dynamicPrices = await fetchCachedCoinGeckoPrices(cgIds);
-        for (const [mint, sym] of Object.entries(symbolByMint)) {
-          const cgId = symbolToCgId[sym.toUpperCase()];
-          const px = cgId ? dynamicPrices[cgId] : 0;
+        for (const { mint, token } of resolved) {
+          const px = token.cgId ? dynamicPrices[token.cgId] : 0;
           if (px > 0) allPrices[mint] = px;
         }
       }

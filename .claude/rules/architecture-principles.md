@@ -249,6 +249,42 @@ zero. New protocols follow `.claude/skills/add-new-protocol/SKILL.md`.
 
 ---
 
+## Rule 9: tokenResolver is canonical for token identity
+
+`app/lib/tokenResolver.ts` (Sprint 1.10) is the single, platform-wide source of
+truth for resolving an on-chain token identifier (EVM/HyperEVM contract, Solana
+mint, Sui coin type) to its `{ symbol, decimals, cgId, priceable }`. Every
+current and future protocol on every chain resolves token identity through it.
+
+**Per-protocol hardcoded token maps are forbidden in new code.** A new protocol
+must NOT carry its own `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map. Pass the
+on-chain identifier to `resolveToken()` and use the returned symbol, decimals,
+and cgId (feed cgId into the existing CoinGecko pricing pipeline — the resolver
+is identity, not price).
+
+The cascade is: in-process + Upstash Redis cache → hardcoded high-stakes
+constants (`app/lib/tokenConstants.ts`: native tokens + canonical stables, the
+only things that NEVER auto-resolve) → CoinGecko contract lookup → on-chain
+metadata (authoritative symbol+decimals — decimals is NEVER a blind 18) →
+CoinGecko symbol search → DeFiLlama coverage check → graceful unresolvable
+(correct symbol/decimals, `priceable:false`, Option A "price unavailable" UX).
+
+The existing `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps still present in the
+dashboard routes are **byte-identical fallbacks consulted before the resolver**,
+intentionally left in place during Sprint 1.10 so previously-mapped tokens are
+provably unchanged. They are being phased out — a future sprint removes them once
+resolver coverage is proven in production. Do not add entries to them; add
+high-stakes pins to `tokenConstants.ts` instead, and let everything else
+auto-resolve.
+
+All CoinGecko HTTP in the resolver flows through the process-wide `withCgPacing`
+queue (architecture Rule 6 / pricing-invariants) so long-tail discovery can never
+burst the free-tier budget. A `token_resolution_failed` event is a
+discoverability gap to investigate, never a reason to hide a token or break a
+page.
+
+---
+
 ## Decision tree: "Is this fix platform-level?"
 
 Ask in order:

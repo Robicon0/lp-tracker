@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { resolveCgIds } from '../../lib/cgSymbolSearch';
+import { resolveToken } from '../../lib/tokenResolver';
 import { safeCalcPendingFee, calcFeeGrowthInside, emitFeeUnderflow } from '../../lib/clmmFeeMath';
 import { logPrice } from '../../lib/priceLogger';
 
@@ -368,25 +368,32 @@ export async function GET(request: Request) {
       }),
     );
 
-    // LAST RESORT: for any coin type not priced via KNOWN_COINS, look up its
-    // symbol via the metadata we just fetched, resolve a CoinGecko ID by
-    // symbol, and merge a real spot price. Purely additive — KNOWN_COINS
-    // fast path is untouched and a null resolution leaves the coin at price
-    // 0 (position still renders with value=0).
+    // LAST RESORT (Sprint 1.10): for any coin type still unpriced after
+    // KNOWN_COINS, resolve its CoinGecko id via the shared platform-wide
+    // tokenResolver (CoinGecko contract lookup -> on-chain metadata ->
+    // CoinGecko symbol search -> DeFiLlama coverage), then merge a real spot
+    // price. Strictly more capable than the prior symbol-search-only fallback.
+    // Purely additive: KNOWN_COINS fast path is untouched, so any previously-
+    // mapped coin type is byte-identical (it never enters `missing`). A null
+    // resolution leaves the coin at price 0 (position still renders).
     {
       const missing = coinTypes.filter((ct) => !(priceData[ct] > 0));
-      const symbolByCt: Record<string, string> = {};
-      for (const ct of missing) {
-        const sym = coinMetaMap[ct]?.symbol;
-        if (sym) symbolByCt[ct] = sym;
-      }
-      const symbolToCgId = await resolveCgIds(Object.values(symbolByCt));
-      const cgIds = [...new Set(Object.values(symbolToCgId))];
+      const resolved = await Promise.all(
+        missing.map(async (ct) => ({
+          ct,
+          token: await resolveToken({
+            chain: 'sui',
+            suiType: ct,
+            symbolHint: coinMetaMap[ct]?.symbol,
+            decimalsHint: coinMetaMap[ct]?.decimals,
+          }),
+        })),
+      );
+      const cgIds = [...new Set(resolved.map(({ token }) => token.cgId).filter((x): x is string => !!x))];
       if (cgIds.length > 0) {
         const dynamicPrices = await fetchCachedCoinGeckoPrices(cgIds);
-        for (const [ct, sym] of Object.entries(symbolByCt)) {
-          const cgId = symbolToCgId[sym.toUpperCase()];
-          const px = cgId ? dynamicPrices[cgId] : 0;
+        for (const { ct, token } of resolved) {
+          const px = token.cgId ? dynamicPrices[token.cgId] : 0;
           if (px > 0) priceData[ct] = px;
         }
       }

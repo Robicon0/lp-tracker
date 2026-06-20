@@ -207,6 +207,46 @@ interface CetusPendingFeeReadFailedEvent {
   reason: 'position_info_missing' | 'tick_lower_mismatch' | 'tick_upper_mismatch' | 'rpc_error';
 }
 
+// Emitted once per token-identity resolution by app/lib/tokenResolver.ts
+// (Sprint 1.10). `source` records which tier of the resolver cascade answered;
+// `priceable` is true iff a CoinGecko id was discovered (stablecoins carry a
+// cgId, so they are priceable). Lets us monitor, in production, how the
+// platform-wide resolver is performing — what fraction of tokens resolve via
+// the hardcoded constants vs CoinGecko contract vs on-chain symbol search, and
+// how long cold-cache discovery takes. `identifier` is the NORMALIZED on-chain
+// id (lowercased EVM addr / base58 mint / normalized Sui type).
+interface TokenResolverUsedEvent {
+  event: 'token_resolver_used';
+  chain: string;
+  identifier: string;
+  source:
+    | 'redis-cache'
+    | 'hardcoded-constant'
+    | 'cg-contract'
+    | 'onchain-symbol-search'
+    | 'defillama'
+    | 'unresolvable';
+  priceable: boolean;
+  cgId: string | null;
+  symbol: string;
+  decimals: number;
+  latencyMs: number;
+}
+
+// Emitted when the resolver could NOT discover a CoinGecko id for a token
+// (Sprint 1.10). The token still renders with correct on-chain symbol/decimals
+// (Option A: amount visible, "price unavailable"), so this is NOT a crash — it
+// is a discoverability gap to monitor. Should be RARE; any cluster of these for
+// a given chain warrants investigation (e.g. a CoinGecko platform regression).
+interface TokenResolutionFailedEvent {
+  event: 'token_resolution_failed';
+  chain: string;
+  identifier: string;
+  lastSourceTried: string; // 'defillama' (exists upstream, not yet priced) | 'unresolvable'
+  symbol: string;
+  decimals: number;
+}
+
 export type PriceLogEvent =
   | LookupEvent
   | FeeClaimResolutionEvent
@@ -217,7 +257,9 @@ export type PriceLogEvent =
   | TickDecoderUsedEvent
   | UnsupportedTickArrayFormatEvent
   | CetusPendingFeeComputedEvent
-  | CetusPendingFeeReadFailedEvent;
+  | CetusPendingFeeReadFailedEvent
+  | TokenResolverUsedEvent
+  | TokenResolutionFailedEvent;
 
 export function logPrice(event: PriceLogEvent): void {
   // Single-line JSON for grep/parse. Always server-side console.log.
