@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
+import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
 import { logPrice } from '../../../lib/priceLogger';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 
@@ -413,6 +414,25 @@ export async function GET(request: Request) {
       ? await fetchSpotPrices([...__cgIdsNeeded])
       : {};
 
+    // Sprint 1.12: prewarm DeFiLlama claim-date historical for any fee-claim pool
+    // side that is NEITHER canonical SUI (priced via SUI-historical above) NOR a
+    // stablecoin ($1) — a long-tail token the existing path can't price
+    // historically, which would otherwise leave the claim "pending". Used by the
+    // synchronous map below ONLY when the claim is still unresolved (additive).
+    // The CETUS reward token's spot+LKG path (pricing-invariants Rule 1
+    // exception) is untouched — reward claims are not routed through DeFiLlama.
+    {
+      const __feeTs = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.timestamp);
+      if (__feeTs.length > 0) {
+        const __eligible = (ct: string) =>
+          !!ct && ct.toLowerCase() !== suiCanonical && !STABLECOINS.has(ct.toLowerCase());
+        const __dl: Array<{ chain: 'sui'; contract: string; timestamps: number[] }> = [];
+        if (__eligible(coinTypeA)) __dl.push({ chain: 'sui', contract: coinTypeA, timestamps: __feeTs });
+        if (__eligible(coinTypeB)) __dl.push({ chain: 'sui', contract: coinTypeB, timestamps: __feeTs });
+        if (__dl.length > 0) await prewarmDefillamaPrices(__dl);
+      }
+    }
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     // [PRICE_LOG] instrumentation (additive only) — per-request fee/reward counters
@@ -537,6 +557,28 @@ export async function GET(request: Request) {
         (ev.type === 'fee_claim' && amount0 === 0 && amount1 === 0);
       if (__isZeroAmount) usdAtTime = 0;
 
+      // Sprint 1.12: DeFiLlama claim-date historical fallback. Fires ONLY when
+      // the existing path above could not price this FEE claim (usdAtTime still
+      // null) — e.g. a non-SUI / non-stable pool whose token isn't in the FIX-A
+      // CG-id map. SUI/stable/zero-amount fee claims already resolve above, so
+      // this never fires for them (byte-identical) and is purely additive.
+      // Reward claims are intentionally NOT routed through DeFiLlama: the CETUS
+      // reward token uses spot+LKG by design (pricing-invariants Rule 1
+      // exception). Rule 1a: claim-date historical only, never current spot.
+      let __viaDefillama = false;
+      if (ev.type === 'fee_claim' && usdAtTime == null) {
+        const __sA = STABLECOINS.has(coinTypeA.toLowerCase());
+        const __sB = STABLECOINS.has(coinTypeB.toLowerCase());
+        const __dlA = __sA ? 1 : getCachedOnlyDefillamaPrice('sui', coinTypeA, ev.timestamp);
+        const __dlB = __sB ? 1 : getCachedOnlyDefillamaPrice('sui', coinTypeB, ev.timestamp);
+        if (__dlA != null && __dlB != null) {
+          price0AtTime = __dlA;
+          price1AtTime = __dlB;
+          usdAtTime = amount0 * __dlA + amount1 * __dlB;
+          __viaDefillama = true;
+        }
+      }
+
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
         runningFeeUSD += usdAtTime ?? 0;
@@ -576,7 +618,8 @@ export async function GET(request: Request) {
             else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
             else __src = 'unknown';
           } else {
-            if ((suiSideIsA || suiSideIsB) && __histSui != null && usdAtTime != null && usdAtTime > 0) __src = 'sui-historical';
+            if (__viaDefillama) __src = 'defillama-historical';
+            else if ((suiSideIsA || suiSideIsB) && __histSui != null && usdAtTime != null && usdAtTime > 0) __src = 'sui-historical';
             else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
             else __src = 'unknown';
           }

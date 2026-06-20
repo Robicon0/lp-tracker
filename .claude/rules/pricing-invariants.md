@@ -76,6 +76,44 @@ fallback). It also does not touch Rule 2: the spot last-resort for deposits/
 withdrawals stays allowed, because those are point-in-time position values,
 not historical earnings.
 
+### Rule 1c: Claim-date historical has TWO sources (CoinGecko, then DeFiLlama)
+
+Claim-date historical pricing is resolved from two sources, in order. **Both are
+claim-date historical — Rule 1a applies unchanged to each; neither may ever fall
+back to current/spot for a claim.**
+
+1. **CoinGecko historical (PRIMARY)** — `app/lib/cgPriceHistory.ts`
+   `fetchTokenPriceAtDate(coingeckoId, ts)`, wrapped by the Sprint 1.6 Upstash
+   Redis tier. Keyed by CoinGecko id; used wherever a token has a CoinGecko id.
+
+2. **DeFiLlama historical-by-contract (SECONDARY, Sprint 1.12)** —
+   `app/lib/defillamaPriceHistory.ts`
+   `fetchDefillamaPriceAtDate(chain, contract, ts)` →
+   `coins.llama.fi/prices/historical/{ts}/{dlChain}:{contract}`, wrapped by its
+   own Redis namespace (`price:historical:defillama:...`). Keyed by on-chain
+   CONTRACT / MINT / COIN-TYPE, so it prices the long-tail CoinGecko can't map
+   to an id (broad Sui/Solana coverage; **DeFiLlama has NO HyperEVM/`hyperliquid`
+   coverage** — verified Sprint 1.12, so HyperEVM claims still rely on CoinGecko).
+
+If BOTH miss, the claim stays **pending** (Rule 1a) — never spot-valued.
+
+**DeFiLlama *current* price is NEVER a claim source.** `defillamaPriceHistory.ts`
+calls only the `/prices/historical/{ts}/...` endpoint with the claim's OWN
+timestamp, and accepts a returned point only within the same UTC day (±24h) of
+the claim (else treats it as missing). DeFiLlama's *current* endpoint
+(`/prices/current/...`) is used elsewhere ONLY as a tokenResolver coverage check
+(Sprint 1.10) and must not value a claim. Production signals:
+`defillama_historical_used` / `_missing` / `_error` (instrumentation.md).
+
+Per-route shape (Sprint 1.12): Solana routes (orca/raydium) use DeFiLlama-by-mint
+as the PRIMARY claim-date source — no CoinGecko-historical path is wired into them
+— replacing the prior current-spot/zero fee-side fallback (a Rule 1a improvement).
+Sui routes (cetus/bluefin) use DeFiLlama as an ADDITIVE fallback that fires only
+when the existing path (on-chain SUI historical + stablecoin $1) leaves a fee
+claim unresolved; reward claims are NOT routed through DeFiLlama (the CETUS reward
+spot+LKG exception below is preserved, and Bluefin reward events carry no coin
+type).
+
 ### Exceptions to Rule 1
 
 **CETUS reward token (Sui)**

@@ -159,6 +159,22 @@ pricing-invariants Rule 1/1a (never spot-value a historical fee claim) and any
 designated exceptions (e.g. CETUS reward token uses spot + LKG by design — that
 path is NOT routed through Redis or historical).
 
+**Secondary historical source — DeFiLlama-by-contract (Sprint 1.12).** When
+CoinGecko can't price a claim token historically (long-tail Sui/Solana tokens not
+mapped to a CoinGecko id), value the claim at its claim-date price via
+`fetchDefillamaPriceAtDate(chain, contract, ts)` / `prewarmDefillamaPrices(...)` +
+`getCachedOnlyDefillamaPrice(chain, contract, ts)` from
+`app/lib/defillamaPriceHistory.ts`. It is keyed by on-chain CONTRACT/MINT/COIN-TYPE
+(which every protocol already has), wraps its own Redis namespace, and follows the
+SAME claim-date-only rule (pricing-invariants Rule 1c) — DeFiLlama *current* price
+is NEVER a claim source. Pattern: collect the non-stable claim-token identifiers +
+their claim timestamps, `await prewarmDefillamaPrices(...)` once before the
+synchronous events loop, then read each side with `getCachedOnlyDefillamaPrice`.
+Coverage note: DeFiLlama has NO HyperEVM (`hyperliquid`) coverage — HyperEVM
+claims rely on CoinGecko. If both sources miss, leave the claim pending (Rule 1a),
+never spot. A new protocol inherits this just by calling the helper with
+`{chain, contract, timestamp}`.
+
 ### Token identity resolution (symbol / decimals / CoinGecko id)
 
 **Do NOT create a per-protocol `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map.**

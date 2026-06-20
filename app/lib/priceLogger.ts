@@ -247,6 +247,38 @@ interface TokenResolutionFailedEvent {
   decimals: number;
 }
 
+// DeFiLlama historical-by-contract claim pricing (Sprint 1.12). A SECONDARY
+// claim-date historical source consulted ONLY when CoinGecko historical has no
+// usable price for a claim token (cold cache, or a token CoinGecko can't price
+// historically). Rule 1a is preserved: this uses the DeFiLlama HISTORICAL
+// endpoint with the claim's OWN timestamp — NEVER current/spot. Events:
+//   _used    = a claim-date price was found (rescued a claim CoinGecko missed)
+//   _missing = DeFiLlama has no data for that contract+date → claim stays
+//              pending (correct — never spot-valued). Negative-cached.
+//   _error   = transient fetch/parse/5xx failure → NOT negative-cached, retried
+//              next request. Should be rare; a cluster warrants investigation.
+interface DefillamaHistoricalUsedEvent {
+  event: 'defillama_historical_used';
+  chain: string;
+  contract: string;
+  date: string;        // YYYYMMDD (UTC) the price is for
+  price: number;
+  latencyMs: number;
+}
+interface DefillamaHistoricalMissingEvent {
+  event: 'defillama_historical_missing';
+  chain: string;
+  contract: string;
+  date: string;
+}
+interface DefillamaHistoricalErrorEvent {
+  event: 'defillama_historical_error';
+  chain: string;
+  contract: string;
+  date: string;
+  reason: string;
+}
+
 export type PriceLogEvent =
   | LookupEvent
   | FeeClaimResolutionEvent
@@ -259,7 +291,10 @@ export type PriceLogEvent =
   | CetusPendingFeeComputedEvent
   | CetusPendingFeeReadFailedEvent
   | TokenResolverUsedEvent
-  | TokenResolutionFailedEvent;
+  | TokenResolutionFailedEvent
+  | DefillamaHistoricalUsedEvent
+  | DefillamaHistoricalMissingEvent
+  | DefillamaHistoricalErrorEvent;
 
 export function logPrice(event: PriceLogEvent): void {
   // Single-line JSON for grep/parse. Always server-side console.log.

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
+import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
+import { logPrice } from '../../../lib/priceLogger';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -320,6 +322,20 @@ export async function GET(request: Request) {
 
     rawEvents.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Claim-date historical pricing (Sprint 1.12): value each fee claim at the
+    // token's market price ON THE DAY of the claim via DeFiLlama historical-by-
+    // mint, instead of the current-spot fallback below (a latent pricing-
+    // invariants Rule 1a issue, and $0 whenever spot was unavailable). DeFiLlama
+    // prices Solana mints by contract; prewarm every non-stable claim-token mint
+    // so the synchronous map can read it. Rule 1a: claim-date only, NEVER spot.
+    const __claimTimestamps = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.timestamp);
+    if (__claimTimestamps.length > 0) {
+      const __dl: Array<{ chain: 'solana'; contract: string; timestamps: number[] }> = [];
+      if (mintA && !STABLECOINS.has(mintA.toLowerCase())) __dl.push({ chain: 'solana', contract: mintA, timestamps: __claimTimestamps });
+      if (mintB && !STABLECOINS.has(mintB.toLowerCase())) __dl.push({ chain: 'solana', contract: mintB, timestamps: __claimTimestamps });
+      if (__dl.length > 0) await prewarmDefillamaPrices(__dl);
+    }
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
@@ -342,7 +358,41 @@ export async function GET(request: Request) {
         }
       }
 
-      if (usdAtTime == null) {
+      if (ev.type === 'fee_claim') {
+        // Claim-date historical via DeFiLlama (Sprint 1.12). Stablecoin side $1;
+        // every other side its DeFiLlama market price on the claim date. NEVER
+        // current spot (pricing-invariants Rule 1a). If a side can't be priced
+        // historically, the claim stays UNRESOLVED (null) → "pending price
+        // resolution" — not coerced, not spot-valued.
+        const isStableA = STABLECOINS.has(mintA.toLowerCase());
+        const isStableB = STABLECOINS.has(mintB.toLowerCase());
+        const pxA = isStableA ? 1 : getCachedOnlyDefillamaPrice('solana', mintA, ev.timestamp);
+        const pxB = isStableB ? 1 : getCachedOnlyDefillamaPrice('solana', mintB, ev.timestamp);
+        if (pxA != null && pxB != null) {
+          price0AtTime = pxA;
+          price1AtTime = pxB;
+          usdAtTime = amount0 * pxA + amount1 * pxB;
+        }
+        const __src = (pxA != null && pxB != null)
+          ? ((isStableA && isStableB) ? 'stablecoin-fixed' : 'defillama-historical')
+          : 'unknown';
+        logPrice({
+          event: 'fee_claim_resolution',
+          route: 'raydium',
+          positionId: positionId ?? '',
+          blockTimestamp: ev.timestamp,
+          token0: { symbol: mintA, address: mintA, amount: String(amount0) },
+          token1: { symbol: mintB, address: mintB, amount: String(amount1) },
+          token0Usd: price0AtTime,
+          token1Usd: price1AtTime,
+          usdAtTime,
+          status: usdAtTime == null ? 'failed_null_usdAtTime' : ((price0AtTime != null && price1AtTime != null) ? 'ok' : 'partial'),
+          notes: `source=${__src}`,
+        });
+      } else if (usdAtTime == null) {
+        // Deposits / withdrawals where on-chain derivation was unavailable:
+        // current-spot last resort (pricing-invariants Rule 2 — point-in-time
+        // position value, not historical earnings). UNCHANGED.
         price0AtTime = fallbackA || null;
         price1AtTime = fallbackB || null;
         if (fallbackA > 0 || fallbackB > 0) {

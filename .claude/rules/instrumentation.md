@@ -219,6 +219,34 @@ Required fields:
 - `symbol`
 - `decimals`
 
+### `defillama_historical_used` / `defillama_historical_missing` / `defillama_historical_error`
+
+Emitted by `app/lib/defillamaPriceHistory.ts` (Sprint 1.12), the SECONDARY
+claim-date historical price source (CoinGecko historical is primary; see
+pricing-invariants Rule 1c). DeFiLlama is keyed by on-chain contract/mint/coin
+type, so it prices the long-tail CoinGecko can't map to an id. It is consulted
+ONLY when CoinGecko has no usable claim-date price, and ONLY via the
+`/prices/historical/{ts}/...` endpoint with the claim's own timestamp — Rule 1a
+holds, current/spot is never used for a claim.
+
+- `defillama_historical_used` — a claim-date price was found (rescued a claim
+  CoinGecko missed). Fields: `chain`, `contract`, `date` (YYYYMMDD UTC), `price`,
+  `latencyMs`.
+- `defillama_historical_missing` — DeFiLlama has no data for that contract+date
+  (404 / empty `coins` / zero price / point >24h from the claim). The claim
+  stays **pending** (correct — never spot-valued). Negative-cached. Fields:
+  `chain`, `contract`, `date`.
+- `defillama_historical_error` — transient fetch/parse/5xx/timeout failure. NOT
+  negative-cached (retried next request). Should be RARE; a cluster warrants
+  investigation. Fields: `chain`, `contract`, `date`, `reason`.
+
+Verification greps: a successful rescue shows `defillama_historical_used` with a
+positive `price`; `_missing` is acceptable for genuinely-unpriceable tokens;
+`_error` should not dominate. A `fee_claim_resolution` event whose `notes`
+contain `source=defillama-historical` confirms a claim was valued from this
+source. There is NO `defillama-current` claim path — its absence is the Rule 1a
+guarantee for this source.
+
 ---
 
 ## Rule 3: Source enum
