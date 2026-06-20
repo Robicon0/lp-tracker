@@ -87,7 +87,21 @@ export interface PositionPnLData {
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   const { currentValue, unclaimedFeesUSD, price0, price1, events, isClosed } = input;
 
-  if (price0 <= 0 || price1 <= 0) {
+  // Current price is only meaningful for an OPEN position: it drives the
+  // mark-to-market `currentValue` and IL. A CLOSED position's headline numbers
+  // — initialValue, closingValue, Capital G/L, netPnl, and fees — all come from
+  // HISTORICAL deposit/withdrawal/claim events; current price feeds only
+  // `hodlValue`/IL, which degrade gracefully (ilAvailable = hodlValue > 0).
+  //
+  // So gating a closed position on a current price it doesn't need spuriously
+  // EXCLUDES it when the position route returns price0/price1 = 0 — e.g. a
+  // cold-instance CoinGecko spot 429 during the parallel analytics fetch (the
+  // 8 source routes fire in one Promise.all; the spot path is un-paced). That
+  // dropped the wallet's closed HyperEVM/ProjectX positions from Capital G/L
+  // and surfaced a bogus "Current price data unavailable" banner on first load,
+  // which vanished on refresh once the 60s spot cache warmed (Sprint 1.11).
+  // Gate OPEN positions only; closed positions proceed and compute from history.
+  if (!isClosed && (price0 <= 0 || price1 <= 0)) {
     return { ok: false, reason: 'missing_current_prices' };
   }
 
