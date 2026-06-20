@@ -41,29 +41,36 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 2.1: Account 1 Aerodrome accounting investigation.**
+**Sprint 1.12: DeFiLlama live pricing for claim resolution.**
 
-**Goal:** Diagnose why Account 1's Aerodrome accounting was reported as "~$57
-platform vs hundreds expected." **Sprint 1.10 disproved the leading hypothesis**
-(Tier-3 wrong-decimals=18 corruption): Account 1's current Aerodrome positions
-use only mapped tokens (WETH/USDC/cbBTC) and the open position reads a healthy
-**$8,921.94** with correct decimals (18,6). The Tier-3 fix shipped anyway (it
-eliminates the corruption class platform-wide) but does NOT alter Account 1's
-positions. So the "$57" symptom is stale or refers to a different metric (fees?
-closed-position Capital G/L? missing/excluded closed positions?). Needs a fresh
-diagnostic harness over Account 1 (open + closed + activity), not a decimals fix.
+**Goal:** Stop fee claims from being left UNRESOLVED on cold cache when CoinGecko
+historical is unavailable. Today the activity routes value each fee_claim via
+`cgPriceHistory` (CoinGecko `/coins/{id}/history`, Redis-cached, Sprint 1.6); on
+a cold instance, or for a token CoinGecko can't price historically, the claim
+stays `usdAtTime = null` and is dropped from Fee Income (surfaced as "N claims
+pending price resolution"). This is the SECOND, separate half of the user's
+2026-06-19 report (the FIRST half — closed positions excluded from Capital G/L —
+shipped in Sprint 1.11, `d57f051`). Sprint 1.10's resolver already proved
+DeFiLlama prices by contract on solana/sui/(hyperevm via "hyperliquid") and
+exposes historical-by-contract — wire it in as a SECONDARY claim-pricing source.
 
-**Status:** Not started — reassess the symptom first (it may already be moot;
-confirm against the live deploy and Account 1's Google-Sheet ground truth before
-building a harness).
+**Hard constraint:** pricing-invariants Rule 1/1a — a fee claim is valued at its
+CLAIM-DATE price, NEVER current spot. DeFiLlama's historical-by-contract
+(`/prices/historical/{ts}/{chain}:{addr}`) is claim-date, so it's a legitimate
+secondary historical source; DeFiLlama *current* price is NOT a fallback for
+claims. Genuinely unpriceable claims still stay pending (never spot-valued).
+
+**Status:** Not started — investigate-first (which routes, which tokens go
+pending on cold cache, DeFiLlama historical coverage/accuracy vs CoinGecko).
 
 **Carry-overs (not blockers):**
 - **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) and the
-  activity routes were intentionally OUT of Sprint 1.10 scope; they still use
-  hardcoded maps. A future sprint migrates them + removes the per-route maps now
-  kept as byte-identical fallbacks (architecture-principles Rule 9).
-- **Slush wallet disconnect (was Sprint 1.8c)** — deferred: browser-specific to
-  Osho's setup, not platform-wide. Diagnosis preserved in git history.
+  activity routes still use hardcoded maps; a future sprint migrates them and
+  removes the per-route maps kept as byte-identical fallbacks (Rule 9).
+- **Aerodrome "$57" (Sprint 2.1)** — Sprint 1.11 may have addressed part of this
+  (closed HyperEVM positions were the canonical excluded-from-Capital-G/L case;
+  Aerodrome closed positions on cold spot would exclude the same way and are now
+  fixed). Re-confirm against Account 1 before building a separate harness.
 - **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
   position on queryable wallets). Byte-identical for healthy positions.
 
@@ -74,21 +81,24 @@ building a harness).
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Account 1 Aerodrome accounting investigation** (active, Sprint 2.1) —
-   reassess the "~$57 vs hundreds" symptom (Sprint 1.10 disproved the
-   wrong-decimals hypothesis; current Account 1 Aerodrome reads ~$8,922). Fresh
-   diagnostic over open + closed + activity vs Google-Sheet ground truth.
-2. **Sui closed positions via RemoveLiquidityV2Event** — recover closed Sui
-   positions from on-chain events (objects destroyed on close, events preserved).
-3. **Closed Solana position fee recovery via Helius** — Solana event indexer;
-   parse Orca/Raydium program instructions from wallet tx history.
-4. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
-   (Bluefin/Cetus/Momentum package addresses).
-5. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-6. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+1. **DeFiLlama live pricing for claim resolution** (active, Sprint 1.12) — add
+   DeFiLlama historical-by-contract as a SECONDARY claim-date price source so
+   cold-cache / CoinGecko-unpriceable fee claims resolve instead of going
+   pending. Rule 1/1a: claim-date only, never current spot (see Active sprint).
+2. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
+   "~$57 vs hundreds" symptom; Sprint 1.11 likely fixed the closed-position
+   Capital-G/L half. Fresh diagnostic over open + closed + activity vs
+   Google-Sheet ground truth only if the symptom persists.
+3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
+   closed Sui positions from on-chain events (objects destroyed on close).
+4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+   indexer; parse Orca/Raydium program instructions from wallet tx history.
+5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC.
+6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+7. **Capital G/L expansion to Sui + Solana** — wire indexed events into the
    Capital G/L sum. Remove "EVM only" UI label.
-7. **UI for closed Sui + Solana positions** — Closed tab support.
-8. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+8. **UI for closed Sui + Solana positions** — Closed tab support.
+9. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
@@ -100,6 +110,29 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`d57f051`** — Sprint 1.11: fix cold-cache exclusion of closed HyperEVM
+  positions on first analytics load. Root cause was NOT token resolution
+  (HYPE/USDC are in hyperswap's hardcoded map; the resolver never touches them):
+  `computePositionPnL` gated EVERY position on current price (`price0/price1 > 0`)
+  BEFORE the closed-position branch. A closed position's Capital G/L / initial /
+  closing / netPnl / fees all come from HISTORICAL events — current price feeds
+  only hodlValue/IL (which degrade via `ilAvailable`). So when the position route
+  returned `price0=0` (a cold-instance CoinGecko SPOT 429 during the parallel
+  8-route analytics fetch; the spot path is un-paced), the wallet's closed
+  HyperEVM/ProjectX positions were spuriously excluded — dropped from Capital G/L
+  (`CAPITAL_GL_CHAINS` includes HyperEVM) and shown with a bogus "Current price
+  data unavailable" banner that vanished on refresh once the 60s spot cache
+  warmed (Capital G/L −$2,774 cold → −$1,808 warm). Fix (Approach C, additive,
+  1 line in `positionPnl.ts`): gate `price0/price1 > 0` for OPEN positions only;
+  closed positions compute from history (IL "unavailable" if current price
+  missing). Warm-cache closed positions byte-identical; open unchanged; genuine
+  data gaps still exclude via `no_deposits`/`missing_deposit_prices`. No cache
+  bump. Verified: build+tsc clean; deterministic unit test 5/5 (closed+price0=0
+  now included w/ correct Capital G/L; warm-closed byte-identical; open+price0=0
+  still excluded; closed+no-deposits → no_deposits); live smoke 0 regression
+  (Orca/ZEC resolution, Cetus pending $348, 0 underflow). The "ProjectX missing
+  from Fee Income" half is a SEPARATE root cause (cold historical-claim cache) →
+  Sprint 1.12. The 429 trigger isn't locally reproducible (low CG load).
 - **`140d908`** — Sprint 1.10: platform-wide automatic token resolution. New
   `app/lib/tokenResolver.ts` (`resolveToken`) + `app/lib/tokenConstants.ts`
   (native tokens + canonical stables per chain — the only pinned identities;
@@ -184,23 +217,8 @@ shorthand.
   unsupported events; no regression (Account 2 ProjectX $1,776.29, redis hits,
   0 cg-spot). No live legacy-format Orca position available to exercise; legacy
   decode unchanged.
-- **`1dd862c`** — Sprint 1.7: guard CLMM fee-growth underflow in Orca
-  pending-fee math. `calcPendingFee` computed `(feeGrowthInside − checkpoint) &
-  U128_MASK` with no underflow guard; for out-of-range positions the recomputed
-  inside lands marginally below the stored checkpoint, so the unsigned masked
-  subtraction wraps to ~2^128 → × liquidity / decimals × price = sextillion-scale
-  USD fees. Account 1 ZEC/USDC (Orca) read `$1.908e24`, leaking into analytics
-  top-level Unclaimed Fees (`Σ p.fees`) and forcing a `value_overflow` exclusion
-  in LP P&L (via `netPnlUSD`). Fix (additive): `calcPendingFee` returns
-  `{fee, guarded, wrappedDelta}`; high-bit-set delta (`≥ 2^127`) → 0 for that
-  side (a real accrual can't reach 2^127); settled `feeOwedA/B` untouched; both
-  token sides symmetric. New `[PRICE_LOG]` `fee_underflow_detected` (per side) +
-  `fee_plausibility_exceeded` ($1e12 route-boundary cap). Rule 1b added to
-  pricing-invariants.md. No cache bump (`pos.fees` is live, 60s staleTime;
-  `lp-pnl-events-v23` caches activity events only). Verified: ZEC `1.908e24 → $0`
-  (value $5,176 unchanged), 2 underflow events, 0 cap firings; no regression
-  (Account 2 ProjectX $1,776.29, redis hits present, 0 HyperEVM cg-spot).
-  **Scope: Orca only — Raydium/Bluefin/Cetus/Momentum follow in Sprint 1.7b.**
+- _(Sprint 1.7 `1dd862c` — Orca CLMM fee-growth underflow guard — rolled off
+  this list; see git history.)_
 - _(Sprint 1.6 `5af4d33` — Upstash Redis persistent historical-price cache —
   rolled off this list; see git history.)_
 ---
