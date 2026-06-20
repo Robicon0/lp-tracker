@@ -41,30 +41,31 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.8c: Slush wallet disconnect on Sui.**
+**Sprint 2.1: Account 1 Aerodrome accounting investigation.**
 
-**Goal:** Stop the Sui (Slush) wallet from disconnecting on dashboard→detail
-navigation and on refresh. Fully diagnosed (Sprint 1.8 investigation 2026-06-18):
-1. The dashboard navigates via `window.location.href` ([dashboard/page.tsx:1809,
-   1948], analytics/page.tsx:2360) — a HARD reload that remounts the provider tree.
-2. On the reload, `useWallets()` is transiently empty before Slush re-registers,
-   and `WalletRestoreEffect.tsx:89-100` then DELETES `dapp-kit:wallet-connection-info`,
-   breaking autoConnect → user must manually reconnect.
+**Goal:** Diagnose why Account 1's Aerodrome accounting was reported as "~$57
+platform vs hundreds expected." **Sprint 1.10 disproved the leading hypothesis**
+(Tier-3 wrong-decimals=18 corruption): Account 1's current Aerodrome positions
+use only mapped tokens (WETH/USDC/cbBTC) and the open position reads a healthy
+**$8,921.94** with correct decimals (18,6). The Tier-3 fix shipped anyway (it
+eliminates the corruption class platform-wide) but does NOT alter Account 1's
+positions. So the "$57" symptom is stale or refers to a different metric (fees?
+closed-position Capital G/L? missing/excluded closed positions?). Needs a fresh
+diagnostic harness over Account 1 (open + closed + activity), not a decimals fix.
 
-**Proposed fix (additive):** (a) replace `window.location.href` with Next
-`router.push` (client nav, no reload); (b) gate the WalletRestoreEffect deletion
-on a STABLE readiness signal (wallets had a chance to register) rather than the
-transient mount-time empty.
-
-**Status:** Not started. Sprint 1.8b (`0b9e3a0`) shipped Performance Metrics +
-Yield/APR projections for new positions (uncollected-based fallback, honest
-source labels). Browser paint for 1.8b not headlessly verifiable — eyeball the
-new ZEC position's projections on the deploy.
+**Status:** Not started — reassess the symptom first (it may already be moot;
+confirm against the live deploy and Account 1's Google-Sheet ground truth before
+building a harness).
 
 **Carry-overs (not blockers):**
+- **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) and the
+  activity routes were intentionally OUT of Sprint 1.10 scope; they still use
+  hardcoded maps. A future sprint migrates them + removes the per-route maps now
+  kept as byte-identical fallbacks (architecture-principles Rule 9).
+- **Slush wallet disconnect (was Sprint 1.8c)** — deferred: browser-specific to
+  Osho's setup, not platform-wide. Diagnosis preserved in git history.
 - **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
   position on queryable wallets). Byte-identical for healthy positions.
-- **Raydium settled-only** — possible under-reporting enhancement, not underflow.
 
 ---
 
@@ -73,24 +74,24 @@ new ZEC position's projections on the deploy.
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Slush wallet disconnect on Sui** (active, Sprint 1.8c) — replace dashboard
-   `window.location.href` with `router.push`; gate the `WalletRestoreEffect`
-   deletion of dapp-kit connection state on a stable readiness signal rather than
-   the transient empty-`useWallets()` window (fully diagnosed; see Active sprint).
-2. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 1.9) — recover
-   closed Sui positions from on-chain events (objects destroyed on close,
-   events preserved).
-3. **Account 1 Aerodrome investigation** (Sprint 2) — diagnostic harness
-   against Account 1 wallets to identify missing/wrong/excluded positions
-   (manual ~$57 platform vs hundreds expected).
-4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
-   indexer; parse Orca/Raydium program instructions from wallet tx history.
-5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
+1. **Account 1 Aerodrome accounting investigation** (active, Sprint 2.1) —
+   reassess the "~$57 vs hundreds" symptom (Sprint 1.10 disproved the
+   wrong-decimals hypothesis; current Account 1 Aerodrome reads ~$8,922). Fresh
+   diagnostic over open + closed + activity vs Google-Sheet ground truth.
+2. **Sui closed positions via RemoveLiquidityV2Event** — recover closed Sui
+   positions from on-chain events (objects destroyed on close, events preserved).
+3. **Closed Solana position fee recovery via Helius** — Solana event indexer;
+   parse Orca/Raydium program instructions from wallet tx history.
+4. **Closed Sui position fee recovery** — Sui event indexer on free public RPC
    (Bluefin/Cetus/Momentum package addresses).
-6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-7. **Capital G/L expansion to Sui + Solana** — wire indexed events into
+5. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+6. **Capital G/L expansion to Sui + Solana** — wire indexed events into
    Capital G/L sum. Remove "EVM only" UI label.
-8. **UI for closed Sui + Solana positions** — Closed tab support.
+7. **UI for closed Sui + Solana positions** — Closed tab support.
+8. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+   pancakeswap) and the activity routes to `resolveToken`, then remove the
+   per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
+   proven in production (architecture-principles Rule 9).
 
 ---
 
@@ -99,6 +100,29 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`140d908`** — Sprint 1.10: platform-wide automatic token resolution. New
+  `app/lib/tokenResolver.ts` (`resolveToken`) + `app/lib/tokenConstants.ts`
+  (native tokens + canonical stables per chain — the only pinned identities;
+  everything else auto-discovers). Cascade: Redis → hardcoded constants →
+  CoinGecko contract lookup (`/coins/{platform}/contract/{addr}`, platforms
+  verified live: solana, sui, hyperevm, ethereum, arbitrum-one,
+  optimistic-ethereum, base, polygon-pos) → on-chain metadata (authoritative
+  symbol+decimals) → CoinGecko symbol search → DeFiLlama coverage check
+  (informational only this sprint) → graceful unresolvable (Option A). New
+  `[PRICE_LOG]` `token_resolver_used` + `token_resolution_failed`. **Tier 1**
+  (cetus, bluefin, momentum, orca, raydium, hyperswap): the LAST-RESORT
+  symbol-search fallback now calls `resolveToken`; hardcoded fast paths
+  untouched → previously-mapped tokens byte-identical (proven: resolver fired
+  0× for every mapped-token position + git-stash A/B identical). **Tier 3**
+  (aerodrome, velodrome): unmapped pool tokens resolve symbol+decimals from
+  on-chain truth instead of the blind `decimals=18` default — silent
+  amount-corruption class eliminated. No cache bump. Verified (Accounts 1&2):
+  build+tsc clean; resolver live on unmapped Orca ZEC mint →
+  `omnibridge-bridged-zcash-solana` dec 8 (0.03% from old `zcash` path); Cetus
+  pending fees intact ($26,495/$346); 0 underflow; 0 resolution-failed.
+  **Sprint 2.1 NOT resolved** (Account 1 Aerodrome healthy $8,922, mapped
+  tokens — Tier-3 class N/A). Tier 2 (uniswap/v3, pancakeswap) + activity
+  routes still queued.
 - **`0b9e3a0`** — Sprint 1.8b: Performance Metrics + Yield/APR Projections fall
   back to an uncollected-fees-based estimate for new positions with no claim
   history (were em-dash / N/A from day 1). New shared `app/lib/positionProjections.ts`
@@ -177,22 +201,8 @@ shorthand.
   (value $5,176 unchanged), 2 underflow events, 0 cap firings; no regression
   (Account 2 ProjectX $1,776.29, redis hits present, 0 HyperEVM cg-spot).
   **Scope: Orca only — Raydium/Bluefin/Cetus/Momentum follow in Sprint 1.7b.**
-- **`5af4d33`** — Sprint 1.6: Upstash Redis persistent price cache. New
-  `app/lib/redisPriceCache.ts` (Upstash REST) is Tier 1 above the in-process
-  historical-price cache in `cgPriceHistory.ts`: `fetchTokenPriceAtDate` checks
-  Redis first (cross-instance, cross-user), falls through to in-process +
-  CoinGecko on miss, writes back fire-and-forget (30d TTL). Keyed by
-  coingeckoId (`price:historical:{id}:{YYYYMMDD}`, UTC). No-op stub if env vars
-  absent. CETUS spot+LKG / Sui historical / stablecoins excluded by
-  construction (separate modules / anchored upstream — no per-chain branch).
-  New `[PRICE_LOG]` sources `redis-cache-hit/miss/error` + optional
-  `route_summary.redis_cache_hits/misses` on the 5 EVM activity routes. Cache
-  bumps v22→v23 (lp-pnl-events), v14→v15 (analytics-activity). Verified
-  localhost (Account 2 ProjectX): cold-instance/cold-Redis → 5 misses, all
-  resolved, 0 errors; restart/warm-Redis → 5 hits, 0 miss, identical $372.89;
-  4-position total $1,776.29 (manual $1,780.44, −0.23%); the lone
-  transient-pending HYPE claim (2026-03-13) resolves once warmed and persists
-  in Redis (37.35, 30d TTL). 0 HyperEVM cg-spot (Sprint 1.5 invariant holds).
+- _(Sprint 1.6 `5af4d33` — Upstash Redis persistent historical-price cache —
+  rolled off this list; see git history.)_
 ---
 
 ## Where things live
@@ -228,6 +238,16 @@ shorthand.
   `calcFeeGrowthInside`, `emitFeeUnderflow`. Used by Orca, Bluefin, Momentum.
 - `app/lib/clmmTickDecoder.ts` — `solanaCLMMTickRegistry` (binary tick-array
   dispatch) + `anchorDiscriminator`. Solana only; Sui uses JSON extraction.
+
+**Shared token resolution** (canonical — see architecture-principles Rule 9):
+- `app/lib/tokenResolver.ts` — `resolveToken({chain, contractAddress|mint|suiType})`
+  → `{symbol, decimals, cgId, priceable, source}`. Cascade: Redis → constants →
+  CoinGecko contract → on-chain metadata → CoinGecko symbol search → DeFiLlama
+  coverage → unresolvable. Used (long-tail fallback) by cetus, bluefin, momentum,
+  orca, raydium, hyperswap, aerodrome, velodrome.
+- `app/lib/tokenConstants.ts` — pinned native tokens + canonical stables per
+  chain (the only identities that never auto-resolve), `CG_PLATFORM` /
+  `DEFILLAMA_CHAIN` slugs, and identifier normalization.
 
 ---
 
