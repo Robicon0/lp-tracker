@@ -41,36 +41,43 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.12: DeFiLlama live pricing for claim resolution.**
+**Sprint 1.13: HyperEVM cold-cache performance.**
 
-**Goal:** Stop fee claims from being left UNRESOLVED on cold cache when CoinGecko
-historical is unavailable. Today the activity routes value each fee_claim via
-`cgPriceHistory` (CoinGecko `/coins/{id}/history`, Redis-cached, Sprint 1.6); on
-a cold instance, or for a token CoinGecko can't price historically, the claim
-stays `usdAtTime = null` and is dropped from Fee Income (surfaced as "N claims
-pending price resolution"). This is the SECOND, separate half of the user's
-2026-06-19 report (the FIRST half — closed positions excluded from Capital G/L —
-shipped in Sprint 1.11, `d57f051`). Sprint 1.10's resolver already proved
-DeFiLlama prices by contract on solana/sui/(hyperevm via "hyperliquid") and
-exposes historical-by-contract — wire it in as a SECONDARY claim-pricing source.
+**Goal:** Reduce the HyperEVM cold-start cost so the FIRST user of a cold Vercel
+instance doesn't pay the full serialized CoinGecko-historical + archive-scan
+penalty. Two known cost sources (see Known limitations): (1) the per-IP-paced
+CoinGecko historical prewarm (`withCgPacing`, concurrency 1, ~1.1s gap) which
+makes a closed HyperEVM position with N unique claim dates take ~N×1.1s cold,
+and (2) the Tier-2 Chainstack archive scan (~500 chunks, ~100s under burst when
+Etherscan Tier 1 is exhausted). Investigate-first: measure where cold-start time
+actually goes (the `deposit_retrieval.latency_ms` + `route_summary.duration_ms` +
+redis hit-rate fields already exist), then target the dominant cost. Note Sprint
+1.12 added DeFiLlama historical as a Redis-cached secondary source — but DeFiLlama
+has NO HyperEVM coverage, so HyperEVM claims still rely on CoinGecko + the Redis
+warm-path; cold-cache HyperEVM remains the target here.
 
-**Hard constraint:** pricing-invariants Rule 1/1a — a fee claim is valued at its
-CLAIM-DATE price, NEVER current spot. DeFiLlama's historical-by-contract
-(`/prices/historical/{ts}/{chain}:{addr}`) is claim-date, so it's a legitimate
-secondary historical source; DeFiLlama *current* price is NOT a fallback for
-claims. Genuinely unpriceable claims still stay pending (never spot-valued).
+**Hard constraint:** additive-only; Rule 1/1a unchanged (no spot for claims);
+no cache bump unless cache shape changes. Conservative params accommodate the
+slowest chain (architecture Rule 6).
 
-**Status:** Not started — investigate-first (which routes, which tokens go
-pending on cold cache, DeFiLlama historical coverage/accuracy vs CoinGecko).
+**Status:** Not started — investigate-first.
 
 **Carry-overs (not blockers):**
-- **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) and the
-  activity routes still use hardcoded maps; a future sprint migrates them and
-  removes the per-route maps kept as byte-identical fallbacks (Rule 9).
-- **Aerodrome "$57" (Sprint 2.1)** — Sprint 1.11 may have addressed part of this
-  (closed HyperEVM positions were the canonical excluded-from-Capital-G/L case;
-  Aerodrome closed positions on cold spot would exclude the same way and are now
-  fixed). Re-confirm against Account 1 before building a separate harness.
+- **Cetus FIX-A cg-spot for claims (latent Rule 1a deviation)** — surfaced in
+  Sprint 1.12 verification: Cetus values a non-SUI/non-stable fee-claim side at
+  CURRENT cg-spot (`app/api/cetus/activity/route.ts` FIX-A, documented
+  CoinGecko-budget tradeoff, pre-existing — NOT introduced by 1.12). Sprint 1.12
+  left it untouched (its DeFiLlama branch is additive null-only and the spot
+  fallback pre-empts it). Candidate follow-up: route Cetus claims through
+  DeFiLlama claim-date historical before the spot fallback (a "replace", needs a
+  decision like the Orca one in 1.12).
+- **Sprint 1.12 Solana route not live-exercised** — Account 1's Orca ZEC/USDC +
+  SOL/USDC positions are freshly opened (deposit-only, no fee claims), so the new
+  Solana DeFiLlama claim path wasn't exercised end-to-end on a reachable wallet.
+  Helper proven by canary; production `defillama_historical_used` /
+  `fee_claim_resolution source=defillama-historical` logs will confirm rescue.
+- **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) + activity
+  routes still use hardcoded maps; future sprint migrates + removes them (Rule 9).
 - **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
   position on queryable wallets). Byte-identical for healthy positions.
 
@@ -81,24 +88,27 @@ pending on cold cache, DeFiLlama historical coverage/accuracy vs CoinGecko).
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **DeFiLlama live pricing for claim resolution** (active, Sprint 1.12) — add
-   DeFiLlama historical-by-contract as a SECONDARY claim-date price source so
-   cold-cache / CoinGecko-unpriceable fee claims resolve instead of going
-   pending. Rule 1/1a: claim-date only, never current spot (see Active sprint).
-2. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
+1. **HyperEVM cold-cache performance** (active, Sprint 1.13) — cut the cold-start
+   CoinGecko-historical + archive-scan penalty for the first user of a cold
+   instance. Investigate-first; additive; Rule 1/1a unchanged (see Active sprint).
+2. **HyperEVM deposit-history retrieval reliability** (Sprint 1.14) — harden the
+   3-tier deposit-history fallback (Etherscan V2 → Chainstack archive →
+   client-fallback) so `deposit_retrieval` failures (`all-tiers-exhausted`,
+   `etherscan-429`) don't drop closed-position deposits.
+3. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
    "~$57 vs hundreds" symptom; Sprint 1.11 likely fixed the closed-position
    Capital-G/L half. Fresh diagnostic over open + closed + activity vs
    Google-Sheet ground truth only if the symptom persists.
-3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
+4. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
    closed Sui positions from on-chain events (objects destroyed on close).
-4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+5. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history.
-5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC.
-6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-7. **Capital G/L expansion to Sui + Solana** — wire indexed events into the
+6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC.
+7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
+8. **Capital G/L expansion to Sui + Solana** — wire indexed events into the
    Capital G/L sum. Remove "EVM only" UI label.
-8. **UI for closed Sui + Solana positions** — Closed tab support.
-9. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+9. **UI for closed Sui + Solana positions** — Closed tab support.
+10. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
@@ -110,6 +120,35 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`5bad502`** — Sprint 1.12: wire DeFiLlama historical-by-contract as a
+  SECONDARY claim-date price source (CoinGecko historical stays primary). New
+  `app/lib/defillamaPriceHistory.ts` (`fetchDefillamaPriceAtDate` /
+  `prewarmDefillamaPrices` / `getCachedOnlyDefillamaPrice`) →
+  `coins.llama.fi/prices/historical/{ts}/{dlChain}:{addr}`, keyed by on-chain
+  contract/mint/coin-type so it prices the Sui/Solana long-tail CoinGecko can't
+  map to an id. Own Redis namespace `price:historical:defillama:*` (30d TTL,
+  fire-and-forget, no-op stub), in-process + negative + in-flight caches, polite
+  rate gate (≤5 concurrent, ≥200ms). 3 new `[PRICE_LOG]` events
+  (`defillama_historical_used`/`_missing`/`_error`). **Rule 1a preserved on BOTH
+  sources** — DeFiLlama used ONLY via the historical endpoint with the claim's
+  own timestamp (±24h same-UTC-day guard), NEVER current/spot; both miss → claim
+  stays pending. **Solana (orca/raydium):** DeFiLlama-by-mint is now the PRIMARY
+  claim-date source (no CG-historical path existed there) — REPLACES the prior
+  current-spot/zero fee-side fallback (Account 1 ZEC/USDC + SOL/USDC return
+  price0=0, which dropped the non-stable side to $0); deposits/withdrawals keep
+  spot last-resort (Rule 2); added `fee_claim_resolution` instrumentation.
+  **Sui (cetus/bluefin):** ADDITIVE fallback — fires ONLY when the existing path
+  (on-chain SUI historical + stablecoin $1) leaves a fee claim null; reward claims
+  NOT routed through DeFiLlama (CETUS spot+LKG exception preserved; Bluefin reward
+  events carry no coin type). HyperEVM unchanged (DeFiLlama has no `hyperliquid`
+  coverage — verified). No cache bump. Verified: build+tsc clean; helper canary
+  PASS (ZEC $245.71 / SOL $83.37 / Sui DEEP $0.0272 via defillama-historical;
+  bogus→missing/null; in-process + Redis cross-process tiers); Account 2
+  Bluefin+Cetus byte-identical (0 DeFiLlama events fired); ProjectX 3/3 still
+  resolved (Sprint 1.11 intact); 0 `defillama-current` anywhere. Caveats (see
+  carry-overs): Solana route not live-exercised (Account 1 Orca positions are
+  deposit-only); Cetus has a pre-existing cg-spot-for-claims FIX-A path (out of
+  scope, flagged).
 - **`d57f051`** — Sprint 1.11: fix cold-cache exclusion of closed HyperEVM
   positions on first analytics load. Root cause was NOT token resolution
   (HYPE/USDC are in hyperswap's hardcoded map; the resolver never touches them):
@@ -199,24 +238,8 @@ shorthand.
   BOTH Solana formats live (legacy_fixed + variable_length), 0 underflow/
   unsupported; ProjectX $1,776.29, redis hits, 0 cg-spot. Bluefin/Momentum live-
   verification pending (no test positions). No cache bump.
-- **`d2ff9d6`** — Sprint 1.7d: Orca variable-length (`DynamicTickArray`) tick
-  decoder. Sprint 1.7c found the ZEC/USDC underflow was a *symptom*: Orca ships
-  two tick-array formats, and the route only decoded the legacy fixed 9956-byte
-  `TickArray` (disc 69,97,…; ticks at `12+idx*113`). Pools on the newer
-  variable-length `DynamicTickArray` (disc 17,216,246,142,225,199,218,56; header
-  60 = disc8+startTickIndex4+whirlpool32+tickBitmap16; then 88 borsh-enum ticks,
-  1 byte Uninitialized / 113 Initialized) were read out-of-bounds → `feeGrowthOutside`
-  0 → `feeGrowthInside` 0 → underflow → Sprint 1.7 guard zeroed real fees. Fix
-  (additive): `fetchTickFeeGrowthOutside` dispatches on the account discriminator;
-  legacy path byte-identical; new `readDynamicTick` walks the enum array (fgA/fgB
-  at element+33/+49). Layout from orca-so/whirlpools source; discriminators
-  confirmed via Anchor sha256; validated vs on-chain sizes. New `[PRICE_LOG]`
-  `tick_decoder_used` + `unsupported_tick_array_format`. Guard preserved as a
-  safety net (now never fires for ZEC). Verified: ZEC pending `$0 → $141.58`
-  (real fees, settled still $0), feeGrowthInside > checkpoint, 0 underflow/
-  unsupported events; no regression (Account 2 ProjectX $1,776.29, redis hits,
-  0 cg-spot). No live legacy-format Orca position available to exercise; legacy
-  decode unchanged.
+- _(Sprint 1.7d `d2ff9d6` — Orca variable-length `DynamicTickArray` tick decoder
+  — rolled off this list; see git history.)_
 - _(Sprint 1.7 `1dd862c` — Orca CLMM fee-growth underflow guard — rolled off
   this list; see git history.)_
 - _(Sprint 1.6 `5af4d33` — Upstash Redis persistent historical-price cache —
@@ -266,6 +289,16 @@ shorthand.
 - `app/lib/tokenConstants.ts` — pinned native tokens + canonical stables per
   chain (the only identities that never auto-resolve), `CG_PLATFORM` /
   `DEFILLAMA_CHAIN` slugs, and identifier normalization.
+
+**Claim-date historical pricing** (two sources — see pricing-invariants Rule 1c):
+- `app/lib/cgPriceHistory.ts` — `fetchTokenPriceAtDate(cgId, ts)`, CoinGecko
+  historical (PRIMARY), wrapped by the Sprint 1.6 Redis tier (`redisPriceCache.ts`).
+- `app/lib/defillamaPriceHistory.ts` (Sprint 1.12) — `fetchDefillamaPriceAtDate` /
+  `prewarmDefillamaPrices` / `getCachedOnlyDefillamaPrice`, DeFiLlama
+  historical-by-contract (SECONDARY), keyed by on-chain contract/mint/coin-type,
+  own Redis namespace `price:historical:defillama:*`. Used by orca/raydium
+  (PRIMARY there) + cetus/bluefin (additive null-only). Claim-date only, never
+  spot (Rule 1a). No HyperEVM coverage.
 
 ---
 
