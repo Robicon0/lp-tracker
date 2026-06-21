@@ -41,41 +41,41 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.13: HyperEVM cold-cache performance.**
+**Sprint 1.14: HyperEVM deposit-history retrieval reliability.**
 
-**Goal:** Reduce the HyperEVM cold-start cost so the FIRST user of a cold Vercel
-instance doesn't pay the full serialized CoinGecko-historical + archive-scan
-penalty. Two known cost sources (see Known limitations): (1) the per-IP-paced
-CoinGecko historical prewarm (`withCgPacing`, concurrency 1, ~1.1s gap) which
-makes a closed HyperEVM position with N unique claim dates take ~N×1.1s cold,
-and (2) the Tier-2 Chainstack archive scan (~500 chunks, ~100s under burst when
-Etherscan Tier 1 is exhausted). Investigate-first: measure where cold-start time
-actually goes (the `deposit_retrieval.latency_ms` + `route_summary.duration_ms` +
-redis hit-rate fields already exist), then target the dominant cost. Note Sprint
-1.12 added DeFiLlama historical as a Redis-cached secondary source — but DeFiLlama
-has NO HyperEVM coverage, so HyperEVM claims still rely on CoinGecko + the Redis
-warm-path; cold-cache HyperEVM remains the target here.
+**Goal:** Harden the 3-tier deposit-history fallback (Etherscan V2 → Chainstack
+archive → client-fallback) so `deposit_retrieval` failures (`all-tiers-exhausted`,
+`etherscan-429`, `etherscan-timeout`) don't drop a closed HyperEVM position's
+deposits — which silently corrupts initial value / Capital G/L / IL for that
+position. Investigate-first: read `deposit_retrieval` (tier_used / result /
+error_reason / latency_ms) across cold loads to see which tier fails and why, then
+target the dominant failure mode (likely Etherscan free-tier 429 under burst →
+archive fallback that itself times out). Sprint 1.13's activity cache already cut
+the deposit-scan COUNT (dedup: one scan per position instead of 2-3×), which
+reduces Etherscan burst pressure — measure whether that alone fixed reliability
+before adding retries/caching.
 
-**Hard constraint:** additive-only; Rule 1/1a unchanged (no spot for claims);
-no cache bump unless cache shape changes. Conservative params accommodate the
-slowest chain (architecture Rule 6).
+**Hard constraint:** additive-only; Rule 1/1a unchanged; no cache bump unless
+shape changes. A persisted deposit-history cache (deposits are immutable for
+closed positions) is a candidate but was deferred from 1.13 ("dominant fix first")
+— revisit here if reliability needs it.
 
 **Status:** Not started — investigate-first.
 
 **Carry-overs (not blockers):**
-- **Cetus FIX-A cg-spot for claims (latent Rule 1a deviation)** — surfaced in
-  Sprint 1.12 verification: Cetus values a non-SUI/non-stable fee-claim side at
-  CURRENT cg-spot (`app/api/cetus/activity/route.ts` FIX-A, documented
-  CoinGecko-budget tradeoff, pre-existing — NOT introduced by 1.12). Sprint 1.12
-  left it untouched (its DeFiLlama branch is additive null-only and the spot
-  fallback pre-empts it). Candidate follow-up: route Cetus claims through
-  DeFiLlama claim-date historical before the spot fallback (a "replace", needs a
-  decision like the Orca one in 1.12).
+- **Cetus FIX-A cg-spot for claims (Rule 1a deviation)** → now its own queued
+  sprint (1.15). Cetus values a non-SUI/non-stable fee-claim side at CURRENT
+  cg-spot (`app/api/cetus/activity/route.ts` FIX-A, documented CoinGecko-budget
+  tradeoff, pre-existing). Fix: route Cetus claims through DeFiLlama claim-date
+  historical before the spot fallback (a "replace", like Orca in 1.12).
 - **Sprint 1.12 Solana route not live-exercised** — Account 1's Orca ZEC/USDC +
-  SOL/USDC positions are freshly opened (deposit-only, no fee claims), so the new
-  Solana DeFiLlama claim path wasn't exercised end-to-end on a reachable wallet.
-  Helper proven by canary; production `defillama_historical_used` /
-  `fee_claim_resolution source=defillama-historical` logs will confirm rescue.
+  SOL/USDC positions are deposit-only (no fee claims yet), so the Solana DeFiLlama
+  claim path wasn't exercised end-to-end. Helper proven by canary; production
+  `defillama_historical_used` logs will confirm rescue.
+- **Sprint 1.13 cold-load full-page browser timing not headlessly measured** — the
+  dedup + cache improvement was verified structurally (per-position activity work
+  cut 2-3× → 1×; deposit scans 10→4 over the test) and on warm baseline (~8s); the
+  exact "3-5 min → Xs" full-page number should be eyeballed on the deploy.
 - **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) + activity
   routes still use hardcoded maps; future sprint migrates + removes them (Rule 9).
 - **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
@@ -88,13 +88,14 @@ slowest chain (architecture Rule 6).
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **HyperEVM cold-cache performance** (active, Sprint 1.13) — cut the cold-start
-   CoinGecko-historical + archive-scan penalty for the first user of a cold
-   instance. Investigate-first; additive; Rule 1/1a unchanged (see Active sprint).
-2. **HyperEVM deposit-history retrieval reliability** (Sprint 1.14) — harden the
-   3-tier deposit-history fallback (Etherscan V2 → Chainstack archive →
-   client-fallback) so `deposit_retrieval` failures (`all-tiers-exhausted`,
-   `etherscan-429`) don't drop closed-position deposits.
+1. **HyperEVM deposit-history retrieval reliability** (active, Sprint 1.14) —
+   harden the 3-tier deposit fallback so cold-burst Etherscan 429 / archive
+   timeouts don't drop closed-position deposits (see Active sprint).
+2. **Cetus claims use cg-spot for historical — Rule 1a fix** (Sprint 1.15) —
+   replace the Cetus FIX-A current-spot fee-claim fallback with DeFiLlama
+   claim-date historical (Sprint 1.12 infra already in place; additive prewarm +
+   reorder so historical wins before spot). A claim must be valued claim-date,
+   never current spot (pricing-invariants Rule 1a).
 3. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
    "~$57 vs hundreds" symptom; Sprint 1.11 likely fixed the closed-position
    Capital-G/L half. Fresh diagnostic over open + closed + activity vs
@@ -120,6 +121,31 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`2dcd3cb`** — Sprint 1.13: server-side activity-route cache + in-flight dedup
+  (HyperEVM cold-load fix). MEASURED root cause of the 3-5 min cold first load:
+  the analytics page fetches every position's activity route 2-3× (useAll-
+  PositionsActivity + useLpPnl + useWalletLevelFees each build the same URL and
+  fetch independently) and the routes had NO server-side cache — so on a cold
+  instance each redundant fetch re-ran the full expensive path (HyperEVM Ether-
+  scan/archive deposit scan + every CoinGecko-historical claim through the
+  process-wide concurrency-1 `withCgPacing` queue), and the extra volume fed
+  CoinGecko free-tier 429 retry storms. Warm path was already ~8s (Redis short-
+  circuits CG). Fix (additive): new `app/lib/activityRouteCache.ts`
+  `withActivityRouteCache` wraps all 9 `/api/{protocol}/activity` GET handlers
+  with (1) IN-FLIGHT DEDUP — concurrent identical requests share ONE computation
+  (the dominant win, collapses the simultaneous multi-hook burst) and (2) a short
+  TTL result cache (cache-versioning Rule 3: 5m success / 60s empty / errors never
+  cached). In-process per-instance, keyed by pathname + sorted search params. New
+  `[PRICE_LOG]` `activity_cache` event (hit|dedup|miss). Byte-identical by
+  construction (a hit/dedup returns the exact route JSON — Rule 1a intact, no new
+  CG/spot calls, Sprint 1.12 DeFiLlama path untouched). NO cache-version bump
+  (in-process module cache, not a versioned key). Verified (Account 2, 4 closed
+  ProjectX + Sui): build+tsc clean; 3 concurrent identical → 1 miss + 2 dedup,
+  deposit scan ran ONCE (was 3×); 10 requests / 4 positions → 4 deposit scans (was
+  up to 10), 4 miss + 5 dedup + 1 hit; TTL hit 0.04s; byte-identical md5 on
+  hyperswap + bluefin; 0 errors, 0 cg-spot for claims, 0 DeFiLlama regression.
+  Per-position activity work cut 2-3× → 1× on cold load. Full-page browser timing
+  not headlessly measured (eyeball on deploy).
 - **`5bad502`** — Sprint 1.12: wire DeFiLlama historical-by-contract as a
   SECONDARY claim-date price source (CoinGecko historical stays primary). New
   `app/lib/defillamaPriceHistory.ts` (`fetchDefillamaPriceAtDate` /
@@ -223,21 +249,8 @@ shorthand.
   USDC/SUI `$0 → $126.54` (canary $125.09, +1.2%), Account 2 `$260.28`, 0
   read-failed/underflow; ProjectX $1,776.29, redis hits, 0 cg-spot. SKILL.md +
   add-new-protocol note for pool-owned fee-table Sui protocols.
-- **`f7842c8`** — Sprint 1.7e: shared CLMM utilities + apply across protocols.
-  New `app/lib/clmmFeeMath.ts` (`safeCalcPendingFee` underflow guard +
-  `calcFeeGrowthInside` + `emitFeeUnderflow`, moved verbatim from Orca) and
-  `app/lib/clmmTickDecoder.ts` (`solanaCLMMTickRegistry` + `anchorDiscriminator`).
-  Orca refactored to import/register into them (byte-identical to 1.7d); Bluefin
-  and Momentum route their pending-fee math through `safeCalcPendingFee`. Phase A
-  finding: protocols aren't uniform — only Orca/Bluefin/Momentum compute pending
-  fees; Raydium is settled-only and Cetus returns `fees:0` (guard N/A). Sui ticks
-  are JSON dynamic fields (no buffer registry — would be leaky); Solana ticks are
-  binary buffers (registry fits). New `.claude/skills/add-new-protocol/SKILL.md`
-  (Protocol Correctness Contract) + architecture-principles Rule 8 (shared CLMM
-  utils canonical; inline guards/decoders forbidden). Verified: Orca exercises
-  BOTH Solana formats live (legacy_fixed + variable_length), 0 underflow/
-  unsupported; ProjectX $1,776.29, redis hits, 0 cg-spot. Bluefin/Momentum live-
-  verification pending (no test positions). No cache bump.
+- _(Sprint 1.7e `f7842c8` — shared CLMM utilities (clmmFeeMath / clmmTickDecoder)
+  applied across Orca/Bluefin/Momentum — rolled off this list; see git history.)_
 - _(Sprint 1.7d `d2ff9d6` — Orca variable-length `DynamicTickArray` tick decoder
   — rolled off this list; see git history.)_
 - _(Sprint 1.7 `1dd862c` — Orca CLMM fee-growth underflow guard — rolled off
