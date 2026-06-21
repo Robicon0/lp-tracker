@@ -94,6 +94,24 @@ Use server-side caching for anything that's the same across users:
 Server-side cache warms once, serves many users. Cold start cost is paid
 once per cache miss across the entire user base.
 
+### Activity-route cache + in-flight dedup (Sprint 1.13)
+`app/lib/activityRouteCache.ts` (`withActivityRouteCache`) wraps every
+`/api/{protocol}/activity` route with an in-process (per-instance) result cache
+**plus in-flight dedup**. It exists because the analytics page fetches each
+position's activity route 2-3× (useAllPositionsActivity + useLpPnl +
+useWalletLevelFees), and the routes had no server-side cache — so on a cold
+instance the expensive Etherscan/archive deposit scan and CoinGecko-historical
+claim lookups ran 2-3× per position (the dominant cause of the 3-5 min cold first
+load). The in-flight dedup is the key win: simultaneous identical requests share
+ONE computation instead of each re-running the scan + pricing. TTLs follow Rule 3
+(5 min success / 60 s empty / errors never cached). This is an **in-process module
+cache, NOT a versioned key** — it carries no `-vN` string and needs no version
+bump; it clears on every deploy/cold start by construction. A cache hit/dedup
+returns the EXACT JSON the route produced, so no pricing/instrumentation invariant
+changes (claims still claim-date-only, Rule 1a). Keyed by route pathname + sorted
+search params, so any change to a route's params (incl. current spot p0/p1)
+naturally yields a fresh entry.
+
 ### Client-side (for per-user data only)
 Use client-side caching only for data that's specific to one wallet:
 - Resolved LP P&L for a connected wallet

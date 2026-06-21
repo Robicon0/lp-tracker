@@ -247,6 +247,32 @@ contain `source=defillama-historical` confirms a claim was valued from this
 source. There is NO `defillama-current` claim path — its absence is the Rule 1a
 guarantee for this source.
 
+### `activity_cache`
+
+Emitted once per activity-route invocation by the shared server-side cache
+(Sprint 1.13, `app/lib/activityRouteCache.ts`). The analytics page fetches each
+position's activity route 2-3× (useAllPositionsActivity + useLpPnl +
+useWalletLevelFees), and the routes had no server-side cache — so on a cold
+instance the expensive Etherscan/archive deposit scan AND the CoinGecko-historical
+claim lookups ran 2-3× per position, the dominant cause of the 3-5 min cold first
+load. This event reports which path served each request.
+
+Required fields:
+- `event: "activity_cache"`
+- `route` — route pathname, e.g. `/api/hyperswap/activity`
+- `status` — `miss` (computed fresh; cached for next time) | `dedup` (an identical
+  request was already in flight; awaited it instead of recomputing — the dominant
+  cold-load win, collapsing the simultaneous multi-hook burst into ONE
+  computation) | `hit` (served from the TTL result cache: 5 min success / 60 s
+  empty / errors never cached, per cache-versioning Rule 3)
+- `ms` — time spent serving (compute time for `miss`; wait time for `dedup`)
+
+Verification: over a cold load, `(dedup + hit) / total` is the fraction of
+redundant route work eliminated. A healthy cold load shows roughly one `miss` per
+unique position-URL plus `dedup`/`hit` for the redundant multi-hook refetches. A
+cache HIT/dedup returns the EXACT JSON the route produced — claims still valued
+claim-date-only (Rule 1a), no new CoinGecko/spot calls.
+
 ---
 
 ## Rule 3: Source enum

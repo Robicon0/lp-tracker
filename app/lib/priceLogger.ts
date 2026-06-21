@@ -279,8 +279,29 @@ interface DefillamaHistoricalErrorEvent {
   reason: string;
 }
 
+// Emitted once per activity-route invocation by the shared server-side cache
+// (Sprint 1.13, app/lib/activityRouteCache.ts). The analytics page fetches each
+// position's activity route 2-3x (useAllPositionsActivity + useLpPnl +
+// useWalletLevelFees), and the routes had NO server-side cache — so on a cold
+// instance the expensive deposit scan + CoinGecko-historical work ran 2-3x per
+// position. This event reports which path served the request:
+//   miss  = computed fresh (the expensive path; cached for next time)
+//   dedup = an identical request was already in flight; awaited it instead of
+//           recomputing (the dominant cold-load win — collapses the simultaneous
+//           multi-hook burst into ONE computation)
+//   hit   = served from the TTL result cache (5m success / 60s empty)
+// `status` distribution over a cold load is the production-observable metric:
+// dedup+hit / total is the fraction of redundant route work eliminated.
+interface ActivityCacheEvent {
+  event: 'activity_cache';
+  route: string;   // route pathname, e.g. "/api/hyperswap/activity"
+  status: 'hit' | 'dedup' | 'miss';
+  ms?: number;     // time spent serving (compute time for miss; wait time for dedup)
+}
+
 export type PriceLogEvent =
   | LookupEvent
+  | ActivityCacheEvent
   | FeeClaimResolutionEvent
   | RouteSummaryEvent
   | DepositRetrievalEvent

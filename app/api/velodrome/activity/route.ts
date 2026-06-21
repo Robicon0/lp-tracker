@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
@@ -223,7 +224,9 @@ function decodeWord(data: string, wordIndex: number): bigint {
   return BigInt('0x' + word);
 }
 
-export async function GET(request: Request) {
+export const GET = withActivityRouteCache(GET_impl);
+
+async function GET_impl(request: Request) {
   // Sprint 1.6: baseline for this invocation's Redis hit/miss delta (the
   // counters are process-wide; the route_summary emission below subtracts this).
   const __redisBaseline = redisCacheSnapshot();

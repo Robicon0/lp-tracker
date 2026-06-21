@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
@@ -225,7 +226,9 @@ function extractRewardSymbol(rewarderType: unknown): string {
   return parts[parts.length - 1] ?? '';
 }
 
-export async function GET(request: Request) {
+export const GET = withActivityRouteCache(GET_impl);
+
+async function GET_impl(request: Request) {
   const { searchParams } = new URL(request.url);
   const positionId = searchParams.get('positionId'); // raw Sui object ID, or "all"
   const account = searchParams.get('account') ?? '';

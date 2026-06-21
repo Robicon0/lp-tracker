@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { createHash } from 'crypto';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
@@ -218,7 +219,9 @@ interface ActivityResponse {
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export const GET = withActivityRouteCache(GET_impl);
+
+async function GET_impl(request: Request) {
   const { searchParams } = new URL(request.url);
   const positionId = searchParams.get('positionId'); // Orca positionPDA
   const account    = searchParams.get('account') ?? '';
