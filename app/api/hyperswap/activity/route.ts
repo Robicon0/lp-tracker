@@ -5,6 +5,7 @@ import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePr
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
+import { getCachedDepositLogs, setCachedDepositLogs } from '../../../lib/depositHistoryCache';
 import { logPrice } from '../../../lib/priceLogger';
 
 // ── HyperEVM log source — 3-tier fallback chain ─────────────────────────────
@@ -432,6 +433,19 @@ async function fetchLogsViaEtherscan(
       return { kind: 'fail', reason: rateLimited ? 'etherscan-429-decrease' : 'etherscan-decrease-failed' };
     }
 
+    // IncreaseLiquidity (the DEPOSIT) is load-bearing too (Sprint 1.14): every
+    // position has at least one deposit, so an aggregated set with ZERO Increase
+    // logs means the Increase topic was rate-limited/dropped (or Etherscan's
+    // index has a gap) — NOT a real "no deposits" state. Returning ok here would
+    // yield a deposit-less success that excludes the position ("Deposit history
+    // could not be retrieved") and could be persisted by the deposit-history
+    // cache. Fail instead so the caller falls to Tier 2 and leaves it UNCACHED
+    // for a clean retry on the next load.
+    const increaseCount = all.filter((l) => (l.topics?.[0] ?? '').toLowerCase() === TOPIC_INCREASE).length;
+    if (increaseCount === 0) {
+      return { kind: 'fail', reason: rateLimited ? 'etherscan-429-increase' : 'etherscan-increase-missing' };
+    }
+
     console.log(
       `[hyperswap/activity] source=etherscan OK — ${all.length} logs for tokenId ${tokenIdHex} ` +
       `(${3 - failed}/3 topics succeeded)`,
@@ -497,7 +511,7 @@ async function fetchLogsViaArchive(
 // buildFallbackPnL in useLpPnl.ts) as the last resort.
 interface FetchLogsResult {
   logs: RawLog[];
-  tierUsed: 'etherscan-v2' | 'chainstack-archive' | 'none';
+  tierUsed: 'etherscan-v2' | 'chainstack-archive' | 'redis-cache' | 'none';
   result: 'success' | 'failure';
   errorReason?: string;
 }
@@ -567,6 +581,12 @@ async function GET_impl(request: Request) {
   const tickLower = searchParams.get('tickLower') != null ? parseInt(searchParams.get('tickLower')!, 10) : null;
   const tickUpper = searchParams.get('tickUpper') != null ? parseInt(searchParams.get('tickUpper')!, 10) : null;
   const pool      = (searchParams.get('pool') ?? '').toLowerCase();
+  // Sprint 1.14: closed positions have an IMMUTABLE on-chain history, so once
+  // retrieved successfully their deposit logs are persisted in Redis and served
+  // from there forever — removing the Etherscan re-fetch (and its rate-limit
+  // race) that was dropping one position's deposits. Open positions are never
+  // cached (they can gain new deposits) and are unaffected by this branch.
+  const isClosedParam = searchParams.get('closed') === '1';
 
   if (!positionId || !nftManager) {
     return NextResponse.json({ error: 'positionId and nftManager required' }, { status: 400 });
@@ -582,7 +602,25 @@ async function GET_impl(request: Request) {
     // observable too. events_count is deposit (IncreaseLiquidity) events; 0 is a
     // valid success when a tier answered but the position has no deposits.
     const __retrievalStart = Date.now();
-    const retrieval = await fetchLogs(nftManager, tokenIdHex);
+    // Sprint 1.14: for a CLOSED position, try the persistent Redis deposit-log
+    // cache first. A hit serves the immutable history without touching Etherscan
+    // (so a throttled Etherscan can never drop this position's deposits again).
+    // On a miss, retrieve live and persist ONLY a complete success (>=1 deposit
+    // log) — never an empty / deposit-less result (which would poison the cache).
+    let retrieval: FetchLogsResult;
+    const __cachedLogs = isClosedParam ? await getCachedDepositLogs(nftManager, positionId) : null;
+    if (__cachedLogs) {
+      retrieval = { logs: __cachedLogs as RawLog[], tierUsed: 'redis-cache', result: 'success' };
+    } else {
+      retrieval = await fetchLogs(nftManager, tokenIdHex);
+      const __depCount = retrieval.logs.filter(
+        (l) => (l.topics?.[0] ?? '').toLowerCase() === TOPIC_INCREASE,
+      ).length;
+      if (isClosedParam && retrieval.result === 'success' && __depCount >= 1) {
+        // Fire-and-forget; never awaited on the hot path.
+        void setCachedDepositLogs(nftManager, positionId, retrieval.logs);
+      }
+    }
     const logs = retrieval.logs;
     const __retrievalMs = Date.now() - __retrievalStart;
     const __protocol = NFT_MANAGER_TO_PROTOCOL[nftManager.toLowerCase()] ?? nftManager.toLowerCase();

@@ -211,6 +211,9 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
     setPool();
+    // Sprint 1.14: closed HyperEVM positions have an immutable deposit history;
+    // the route persists it in Redis so a throttled Etherscan can't drop it.
+    if (pos.status === "Closed") params.set("closed", "1");
     return `/api/hyperswap/activity?${params}`;
   }
 

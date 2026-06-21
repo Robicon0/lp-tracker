@@ -115,17 +115,34 @@ Required fields:
 - `protocol` — `projectx`, `hyperswap`, or `kittenswap`
 - `chain` — the chain identifier (currently always `hyperevm`)
 - `position_id` — the NFT token ID / position identifier
-- `tier_used` — `etherscan-v2`, `chainstack-archive`, `client-fallback`, or
-  `none` (the route emits `none` on total failure, which is what triggers the
-  client-side `client-fallback` tier in `useLpPnl.ts`)
+- `tier_used` — `redis-cache`, `etherscan-v2`, `chainstack-archive`,
+  `client-fallback`, or `none`. `redis-cache` (Sprint 1.14) means a CLOSED
+  position's immutable deposit logs were served from the persistent
+  `depositHistoryCache.ts` without touching Etherscan/archive — the steady state
+  for any closed position after its first successful live retrieval. The route
+  emits `none` on total live failure, which triggers the client-side
+  `client-fallback` tier in `useLpPnl.ts`.
 - `result` — `success` or `failure`
 - `latency_ms` — retrieval time across all tiers
-- `events_count` — deposit events retrieved (0 is a valid `success` when a tier
-  answered but the position genuinely has no deposit history)
+- `events_count` — deposit (IncreaseLiquidity) events retrieved. NOTE (Sprint
+  1.14): a real position ALWAYS has ≥1 deposit, so Tier 1 now treats 0 deposit
+  logs as a retrieval FAILURE (Increase topic dropped / index gap), not a valid
+  empty — see `etherscan-increase-missing` below. Only an empty wallet/position
+  legitimately yields 0, and such a result is never persisted to the cache.
 
 Optional field (present only on failure):
 - `error_reason` — brief technical cause, e.g. `etherscan-429`,
-  `etherscan-timeout`, `archive-unconfigured`, `all-tiers-exhausted`
+  `etherscan-timeout`, `archive-unconfigured`, `all-tiers-exhausted`,
+  `etherscan-429-increase` / `etherscan-increase-missing` (Sprint 1.14 — the
+  load-bearing IncreaseLiquidity/deposit topic was rate-limited or absent, so
+  Tier 1 fails rather than returning a deposit-less "success").
+
+Reliability note (Sprint 1.14): Tier 2 (Chainstack archive) only scans the last
+`SCAN_DEPTH` (~5M) blocks — ~57 days at HyperEVM's ~1s block time — and a true
+`fromBlock=0` archive query is plan-blocked (`-32002`). So Tier 2 cannot serve a
+position older than ~57 days; Tier 1 (Etherscan, `fromBlock=0`) is the only live
+tier for those, and `redis-cache` is what makes a once-retrieved closed position
+immune to Etherscan rate-limit drops thereafter.
 
 ### `lp_pnl_position_lookup`
 Emitted when a single position's P&L is calculated.

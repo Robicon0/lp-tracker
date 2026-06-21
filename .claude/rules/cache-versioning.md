@@ -112,6 +112,25 @@ changes (claims still claim-date-only, Rule 1a). Keyed by route pathname + sorte
 search params, so any change to a route's params (incl. current spot p0/p1)
 naturally yields a fresh entry.
 
+### Closed-position deposit-history cache (Sprint 1.14)
+`app/lib/depositHistoryCache.ts` persists a CLOSED HyperEVM position's raw
+deposit/withdrawal/fee logs in Upstash Redis, keyed by `(nftManager, tokenId)`,
+30-day TTL. It exists because those positions are retrievable ONLY via Tier 1
+(Etherscan V2, `fromBlock=0`) — Tier 2 (Chainstack archive) only covers the last
+~57 days and is plan-blocked for true archive — so when Etherscan's free-tier
+rate limit throttles Tier 1 under load, the position's deposits are dropped and
+analytics excludes it ("Deposit history could not be retrieved"). A closed
+position's on-chain history is IMMUTABLE, so the first successful live retrieval
+is persisted and every later load (any instance, any user) serves from Redis,
+never re-hitting Etherscan. Scope/safety: CLOSED positions only (the activity URL
+carries `closed=1`; open positions can gain deposits and are never cached); a
+deposit-less / empty result is NEVER written (Tier 1 now fails on 0 deposit logs
+rather than returning a deposit-less success — see instrumentation.md). Persistent
+Redis (Sprint 1.6 contract: own client, `PRICE_CACHE_KV_*`, no-op stub, never
+throws, fire-and-forget writes), NOT a versioned key — no version bump; serving
+cached logs is byte-identical to a fresh retrieval (the downstream parser runs
+unchanged).
+
 ### Client-side (for per-user data only)
 Use client-side caching only for data that's specific to one wallet:
 - Resolved LP P&L for a connected wallet

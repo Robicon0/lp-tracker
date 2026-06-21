@@ -112,7 +112,11 @@ interface DepositRetrievalEvent {
   protocol: string;     // projectx | hyperswap | kittenswap
   chain: string;        // "hyperevm"
   position_id: string;  // NFT tokenId / position identifier
-  tier_used: 'etherscan-v2' | 'chainstack-archive' | 'client-fallback' | 'none';
+  // 'redis-cache' (Sprint 1.14): a CLOSED position's immutable deposit logs were
+  // served from the persistent Upstash cache (depositHistoryCache.ts) without
+  // touching Etherscan/archive — so a throttled Etherscan can no longer drop the
+  // deposit. Written once on the first complete (>=1 deposit) live success.
+  tier_used: 'etherscan-v2' | 'chainstack-archive' | 'redis-cache' | 'client-fallback' | 'none';
   result: 'success' | 'failure';
   latency_ms: number;
   events_count: number; // deposit events retrieved (0 is a valid success)
