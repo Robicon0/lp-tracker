@@ -41,41 +41,42 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.14: HyperEVM deposit-history retrieval reliability.**
+**Sprint 1.15: Cetus claims use cg-spot for historical — Rule 1a fix.**
 
-**Goal:** Harden the 3-tier deposit-history fallback (Etherscan V2 → Chainstack
-archive → client-fallback) so `deposit_retrieval` failures (`all-tiers-exhausted`,
-`etherscan-429`, `etherscan-timeout`) don't drop a closed HyperEVM position's
-deposits — which silently corrupts initial value / Capital G/L / IL for that
-position. Investigate-first: read `deposit_retrieval` (tier_used / result /
-error_reason / latency_ms) across cold loads to see which tier fails and why, then
-target the dominant failure mode (likely Etherscan free-tier 429 under burst →
-archive fallback that itself times out). Sprint 1.13's activity cache already cut
-the deposit-scan COUNT (dedup: one scan per position instead of 2-3×), which
-reduces Etherscan burst pressure — measure whether that alone fixed reliability
-before adding retries/caching.
+**Goal:** Replace the Cetus FIX-A *current-spot* fee-claim fallback with DeFiLlama
+**claim-date historical**. `app/api/cetus/activity/route.ts` values a non-SUI /
+non-stable fee-claim side at CURRENT cg-spot (the "FIX-A" path, lines ~507-521 —
+a documented CoinGecko-budget tradeoff, pre-existing, surfaced in Sprint 1.12
+verification). That violates pricing-invariants Rule 1a (a claim must be valued at
+its claim-date price, NEVER current spot). The Sprint 1.12 DeFiLlama infra is
+already in place (`prewarmDefillamaPrices` / `getCachedOnlyDefillamaPrice`, keyed
+by Sui coin type) — this sprint reorders so DeFiLlama claim-date historical wins
+BEFORE the spot fallback for Cetus fee claims (a "replace", like the Orca decision
+in 1.12, not additive-only — get explicit approval at the plan gate). The CETUS
+**reward** token spot+LKG path stays untouched (a separate, designated Rule 1
+exception).
 
-**Hard constraint:** additive-only; Rule 1/1a unchanged; no cache bump unless
-shape changes. A persisted deposit-history cache (deposits are immutable for
-closed positions) is a candidate but was deferred from 1.13 ("dominant fix first")
-— revisit here if reliability needs it.
+**Hard constraint:** Rule 1a — no current spot for claims. Reward-token exception
+preserved. Build clean before commit.
 
-**Status:** Not started — investigate-first.
+**Status:** Not started — investigate-first (confirm the FIX-A spot path is still
+the resolver for Cetus non-SUI fee sides; find a reachable Cetus position with a
+non-SUI/non-stable pair to verify, or verify via the helper canary as in 1.12).
 
 **Carry-overs (not blockers):**
-- **Cetus FIX-A cg-spot for claims (Rule 1a deviation)** → now its own queued
-  sprint (1.15). Cetus values a non-SUI/non-stable fee-claim side at CURRENT
-  cg-spot (`app/api/cetus/activity/route.ts` FIX-A, documented CoinGecko-budget
-  tradeoff, pre-existing). Fix: route Cetus claims through DeFiLlama claim-date
-  historical before the spot fallback (a "replace", like Orca in 1.12).
+- **HyperEVM Tier 2 archive is a non-functional fallback for positions >~57 days
+  old** (Sprint 1.14 finding) — SCAN_DEPTH 5M blocks ≈ 57 days at HyperEVM's ~1s
+  block time, AND the Chainstack plan returns -32002 for true `fromBlock=0`
+  archive. Sprint 1.14's Redis deposit cache makes this moot for CLOSED positions
+  once warmed, but an OPEN HyperEVM position older than 57 days whose Etherscan
+  Tier 1 fails has no working fallback. Revisit only if it surfaces (open HyperEVM
+  positions get the client-side value>0 fallback, so no banner).
 - **Sprint 1.12 Solana route not live-exercised** — Account 1's Orca ZEC/USDC +
-  SOL/USDC positions are deposit-only (no fee claims yet), so the Solana DeFiLlama
-  claim path wasn't exercised end-to-end. Helper proven by canary; production
+  SOL/USDC positions are deposit-only (no fee claims yet). Production
   `defillama_historical_used` logs will confirm rescue.
-- **Sprint 1.13 cold-load full-page browser timing not headlessly measured** — the
-  dedup + cache improvement was verified structurally (per-position activity work
-  cut 2-3× → 1×; deposit scans 10→4 over the test) and on warm baseline (~8s); the
-  exact "3-5 min → Xs" full-page number should be eyeballed on the deploy.
+- **Sprint 1.13 cold-load full-page browser timing not headlessly measured** —
+  verified structurally (per-position activity work 2-3× → 1×) + warm baseline
+  (~8s); eyeball the "3-5 min → Xs" full-page number on the deploy.
 - **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) + activity
   routes still use hardcoded maps; future sprint migrates + removes them (Rule 9).
 - **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
@@ -88,22 +89,23 @@ closed positions) is a candidate but was deferred from 1.13 ("dominant fix first
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **HyperEVM deposit-history retrieval reliability** (active, Sprint 1.14) —
-   harden the 3-tier deposit fallback so cold-burst Etherscan 429 / archive
-   timeouts don't drop closed-position deposits (see Active sprint).
-2. **Cetus claims use cg-spot for historical — Rule 1a fix** (Sprint 1.15) —
-   replace the Cetus FIX-A current-spot fee-claim fallback with DeFiLlama
-   claim-date historical (Sprint 1.12 infra already in place; additive prewarm +
-   reorder so historical wins before spot). A claim must be valued claim-date,
-   never current spot (pricing-invariants Rule 1a).
-3. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
+1. **Cetus claims use cg-spot for historical — Rule 1a fix** (active, Sprint 1.15)
+   — replace the Cetus FIX-A current-spot fee-claim fallback with DeFiLlama
+   claim-date historical (1.12 infra in place; reorder so historical wins before
+   spot). Claim-date only, never current spot (Rule 1a). See Active sprint.
+2. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
    "~$57 vs hundreds" symptom; Sprint 1.11 likely fixed the closed-position
    Capital-G/L half. Fresh diagnostic over open + closed + activity vs
    Google-Sheet ground truth only if the symptom persists.
-4. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
-   closed Sui positions from on-chain events (objects destroyed on close).
-5. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
-   indexer; parse Orca/Raydium program instructions from wallet tx history.
+3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
+   closed Sui positions from on-chain events (objects destroyed on close); feeds
+   Capital G/L.
+4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+   indexer; parse Orca/Raydium program instructions from wallet tx history; feeds
+   Capital G/L.
+5. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
+   make the Capital G/L figure expand to a per-position breakdown (deposited vs
+   withdrawn USD, per closed position) so users can verify the number.
 6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC.
 7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
 8. **Capital G/L expansion to Sui + Solana** — wire indexed events into the
@@ -121,6 +123,35 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`65d6328`** — Sprint 1.14: persist closed-position deposit history in Redis
+  (fixes the "Deposit history could not be retrieved" banner on 1 of 4 Account 2
+  ProjectX positions, which persisted past Sprint 1.13). DIAGNOSIS: these closed
+  positions are retrievable ONLY via Tier 1 (Etherscan V2, `fromBlock=0`). Tier 2
+  (Chainstack archive) is a non-functional fallback for them — it scans only the
+  last `SCAN_DEPTH`≈5M blocks = **~57 days** at HyperEVM's ~1s block time, but the
+  deposits are 68-97 days old (blocks 29.25M-32.5M vs a 33.45M window floor), AND
+  a true `fromBlock=0` archive query is **plan-blocked** (`-32002`). So when
+  Etherscan's free-tier rate limit throttles Tier 1 for one position under
+  concurrent production load, it falls to a Tier 2 that physically cannot find the
+  deposit → 0 deposits → analytics excludes the closed (value=0, no client
+  fallback) position. Sprint 1.13's dedup cut call VOLUME but can't help when the
+  one remaining Etherscan call is throttled. FIX (additive, free-tier): a closed
+  position's on-chain history is IMMUTABLE → new `app/lib/depositHistoryCache.ts`
+  persists the raw logs in Upstash Redis keyed by `(nftManager, tokenId)`, 30d TTL
+  (Sprint 1.6 contract). hyperswap/activity reads it first for closed positions
+  (new `tier_used: 'redis-cache'`) and writes on the first complete live success;
+  once warmed, every later load — any instance/user, even while Etherscan
+  throttles — serves from Redis, never re-hitting Etherscan. CLOSED-only (`closed=1`
+  from `pos.status` in both useLpPnl + useAllPositionsActivity); open positions
+  never cached. Paired guards: Tier 1 now treats 0 IncreaseLiquidity logs as a
+  FAILURE (`etherscan-increase-missing`) instead of a deposit-less "success"; an
+  empty result is NEVER persisted. No cache-version bump (persistent Redis, not a
+  versioned key; cached logs byte-identical to a fresh retrieval). Verified
+  (Account 2, 4 closed ProjectX): build+tsc clean; cold → tier etherscan-v2 +
+  Redis key written; restart → tier redis-cache, 0 Etherscan calls, byte-identical
+  md5, claims 5/5 resolved, 0 cg-spot (Rule 1a); open-path writes no key; all 4
+  persist. Prod Etherscan-throttle not locally reproducible (free key); mechanics
+  verified.
 - **`2dcd3cb`** — Sprint 1.13: server-side activity-route cache + in-flight dedup
   (HyperEVM cold-load fix). MEASURED root cause of the 3-5 min cold first load:
   the analytics page fetches every position's activity route 2-3× (useAll-
@@ -233,22 +264,9 @@ shorthand.
   bump). Verified: canary math (new ZEC $41.65/1d/$4700 → 'uncollected', 323.5%
   APR, $15,202/yr) + byte-identity for claims; live ZEC input $63.08, apy 0. Browser
   paint not headlessly verifiable — eyeball on deploy.
-- **`a6a6e75`** — Sprint 1.8: implement Cetus pending-fee computation
-  (platform-wide; was hardcoded `fees:0` since the original integration
-  `4339ad87`, March 2026 — every Cetus position worldwide showed $0 uncollected).
-  Cetus keeps per-position fee state in the pool's `position_manager`
-  LinkedTable (`PositionInfo`: `fee_growth_inside` checkpoints + `fee_owned`),
-  NOT on the position object, and tick `fee_growth_outside` in the `tick_manager`
-  move_stl SkipList (u64 score = `tickIndex + 443636`). New `computeCetusPendingFees`
-  + `fetchCetusTick` (with a defensive returned-index guard) fetch those via
-  `getDynamicFieldObject` and compute through the shared `calcFeeGrowthInside` +
-  `safeCalcPendingFee` + `emitFeeUnderflow`; `total = fee_owned + guarded delta`.
-  New `[PRICE_LOG]` `cetus_pending_fee_computed` + `cetus_pending_fee_read_failed`
-  (fallback to 0 on read failure). CETUS reward spot+LKG untouched (separate
-  activity route; `rewards[]` never read). No cache bump. Verified: Account 1
-  USDC/SUI `$0 → $126.54` (canary $125.09, +1.2%), Account 2 `$260.28`, 0
-  read-failed/underflow; ProjectX $1,776.29, redis hits, 0 cg-spot. SKILL.md +
-  add-new-protocol note for pool-owned fee-table Sui protocols.
+- _(Sprint 1.8 `a6a6e75` — Cetus pending-fee computation (pool-owned fee table:
+  position_manager LinkedTable + tick SkipList) — rolled off this list; see git
+  history.)_
 - _(Sprint 1.7e `f7842c8` — shared CLMM utilities (clmmFeeMath / clmmTickDecoder)
   applied across Orca/Bluefin/Momentum — rolled off this list; see git history.)_
 - _(Sprint 1.7d `d2ff9d6` — Orca variable-length `DynamicTickArray` tick decoder
@@ -342,13 +360,22 @@ resolver cannot run on HyperEVM. Claim-time pricing for HyperSwap,
 KittenSwap, ProjectX must use CG-historical awaited for closed
 positions, fire-and-forget for open.
 
-**HyperEVM Tier 2 archive scan is slow under burst.** When Etherscan
-(Tier 1) is exhausted and the Chainstack archive fallback fires, scanning
-~500 chunks (`SCAN_DEPTH` 5M / `LOG_CHUNK` 10k) at `LOG_CONCURRENCY` 3 +
-200ms batch delay can take ~100s per position under concurrent contention
-(now visible via the `deposit_retrieval` event's `latency_ms`, observed in
-`e1213bd` verification). Within Vercel's 300s function budget and only on
-the rare Etherscan-exhaustion path, but a future optimization target.
+**HyperEVM Tier 2 archive is a non-functional fallback for positions older than
+~57 days (Sprint 1.14 finding).** It scans only the last `SCAN_DEPTH` 5M blocks,
+which at HyperEVM's ~1s (~984ms) block time is **~57 days** — and a true
+`fromBlock=0` archive query is plan-blocked (`-32002`, see above). So a position
+whose deposit predates the window can't be served by Tier 2 at all; Tier 1
+(Etherscan V2, `fromBlock=0`) is the only live tier for it. When Etherscan
+throttles Tier 1 under production load, the deposit is dropped → exclusion banner.
+**Mitigated for CLOSED positions in Sprint 1.14 (`65d6328`):**
+`app/lib/depositHistoryCache.ts` persists a closed position's immutable deposit
+logs in Redis (keyed by `(nftManager, tokenId)`, 30d TTL), so after the first
+successful retrieval it's served from cache forever (`tier_used: redis-cache`),
+never re-hitting Etherscan. OPEN HyperEVM positions older than 57 days still rely
+on Tier 1 (they're not cached, since they can gain deposits) — but they have the
+client-side value>0 fallback, so no banner. A paid Chainstack archive tier (or
+narrowing the scan by a known deposit block) remains the only way to make Tier 2
+a real fallback for open old positions; deferred (budget decision).
 
 **Server-side cross-user price cache — RESOLVED in Sprint 1.6 (`5af4d33`).**
 The persistent cross-request price cache ("Option C") is now built:
@@ -416,10 +443,13 @@ investigating.
 - Vercel Pro ($20/month) — auto-deploys from `main`
 - Neon Postgres
 - Upstash Redis (`defidesh-price-cache`, free tier, us-east-1) — persistent
-  historical-price cache (Sprint 1.6). Env: `PRICE_CACHE_KV_REST_API_URL` +
-  `PRICE_CACHE_KV_REST_API_TOKEN` (pass explicitly to the `@upstash/redis`
-  client — it auto-reads only `UPSTASH_*`/`KV_*`, not `PRICE_CACHE_KV_*`).
-  Connected to Production/Preview/Development; shared, so avoid broad flushes.
+  historical-price cache (Sprint 1.6) + DeFiLlama claim prices (Sprint 1.12,
+  `price:historical:defillama:*`) + closed-position deposit history (Sprint 1.14,
+  `deposit:logs:hyperevm:{nftManager}:{tokenId}`, 30d TTL). Env:
+  `PRICE_CACHE_KV_REST_API_URL` + `PRICE_CACHE_KV_REST_API_TOKEN` (pass explicitly
+  to the `@upstash/redis` client — it auto-reads only `UPSTASH_*`/`KV_*`, not
+  `PRICE_CACHE_KV_*`). Connected to Production/Preview/Development; shared, so
+  avoid broad flushes.
 
 **RPC providers:**
 - Chainstack `nanoreth` — HyperEVM (`HYPEREVM_ARCHIVE_RPC`)
