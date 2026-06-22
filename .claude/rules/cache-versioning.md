@@ -45,10 +45,10 @@ updated when versions are bumped.
 
 | Cache key            | Current version | Last bump reason |
 |----------------------|-----------------|------------------|
-| lp-pnl-events        | v24             | Sprint 2.1b — EVM V3 activity events gain `logIndex`; Aerodrome/Velodrome fee claims valued historical-only (cg-spot removed, DeFiLlama tier added). Parity with analytics-activity v16 |
-| analytics-activity   | v16             | Sprint 2.1b — closed Aerodrome/Velodrome positions now scanned per-position (were skipped); Fee Income dedup keys on (protocol, txHash, logIndex); cg-spot removed from aero/velo routes |
+| lp-pnl-events        | v25             | Sprint NEW — Bluefin fee claims valued historical-only (current-spot fallbackA/fallbackB removed; SUI → CG-historical → DeFiLlama → pending). Parity with analytics-activity v17 |
+| analytics-activity   | v17             | Sprint NEW — Bluefin fee claims historical-only (cg-spot/current-spot removed); flush so analytics Fee Income re-resolves under the new cascade in lockstep with LP-P&L |
 | cetus-activity       | v3              | Cetus V2 deposit/withdrawal event structure |
-| bluefin-activity     | v3              | (verify in code before bumping) |
+| bluefin-activity     | v4              | Sprint NEW — Bluefin fee claims valued claim-date historical-only (stable → $1; SUI → CG-historical → DeFiLlama; other non-stable → DeFiLlama; else pending); current-spot fallback removed (Rule 1a) |
 
 If a version listed here doesn't match what's in code, code is the source
 of truth. Update this table to match code, not the other way around.

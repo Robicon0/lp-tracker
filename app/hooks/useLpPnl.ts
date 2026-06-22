@@ -427,7 +427,14 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // resort REMOVED (Rule 1a). useLpPnl's per-position Capital-G/L / Fees-Collected
 // values were already correct (it never used the wallet-scope path), but flush
 // v23 so analytics & LP-P&L refresh in lockstep under the new event shape.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v24-";
+// Bumped v24 → v25: Sprint NEW parity with analytics-activity v16 → v17. The
+// Bluefin activity route now values FEE claims historical-ONLY (stable → $1;
+// SUI → CoinGecko-historical → DeFiLlama-historical → pending; other non-stable
+// → DeFiLlama-historical → pending) — the current-spot fallbackA/fallbackB last
+// resort was REMOVED for Bluefin fee claims (Rule 1a, mirrors Cetus 1.15). v24
+// entries carry spot-contaminated cold-cache Bluefin fee values; flush so
+// Fees-Collected re-resolves under the new cascade in lockstep with analytics.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v25-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

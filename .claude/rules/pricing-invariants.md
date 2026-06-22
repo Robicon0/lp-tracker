@@ -112,12 +112,21 @@ as the PRIMARY claim-date source — no CoinGecko-historical path is wired into 
 $1; SUI side → CoinGecko historical then DeFiLlama historical; any other non-stable
 side → DeFiLlama historical; if a side can't be priced historically the claim
 stays pending. The prior current-spot / "FIX-A" cg-spot fee-claim fallback is
-REMOVED — there is NO spot path for Cetus fee claims. Bluefin/Momentum still carry
-the older shape (DeFiLlama additive null-only + a current-spot last resort when
-SUI-historical misses) — a known same-pattern Rule 1a gap queued for a follow-up
-sprint. Reward claims on every Sui route are NOT routed through DeFiLlama: the
-CETUS reward token's spot+LKG path (below) is a separate, designated exception and
-is preserved; Bluefin reward events carry no coin type.
+REMOVED — there is NO spot path for Cetus fee claims. **Bluefin (Sprint NEW)** now
+follows the identical historical-ONLY cascade as Cetus: stablecoin → $1; SUI side →
+CoinGecko historical then DeFiLlama historical-by-coin-type; any other non-stable
+side → DeFiLlama historical; else pending. The current-spot `fallbackA`/`fallbackB`
+last resort is REMOVED for Bluefin fee claims — there is NO spot path for them
+either. **Momentum** is dashboard-only (no activity/fee-claim valuation route
+exists yet — it is an unsupported protocol in the P&L pipeline); the same
+historical-only cascade will be built into its activity route when that route is
+created (sprint queue). With Bluefin fixed, **no protocol on any chain values a fee
+claim at spot** — Rule 1a is fully enforced platform-wide. Reward claims on every
+Sui route are NOT routed through DeFiLlama: the CETUS reward token's spot+LKG path
+(below) is a separate, designated exception and is preserved; Bluefin reward events
+carry no coin type and keep their separate symbol-matched path (untouched this
+sprint — empirical historical migration deferred, same caution as the CETUS
+exception).
 
 ### Exceptions to Rule 1
 

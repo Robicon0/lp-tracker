@@ -112,7 +112,13 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // txHash::logIndex dedup). (3) Aerodrome/Velodrome fee claims no longer fall to
 // current spot (cg-spot removed; DeFiLlama historical added) — claim values can
 // shift for affected wallets. Flush v15 entries so all three changes take effect.
-function cacheKey(id: string) { return `analytics-activity-v16-${id}`; }
+// Bumped v16 → v17: Sprint NEW. Bluefin FEE claims now value CLAIM-DATE
+// historical-ONLY (stable → $1; SUI → CG-historical → DeFiLlama; other non-stable
+// → DeFiLlama; else pending) — the current-spot fallbackA/fallbackB last resort
+// was REMOVED for Bluefin fee claims (Rule 1a, mirrors Cetus 1.15). v16 entries
+// carry spot-contaminated cold-cache Bluefin fee values; flush so analytics Fee
+// Income & LP-P&L refresh in lockstep (parity with useLpPnl's v24 → v25).
+function cacheKey(id: string) { return `analytics-activity-v17-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

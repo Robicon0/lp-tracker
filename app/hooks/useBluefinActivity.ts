@@ -23,7 +23,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 function cacheKey(positionId: string) {
   // v3: Bluefin activity route now values fee_claim / reward_claim against
   // historical SUI price at the claim's date instead of today's spot.
-  return `bluefin-activity-v3-${positionId}`;
+  // v3 → v4 (Sprint NEW): Bluefin FEE claims are now valued CLAIM-DATE
+  // historical-ONLY (stable → $1; SUI → CG-historical → DeFiLlama; other
+  // non-stable → DeFiLlama; else pending). The current-spot fallbackA/fallbackB
+  // last resort was REMOVED for fee claims (Rule 1a). v3 entries carry
+  // spot-contaminated cold-cache fee values; bump flushes them.
+  return `bluefin-activity-v4-${positionId}`;
 }
 
 function readCache(positionId: string): BluefinActivityData | null {
