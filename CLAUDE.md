@@ -41,46 +41,43 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 1.15: Cetus claims use cg-spot for historical — Rule 1a fix.**
+**Sprint 2.1: Account 1 Aerodrome accounting investigation.**
 
-**Goal:** Replace the Cetus FIX-A *current-spot* fee-claim fallback with DeFiLlama
-**claim-date historical**. `app/api/cetus/activity/route.ts` values a non-SUI /
-non-stable fee-claim side at CURRENT cg-spot (the "FIX-A" path, lines ~507-521 —
-a documented CoinGecko-budget tradeoff, pre-existing, surfaced in Sprint 1.12
-verification). That violates pricing-invariants Rule 1a (a claim must be valued at
-its claim-date price, NEVER current spot). The Sprint 1.12 DeFiLlama infra is
-already in place (`prewarmDefillamaPrices` / `getCachedOnlyDefillamaPrice`, keyed
-by Sui coin type) — this sprint reorders so DeFiLlama claim-date historical wins
-BEFORE the spot fallback for Cetus fee claims (a "replace", like the Orca decision
-in 1.12, not additive-only — get explicit approval at the plan gate). The CETUS
-**reward** token spot+LKG path stays untouched (a separate, designated Rule 1
-exception).
+**Goal:** Reassess the long-standing "~$57 vs hundreds" Aerodrome symptom on
+Account 1 (EVM `0xD99a9e66…4F20`, Base). Sprint 1.11 fixed the closed-position
+Capital-G/L exclusion (the canonical excluded-from-Capital-G/L case), which may
+have addressed part of this — and Sprint 1.13/1.14 fixed cold-load + deposit
+retrieval. Investigate-first: capture a fresh diagnostic over Account 1's open +
+closed Aerodrome positions + activity, compare against the Google-Sheet ground
+truth, and only build a fix if the symptom persists. Aerodrome fee claims price
+via sqrtPriceX96 archive (primary) + CoinGecko historical — confirm no spot
+leakage and that closed positions are included in Capital G/L.
 
-**Hard constraint:** Rule 1a — no current spot for claims. Reward-token exception
-preserved. Build clean before commit.
+**Hard constraint:** investigate-first (measure vs ground truth before any fix);
+additive; Rule 1a (no spot for claims). State which account explicitly
+(wallet-security Rule 4).
 
-**Status:** Not started — investigate-first (confirm the FIX-A spot path is still
-the resolver for Cetus non-SUI fee sides; find a reachable Cetus position with a
-non-SUI/non-stable pair to verify, or verify via the helper canary as in 1.12).
+**Status:** Not started — investigate-first.
 
 **Carry-overs (not blockers):**
+- **Bluefin/Momentum fee claims carry the same Rule 1a gap Cetus had** (found in
+  Sprint 1.15) — their fee-claim path falls to a current-spot last resort
+  (`fallbackA`/`fallbackB`) when SUI-historical misses, instead of DeFiLlama
+  claim-date historical. Queued as the **Bluefin/Momentum Rule 1a follow-up**
+  (queue item below); same fix pattern as Cetus 1.15 (per-side historical cascade,
+  remove spot). Reward paths there have no coin type / use their own rules.
 - **HyperEVM Tier 2 archive is a non-functional fallback for positions >~57 days
-  old** (Sprint 1.14 finding) — SCAN_DEPTH 5M blocks ≈ 57 days at HyperEVM's ~1s
-  block time, AND the Chainstack plan returns -32002 for true `fromBlock=0`
-  archive. Sprint 1.14's Redis deposit cache makes this moot for CLOSED positions
-  once warmed, but an OPEN HyperEVM position older than 57 days whose Etherscan
-  Tier 1 fails has no working fallback. Revisit only if it surfaces (open HyperEVM
-  positions get the client-side value>0 fallback, so no banner).
+  old** (Sprint 1.14) — mitigated for CLOSED positions by the Redis deposit cache;
+  OPEN HyperEVM positions >57 days rely on Tier 1 (but have the value>0 client
+  fallback, so no banner). Paid Chainstack archive would be the only real Tier-2
+  fix; deferred (budget).
 - **Sprint 1.12 Solana route not live-exercised** — Account 1's Orca ZEC/USDC +
   SOL/USDC positions are deposit-only (no fee claims yet). Production
   `defillama_historical_used` logs will confirm rescue.
 - **Sprint 1.13 cold-load full-page browser timing not headlessly measured** —
-  verified structurally (per-position activity work 2-3× → 1×) + warm baseline
-  (~8s); eyeball the "3-5 min → Xs" full-page number on the deploy.
+  verified structurally + warm baseline (~8s); eyeball on the deploy.
 - **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) + activity
   routes still use hardcoded maps; future sprint migrates + removes them (Rule 9).
-- **Bluefin/Momentum guard live-verification** still pending (no live Sui CLMM
-  position on queryable wallets). Byte-identical for healthy positions.
 
 ---
 
@@ -89,14 +86,14 @@ non-SUI/non-stable pair to verify, or verify via the helper canary as in 1.12).
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Cetus claims use cg-spot for historical — Rule 1a fix** (active, Sprint 1.15)
-   — replace the Cetus FIX-A current-spot fee-claim fallback with DeFiLlama
-   claim-date historical (1.12 infra in place; reorder so historical wins before
-   spot). Claim-date only, never current spot (Rule 1a). See Active sprint.
-2. **Account 1 Aerodrome accounting investigation** (Sprint 2.1) — reassess the
-   "~$57 vs hundreds" symptom; Sprint 1.11 likely fixed the closed-position
-   Capital-G/L half. Fresh diagnostic over open + closed + activity vs
-   Google-Sheet ground truth only if the symptom persists.
+1. **Account 1 Aerodrome accounting investigation** (active, Sprint 2.1) —
+   reassess the "~$57 vs hundreds" symptom against Google-Sheet ground truth;
+   1.11/1.13/1.14 may have addressed it. Fresh diagnostic; fix only if it persists.
+2. **Bluefin/Momentum fee-claim Rule 1a fix** (follow-up from Sprint 1.15) — apply
+   the Cetus 1.15 pattern: value Bluefin/Momentum fee claims historical-only
+   (stable → $1; SUI → CG-historical then DeFiLlama; other non-stable → DeFiLlama;
+   else pending). Remove the current-spot `fallbackA`/`fallbackB` last resort for
+   fee claims. Reward paths unchanged.
 3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
    closed Sui positions from on-chain events (objects destroyed on close); feeds
    Capital G/L.
@@ -123,6 +120,26 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`4752416`** — Sprint 1.15: Cetus fee claims route through DeFiLlama historical
+  before any spot (Rule 1a fix). Eliminates the latent FIX-A violation surfaced in
+  1.12: Cetus FEE claims fell back to CURRENT cg-spot when CoinGecko SUI-historical
+  missed (cold/rate-limited) or for a non-SUI/non-stable side, and the USDC stable
+  side was priced off the current-spot fallback rather than $1-anchored. Fix
+  (REPLACE, user-approved like the 1.12 Orca decision): fee claims are now valued
+  historical-ONLY, per side — stablecoin → $1; SUI side → CoinGecko historical then
+  DeFiLlama historical-by-coin-type; any other non-stable side → DeFiLlama
+  historical; if a side can't be priced historically the claim stays pending (no
+  spot). The cg-spot / FIX-A fee-claim fallback is REMOVED; the 1.12 DeFiLlama
+  prewarm is expanded to include the SUI side; the 1.12 null-only DeFiLlama block
+  is folded into the cascade as a first-class historical tier (reuses the 1.12
+  helper). **Memory #28 CETUS reward-token spot+LKG path PRESERVED** (separate
+  reward_claim branch). No cache bump. Verified (Account 2 USDC/SUI): build+tsc
+  clean; 3/3 fee claims via sui-historical with USDC=$1; **0 cg-spot for fee_claims**
+  (the only cg-spot are 3 reward_claim/CETUS — the designated exception); DeFiLlama-
+  SUI fallback warmed + wired (`defillama_historical_used` for 0x2::sui::SUI at all
+  3 dates); Bluefin 38/38 unchanged; scope limited to cetus/activity + docs.
+  CG-miss→DeFiLlama-SUI proven by construction (CoinGecko can't be forced to miss
+  locally). **Bluefin/Momentum carry the same latent pattern → queued follow-up.**
 - **`65d6328`** — Sprint 1.14: persist closed-position deposit history in Redis
   (fixes the "Deposit history could not be retrieved" banner on 1 of 4 Account 2
   ProjectX positions, which persisted past Sprint 1.13). DIAGNOSIS: these closed
@@ -252,18 +269,9 @@ shorthand.
   **Sprint 2.1 NOT resolved** (Account 1 Aerodrome healthy $8,922, mapped
   tokens — Tier-3 class N/A). Tier 2 (uniswap/v3, pancakeswap) + activity
   routes still queued.
-- **`0b9e3a0`** — Sprint 1.8b: Performance Metrics + Yield/APR Projections fall
-  back to an uncollected-fees-based estimate for new positions with no claim
-  history (were em-dash / N/A from day 1). New shared `app/lib/positionProjections.ts`
-  (`computePositionProjection`: claims → uncollected → none). Position detail page
-  feeds `actualAPR`/`actualDailyIncome` from it (byte-identical when claims exist)
-  and labels the source honestly (Memory #14): "from uncollected (early estimate)"
-  vs "from real claims". Yield & APR Projections keep the pool-APY path when
-  `hasApr`, else fall back to the uncollected projection (per user decision). Fee
-  Income Rate + Estimated APR untouched. UI-only (no route changes, no cache
-  bump). Verified: canary math (new ZEC $41.65/1d/$4700 → 'uncollected', 323.5%
-  APR, $15,202/yr) + byte-identity for claims; live ZEC input $63.08, apy 0. Browser
-  paint not headlessly verifiable — eyeball on deploy.
+- _(Sprint 1.8b `0b9e3a0` — Performance Metrics + Yield/APR Projections fall back
+  to an uncollected-fees estimate for new positions with no claim history — rolled
+  off this list; see git history.)_
 - _(Sprint 1.8 `a6a6e75` — Cetus pending-fee computation (pool-owned fee table:
   position_manager LinkedTable + tick SkipList) — rolled off this list; see git
   history.)_
