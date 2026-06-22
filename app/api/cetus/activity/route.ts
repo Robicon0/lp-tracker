@@ -417,18 +417,20 @@ async function GET_impl(request: Request) {
       ? await fetchSpotPrices([...__cgIdsNeeded])
       : {};
 
-    // Sprint 1.12: prewarm DeFiLlama claim-date historical for any fee-claim pool
-    // side that is NEITHER canonical SUI (priced via SUI-historical above) NOR a
-    // stablecoin ($1) — a long-tail token the existing path can't price
-    // historically, which would otherwise leave the claim "pending". Used by the
-    // synchronous map below ONLY when the claim is still unresolved (additive).
-    // The CETUS reward token's spot+LKG path (pricing-invariants Rule 1
-    // exception) is untouched — reward claims are not routed through DeFiLlama.
+    // Sprint 1.15: prewarm DeFiLlama claim-date historical for EVERY non-stable
+    // fee-claim pool side — INCLUDING canonical SUI. Cetus fee claims are now
+    // valued historical-only (Rule 1a): the SUI side uses CoinGecko historical
+    // first and DeFiLlama as its historical fallback (so a cold/missed CG-history
+    // no longer drops the SUI side to current spot), and any non-SUI side uses
+    // DeFiLlama. Stablecoin sides anchor at $1 and need no fetch. (Sprint 1.12
+    // excluded SUI here because the spot fallback covered it; that fallback is
+    // now removed.) The CETUS reward token's spot+LKG path is a separate,
+    // designated Rule 1 exception and is untouched — rewards are not prewarmed
+    // or priced via DeFiLlama.
     {
       const __feeTs = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.timestamp);
       if (__feeTs.length > 0) {
-        const __eligible = (ct: string) =>
-          !!ct && ct.toLowerCase() !== suiCanonical && !STABLECOINS.has(ct.toLowerCase());
+        const __eligible = (ct: string) => !!ct && !STABLECOINS.has(ct.toLowerCase());
         const __dl: Array<{ chain: 'sui'; contract: string; timestamps: number[] }> = [];
         if (__eligible(coinTypeA)) __dl.push({ chain: 'sui', contract: coinTypeA, timestamps: __feeTs });
         if (__eligible(coinTypeB)) __dl.push({ chain: 'sui', contract: coinTypeB, timestamps: __feeTs });
@@ -461,6 +463,10 @@ async function GET_impl(request: Request) {
       let price0AtTime: number | null = null;
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
+      // Sprint 1.15: which historical source priced a fee claim (for the
+      // read-only [PRICE_LOG] re-derivation below). NEVER 'cg-spot' — fee claims
+      // are historical-only (Rule 1a).
+      let __feeClaimSrc = 'unknown';
 
       if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
         const derived = deriveDepositPrices(
@@ -521,32 +527,51 @@ async function GET_impl(request: Request) {
           price1AtTime = null;
           usdAtTime = null;
         }
-      } else if (usdAtTime == null) {
-        // fee_claim / withdrawal / deposit where deriveDepositPrices was
-        // unavailable. For fee_claim: substitute historical SUI price on
-        // the SUI side when the cache has it (prewarmed above); the other
-        // side stays at current fallback (USDC is $1; other non-SUI tokens
-        // get their current price as a last-resort approximation).
-        let pxA = fallbackA;
-        let pxB = fallbackB;
-        if (ev.type === 'fee_claim') {
-          if (suiSideIsA) {
-            const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
-            if (hist != null) pxA = hist;
-          } else if (suiSideIsB) {
-            const hist = getCachedSuiPriceForTimestamp(ev.timestamp);
-            if (hist != null) pxB = hist;
+      } else if (ev.type === 'fee_claim') {
+        // Sprint 1.15: Cetus fee claims are valued at CLAIM-DATE historical ONLY
+        // (pricing-invariants Rule 1a) — NEVER current spot. Per side: a
+        // stablecoin is $1; the SUI side uses CoinGecko historical (prewarmed)
+        // then DeFiLlama historical-by-coin-type as its historical fallback; any
+        // other non-stable side uses DeFiLlama historical. If a side cannot be
+        // priced historically the claim stays UNRESOLVED (null) and surfaces as
+        // "pending price resolution" — the prior current-spot / FIX-A spot
+        // fallback is REMOVED. (The CETUS reward token's spot+LKG path above is a
+        // separate, designated Rule 1 exception and is untouched.)
+        const __sA = STABLECOINS.has(coinTypeA.toLowerCase());
+        const __sB = STABLECOINS.has(coinTypeB.toLowerCase());
+        const __histSui = getCachedSuiPriceForTimestamp(ev.timestamp);
+        let __usedDl = false;
+        let __usedSuiHist = false;
+        const priceSide = (coinType: string, isStable: boolean, isSui: boolean): number | null => {
+          if (isStable) return 1;
+          if (isSui) {
+            if (__histSui != null) { __usedSuiHist = true; return __histSui; }
+            const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
+            if (dl != null) __usedDl = true;
+            return dl;
           }
-          // FIX A: a SUI / CETUS fee side still unpriced (e.g. CETUS/USDC pool,
-          // or SUI when both historical and its spot fallback returned null) →
-          // current cg-spot via the CG-id map.
-          if (pxA === 0) { const cg = CG_ID_BY_COINTYPE[coinTypeA.toLowerCase()]; if (cg && (spotByCgId[cg] ?? 0) > 0) pxA = spotByCgId[cg]; }
-          if (pxB === 0) { const cg = CG_ID_BY_COINTYPE[coinTypeB.toLowerCase()]; if (cg && (spotByCgId[cg] ?? 0) > 0) pxB = spotByCgId[cg]; }
-        }
-        price0AtTime = pxA || null;
-        price1AtTime = pxB || null;
-        if (pxA > 0 || pxB > 0) {
+          const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
+          if (dl != null) __usedDl = true;
+          return dl;
+        };
+        const pxA = priceSide(coinTypeA, __sA, suiSideIsA);
+        const pxB = priceSide(coinTypeB, __sB, suiSideIsB);
+        if (pxA != null && pxB != null) {
+          price0AtTime = pxA;
+          price1AtTime = pxB;
           usdAtTime = amount0 * pxA + amount1 * pxB;
+          __feeClaimSrc = __usedDl ? 'defillama-historical' : __usedSuiHist ? 'sui-historical' : 'stablecoin-fixed';
+        }
+        // else: usdAtTime stays null → pending (Rule 1a — no spot fallback).
+      } else if (usdAtTime == null) {
+        // Withdrawal / deposit where on-chain derivation (deriveDepositPrices)
+        // was unavailable: current-spot last resort. Allowed by pricing-invariants
+        // Rule 2 (a point-in-time position value, NOT historical earnings).
+        // UNCHANGED — this never applies to fee claims (handled above).
+        price0AtTime = fallbackA || null;
+        price1AtTime = fallbackB || null;
+        if (fallbackA > 0 || fallbackB > 0) {
+          usdAtTime = amount0 * fallbackA + amount1 * fallbackB;
         }
       }
 
@@ -560,27 +585,10 @@ async function GET_impl(request: Request) {
         (ev.type === 'fee_claim' && amount0 === 0 && amount1 === 0);
       if (__isZeroAmount) usdAtTime = 0;
 
-      // Sprint 1.12: DeFiLlama claim-date historical fallback. Fires ONLY when
-      // the existing path above could not price this FEE claim (usdAtTime still
-      // null) — e.g. a non-SUI / non-stable pool whose token isn't in the FIX-A
-      // CG-id map. SUI/stable/zero-amount fee claims already resolve above, so
-      // this never fires for them (byte-identical) and is purely additive.
-      // Reward claims are intentionally NOT routed through DeFiLlama: the CETUS
-      // reward token uses spot+LKG by design (pricing-invariants Rule 1
-      // exception). Rule 1a: claim-date historical only, never current spot.
-      let __viaDefillama = false;
-      if (ev.type === 'fee_claim' && usdAtTime == null) {
-        const __sA = STABLECOINS.has(coinTypeA.toLowerCase());
-        const __sB = STABLECOINS.has(coinTypeB.toLowerCase());
-        const __dlA = __sA ? 1 : getCachedOnlyDefillamaPrice('sui', coinTypeA, ev.timestamp);
-        const __dlB = __sB ? 1 : getCachedOnlyDefillamaPrice('sui', coinTypeB, ev.timestamp);
-        if (__dlA != null && __dlB != null) {
-          price0AtTime = __dlA;
-          price1AtTime = __dlB;
-          usdAtTime = amount0 * __dlA + amount1 * __dlB;
-          __viaDefillama = true;
-        }
-      }
+      // (Sprint 1.15: the Sprint 1.12 additive DeFiLlama fallback that lived here
+      // is now folded into the fee_claim historical cascade above — DeFiLlama is
+      // a first-class historical tier for both the SUI side and non-SUI sides,
+      // not an after-the-fact null-only patch.)
 
       let cumulativeFeeUSD = 0;
       if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
@@ -621,10 +629,10 @@ async function GET_impl(request: Request) {
             else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
             else __src = 'unknown';
           } else {
-            if (__viaDefillama) __src = 'defillama-historical';
-            else if ((suiSideIsA || suiSideIsB) && __histSui != null && usdAtTime != null && usdAtTime > 0) __src = 'sui-historical';
-            else if (usdAtTime != null && usdAtTime > 0) __src = 'cg-spot';
-            else __src = 'unknown';
+            // Sprint 1.15: fee-claim source is whatever the historical cascade
+            // recorded — sui-historical / defillama-historical / stablecoin-fixed
+            // / unknown. NEVER cg-spot (Rule 1a: fee claims are historical-only).
+            __src = __feeClaimSrc;
           }
           __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
           const __ok = usdAtTime != null && usdAtTime > 0;

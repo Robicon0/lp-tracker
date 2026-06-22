@@ -105,14 +105,19 @@ the claim (else treats it as missing). DeFiLlama's *current* endpoint
 (Sprint 1.10) and must not value a claim. Production signals:
 `defillama_historical_used` / `_missing` / `_error` (instrumentation.md).
 
-Per-route shape (Sprint 1.12): Solana routes (orca/raydium) use DeFiLlama-by-mint
+Per-route shape: Solana routes (orca/raydium, Sprint 1.12) use DeFiLlama-by-mint
 as the PRIMARY claim-date source — no CoinGecko-historical path is wired into them
 — replacing the prior current-spot/zero fee-side fallback (a Rule 1a improvement).
-Sui routes (cetus/bluefin) use DeFiLlama as an ADDITIVE fallback that fires only
-when the existing path (on-chain SUI historical + stablecoin $1) leaves a fee
-claim unresolved; reward claims are NOT routed through DeFiLlama (the CETUS reward
-spot+LKG exception below is preserved, and Bluefin reward events carry no coin
-type).
+**Cetus (Sprint 1.15)** values fee claims historical-ONLY, per side: stablecoin →
+$1; SUI side → CoinGecko historical then DeFiLlama historical; any other non-stable
+side → DeFiLlama historical; if a side can't be priced historically the claim
+stays pending. The prior current-spot / "FIX-A" cg-spot fee-claim fallback is
+REMOVED — there is NO spot path for Cetus fee claims. Bluefin/Momentum still carry
+the older shape (DeFiLlama additive null-only + a current-spot last resort when
+SUI-historical misses) — a known same-pattern Rule 1a gap queued for a follow-up
+sprint. Reward claims on every Sui route are NOT routed through DeFiLlama: the
+CETUS reward token's spot+LKG path (below) is a separate, designated exception and
+is preserved; Bluefin reward events carry no coin type.
 
 ### Exceptions to Rule 1
 
