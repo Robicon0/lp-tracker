@@ -45,8 +45,8 @@ updated when versions are bumped.
 
 | Cache key            | Current version | Last bump reason |
 |----------------------|-----------------|------------------|
-| lp-pnl-events        | v23             | Sprint 1.6 — Tier-1 Upstash Redis persistent price cache added above the in-process historical cache; resolution path changed (warm-Redis claims that previously timed out now resolve) |
-| analytics-activity   | v15             | Parity with lp-pnl-events v23 — Sprint 1.6 Redis price-cache tier |
+| lp-pnl-events        | v24             | Sprint 2.1b — EVM V3 activity events gain `logIndex`; Aerodrome/Velodrome fee claims valued historical-only (cg-spot removed, DeFiLlama tier added). Parity with analytics-activity v16 |
+| analytics-activity   | v16             | Sprint 2.1b — closed Aerodrome/Velodrome positions now scanned per-position (were skipped); Fee Income dedup keys on (protocol, txHash, logIndex); cg-spot removed from aero/velo routes |
 | cetus-activity       | v3              | Cetus V2 deposit/withdrawal event structure |
 | bluefin-activity     | v3              | (verify in code before bumping) |
 

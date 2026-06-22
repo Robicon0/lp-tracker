@@ -41,31 +41,27 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 2.1: Account 1 Aerodrome accounting investigation.**
+**Sprint NEW: Bluefin + Momentum fee-claim Rule 1a fix.**
 
-**Goal:** Reassess the long-standing "~$57 vs hundreds" Aerodrome symptom on
-Account 1 (EVM `0xD99a9e66…4F20`, Base). Sprint 1.11 fixed the closed-position
-Capital-G/L exclusion (the canonical excluded-from-Capital-G/L case), which may
-have addressed part of this — and Sprint 1.13/1.14 fixed cold-load + deposit
-retrieval. Investigate-first: capture a fresh diagnostic over Account 1's open +
-closed Aerodrome positions + activity, compare against the Google-Sheet ground
-truth, and only build a fix if the symptom persists. Aerodrome fee claims price
-via sqrtPriceX96 archive (primary) + CoinGecko historical — confirm no spot
-leakage and that closed positions are included in Capital G/L.
+**Goal:** Apply the Cetus 1.15 / Aerodrome 2.1b historical-only pattern to the
+**Bluefin and Momentum** activity routes. Their fee-claim path still falls to a
+current-spot last resort (`fallbackA`/`fallbackB`) when SUI-historical misses —
+the last remaining instance of the Rule 1a leak that 1.15 fixed for Cetus and
+2.1b fixed for Aerodrome/Velodrome. Value fee claims historical-only, per side:
+stablecoin → $1; SUI side → CoinGecko historical then DeFiLlama
+historical-by-coin-type; any other non-stable side → DeFiLlama historical; else
+pending. Remove the current-spot `fallbackA`/`fallbackB` last resort **for fee
+claims only** (deposits/withdrawals keep the Rule 2 spot last resort). Reward
+paths unchanged (Bluefin reward events carry no coin type; CETUS reward spot+LKG
+is a separate designated exception — not relevant to Bluefin/Momentum).
 
-**Hard constraint:** investigate-first (measure vs ground truth before any fix);
-additive; Rule 1a (no spot for claims). State which account explicitly
-(wallet-security Rule 4).
+**Hard constraint:** investigate-first; additive except the spot-fee-claim
+REPLACE (user-approved pattern, same gate as 1.12/1.15/2.1b); Rule 1a (no spot
+for claims). State which account explicitly (wallet-security Rule 4).
 
-**Status:** Not started — investigate-first.
+**Status:** Not started.
 
 **Carry-overs (not blockers):**
-- **Bluefin/Momentum fee claims carry the same Rule 1a gap Cetus had** (found in
-  Sprint 1.15) — their fee-claim path falls to a current-spot last resort
-  (`fallbackA`/`fallbackB`) when SUI-historical misses, instead of DeFiLlama
-  claim-date historical. Queued as the **Bluefin/Momentum Rule 1a follow-up**
-  (queue item below); same fix pattern as Cetus 1.15 (per-side historical cascade,
-  remove spot). Reward paths there have no coin type / use their own rules.
 - **HyperEVM Tier 2 archive is a non-functional fallback for positions >~57 days
   old** (Sprint 1.14) — mitigated for CLOSED positions by the Redis deposit cache;
   OPEN HyperEVM positions >57 days rely on Tier 1 (but have the value>0 client
@@ -86,14 +82,15 @@ additive; Rule 1a (no spot for claims). State which account explicitly
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Account 1 Aerodrome accounting investigation** (active, Sprint 2.1) —
-   reassess the "~$57 vs hundreds" symptom against Google-Sheet ground truth;
-   1.11/1.13/1.14 may have addressed it. Fresh diagnostic; fix only if it persists.
-2. **Bluefin/Momentum fee-claim Rule 1a fix** (follow-up from Sprint 1.15) — apply
-   the Cetus 1.15 pattern: value Bluefin/Momentum fee claims historical-only
-   (stable → $1; SUI → CG-historical then DeFiLlama; other non-stable → DeFiLlama;
-   else pending). Remove the current-spot `fallbackA`/`fallbackB` last resort for
-   fee claims. Reward paths unchanged.
+1. **Bluefin/Momentum fee-claim Rule 1a fix** (active, Sprint NEW; follow-up from
+   Sprint 1.15) — apply the Cetus 1.15 / Aerodrome 2.1b pattern: value
+   Bluefin/Momentum fee claims historical-only (stable → $1; SUI → CG-historical
+   then DeFiLlama; other non-stable → DeFiLlama; else pending). Remove the
+   current-spot `fallbackA`/`fallbackB` last resort for fee claims. Reward paths
+   unchanged. Last remaining instance of the cg-spot fee-claim leak.
+2. **Homepage email capture** (Sprint EMAIL) — one-day sprint: add an email-capture
+   field to the homepage (waitlist / updates). Server-side store; no wallet
+   coupling (wallet-security forward-looking note).
 3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
    closed Sui positions from on-chain events (objects destroyed on close); feeds
    Capital G/L.
@@ -120,6 +117,36 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`5b8f6b7`** — Sprint 2.1b: Aerodrome/Velodrome closed-position Fee Income fix +
+  cg-spot Rule 1a cleanup. Investigation (Sprint 2.1, read-only) found the
+  long-standing "~$57 vs hundreds" Account-1 Aerodrome symptom is largely resolved
+  (1.10/1.11/1.13/1.14 side effects) BUT a residual bug remained: closed
+  Aerodrome/Velodrome positions were skipped per-position
+  (`useAllPositionsActivity.ts`) and delegated to the wallet-scope `positionId=all`
+  scan, which prices EVERY ever-owned tokenId with ONE representative pool context.
+  A wallet with 2+ pairs where a non-largest pair is fully closed had that pair's
+  Collect events decoded with the WRONG decimals/pool → crushed to ~$0. Account 1's
+  closed USDC/cbBTC NFT 50087147: true lifetime fees ~$296 shown as $0.21; Aerodrome
+  Fee Income $1,277.67 vs true ~$1,576. FIX (REPLACE, user-approved like 1.12/1.15):
+  closed Aerodrome/Velodrome positions with resolved token context (token0Address +
+  token1Address + poolAddress all present) now flow through the SAME per-position
+  scan used by Capital G/L + the LP P&L "Fees Collected" card; wallet-scope retained
+  as a SAFETY NET for context-less burned positions; analytics Fee Income dedup now
+  keys on (protocol, txHash, **logIndex**) — propagated from both EVM V3 routes — so
+  per-position values win over the wallet-scope duplicate. BONUS (Rule 1a): the
+  cg-spot last resort is REMOVED from the Aerodrome AND Velodrome activity routes;
+  fee claims value historical-only (sqrtPriceX96 archive → CoinGecko historical →
+  DeFiLlama historical-by-contract, prewarmed only for sqrtPrice-missed claims →
+  pending), same template as Cetus 1.15. Cache bumps: analytics-activity v15→v16,
+  lp-pnl-events v23→v24. Verified (Account 1): cbBTC $0.21→~$296; merged Fee Income
+  ~$1,576; 45/45 wallet-scope claims deduped (per-position wins); **0 cg-spot for
+  aerodrome/velodrome fee claims** (3 formerly-leaking claims now defillama-
+  historical); Capital G/L computation path byte-identical (A/B stash-proven
+  old==new — the −$2,670→−$2,755 numeric drift is pre-existing sqrtPrice-archive
+  run-to-run variance on one single-sided withdrawal block, NOT this fix);
+  build+tsc clean. Velodrome fix is platform-prophylactic (Account 1 has 0
+  Velodrome positions). **Bluefin/Momentum still carry the spot-fee-claim leak →
+  now the active sprint.**
 - **`4752416`** — Sprint 1.15: Cetus fee claims route through DeFiLlama historical
   before any spot (Rule 1a fix). Eliminates the latent FIX-A violation surfaced in
   1.12: Cetus FEE claims fell back to CURRENT cg-spot when CoinGecko SUI-historical
@@ -246,29 +273,10 @@ shorthand.
   (Orca/ZEC resolution, Cetus pending $348, 0 underflow). The "ProjectX missing
   from Fee Income" half is a SEPARATE root cause (cold historical-claim cache) →
   Sprint 1.12. The 429 trigger isn't locally reproducible (low CG load).
-- **`140d908`** — Sprint 1.10: platform-wide automatic token resolution. New
-  `app/lib/tokenResolver.ts` (`resolveToken`) + `app/lib/tokenConstants.ts`
-  (native tokens + canonical stables per chain — the only pinned identities;
-  everything else auto-discovers). Cascade: Redis → hardcoded constants →
-  CoinGecko contract lookup (`/coins/{platform}/contract/{addr}`, platforms
-  verified live: solana, sui, hyperevm, ethereum, arbitrum-one,
-  optimistic-ethereum, base, polygon-pos) → on-chain metadata (authoritative
-  symbol+decimals) → CoinGecko symbol search → DeFiLlama coverage check
-  (informational only this sprint) → graceful unresolvable (Option A). New
-  `[PRICE_LOG]` `token_resolver_used` + `token_resolution_failed`. **Tier 1**
-  (cetus, bluefin, momentum, orca, raydium, hyperswap): the LAST-RESORT
-  symbol-search fallback now calls `resolveToken`; hardcoded fast paths
-  untouched → previously-mapped tokens byte-identical (proven: resolver fired
-  0× for every mapped-token position + git-stash A/B identical). **Tier 3**
-  (aerodrome, velodrome): unmapped pool tokens resolve symbol+decimals from
-  on-chain truth instead of the blind `decimals=18` default — silent
-  amount-corruption class eliminated. No cache bump. Verified (Accounts 1&2):
-  build+tsc clean; resolver live on unmapped Orca ZEC mint →
-  `omnibridge-bridged-zcash-solana` dec 8 (0.03% from old `zcash` path); Cetus
-  pending fees intact ($26,495/$346); 0 underflow; 0 resolution-failed.
-  **Sprint 2.1 NOT resolved** (Account 1 Aerodrome healthy $8,922, mapped
-  tokens — Tier-3 class N/A). Tier 2 (uniswap/v3, pancakeswap) + activity
-  routes still queued.
+- _(Sprint 1.10 `140d908` — platform-wide automatic token resolution
+  (`app/lib/tokenResolver.ts` + `tokenConstants.ts`); Tier-3 (aerodrome/velodrome)
+  unmapped pool tokens resolve decimals from on-chain truth, not blind `=18` —
+  rolled off this list; see git history.)_
 - _(Sprint 1.8b `0b9e3a0` — Performance Metrics + Yield/APR Projections fall back
   to an uncollected-fees estimate for new positions with no claim history — rolled
   off this list; see git history.)_
@@ -489,8 +497,10 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
-- `lp-pnl-events-v23`
-- `analytics-activity-v15`
+- `lp-pnl-events-v24` (Sprint 2.1b — EVM V3 events gain `logIndex`; aero/velo
+  fee claims historical-only, cg-spot removed)
+- `analytics-activity-v16` (Sprint 2.1b — closed aero/velo now scanned
+  per-position; `logIndex` dedup; cg-spot removed)
 - `cetus-activity-v3`
 - `bluefin-activity-v3`
 
