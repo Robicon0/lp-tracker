@@ -41,25 +41,29 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint NEW: Bluefin + Momentum fee-claim Rule 1a fix.**
+**Sprint EMAIL: Homepage email capture.**
 
-**Goal:** Apply the Cetus 1.15 / Aerodrome 2.1b historical-only pattern to the
-**Bluefin and Momentum** activity routes. Their fee-claim path still falls to a
-current-spot last resort (`fallbackA`/`fallbackB`) when SUI-historical misses —
-the last remaining instance of the Rule 1a leak that 1.15 fixed for Cetus and
-2.1b fixed for Aerodrome/Velodrome. Value fee claims historical-only, per side:
-stablecoin → $1; SUI side → CoinGecko historical then DeFiLlama
-historical-by-coin-type; any other non-stable side → DeFiLlama historical; else
-pending. Remove the current-spot `fallbackA`/`fallbackB` last resort **for fee
-claims only** (deposits/withdrawals keep the Rule 2 spot last resort). Reward
-paths unchanged (Bluefin reward events carry no coin type; CETUS reward spot+LKG
-is a separate designated exception — not relevant to Bluefin/Momentum).
+**Goal:** One-day sprint — add an email-capture field to the homepage (waitlist /
+updates). Server-side store; **no wallet coupling** (wallet-security forward-looking
+note: gating/identity must stay architecturally separate from wallet logic, and
+this is a no-wallet feature). Validate + persist server-side; no client-only store.
 
-**Hard constraint:** investigate-first; additive except the spot-fee-claim
-REPLACE (user-approved pattern, same gate as 1.12/1.15/2.1b); Rule 1a (no spot
-for claims). State which account explicitly (wallet-security Rule 4).
+**Hard constraint:** investigate-first; additive; server-side persistence only;
+keep wallet logic untouched (wallet-security forward-looking note).
 
 **Status:** Not started.
+
+**Note — Sprint NEW (Bluefin/Momentum Rule 1a) shipped as `17c5101`:** Bluefin fee
+claims are now historical-only (cg-spot/current-spot fallback removed); see Recent
+fixes. **Momentum was a no-op this sprint** — it is dashboard-only with NO activity
+route / NO fee-claim valuation path (an *unsupported* protocol in the P&L pipeline,
+per `useLpPnl.ts`), so it carried no cg-spot leak. Its historical-only cascade will
+be built into the Momentum activity route when that route is created (queue
+"Momentum activity route"). **Rule 1a is now fully enforced platform-wide: every
+fee claim on every protocol on every chain uses historical pricing only** — the
+sole documented exception is the CETUS reward-token spot+LKG path (a designated
+primary source, not a fallback). Bluefin/Momentum reward branches remain on their
+separate spot+symbol path (untouched; empirical historical migration deferred).
 
 **Carry-overs (not blockers):**
 - **HyperEVM Tier 2 archive is a non-functional fallback for positions >~57 days
@@ -82,30 +86,27 @@ for claims). State which account explicitly (wallet-security Rule 4).
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Bluefin/Momentum fee-claim Rule 1a fix** (active, Sprint NEW; follow-up from
-   Sprint 1.15) — apply the Cetus 1.15 / Aerodrome 2.1b pattern: value
-   Bluefin/Momentum fee claims historical-only (stable → $1; SUI → CG-historical
-   then DeFiLlama; other non-stable → DeFiLlama; else pending). Remove the
-   current-spot `fallbackA`/`fallbackB` last resort for fee claims. Reward paths
-   unchanged. Last remaining instance of the cg-spot fee-claim leak.
-2. **Homepage email capture** (Sprint EMAIL) — one-day sprint: add an email-capture
-   field to the homepage (waitlist / updates). Server-side store; no wallet
-   coupling (wallet-security forward-looking note).
-3. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
+1. **Homepage email capture** (active, Sprint EMAIL) — one-day sprint: add an
+   email-capture field to the homepage (waitlist / updates). Server-side store; no
+   wallet coupling (wallet-security forward-looking note).
+2. **Sui closed positions via RemoveLiquidityV2Event** (Sprint 2.2) — recover
    closed Sui positions from on-chain events (objects destroyed on close); feeds
    Capital G/L.
-4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+3. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history; feeds
    Capital G/L.
-5. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
+4. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number.
-6. **Closed Sui position fee recovery** — Sui event indexer on free public RPC.
-7. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer.
-8. **Capital G/L expansion to Sui + Solana** — wire indexed events into the
+5. **Closed Sui position fee recovery** — Sui event indexer on free public RPC.
+6. **Momentum activity route** — modeled on Bluefin, uses the Sui indexer. Build the
+   Rule 1a historical-only fee-claim cascade in from the start (stable → $1; SUI →
+   CG-historical → DeFiLlama; other non-stable → DeFiLlama; else pending; no spot) —
+   the Bluefin `17c5101` template. This is where Momentum's deferred cascade lands.
+7. **Capital G/L expansion to Sui + Solana** — wire indexed events into the
    Capital G/L sum. Remove "EVM only" UI label.
-9. **UI for closed Sui + Solana positions** — Closed tab support.
-10. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+8. **UI for closed Sui + Solana positions** — Closed tab support.
+9. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
@@ -117,6 +118,35 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`17c5101`** — Sprint NEW: Bluefin fee claims historical-only — the LAST cg-spot
+  fee-claim leak on the platform. Sprint 1.15's investigation flagged that Bluefin
+  (and Momentum) carried the same latent FIX-A pattern Cetus had. CONFIRMED in the
+  Bluefin activity route: fee claims started `pxA=fallbackA`/`pxB=fallbackB` (current
+  spot query params) and set `usdAtTime` non-null whenever any spot was passed,
+  PRE-EMPTING the Sprint 1.12 DeFiLlama block (which only fired when
+  `usdAtTime==null`) — so DeFiLlama was effectively dead code for fee claims and the
+  SUI/non-stable sides rode current spot on cold-cache loads (Rule 1a leak). FIX
+  (REPLACE, user-approved like 1.12/1.15/2.1b): a dedicated `else if (ev.type ===
+  'fee_claim')` branch placed before the deposit/withdrawal spot last-resort, valuing
+  fee claims claim-date historical-ONLY per side — stablecoin → $1; SUI →
+  CoinGecko-historical → DeFiLlama-historical → pending; other non-stable →
+  DeFiLlama-historical → pending; NO spot. DeFiLlama is folded in as a first-class
+  historical tier and the prewarm is WIDENED to include the SUI side (cold CG-history
+  SUI miss → DeFiLlama, not spot), mirroring Cetus 1.15. Deposit/withdrawal spot
+  last-resort (Rule 2) PRESERVED; reward branch PRESERVED byte-identical (Bluefin
+  reward events carry only a symbol, no coin type; empirical historical migration
+  deferred, same caution as the CETUS spot+LKG exception). **MOMENTUM was a no-op** —
+  dashboard-only, NO activity route / NO fee-claim path (unsupported in `useLpPnl`),
+  so no leak; its cascade is deferred into the future "Momentum activity route"
+  sprint. Cache bumps: bluefin-activity v3→v4, analytics-activity v16→v17,
+  lp-pnl-events v24→v25. Verified (Account 2, Bluefin wallet-scope, spot priceA=2.0
+  passed like prod): fee claims 19/19 historical (10 defillama-historical + 9
+  sui-historical), **0 cg-spot / 0 unknown**; route_summary 38/38 resolved 0 failed;
+  defillama_historical 10 used / 0 missing / 0 error; the 10 cg-spot in the breakdown
+  are all REWARD claims (untouched path); build+tsc clean. **Platform-wide: Rule 1a
+  now fully enforced — every fee claim on every protocol on every chain is historical
+  only** (sole exception: CETUS reward-token spot+LKG, a designated source not a
+  fallback).
 - **`5b8f6b7`** — Sprint 2.1b: Aerodrome/Velodrome closed-position Fee Income fix +
   cg-spot Rule 1a cleanup. Investigation (Sprint 2.1, read-only) found the
   long-standing "~$57 vs hundreds" Account-1 Aerodrome symptom is largely resolved
@@ -250,29 +280,10 @@ shorthand.
   carry-overs): Solana route not live-exercised (Account 1 Orca positions are
   deposit-only); Cetus has a pre-existing cg-spot-for-claims FIX-A path (out of
   scope, flagged).
-- **`d57f051`** — Sprint 1.11: fix cold-cache exclusion of closed HyperEVM
-  positions on first analytics load. Root cause was NOT token resolution
-  (HYPE/USDC are in hyperswap's hardcoded map; the resolver never touches them):
-  `computePositionPnL` gated EVERY position on current price (`price0/price1 > 0`)
-  BEFORE the closed-position branch. A closed position's Capital G/L / initial /
-  closing / netPnl / fees all come from HISTORICAL events — current price feeds
-  only hodlValue/IL (which degrade via `ilAvailable`). So when the position route
-  returned `price0=0` (a cold-instance CoinGecko SPOT 429 during the parallel
-  8-route analytics fetch; the spot path is un-paced), the wallet's closed
-  HyperEVM/ProjectX positions were spuriously excluded — dropped from Capital G/L
-  (`CAPITAL_GL_CHAINS` includes HyperEVM) and shown with a bogus "Current price
-  data unavailable" banner that vanished on refresh once the 60s spot cache
-  warmed (Capital G/L −$2,774 cold → −$1,808 warm). Fix (Approach C, additive,
-  1 line in `positionPnl.ts`): gate `price0/price1 > 0` for OPEN positions only;
-  closed positions compute from history (IL "unavailable" if current price
-  missing). Warm-cache closed positions byte-identical; open unchanged; genuine
-  data gaps still exclude via `no_deposits`/`missing_deposit_prices`. No cache
-  bump. Verified: build+tsc clean; deterministic unit test 5/5 (closed+price0=0
-  now included w/ correct Capital G/L; warm-closed byte-identical; open+price0=0
-  still excluded; closed+no-deposits → no_deposits); live smoke 0 regression
-  (Orca/ZEC resolution, Cetus pending $348, 0 underflow). The "ProjectX missing
-  from Fee Income" half is a SEPARATE root cause (cold historical-claim cache) →
-  Sprint 1.12. The 429 trigger isn't locally reproducible (low CG load).
+- _(Sprint 1.11 `d57f051` — gate `price0/price1 > 0` for OPEN positions only in
+  `computePositionPnL` so a cold-instance spot-429 (`price0=0`) no longer spuriously
+  excludes closed HyperEVM positions from Capital G/L; closed positions compute from
+  historical events — rolled off this list; see git history.)_
 - _(Sprint 1.10 `140d908` — platform-wide automatic token resolution
   (`app/lib/tokenResolver.ts` + `tokenConstants.ts`); Tier-3 (aerodrome/velodrome)
   unmapped pool tokens resolve decimals from on-chain truth, not blind `=18` —
@@ -497,12 +508,14 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
-- `lp-pnl-events-v24` (Sprint 2.1b — EVM V3 events gain `logIndex`; aero/velo
-  fee claims historical-only, cg-spot removed)
-- `analytics-activity-v16` (Sprint 2.1b — closed aero/velo now scanned
-  per-position; `logIndex` dedup; cg-spot removed)
+- `lp-pnl-events-v25` (Sprint NEW — Bluefin fee claims historical-only,
+  current-spot fallback removed; parity with analytics-activity v17)
+- `analytics-activity-v17` (Sprint NEW — Bluefin fee claims historical-only
+  re-resolve in lockstep with LP-P&L)
 - `cetus-activity-v3`
-- `bluefin-activity-v3`
+- `bluefin-activity-v4` (Sprint NEW — Bluefin fee claims valued claim-date
+  historical-only: stable → $1; SUI → CG-historical → DeFiLlama; other
+  non-stable → DeFiLlama; else pending; current-spot fallback removed, Rule 1a)
 
 ---
 
