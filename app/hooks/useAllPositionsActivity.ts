@@ -17,6 +17,11 @@ export interface ActivityEvent {
   // Every activity route emits this — used to dedupe when per-position and
   // wallet-scope scans both observe the same fee claim.
   txHash?: string;
+  // On-chain log index (EVM V3 routes: Aerodrome, Velodrome). Combined with
+  // txHash it uniquely identifies a Collect log, so the analytics Fee Income
+  // dedup can collapse the per-position and wallet-scope views of the SAME
+  // claim even when their decimal-scaled amounts differ (Sprint 2.1b).
+  logIndex?: number;
 }
 
 interface ActivityResponse {
@@ -100,7 +105,14 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // cache; some HyperEVM claims that previously timed out to UNRESOLVED now
 // resolve from warm Redis. Flush v14 entries so analytics & LP-P&L refresh in
 // lockstep under the new ladder.
-function cacheKey(id: string) { return `analytics-activity-v15-${id}`; }
+// Bumped v15 → v16: Sprint 2.1b. (1) Closed Aerodrome/Velodrome positions with
+// resolved token context are now scanned PER-POSITION (previously skipped here),
+// so new cache entries appear for them with accurate per-pair pricing. (2) EVM V3
+// activity events now carry `logIndex` (used by the analytics Fee Income
+// txHash::logIndex dedup). (3) Aerodrome/Velodrome fee claims no longer fall to
+// current spot (cg-spot removed; DeFiLlama historical added) — claim values can
+// shift for affected wallets. Flush v15 entries so all three changes take effect.
+function cacheKey(id: string) { return `analytics-activity-v16-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {
@@ -328,17 +340,35 @@ export function useAllPositionsActivity(
     const seen = new Set<string>();
     const eligible = positions.filter((p) => {
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) return false;
-      // Closed Aerodrome positions are recovered via the wallet-scope
-      // positionId=all scan (useWalletLevelFees), not per-position — skip them
-      // here so their fees aren't double-scanned/mis-priced. Mirrors how
-      // Cetus/Bluefin closed positions are wallet-scope only. (Open Aerodrome
-      // positions are still scanned per-position for accurate pricing; the
-      // wallet-scope pass dedupes against them by protocol::txHash::amounts.)
-      if (p.protocol === "Aerodrome" && p.status === "Closed") return false;
-      // Velodrome (original Slipstream, Optimism): same as Aerodrome — closed
-      // positions are recovered via the wallet-scope positionId=all scan, so
-      // skip them per-position to avoid double-scan/mis-pricing.
-      if (p.protocol === "Velodrome" && p.status === "Closed") return false;
+      // Sprint 2.1b: Closed Aerodrome / Velodrome positions (NFT burned on
+      // close) are scanned PER-POSITION when their token context is FULLY
+      // resolved — token0Address + token1Address + poolAddress all present
+      // (buildClosedPositions derives these from the position's mint tx). That
+      // routes them through the SAME accurate per-pair pricing path used by
+      // Capital G/L and the LP P&L "Fees Collected" card. Previously they were
+      // unconditionally skipped here and delegated to the wallet-scope
+      // positionId=all scan (useWalletLevelFees), which prices EVERY ever-owned
+      // tokenId with ONE representative pool context — crushing a
+      // non-representative closed pair's fees to ~$0 (the Sprint 2.1 bug:
+      // Account 1's closed USDC/cbBTC position showed $0.21 vs a true $294).
+      // The wallet-scope scan stays as the SAFETY NET for context-less burned
+      // positions; the analytics Fee Income dedup (protocol::txHash::logIndex)
+      // drops its duplicate so the per-position value wins. Open positions are
+      // unaffected (already scanned per-position).
+      if (
+        (p.protocol === "Aerodrome" || p.protocol === "Velodrome") &&
+        p.status === "Closed"
+      ) {
+        const hasContext = !!(p.token0Address && p.token1Address && p.poolAddress);
+        if (!hasContext) {
+          // Context-less burned position → leave it to the wallet-scope safety net.
+          console.debug(
+            `[activity] ${p.protocol} closed ${p.id}: no resolved token context → wallet-scope safety net only`,
+          );
+          return false;
+        }
+        // else: fall through and scan per-position with its own correct context.
+      }
       // Uniswap V3: skip only BURNED positions (recovered via wallet-scope
       // positionId=all). Closed-but-not-burned positions (held, liquidity=0)
       // still exist on-chain and keep their accurate per-position scan, so the

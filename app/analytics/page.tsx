@@ -678,7 +678,16 @@ export default function Analytics() {
     // status/value predicate, lifetime fees stay complete.
     const posById = new Map(positions.map((p) => [p.id, p]));
 
-    const buildKey = (protocol: string, e: { txHash?: string; timestamp: number; amount0: number; amount1: number }) => {
+    const buildKey = (protocol: string, e: { txHash?: string; logIndex?: number; timestamp: number; amount0: number; amount1: number }) => {
+      // Sprint 2.1b: when the event carries an on-chain logIndex (EVM V3 routes:
+      // Aerodrome, Velodrome), key on (protocol, txHash, logIndex). That makes
+      // the SAME Collect collapse to ONE entry across the per-position scan
+      // (accurate amounts) and the wallet-scope safety-net scan (single-context,
+      // possibly mis-scaled amounts) — which the older amount-based key could NOT
+      // do once the two scans disagreed on amounts. Per-position events are
+      // pushed FIRST below, so they win the dedup. Protocols with no logIndex
+      // keep the amount-based key (unchanged behaviour).
+      if (e.txHash && e.logIndex != null) return `${protocol}::${e.txHash}::${e.logIndex}`;
       if (e.txHash) return `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`;
       return `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
     };
@@ -686,7 +695,7 @@ export default function Analytics() {
     const push = (
       protocol: string,
       chain: string,
-      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string },
+      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string; logIndex?: number },
     ) => {
       if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
       // A fee claim with no historical valuation arrives here with
@@ -731,11 +740,22 @@ export default function Analytics() {
     for (const t of walletLevelFees) push(t.protocol, t.chain, t.event);
 
     const seen = new Set<string>();
+    // Sprint 2.1b: per-position events are pushed BEFORE wallet-scope ones
+    // above, so for a (protocol, txHash, logIndex) collision the per-position
+    // (accurate) value is kept and the wallet-scope (single-context, possibly
+    // mis-scaled) duplicate is dropped here. Count drops for visibility — the
+    // dedup happens client-side, so this is a browser-console signal (the
+    // server-side proof of correct per-position pricing is each per-position
+    // route's route_summary).
+    let __dedupDropped = 0;
     const deduped = flat.filter((f) => {
-      if (seen.has(f.dedupeKey)) return false;
+      if (seen.has(f.dedupeKey)) { __dedupDropped += 1; return false; }
       seen.add(f.dedupeKey);
       return true;
     });
+    if (__dedupDropped > 0) {
+      console.debug(`[feeIncome] dedup dropped ${__dedupDropped} duplicate claim(s) (per-position value wins over wallet-scope)`);
+    }
     deduped.sort((a, b) => a.ts - b.ts);
     flat.length = 0;
     flat.push(...deduped);
@@ -803,12 +823,17 @@ export default function Analytics() {
     let total = 0;
     const add = (
       protocol: string,
-      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string },
+      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string; logIndex?: number },
     ) => {
       if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
       const usd = e.usdAtTime ?? 0;
       if (!Number.isFinite(usd) || usd <= 0) return;
-      const key = e.txHash
+      // Sprint 2.1b: mirror feeIncome's dedup — prefer (protocol, txHash,
+      // logIndex) for EVM V3 events so per-position and wallet-scope views of the
+      // same Collect collapse to one; fall back to the amount-based key otherwise.
+      const key = e.txHash && e.logIndex != null
+        ? `${protocol}::${e.txHash}::${e.logIndex}`
+        : e.txHash
         ? `${protocol}::${e.txHash}::${e.amount0}::${e.amount1}`
         : `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
       if (seen.has(key)) return;

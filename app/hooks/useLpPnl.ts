@@ -420,7 +420,14 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // unchanged, but the resolution PATH changed — some HyperEVM claims that
 // previously timed out to UNRESOLVED now resolve from warm Redis — so flush v22
 // entries to re-resolve under the new ladder.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v23-";
+// Bumped v23 → v24: Sprint 2.1b parity with analytics-activity v15 → v16. The
+// Aerodrome/Velodrome activity routes now (a) emit `logIndex` on every event
+// (shape change) and (b) value fee claims historical-only — sqrtPriceX96 →
+// CoinGecko-historical → DeFiLlama-historical → pending — with the cg-spot last
+// resort REMOVED (Rule 1a). useLpPnl's per-position Capital-G/L / Fees-Collected
+// values were already correct (it never used the wallet-scope path), but flush
+// v23 so analytics & LP-P&L refresh in lockstep under the new event shape.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v24-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

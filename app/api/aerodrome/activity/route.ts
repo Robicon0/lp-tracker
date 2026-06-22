@@ -3,6 +3,7 @@ import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
+import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
 import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
@@ -94,6 +95,12 @@ export interface ActivityEvent {
   price0AtTime: number | null;
   price1AtTime: number | null;
   cumulativeFeeUSD: number;   // running total of fee_claim USD; 0 for non-fee events
+  // On-chain log index of the source event. The analytics Fee Income dedup
+  // keys on (protocol, txHash, logIndex) so the SAME Collect seen by BOTH the
+  // per-position scan (accurate per-pair pricing) and the wallet-scope
+  // positionId=all safety-net scan (single representative context) collapses
+  // to ONE entry — and the per-position value wins (it's pushed first).
+  logIndex: number;
 }
 
 interface ActivityResponse {
@@ -340,6 +347,7 @@ async function GET_impl(request: Request) {
     interface RawEvent {
       type: ActivityEventType;
       txHash: string;
+      logIndex: number;
       blockNumber: number;
       timestamp: number;
       amount0Raw: bigint;
@@ -351,6 +359,10 @@ async function GET_impl(request: Request) {
       const blockNum = parseInt(log.blockNumber, 16);
       const timestamp = timestamps[blockNum] ?? 0;
       const data = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
+      // On-chain log index — stable identifier for the analytics Fee Income
+      // (protocol, txHash, logIndex) dedup so per-position + wallet-scope scans
+      // of the same Collect collapse to one entry.
+      const logIndex = log.logIndex ? parseInt(log.logIndex, 16) : 0;
 
       let type: ActivityEventType;
       let amount0Raw = 0n, amount1Raw = 0n;
@@ -369,7 +381,7 @@ async function GET_impl(request: Request) {
         amount1Raw = decodeWord(data, 2);
       }
 
-      return { type, txHash: log.transactionHash, blockNumber: blockNum, timestamp, amount0Raw, amount1Raw };
+      return { type, txHash: log.transactionHash, logIndex, blockNumber: blockNum, timestamp, amount0Raw, amount1Raw };
     });
 
     // When a Collect (fee_claim) and DecreaseLiquidity (withdrawal) share the
@@ -483,6 +495,34 @@ async function GET_impl(request: Request) {
       }
     }
 
+    // Sprint 2.1b: DeFiLlama claim-date historical is the SECONDARY fee-claim
+    // source (after sqrtPriceX96 archive + CoinGecko historical) so a sqrtPrice
+    // archive miss no longer falls to current spot (Rule 1a — the cg-spot
+    // last resort below is REMOVED for fee claims). Prewarm ONLY the
+    // (token, date) pairs that sqrtPriceX96 could NOT price, so the common
+    // sqrtPrice-priced claim incurs zero DeFiLlama traffic. Non-stable sides
+    // only (stablecoins anchor at $1). Awaited so getCachedOnlyDefillamaPrice()
+    // reads synchronously in the events.map below. Mirrors the Sprint 1.15
+    // Cetus historical-only cascade.
+    {
+      const dlNeed = new Map<string, Set<number>>();
+      for (const ev of cleanRawEvents) {
+        if (ev.type !== 'fee_claim' || ev.timestamp <= 0) continue;
+        if (histPrices?.get('0x' + ev.blockNumber.toString(16))) continue; // sqrtPriceX96 prices it
+        for (const tok of [token0, token1]) {
+          if (tok && !STABLECOINS.has(tok)) {
+            if (!dlNeed.has(tok)) dlNeed.set(tok, new Set());
+            dlNeed.get(tok)!.add(ev.timestamp);
+          }
+        }
+      }
+      if (dlNeed.size > 0) {
+        await prewarmDefillamaPrices(
+          [...dlNeed.entries()].map(([contract, tss]) => ({ chain: 'base' as const, contract, timestamps: [...tss] })),
+        );
+      }
+    }
+
     let runningFeeUSD = 0;
     const hasTicks = tickLower != null && tickUpper != null;
     // [PRICE_LOG] instrumentation (additive only) — per-request fee_claim counters
@@ -498,6 +538,11 @@ async function GET_impl(request: Request) {
       let price0AtTime: number | null = null;
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
+      // Sprint 2.1b: which historical source priced a fee claim (read by the
+      // [PRICE_LOG] re-derivation below). NEVER cg-spot — fee claims are
+      // historical-only (Rule 1a).
+      let __feeUsedCg = false;
+      let __feeUsedDl = false;
 
       // For deposits/withdrawals, try historical sqrtPrice at the block
       // FIRST. Only fall back to deriveDepositPrices's tick estimate when
@@ -541,49 +586,50 @@ async function GET_impl(request: Request) {
         }
       }
 
-      // Fee claims — PRIORITY 2: CoinGecko historical daily MARKET price
-      // (cache-only — never fetches; the fire-and-forget prewarm above
-      // populates the cache for next request). Replaces sqrtPriceX96 with
-      // true market price when available — a strict accuracy refinement
-      // over the pool-internal ratio, especially for low-TVL pools or
-      // pools temporarily out of arbitrage equilibrium. Skipped when
-      // priority 1 already priced this event, OR when the cache is cold.
+      // Fee claims — PRIORITY 2: claim-date historical, PER SIDE (Rule 1a —
+      // NEVER current spot). Skipped when PRIORITY 1 (sqrtPriceX96 archive)
+      // already priced this claim. Per side: stablecoin → $1; else CoinGecko
+      // historical (cache-only — the fire-and-forget prewarm above populates
+      // it) THEN DeFiLlama historical-by-contract (Sprint 1.12 helper,
+      // awaited-prewarmed above for sqrtPrice-missed claims). If a side cannot
+      // be priced historically the claim stays UNRESOLVED (null) and surfaces
+      // as "pending price resolution" — the prior cg-spot last resort is
+      // REMOVED (Sprint 2.1b). Mirrors the Sprint 1.15 Cetus cascade.
       if (ev.type === 'fee_claim' && usdAtTime == null) {
         const isStable0 = STABLECOINS.has(token0);
         const isStable1 = STABLECOINS.has(token1);
         const cg0 = !isStable0 ? CG_IDS[token0] : undefined;
         const cg1 = !isStable1 ? CG_IDS[token1] : undefined;
-        const p0 = isStable0 ? 1 : (cg0 ? getCachedOnlyTokenPrice(cg0, ev.timestamp) : null);
-        const p1 = isStable1 ? 1 : (cg1 ? getCachedOnlyTokenPrice(cg1, ev.timestamp) : null);
+        const priceSide = (tok: string, isStable: boolean, cgId: string | undefined): number | null => {
+          if (isStable) return 1;
+          const cg = cgId ? getCachedOnlyTokenPrice(cgId, ev.timestamp) : null;
+          if (cg != null) { __feeUsedCg = true; return cg; }
+          const dl = tok ? getCachedOnlyDefillamaPrice('base', tok, ev.timestamp) : null;
+          if (dl != null) { __feeUsedDl = true; return dl; }
+          return null;
+        };
+        const p0 = priceSide(token0, isStable0, cg0);
+        const p1 = priceSide(token1, isStable1, cg1);
         if (p0 != null && p1 != null) {
           price0AtTime = p0;
           price1AtTime = p1;
           usdAtTime = amount0 * p0 + amount1 * p1;
         }
+        // else: usdAtTime stays null → pending (Rule 1a — no spot fallback).
       }
 
-      // Withdrawals + fallback when derivation / historical fetch unavailable.
-      // currentSpot0/1 was promoted above from caller fallback OR a fresh CG
-      // simple/price lookup OR stablecoin-anchored $1, so this catches the
-      // case where the caller passed p0=0/p1=0 but the token is mappable.
-      if (usdAtTime == null) {
+      // Deposits / withdrawals ONLY: current-spot last resort when on-chain
+      // historical derivation (sqrtPriceX96 / deriveDepositPrices) was
+      // unavailable. Allowed by pricing-invariants Rule 2 (a point-in-time
+      // position value, NOT historical earnings). Fee claims are handled above
+      // and NEVER fall to spot (Rule 1a). currentSpot0/1 was promoted above
+      // from caller fallback / a fresh CG simple-price lookup / stablecoin $1.
+      if (usdAtTime == null && ev.type !== 'fee_claim') {
         price0AtTime = currentSpot0 || null;
         price1AtTime = currentSpot1 || null;
         if (currentSpot0 > 0 || currentSpot1 > 0) {
           usdAtTime = amount0 * currentSpot0 + amount1 * currentSpot1;
         }
-      }
-
-      // PART 1 FINAL GUARANTEE: fee_claim events must NEVER carry a null
-      // usdAtTime. The analytics feeIncome push() silently drops null/<=0
-      // events, which would make Aerodrome (and any other route hit by
-      // this case) disappear from "Fee Income By Protocol" entirely.
-      // Zero-amount artifacts were already filtered out by cleanRawEvents,
-      // so usdAtTime=0 here means "non-zero amounts but no pricing data
-      // anywhere" — the protocol still surfaces in the breakdown with $0
-      // contribution rather than silently vanishing.
-      if (ev.type === 'fee_claim' && usdAtTime == null) {
-        usdAtTime = 0;
       }
 
       let cumulativeFeeUSD = 0;
@@ -592,24 +638,17 @@ async function GET_impl(request: Request) {
         cumulativeFeeUSD = runningFeeUSD;
       }
 
-      // [PRICE_LOG] fee_claim resolution — read-only re-derivation of the
-      // winning price source, mirrors the ladder above without altering values.
+      // [PRICE_LOG] fee_claim resolution — source reflects the historical-only
+      // cascade flags set during pricing above. NEVER cg-spot (Rule 1a: fee
+      // claims are historical-only; the spot last resort was removed Sprint 2.1b).
       if (ev.type === 'fee_claim') {
         const __hex = '0x' + ev.blockNumber.toString(16);
         let __src: string;
-        if (histPrices && histPrices.get(__hex)) {
-          __src = 'sqrtPriceX96';
-        } else {
-          const __s0 = STABLECOINS.has(token0);
-          const __s1 = STABLECOINS.has(token1);
-          const __cg0 = !__s0 ? CG_IDS[token0] : undefined;
-          const __cg1 = !__s1 ? CG_IDS[token1] : undefined;
-          const __p0 = __s0 ? 1 : (__cg0 ? getCachedOnlyTokenPrice(__cg0, ev.timestamp) : null);
-          const __p1 = __s1 ? 1 : (__cg1 ? getCachedOnlyTokenPrice(__cg1, ev.timestamp) : null);
-          if (__p0 != null && __p1 != null) __src = (__s0 && __s1) ? 'stablecoin-fixed' : 'cg-historical-cache';
-          else if (currentSpot0 > 0 || currentSpot1 > 0) __src = 'cg-spot';
-          else __src = 'unknown';
-        }
+        if (histPrices && histPrices.get(__hex)) __src = 'sqrtPriceX96';
+        else if (__feeUsedDl) __src = 'defillama-historical';
+        else if (__feeUsedCg) __src = 'cg-historical-cache';
+        else if (usdAtTime != null && usdAtTime > 0) __src = 'stablecoin-fixed'; // both sides stable → $1
+        else __src = 'unknown'; // pending — no historical price on any source
         __totalClaims++; __totalLookups++;
         __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
         const __ok = usdAtTime != null && usdAtTime > 0;
@@ -632,6 +671,7 @@ async function GET_impl(request: Request) {
       return {
         type: ev.type,
         txHash: ev.txHash,
+        logIndex: ev.logIndex,
         blockNumber: ev.blockNumber,
         timestamp: ev.timestamp,
         amount0,
