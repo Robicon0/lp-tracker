@@ -290,6 +290,34 @@ unique position-URL plus `dedup`/`hit` for the redundant multi-hook refetches. A
 cache HIT/dedup returns the EXACT JSON the route produced — claims still valued
 claim-date-only (Rule 1a), no new CoinGecko/spot calls.
 
+### `sui_closed_position_valued`
+
+Emitted once per CLOSED Sui position valued by `app/lib/suiClosedPositions.ts`
+(Sprint 2.2b). A closed Sui position's object is destroyed on close, so its Capital
+G/L is reconstructed from wallet-tx-history events and valued by the historical
+cascade (stablecoin $1 → event-embedded `current_sqrt_price` at the deposit/withdrawal
+BLOCK, historical-by-construction NOT spot → DeFiLlama historical → CoinGecko SUI
+historical → pending). For deposits/withdrawals the sqrt path is primary; fee claims
+(no sqrtPrice) use historical-per-side. Reward claims are NOT valued here.
+
+Required fields:
+- `event: "sui_closed_position_valued"`
+- `protocol` — `cetus` | `bluefin`
+- `positionId`, `pair`
+- `depositUSD`, `withdrawalUSD`, `feesUSD`
+- `capitalGL` — `withdrawalUSD − depositUSD` (Rule 4; NO fees)
+- `pendingEventCount` — events left unpriced (Rule 1a pending; surfaced, never spot)
+- `sourceBreakdown` — count per cascade tier: `sqrtprice-historical` |
+  `stablecoin-fixed` | `cg-historical` | `defillama-historical` | `pending` |
+  `zero_amount` (combined keys like `stablecoin-fixed+cg-historical` for two-sided
+  events). **`cg-spot` / any `spot` tier MUST NEVER appear** (Rule 1a) — its absence
+  is the production guarantee; a single occurrence is a regression to investigate.
+
+Verification grep: `grep sui_closed_position_valued | grep -i spot` must return
+nothing. The closed-position SUI side reads `getHistoricalOnlySuiPrice` (pure
+historical cache), deliberately NOT `getCachedSuiPriceForTimestamp` (which can return
+the FIX-C cg-spot `spotFallback`).
+
 ---
 
 ## Rule 3: Source enum

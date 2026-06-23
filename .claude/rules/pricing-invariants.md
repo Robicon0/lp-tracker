@@ -208,8 +208,21 @@ calculations on **EVM chains**:
 Fall back to CoinGecko historical awaited for closed positions.
 
 **Sui and Solana**: position objects are destroyed on close. Historical
-P&L for closed positions requires event-log reconstruction (see Sprint 3
-in the sprint queue).
+P&L for closed positions requires event-log reconstruction.
+- **Sui Cetus + Bluefin — IMPLEMENTED (Sprint 2.2b, `bb7fc0d`).**
+  `app/lib/suiClosedPositions.ts` reconstructs each closed position's lifecycle from
+  wallet tx history and values deposits/withdrawals via this cascade (per side, NEVER
+  current spot — Rule 1a): stablecoin → $1 → **event-captured `current_sqrt_price` at
+  the deposit/withdrawal BLOCK** (historical-by-construction — this is the Sui analogue
+  of the EVM sqrtPriceX96 archive read in Rule 2 above, NOT a current/spot query) →
+  DeFiLlama historical-by-coin-type → CoinGecko SUI historical → pending. Fee claims
+  (no sqrtPrice) take the historical-per-side tiers. Capital G/L = withdrawal − deposit
+  (Rule 4). **Every new CLMM protocol on Sui inherits this cascade by routing through
+  `suiClosedPositions.ts`** (Protocol Correctness Contract). The SUI side uses the
+  historical-only `getHistoricalOnlySuiPrice`, NOT `getCachedSuiPriceForTimestamp`
+  (which can return a FIX-C cg-spot fallback — see the open-position Sprint 2.2c gap).
+- **Sui Momentum + Solana (orca/raydium)** closed positions: still pending event-log
+  reconstruction (Sprint MOMENTUM / Sprint 3).
 
 ---
 

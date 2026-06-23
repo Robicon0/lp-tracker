@@ -49,6 +49,7 @@ updated when versions are bumped.
 | analytics-activity   | v17             | Sprint NEW — Bluefin fee claims historical-only (cg-spot/current-spot removed); flush so analytics Fee Income re-resolves under the new cascade in lockstep with LP-P&L |
 | cetus-activity       | v3              | Cetus V2 deposit/withdrawal event structure |
 | bluefin-activity     | v4              | Sprint NEW — Bluefin fee claims valued claim-date historical-only (stable → $1; SUI → CG-historical → DeFiLlama; other non-stable → DeFiLlama; else pending); current-spot fallback removed (Rule 1a) |
+| closed_pos_sui       | v1              | Sprint 2.2b — NEW Redis cache of reconstructed CLOSED Cetus/Bluefin positions' Capital G/L (key `closed_pos_sui_v1:{protocol}:{wallet}`, 30d TTL). Bump on a closed-position valuation-logic change. lp-pnl-events / analytics-activity were NOT bumped this sprint — their per-position event caches are byte-identical (closed Sui has its own key, this one) |
 
 If a version listed here doesn't match what's in code, code is the source
 of truth. Update this table to match code, not the other way around.
@@ -130,6 +131,24 @@ Redis (Sprint 1.6 contract: own client, `PRICE_CACHE_KV_*`, no-op stub, never
 throws, fire-and-forget writes), NOT a versioned key — no version bump; serving
 cached logs is byte-identical to a fresh retrieval (the downstream parser runs
 unchanged).
+
+### Closed-Sui-position Capital G/L cache (Sprint 2.2b)
+`app/lib/suiClosedPositions.ts` persists each wallet's reconstructed CLOSED
+Cetus/Bluefin positions (Capital G/L + valued events) in Upstash Redis, keyed
+`closed_pos_sui_v1:{protocol}:{wallet}`, 30-day TTL. A closed Sui position's object
+is destroyed on close, so its lifecycle is immutable (events on a finalized
+ledger) — the first successful reconstruction is served thereafter (any instance,
+any user) without re-scanning tx history (cold ~49s → warm ~1s). UNLIKE the Sprint
+1.14 deposit cache this one IS a versioned key (`closed_pos_sui_v1`) because it
+caches a COMPUTED result (valued Capital G/L), not raw logs — bump the version
+suffix to invalidate on a valuation-logic change. Same Sprint 1.14 contract
+otherwise: own client, `PRICE_CACHE_KV_*`, no-op stub if unset, never throws,
+fire-and-forget writes, EMPTY results never cached (a transient empty scan must
+not freeze in as "no closed positions"). The existing `lp-pnl-events` /
+`analytics-activity` localStorage caches were NOT bumped for Sprint 2.2b — they
+cache per-position activity events for positions in the dashboard array, and
+closed (destroyed-object) Sui positions were never in that array, so their cached
+contents are byte-identical (Rule 1: bump only when cached contents change).
 
 ### Client-side (for per-user data only)
 Use client-side caching only for data that's specific to one wallet:
