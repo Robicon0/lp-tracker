@@ -228,3 +228,16 @@ export function getCachedSuiPriceForTimestamp(timestampSeconds: number): number 
   // cache = real historical; spotFallback = cg-spot recovery (FIX C).
   return cache.get(date) ?? spotFallback.get(date) ?? null;
 }
+
+// HISTORICAL-ONLY synchronous lookup — returns ONLY a real claim-date historical
+// price from `cache`, NEVER the FIX-C `spotFallback` current-spot recovery.
+// Added for Sprint 2.2b Sui closed-position Capital G/L, where fee-claim
+// valuation must be claim-date historical with NO spot fallback under any
+// circumstance (pricing-invariants Rule 1a). A miss returns null so the caller
+// can fall to DeFiLlama historical and then leave the event pending — it must
+// never be coerced to current spot. (getCachedSuiPriceForTimestamp above is
+// left UNCHANGED for the existing activity routes.)
+export function getHistoricalOnlySuiPrice(timestampSeconds: number): number | null {
+  if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return null;
+  return cache.get(tsToCoinGeckoDate(timestampSeconds)) ?? null;
+}

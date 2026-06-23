@@ -621,7 +621,7 @@ export default function Analytics() {
     return () => { cancelled = true; };
   }, []);
   const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice);
-  const lpPnl = useLpPnl(filteredPositions);
+  const lpPnl = useLpPnl(filteredPositions, suiWalletAddresses);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -1747,8 +1747,8 @@ export default function Analytics() {
                     label: "Capital G/L",
                     val: fmt$Signed(lpPnl.capitalGL),
                     color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright,
-                    sub: "closed positions, EVM only",
-                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains only (HyperEVM, Base, Arbitrum). Solana and Sui closed position exit data is not yet available on-chain.",
+                    sub: "closed positions, EVM + Sui (Cetus, Bluefin)",
+                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.) plus Sui (Cetus, Bluefin), reconstructed from on-chain events and valued at historical prices. Solana closed-position exit data is not yet available on-chain.",
                   },
                   {
                     label: "Imperm. Loss",

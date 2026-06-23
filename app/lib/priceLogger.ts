@@ -283,6 +283,27 @@ interface DefillamaHistoricalErrorEvent {
   reason: string;
 }
 
+// Emitted once per CLOSED Sui position valued by app/lib/suiClosedPositions.ts
+// (Sprint 2.2b). A closed Sui position's object is destroyed on close, so its
+// Capital G/L is reconstructed from wallet-tx-history events and valued by the
+// historical cascade (stablecoin $1 → event-embedded sqrtPrice (block price, NOT
+// spot) → DeFiLlama historical → CoinGecko historical → pending). `sourceBreakdown`
+// keys are the cascade tiers used across the position's events; `cg-spot` MUST
+// NEVER appear (Rule 1a). `pendingEventCount` > 0 means some event could not be
+// priced historically and was left out (surfaced to the user, never spot-valued).
+interface SuiClosedPositionValuedEvent {
+  event: 'sui_closed_position_valued';
+  protocol: string;            // cetus | bluefin
+  positionId: string;
+  pair: string;
+  depositUSD: number;
+  withdrawalUSD: number;
+  feesUSD: number;
+  capitalGL: number;           // withdrawalUSD − depositUSD (Rule 4; NO fees)
+  pendingEventCount: number;
+  sourceBreakdown: Record<string, number>;
+}
+
 // Emitted once per activity-route invocation by the shared server-side cache
 // (Sprint 1.13, app/lib/activityRouteCache.ts). The analytics page fetches each
 // position's activity route 2-3x (useAllPositionsActivity + useLpPnl +
@@ -317,6 +338,7 @@ export type PriceLogEvent =
   | CetusPendingFeeReadFailedEvent
   | TokenResolverUsedEvent
   | TokenResolutionFailedEvent
+  | SuiClosedPositionValuedEvent
   | DefillamaHistoricalUsedEvent
   | DefillamaHistoricalMissingEvent
   | DefillamaHistoricalErrorEvent;

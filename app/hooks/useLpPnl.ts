@@ -734,7 +734,17 @@ function aggregate(
   inflight: number,
   positionMeta: Map<string, PositionMeta>,
   unsupportedRejections: ExcludedPosition[],
+  // Sprint 2.2b: closed Sui (Cetus/Bluefin) positions, reconstructed from events
+  // and pre-computed via computePositionPnL in the hook's Sui effect. Kept in a
+  // SEPARATE map (not resultsMap) so the positions-array eviction can't drop them;
+  // merged here so they flow through the IDENTICAL per-position loop as EVM.
+  suiClosed: Map<string, PosResult> = new Map(),
+  suiClosedMeta: Map<string, PositionMeta> = new Map(),
 ): LpPnlResult {
+  // Merge the Sui-closed map/meta into the inputs the loop iterates. The Sui set
+  // is disjoint from resultsMap (destroyed objects, distinct ids), so no override.
+  const results = suiClosed.size ? new Map([...resultsMap, ...suiClosed]) : resultsMap;
+  const meta = suiClosedMeta.size ? new Map([...positionMeta, ...suiClosedMeta]) : positionMeta;
   let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let capitalGL = 0;
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
@@ -747,8 +757,13 @@ function aggregate(
   // Chain literals match exactly what each position route emits in pos.chain
   // (e.g. "HyperEVM" — NOT "Hyperliquid L1" which is only the DefiLlama
   // project lookup string in app/api/hyperswap/route.ts).
+  // Sprint 2.2b: "Sui" added — closed Cetus/Bluefin positions are reconstructed
+  // from on-chain events (their objects are destroyed on close) and injected via
+  // the separate suiClosedResults map below; they carry chain "Sui" and a reliable
+  // historically-valued closingValue/initialValue, so they fold into Capital G/L
+  // exactly like EVM closed positions. (Solana still excluded — Sprint 3.)
   const CAPITAL_GL_CHAINS = new Set([
-    "HyperEVM", "Base", "Arbitrum", "Optimism", "Polygon", "Ethereum", "BNB Chain",
+    "HyperEVM", "Base", "Arbitrum", "Optimism", "Polygon", "Ethereum", "BNB Chain", "Sui",
   ]);
   const errorReasons = new Set<string>();
   // Per-position record built from the same map the totals come from — any
@@ -767,7 +782,7 @@ function aggregate(
   const AGG_USD_CEILING = 10_000_000;
   const isPlausible = (v: number) => Number.isFinite(v) && Math.abs(v) <= AGG_USD_CEILING;
 
-  for (const [id, r] of resultsMap) {
+  for (const [id, r] of results) {
     if (r.ok) {
       const d = r.data;
       const componentsOk =
@@ -780,16 +795,16 @@ function aggregate(
         // Treat as an excluded position with a calculation-overflow reason.
         // We DO NOT touch feesCollected here — fees aggregation lives in the
         // separate feeIncome pipeline (analytics page) and has its own checks.
-        const meta = positionMeta.get(id);
+        const m = meta.get(id);
         console.error(
           `[useLpPnl] overflow guard rejected ${id} — ` +
           `initial=${d.initialValue} current=${d.currentValue} closing=${d.closingValue} ` +
           `ilUSD=${d.ilUSD} netPnl=${d.netPnlUSD}`,
         );
-        if (meta) {
+        if (m) {
           excludedPositions.push({
-            id, pair: meta.pair, protocol: meta.protocol, chain: meta.chain,
-            reason: userFriendlyReason("value_overflow", meta.protocol),
+            id, pair: m.pair, protocol: m.protocol, chain: m.chain,
+            reason: userFriendlyReason("value_overflow", m.protocol),
           });
         }
         excluded += 1;
@@ -824,7 +839,7 @@ function aggregate(
         // position that passed the eligibility filter, so meta should
         // always be present here; defensive `?.` keeps us safe if a
         // future code path ever bypasses metadata.
-        const chain = positionMeta.get(id)?.chain;
+        const chain = meta.get(id)?.chain;
         if (chain && CAPITAL_GL_CHAINS.has(chain)) {
           capitalGL += d.closingValue - d.initialValue;
         }
@@ -916,7 +931,21 @@ function aggregate(
 // positions trigger fetches. This prevents the race condition where late-
 // arriving chains cancel in-flight fetches from earlier chains.
 
-export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
+// Sprint 2.2b — shape of one closed Sui position returned by
+// /api/sui-closed-positions (the JSON wire form of SuiClosedPosition). Declared
+// locally so the client hook never imports the SERVER lib (which pulls in Redis).
+interface SuiClosedPositionDTO {
+  positionId: string;
+  protocol: "cetus" | "bluefin";
+  pair: string;
+  events: ActivityEventForPnL[];
+}
+
+// Sprint 2.2b — optional Sui addresses (connected + watched) whose CLOSED
+// Cetus/Bluefin positions should be folded into Capital G/L. The analytics page
+// already builds this list (it passes the same to useWalletLevelFees). Omitted /
+// empty → no Sui closed-position fetch (e.g. the dashboard caller).
+export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: string[] = []): LpPnlResult {
   const [result, setResult] = useState<LpPnlResult>({ ...EMPTY });
   // Per-position results map — persists across renders, never reset.
   const resultsRef = useRef<Map<string, PosResult>>(new Map());
@@ -931,6 +960,52 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
   // (Momentum, anything not in ACTIVITY_PROTOCOLS). Surfaced in the
   // warning banner so the user knows P&L isn't calculated for them.
   const unsupportedRejectionsRef = useRef<ExcludedPosition[]>([]);
+  // Sprint 2.2b — CLOSED Sui (Cetus/Bluefin) positions, reconstructed server-side
+  // and pre-computed via computePositionPnL. Kept SEPARATE from resultsRef so the
+  // positions-array eviction can't drop them; merged in aggregate().
+  const suiClosedRef = useRef<Map<string, PosResult>>(new Map());
+  const suiClosedMetaRef = useRef<Map<string, PositionMeta>>(new Map());
+
+  // Fetch + value closed Sui positions whenever the Sui address set changes.
+  // Disjoint from the open/closed positions in `positions` (destroyed objects),
+  // so this runs independently of the per-position fetch effect below.
+  useEffect(() => {
+    const addrs = suiWalletAddresses.filter(Boolean);
+    if (addrs.length === 0) {
+      if (suiClosedRef.current.size > 0) {
+        suiClosedRef.current = new Map();
+        suiClosedMetaRef.current = new Map();
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+      }
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const newMap = new Map<string, PosResult>();
+      const newMeta = new Map<string, PositionMeta>();
+      await Promise.all(addrs.map(async (addr) => {
+        try {
+          const res = await fetch(`/api/sui-closed-positions?account=${encodeURIComponent(addr)}`);
+          if (!res.ok) return;
+          const json = await res.json();
+          for (const sp of (json.positions ?? []) as SuiClosedPositionDTO[]) {
+            // Value via the SAME pure engine EVM closed positions use, so the
+            // injected closingValue/initialValue/fees are byte-identical in shape.
+            const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
+            if (!pnl.ok) continue;
+            const id = `sui-closed-${sp.protocol}-${sp.positionId}`;
+            newMap.set(id, pnl);
+            newMeta.set(id, { pair: sp.pair, protocol: sp.protocol === "cetus" ? "Cetus" : "Bluefin", chain: "Sui" });
+          }
+        } catch { /* graceful — a Sui address that fails contributes nothing */ }
+      }));
+      if (cancelled || !mountedRef.current) return;
+      suiClosedRef.current = newMap;
+      suiClosedMetaRef.current = newMeta;
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+    })();
+    return () => { cancelled = true; };
+  }, [suiWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1023,13 +1098,13 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
     if (toFetch.length === 0) {
       // All positions already fetched — just recompute totals (in case
       // positions array changed order but same IDs).
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
       return;
     }
 
     // Mark as inflight and update loading state.
     for (const p of toFetch) inflightRef.current.add(p.id);
-    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
+    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
 
     // Fetch each position, paced PER activity endpoint (paceByEndpoint /
     // MAX_PER_ENDPOINT). A wallet with many positions on one provider — e.g. 4
@@ -1057,7 +1132,7 @@ export function useLpPnl(positions: AerodromePosition[]): LpPnlResult {
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
       });
     }
   }, [positions]);
