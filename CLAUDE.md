@@ -41,37 +41,31 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint EMAIL: Homepage email capture.**
+**Sprint MOMENTUM: Momentum activity route + closed-position Capital G/L.**
 
-**Goal:** One-day sprint — add an email-capture field to the homepage (waitlist /
-updates). Server-side store; **no wallet coupling** (wallet-security forward-looking
-note: gating/identity must stay architecturally separate from wallet logic, and
-this is a no-wallet feature). Validate + persist server-side; no client-only store.
+**Goal:** Build the Momentum (Sui) activity route modeled on Bluefin (`17c5101`), with
+the Rule 1a historical-ONLY fee-claim cascade from the start — stable → $1; SUI →
+CoinGecko-historical → DeFiLlama-historical; other non-stable → DeFiLlama-historical;
+else pending; **NO spot** — and the SUI side reading `getHistoricalOnlySuiPrice` (pure
+historical, never the FIX-C `spotFallback`) per Sprint 2.2c. THEN fold Momentum's closed
+positions into Capital G/L via the Sprint 2.2b `app/lib/suiClosedPositions.ts` lib (add
+`'momentum'` to `SuiClmmProtocol`; its deposit/withdrawal events are self-contained —
+verified Sprint 2.2 Phase A). Inherits the closed-position valuation cascade (per side,
+NEVER current spot — Rule 1a): stable → $1 → event-captured `current_sqrt_price` at the
+deposit/withdrawal block → DeFiLlama historical-by-coin-type → CoinGecko SUI historical →
+pending.
 
-**Hard constraint:** investigate-first; additive; server-side persistence only;
-keep wallet logic untouched (wallet-security forward-looking note).
+**Hard constraint:** investigate-first; additive; historical-only fee claims from the
+start (no spot leak to fix later); reuse shared CLMM utilities + `suiClosedPositions.ts`
+(Protocol Correctness Contract), no per-chain branches.
 
 **Status:** Not started.
 
-**Note — Sprint 2.2b (Sui closed-position Capital G/L) shipped as `bb7fc0d`:** closed
-Cetus + Bluefin positions are now reconstructed from wallet tx history (their objects
-are destroyed on close) and folded into Capital G/L alongside EVM; UI label is now
-"EVM + Sui (Cetus, Bluefin)". See Recent fixes. **Closed-position valuation cascade
-(per side; NEVER current spot — Rule 1a):** stablecoin → $1 (tokenConstants) →
-event-captured `current_sqrt_price` at the deposit/withdrawal **block**
-(historical-by-construction, the Sui analogue of Sprint 2.1b's EVM sqrtPriceX96
-archive read — NOT a current/spot query) → DeFiLlama historical-by-coin-type →
-CoinGecko SUI historical → pending. Deposits/withdrawals take the sqrtPrice path; fee
-claims (which carry no sqrtPrice) take historical-per-side. **Future protocol
-additions inherit this cascade** via `app/lib/suiClosedPositions.ts` (Protocol
-Correctness Contract). Reward claims are NOT valued in the closed-position path (Cap
-G/L excludes them — Rule 4; the displayed Fees Collected already recovers closed-Sui
-fees+rewards via the existing wallet-scope `positionId=all` pipeline). **Momentum
-deferred to Sprint MOMENTUM** — its deposit/withdrawal events are self-contained, but
-it's folded in alongside building its activity route. **Sprint 2.2c (FIX-C) SHIPPED as
-`bfabf3f`:** the open-position SUI fee-claim cg-spot leak found during 2.2b is closed —
-Cetus/Bluefin open-position fee cascades now read `getHistoricalOnlySuiPrice` (pure
-historical) for the SUI side, never the FIX-C `spotFallback`. See Recent fixes.
+**Note — Sprint EMAIL (homepage email capture) shipped as `5b583f7`:** a privacy-respecting
+ship-notification email-capture section now sits between FEATURES and the footer on the
+homepage, persisting to the Neon `subscribers` table (email-only list, NOT user accounts).
+No wallet coupling, no cache bumps. See Recent fixes + the subscribers schema note under
+"Data model".
 
 **Carry-overs (not blockers):**
 - **Sui closed positions now Capital-G/L-integrated for Cetus + Bluefin only**
@@ -97,29 +91,23 @@ historical) for the SUI side, never the FIX-C `spotFallback`. See Recent fixes.
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Homepage email capture** (active, Sprint EMAIL) — one-day sprint: add an
-   email-capture field to the homepage (waitlist / updates). Server-side store; no
-   wallet coupling (wallet-security forward-looking note).
-2. **Momentum activity route + closed-position integration** (Sprint MOMENTUM) —
+1. **Momentum activity route + closed-position integration** (active, Sprint MOMENTUM) —
    build the Momentum activity route modeled on Bluefin (Rule 1a historical-only
    fee-claim cascade from the start: stable → $1; SUI → CG-historical → DeFiLlama;
    other non-stable → DeFiLlama; else pending; no spot — the Bluefin `17c5101`
    template), AND fold Momentum's closed positions into Capital G/L via the Sprint
    2.2b `suiClosedPositions.ts` lib (add `'momentum'` to `SuiClmmProtocol`; its
    deposit/withdrawal events are self-contained — verified Sprint 2.2 Phase A).
-3. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+2. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history; feeds
    Capital G/L.
-4. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
+3. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number. The Sprint
    2.2b `SuiClosedPosition` summary fields are already shaped for this.
-
-_(Sprint 2.2c — open-position SUI fee-claim cg-spot leak hardening — SHIPPED
-`bfabf3f`; removed from queue.)_
-6. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
+4. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
    positions are now retrieved for Capital G/L but not yet shown as Closed rows).
-7. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+5. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
@@ -131,6 +119,29 @@ _(Sprint 2.2c — open-position SUI fee-claim cg-spot leak hardening — SHIPPED
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`5b583f7`** — Sprint EMAIL: homepage email capture (ship notifications). Adds a
+  privacy-respecting email-capture section to the homepage so visitors can subscribe to
+  ship notifications — a simple email-only list, **NOT user accounts** (no login, no
+  password, no wallet coupling; gating/identity stays architecturally separate per the
+  wallet-security forward-looking note). New `POST /api/subscribe`
+  (`app/api/subscribe/route.ts`) mirrors the existing `position-entries` pattern
+  (`@vercel/postgres` `sql.query`, `isDbConfigured()` guard, idempotent
+  `CREATE TABLE IF NOT EXISTS subscribers`): server-side RFC-shape validation, email
+  lowercased before storage (case-insensitive UNIQUE), duplicates `ON CONFLICT DO
+  NOTHING` and return **200 — no existence leak** (privacy), `x-forwarded-for` captured
+  for spam-protection only, best-effort in-memory **5/IP/hour** rate limit, opaque 500 on
+  DB error. New `ShipNotifications` client component matches the hero SCAN-input terminal
+  aesthetic (`#00ff41`, `>_` prefix, JetBrains Mono — used the established brand green,
+  not the prompt's `#4ade80` which appears nowhere in the codebase); inline confirmation
+  replaces the input on success with **no layout shift**; a11y `role=status`/`role=alert`,
+  `aria-label`, real submit `<button>` in a `<form>`. Wired into `app/page.tsx` between
+  FEATURES and the footer (user-confirmed placement; the FEATURES section sits between
+  Supported Protocols and the footer). **No new deps, env vars, or cache-version bumps.**
+  Verified locally against Neon: valid→200, duplicate(diff case)→200 single row,
+  invalid/empty→400 `invalid_email`, 6th/IP/hour→429; schema + dedup + rate-limit + IP
+  capture confirmed, test rows cleaned up; tsc + build clean. **No email-sending,
+  unsubscribe endpoint, captcha, or analytics** — deferred per Memory #29 (wait for
+  traction). Export subscribers via manual SQL when an announcement goes out.
 - **`bfabf3f`** — Sprint 2.2c: close the open-position SUI fee-claim cg-spot leak
   (Rule 1a). The Cetus (1.15) + Bluefin (Sprint NEW) OPEN-position fee cascades read the
   SUI side via `getCachedSuiPriceForTimestamp`, which returns `cache ?? spotFallback` —
@@ -505,7 +516,16 @@ investigating.
 
 **Hosting and database:**
 - Vercel Pro ($20/month) — auto-deploys from `main`
-- Neon Postgres
+- Neon Postgres (`@vercel/postgres`, env `POSTGRES_URL`; helper `app/lib/db.ts` →
+  `sql`, `isDbConfigured()`). Tables: `position_manual_entries` (manual closed-position
+  deposit/withdrawal entries), `portfolio_snapshots` / `position_snapshots` (snapshots),
+  `wallets` (registered wallets), and **`subscribers`** (Sprint EMAIL `5b583f7` —
+  homepage ship-notification email capture; columns `id SERIAL PK`, `email TEXT UNIQUE`
+  stored lowercased, `created_at TIMESTAMPTZ`, `ip_address TEXT` nullable, index
+  `subscribers_email_idx`). The `subscribers` table is a **simple email-only list, NOT
+  user accounts** — no login/password/wallet coupling; created idempotently by
+  `app/api/subscribe/route.ts` on first POST. Export via manual SQL
+  (`SELECT email FROM subscribers ORDER BY created_at`) when an announcement ships.
 - Upstash Redis (`defidesh-price-cache`, free tier, us-east-1) — persistent
   historical-price cache (Sprint 1.6) + DeFiLlama claim prices (Sprint 1.12,
   `price:historical:defillama:*`) + closed-position deposit history (Sprint 1.14,
