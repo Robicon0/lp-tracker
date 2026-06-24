@@ -434,7 +434,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // resort was REMOVED for Bluefin fee claims (Rule 1a, mirrors Cetus 1.15). v24
 // entries carry spot-contaminated cold-cache Bluefin fee values; flush so
 // Fees-Collected re-resolves under the new cascade in lockstep with analytics.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v25-";
+// Bumped v25 → v26: Sprint 2.2c parity with analytics-activity v17 → v18. Cetus +
+// Bluefin fee-claim SUI side now reads getHistoricalOnlySuiPrice (pure historical)
+// instead of getCachedSuiPriceForTimestamp, which could return the FIX-C cg-spot
+// fallback on a CoinGecko-historical miss (Rule 1a leak). v25 entries may carry
+// spot-contaminated fee values; flush so they re-resolve via DeFiLlama / pending.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v26-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

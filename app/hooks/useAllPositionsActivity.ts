@@ -118,7 +118,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // was REMOVED for Bluefin fee claims (Rule 1a, mirrors Cetus 1.15). v16 entries
 // carry spot-contaminated cold-cache Bluefin fee values; flush so analytics Fee
 // Income & LP-P&L refresh in lockstep (parity with useLpPnl's v24 → v25).
-function cacheKey(id: string) { return `analytics-activity-v17-${id}`; }
+// Bumped v17 → v18: Sprint 2.2c. Cetus + Bluefin fee-claim SUI side now reads
+// getHistoricalOnlySuiPrice (pure historical) instead of
+// getCachedSuiPriceForTimestamp, which could return the FIX-C cg-spot fallback on a
+// CoinGecko-historical miss (Rule 1a leak). Flush so analytics Fee Income & LP-P&L
+// re-resolve any spot-contaminated fee value (parity with useLpPnl's v25 → v26).
+function cacheKey(id: string) { return `analytics-activity-v18-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
-import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp } from '../../../lib/suiPriceHistory';
+import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
 import { logPrice } from '../../../lib/priceLogger';
 
@@ -430,7 +430,7 @@ async function GET_impl(request: Request) {
         // events carry only a symbol, no coin type.)
         const __sA = STABLECOINS.has(coinTypeA.toLowerCase());
         const __sB = STABLECOINS.has(coinTypeB.toLowerCase());
-        const __histSui = getCachedSuiPriceForTimestamp(ev.timestamp);
+        const __histSui = getHistoricalOnlySuiPrice(ev.timestamp);
         let __usedDl = false;
         let __usedSuiHist = false;
         const priceSide = (coinType: string, isStable: boolean, isSui: boolean): number | null => {
@@ -477,7 +477,7 @@ async function GET_impl(request: Request) {
       // [PRICE_LOG] fee/reward resolution — read-only source re-derivation,
       // mirrors the Sui pricing rules above without altering any value.
       if (ev.type === 'fee_claim' || ev.type === 'reward_claim') {
-        const __histSui = getCachedSuiPriceForTimestamp(ev.timestamp);
+        const __histSui = getHistoricalOnlySuiPrice(ev.timestamp);
         let __src: string;
         if (ev.type === 'reward_claim') {
           const __sym = (ev.rewardSymbol ?? '').trim();

@@ -27,8 +27,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // v3: Cetus activity route now values fee_claim / reward_claim against
 // historical SUI price at the claim's date (instead of today's spot).
 // Cached events from v2 carry wrong-era SUI valuations.
+// v4 (Sprint 2.2c): fee-claim SUI side now reads getHistoricalOnlySuiPrice
+// (pure historical) instead of getCachedSuiPriceForTimestamp, which could
+// return the FIX-C cg-spot fallback on a CoinGecko-historical miss — closing a
+// Rule 1a leak. Flush so any spot-contaminated cached fee value re-resolves.
 function cacheKey(positionId: string) {
-  return `cetus-activity-v3-${positionId}`;
+  return `cetus-activity-v4-${positionId}`;
 }
 
 function readCache(positionId: string): CetusActivityData | null {

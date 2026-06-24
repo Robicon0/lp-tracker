@@ -28,7 +28,11 @@ function cacheKey(positionId: string) {
   // non-stable → DeFiLlama; else pending). The current-spot fallbackA/fallbackB
   // last resort was REMOVED for fee claims (Rule 1a). v3 entries carry
   // spot-contaminated cold-cache fee values; bump flushes them.
-  return `bluefin-activity-v4-${positionId}`;
+  // v4 → v5 (Sprint 2.2c): fee-claim SUI side now reads getHistoricalOnlySuiPrice
+  // (pure historical) instead of getCachedSuiPriceForTimestamp, which could return
+  // the FIX-C cg-spot fallback on a CoinGecko-historical miss (Rule 1a leak). Flush
+  // so any spot-contaminated cached fee value re-resolves via DeFiLlama / pending.
+  return `bluefin-activity-v5-${positionId}`;
 }
 
 function readCache(positionId: string): BluefinActivityData | null {
