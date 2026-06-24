@@ -220,7 +220,10 @@ P&L for closed positions requires event-log reconstruction.
   (Rule 4). **Every new CLMM protocol on Sui inherits this cascade by routing through
   `suiClosedPositions.ts`** (Protocol Correctness Contract). The SUI side uses the
   historical-only `getHistoricalOnlySuiPrice`, NOT `getCachedSuiPriceForTimestamp`
-  (which can return a FIX-C cg-spot fallback — see the open-position Sprint 2.2c gap).
+  (which can return a FIX-C cg-spot fallback). Sprint 2.2c migrated the Cetus/Bluefin
+  **open**-position fee-claim SUI side to `getHistoricalOnlySuiPrice` too, so no fee
+  claim on any Sui route can be spot-valued — only the CETUS reward token's designated
+  spot+LKG path (Memory #28) remains a deliberate spot exception.
 - **Sui Momentum + Solana (orca/raydium)** closed positions: still pending event-log
   reconstruction (Sprint MOMENTUM / Sprint 3).
 

@@ -68,8 +68,10 @@ Correctness Contract). Reward claims are NOT valued in the closed-position path 
 G/L excludes them — Rule 4; the displayed Fees Collected already recovers closed-Sui
 fees+rewards via the existing wallet-scope `positionId=all` pipeline). **Momentum
 deferred to Sprint MOMENTUM** — its deposit/withdrawal events are self-contained, but
-it's folded in alongside building its activity route. **Sprint 2.2c (FIX-C) queued:**
-an open-position SUI fee-claim cg-spot leak found during 2.2b — see Known limitations.
+it's folded in alongside building its activity route. **Sprint 2.2c (FIX-C) SHIPPED as
+`bfabf3f`:** the open-position SUI fee-claim cg-spot leak found during 2.2b is closed —
+Cetus/Bluefin open-position fee cascades now read `getHistoricalOnlySuiPrice` (pure
+historical) for the SUI side, never the FIX-C `spotFallback`. See Recent fixes.
 
 **Carry-overs (not blockers):**
 - **Sui closed positions now Capital-G/L-integrated for Cetus + Bluefin only**
@@ -105,18 +107,16 @@ begins.
    template), AND fold Momentum's closed positions into Capital G/L via the Sprint
    2.2b `suiClosedPositions.ts` lib (add `'momentum'` to `SuiClmmProtocol`; its
    deposit/withdrawal events are self-contained — verified Sprint 2.2 Phase A).
-3. **Sui open-position fee-claim FIX-C hardening** (Sprint 2.2c) — Cetus + Bluefin
-   *open*-position fee USD can fall to cg-spot via `getCachedSuiPriceForTimestamp`'s
-   FIX-C `spotFallback` on a CoinGecko-historical miss, before DeFiLlama is tried
-   (Rule 1a leak). Point those routes' SUI side at the new `getHistoricalOnlySuiPrice`
-   → DeFiLlama → pending (the Sprint 2.2b closed-position path). See Known limitations.
-4. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+3. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history; feeds
    Capital G/L.
-5. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
+4. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number. The Sprint
    2.2b `SuiClosedPosition` summary fields are already shaped for this.
+
+_(Sprint 2.2c — open-position SUI fee-claim cg-spot leak hardening — SHIPPED
+`bfabf3f`; removed from queue.)_
 6. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
    positions are now retrieved for Capital G/L but not yet shown as Closed rows).
 7. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
@@ -131,6 +131,26 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`bfabf3f`** — Sprint 2.2c: close the open-position SUI fee-claim cg-spot leak
+  (Rule 1a). The Cetus (1.15) + Bluefin (Sprint NEW) OPEN-position fee cascades read the
+  SUI side via `getCachedSuiPriceForTimestamp`, which returns `cache ?? spotFallback` —
+  so on a CoinGecko-historical miss it returned the FIX-C **current cg-spot** value and,
+  being non-null, PRE-EMPTED the DeFiLlama-historical tier in `priceSide`. A fee claim's
+  SUI side could thus be spot-valued (the leak found during 2.2b; the closed-position
+  path already avoided it). FIX (fee claims only, scope-locked): the 2 fee-claim
+  `__histSui` sites (bluefin:433, cetus:542) + the 2 `[PRICE_LOG]` re-derivation sites
+  (bluefin:480, cetus:622) now call `getHistoricalOnlySuiPrice` (pure historical `cache`,
+  never `spotFallback`) → on a CG miss `__histSui` is null → existing DeFiLlama tier →
+  else pending; NO spot. The 2 reward-claim sites (bluefin:402, cetus:500) UNCHANGED
+  (CETUS reward spot+LKG is the designated Memory #28 exception; Bluefin reward historical
+  migration separately deferred); `getCachedSuiPriceForTimestamp` retained for them. Cache
+  bumps (precedent Sprint NEW): cetus-activity v3→v4, bluefin-activity v4→v5,
+  analytics-activity v17→v18, lp-pnl-events v25→v26. Verified (both Sui wallets, both
+  routes, wallet-scope, spot priceA=2.5 like prod): **0 cg-spot for fee_claims** (cg-spot
+  only in the untouched reward path); 0 real pending (cetus zero-amount dust → $0); Bluefin
+  Account 2 **19/19 historical** (matches Sprint NEW baseline); fee USD byte-identical
+  old==new on the CG-hit path (**$0.00 shift**) — only transient CG-miss dates differ and
+  there resolve via DeFiLlama-historical, never spot; tsc + build clean.
 - **`bb7fc0d`** — Sprint 2.2b: Sui closed-position Capital G/L integration for Cetus +
   Bluefin (Sprint 2.2 Phase A was the read-only investigation that approved this). A
   closed Sui CLMM position's object is DESTROYED on close, so `suix_getOwnedObjects`
@@ -267,31 +287,11 @@ shorthand.
   md5, claims 5/5 resolved, 0 cg-spot (Rule 1a); open-path writes no key; all 4
   persist. Prod Etherscan-throttle not locally reproducible (free key); mechanics
   verified.
-- **`2dcd3cb`** — Sprint 1.13: server-side activity-route cache + in-flight dedup
-  (HyperEVM cold-load fix). MEASURED root cause of the 3-5 min cold first load:
-  the analytics page fetches every position's activity route 2-3× (useAll-
-  PositionsActivity + useLpPnl + useWalletLevelFees each build the same URL and
-  fetch independently) and the routes had NO server-side cache — so on a cold
-  instance each redundant fetch re-ran the full expensive path (HyperEVM Ether-
-  scan/archive deposit scan + every CoinGecko-historical claim through the
-  process-wide concurrency-1 `withCgPacing` queue), and the extra volume fed
-  CoinGecko free-tier 429 retry storms. Warm path was already ~8s (Redis short-
-  circuits CG). Fix (additive): new `app/lib/activityRouteCache.ts`
-  `withActivityRouteCache` wraps all 9 `/api/{protocol}/activity` GET handlers
-  with (1) IN-FLIGHT DEDUP — concurrent identical requests share ONE computation
-  (the dominant win, collapses the simultaneous multi-hook burst) and (2) a short
-  TTL result cache (cache-versioning Rule 3: 5m success / 60s empty / errors never
-  cached). In-process per-instance, keyed by pathname + sorted search params. New
-  `[PRICE_LOG]` `activity_cache` event (hit|dedup|miss). Byte-identical by
-  construction (a hit/dedup returns the exact route JSON — Rule 1a intact, no new
-  CG/spot calls, Sprint 1.12 DeFiLlama path untouched). NO cache-version bump
-  (in-process module cache, not a versioned key). Verified (Account 2, 4 closed
-  ProjectX + Sui): build+tsc clean; 3 concurrent identical → 1 miss + 2 dedup,
-  deposit scan ran ONCE (was 3×); 10 requests / 4 positions → 4 deposit scans (was
-  up to 10), 4 miss + 5 dedup + 1 hit; TTL hit 0.04s; byte-identical md5 on
-  hyperswap + bluefin; 0 errors, 0 cg-spot for claims, 0 DeFiLlama regression.
-  Per-position activity work cut 2-3× → 1× on cold load. Full-page browser timing
-  not headlessly measured (eyeball on deploy).
+- _(Sprint 1.13 `2dcd3cb` — server-side activity-route cache + in-flight dedup
+  (`app/lib/activityRouteCache.ts` `withActivityRouteCache` wraps all 9
+  `/api/{protocol}/activity` GETs): collapses the 2-3× redundant multi-hook fetch
+  per position into ONE computation (the HyperEVM cold-load fix), in-process,
+  byte-identical, no version bump — rolled off this list; see git history.)_
 - _(Sprint 1.12 `5bad502` — DeFiLlama historical-by-contract wired as a SECONDARY
   claim-date price source (`app/lib/defillamaPriceHistory.ts`), keyed by on-chain
   contract/mint/coin-type for the Sui/Solana long-tail; PRIMARY for Solana
@@ -454,15 +454,17 @@ G/L — separate queue item); and **reward claims** are not valued in the
 closed-position path (Cap G/L excludes them by Rule 4; the displayed Fees Collected
 already recovers closed-Sui fees+rewards via the wallet-scope pipeline).
 
-**Sui open-position fee-claim cg-spot leak (Sprint 2.2c, queued).** The Cetus (1.15)
-and Bluefin (Sprint NEW) *open*-position fee cascades call
-`getCachedSuiPriceForTimestamp` for the SUI side, which can return the FIX-C
-`spotFallback` (current cg-spot) when CoinGecko historical misses — BEFORE DeFiLlama
-is tried — so an open-position SUI fee claim can be spot-valued under a CG-historical
-miss (a Rule 1a leak). Found during Sprint 2.2b; the closed-position path already
-avoids it via the new `getHistoricalOnlySuiPrice`. Fix: point the open-position
-routes' SUI side at `getHistoricalOnlySuiPrice` → DeFiLlama → pending. Queued as
-Sprint 2.2c (after EMAIL / MOMENTUM); not a closed-position-scope issue so deferred.
+**Sui open-position fee-claim cg-spot leak — RESOLVED (Sprint 2.2c `bfabf3f`).** The
+Cetus (1.15) and Bluefin (Sprint NEW) *open*-position fee cascades called
+`getCachedSuiPriceForTimestamp` for the SUI side, which returns the FIX-C `spotFallback`
+(current cg-spot) when CoinGecko historical misses — and, being non-null, PRE-EMPTED the
+DeFiLlama-historical tier — so an open-position SUI fee claim could be spot-valued (Rule
+1a leak). Fixed: the 2 fee-claim sites + 2 `[PRICE_LOG]` re-derivation sites now call
+`getHistoricalOnlySuiPrice` (pure historical → DeFiLlama → pending; no spot). The 2
+reward-claim sites are untouched (CETUS reward spot+LKG is the designated Memory #28
+exception; Bluefin reward historical migration remains deferred). Platform-wide, **every
+fee claim on every protocol on every chain is now historical-only** — the sole exception
+is the CETUS reward token's designated spot+LKG path.
 
 **Solana closed positions not yet retrievable.** Position state destroyed
 on close. Solution exists in plan (transaction history parsing); requires
@@ -543,16 +545,17 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
-- `lp-pnl-events-v25` (Sprint NEW — Bluefin fee claims historical-only,
-  current-spot fallback removed; parity with analytics-activity v17. NOT bumped in
-  Sprint 2.2b — its per-position event cache is byte-identical; closed Sui has its
-  own key)
-- `analytics-activity-v17` (Sprint NEW — Bluefin fee claims historical-only
-  re-resolve in lockstep with LP-P&L. NOT bumped in 2.2b — same reason)
-- `cetus-activity-v3`
-- `bluefin-activity-v4` (Sprint NEW — Bluefin fee claims valued claim-date
-  historical-only: stable → $1; SUI → CG-historical → DeFiLlama; other
-  non-stable → DeFiLlama; else pending; current-spot fallback removed, Rule 1a)
+- `lp-pnl-events-v26` (Sprint 2.2c — Cetus + Bluefin fee-claim SUI side now reads
+  `getHistoricalOnlySuiPrice` (pure historical) instead of the spot-capable
+  `getCachedSuiPriceForTimestamp`; flush spot-contaminated cold-cache fee values.
+  Parity with analytics-activity v18. NOT bumped in 2.2b)
+- `analytics-activity-v18` (Sprint 2.2c — same fee-claim historical-only migration;
+  re-resolve analytics Fee Income in lockstep with LP-P&L. NOT bumped in 2.2b)
+- `cetus-activity-v4` (Sprint 2.2c — Cetus fee-claim SUI side historical-only via
+  `getHistoricalOnlySuiPrice`; FIX-C spotFallback no longer reachable for fee claims)
+- `bluefin-activity-v5` (Sprint 2.2c — Bluefin fee-claim SUI side historical-only via
+  `getHistoricalOnlySuiPrice`; FIX-C spotFallback no longer reachable for fee claims.
+  v4 had: stable → $1; SUI → CG-historical → DeFiLlama; else pending)
 - `closed_pos_sui_v1` (Sprint 2.2b — Upstash Redis cache of reconstructed CLOSED
   Cetus/Bluefin positions' Capital G/L, keyed `closed_pos_sui_v1:{protocol}:{wallet}`,
   30d TTL, Sprint 1.14 immutable contract. Bump to invalidate on a closed-position

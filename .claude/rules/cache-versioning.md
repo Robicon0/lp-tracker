@@ -45,10 +45,10 @@ updated when versions are bumped.
 
 | Cache key            | Current version | Last bump reason |
 |----------------------|-----------------|------------------|
-| lp-pnl-events        | v25             | Sprint NEW — Bluefin fee claims valued historical-only (current-spot fallbackA/fallbackB removed; SUI → CG-historical → DeFiLlama → pending). Parity with analytics-activity v17 |
-| analytics-activity   | v17             | Sprint NEW — Bluefin fee claims historical-only (cg-spot/current-spot removed); flush so analytics Fee Income re-resolves under the new cascade in lockstep with LP-P&L |
-| cetus-activity       | v3              | Cetus V2 deposit/withdrawal event structure |
-| bluefin-activity     | v4              | Sprint NEW — Bluefin fee claims valued claim-date historical-only (stable → $1; SUI → CG-historical → DeFiLlama; other non-stable → DeFiLlama; else pending); current-spot fallback removed (Rule 1a) |
+| lp-pnl-events        | v26             | Sprint 2.2c — Cetus + Bluefin fee-claim SUI side now reads `getHistoricalOnlySuiPrice` (pure historical) instead of the spot-capable `getCachedSuiPriceForTimestamp`; flush spot-contaminated cold-cache fee values. Parity with analytics-activity v18 |
+| analytics-activity   | v18             | Sprint 2.2c — same fee-claim historical-only migration; flush so analytics Fee Income re-resolves in lockstep with LP-P&L |
+| cetus-activity       | v4              | Sprint 2.2c — Cetus fee-claim SUI side historical-only via `getHistoricalOnlySuiPrice` (FIX-C spotFallback no longer reachable for fee claims; Rule 1a) |
+| bluefin-activity     | v5              | Sprint 2.2c — Bluefin fee-claim SUI side historical-only via `getHistoricalOnlySuiPrice` (FIX-C spotFallback no longer reachable for fee claims; Rule 1a) |
 | closed_pos_sui       | v1              | Sprint 2.2b — NEW Redis cache of reconstructed CLOSED Cetus/Bluefin positions' Capital G/L (key `closed_pos_sui_v1:{protocol}:{wallet}`, 30d TTL). Bump on a closed-position valuation-logic change. lp-pnl-events / analytics-activity were NOT bumped this sprint — their per-position event caches are byte-identical (closed Sui has its own key, this one) |
 
 If a version listed here doesn't match what's in code, code is the source
