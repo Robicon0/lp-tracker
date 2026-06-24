@@ -5,6 +5,7 @@ import PriceTickerStrip from "./components/PriceTickerStrip";
 import BlinkingCursor from "./components/BlinkingCursor";
 import ProtocolScroll, { type ProtocolScrollItem } from "./components/ProtocolScroll";
 import MobileNavMenu from "./components/MobileNavMenu";
+import ShipNotifications from "./components/ShipNotifications";
 
 const PROTOCOL_DEFS: {
   name: string;
@@ -372,6 +373,9 @@ export default async function Home() {
           </div>
         ))}
       </section>
+
+      {/* SHIP NOTIFICATIONS — email capture */}
+      <ShipNotifications />
 
       {/* FOOTER */}
       <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[14px] text-[#888] tracking-[0.08em]">
