@@ -41,36 +41,47 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint MOMENTUM: Momentum activity route + closed-position Capital G/L.**
+**Sprint 3: Closed Solana position fee recovery via Helius.**
 
-**Goal:** Build the Momentum (Sui) activity route modeled on Bluefin (`17c5101`), with
-the Rule 1a historical-ONLY fee-claim cascade from the start — stable → $1; SUI →
-CoinGecko-historical → DeFiLlama-historical; other non-stable → DeFiLlama-historical;
-else pending; **NO spot** — and the SUI side reading `getHistoricalOnlySuiPrice` (pure
-historical, never the FIX-C `spotFallback`) per Sprint 2.2c. THEN fold Momentum's closed
-positions into Capital G/L via the Sprint 2.2b `app/lib/suiClosedPositions.ts` lib (add
-`'momentum'` to `SuiClmmProtocol`; its deposit/withdrawal events are self-contained —
-verified Sprint 2.2 Phase A). Inherits the closed-position valuation cascade (per side,
-NEVER current spot — Rule 1a): stable → $1 → event-captured `current_sqrt_price` at the
-deposit/withdrawal block → DeFiLlama historical-by-coin-type → CoinGecko SUI historical →
-pending.
+**Goal:** Recover closed Solana (Orca, Raydium) positions for Capital G/L + Fee Income.
+A Solana CLMM position's state is DESTROYED on close (like Sui — Category B), so build a
+Solana event indexer that parses Orca/Raydium program instructions from the wallet's tx
+history and reconstructs deposit/withdrawal/fee lifecycle, then values it via the same
+Rule-1a historical-only cascade (DeFiLlama-by-mint primary per Sprint 1.12; stable → $1;
+never spot). Feeds Capital G/L exactly like the Sui closed-position path
+(`suiClosedPositions.ts`) does for Cetus/Bluefin/Momentum — reuse `computePositionPnL`,
+no per-chain branches.
 
-**Hard constraint:** investigate-first; additive; historical-only fee claims from the
-start (no spot leak to fix later); reuse shared CLMM utilities + `suiClosedPositions.ts`
+**GATING DEPENDENCY (decide before starting):** the closed-Solana tx-history parse needs
+**paid Helius** (~$49/mo) for speed — the free tier is too slow to scan a wallet's full
+program-instruction history within the route budget. This is a budget decision for Osho;
+Sprint 3 is **blocked on that approval** (see Business context). Until then, Solana closed
+positions remain excluded from Capital G/L (label already scopes to "EVM + Sui").
+
+**Hard constraint:** investigate-first; additive; historical-only (Rule 1a), no spot in
+any fee/capital path; reuse the closed-position engine pattern + `computePositionPnL`
 (Protocol Correctness Contract), no per-chain branches.
 
-**Status:** Not started.
+**Status:** Not started — gated on the Helius paid-upgrade decision.
 
-**Note — Sprint EMAIL (homepage email capture) shipped as `5b583f7`:** a privacy-respecting
-ship-notification email-capture section now sits between FEATURES and the footer on the
-homepage, persisting to the Neon `subscribers` table (email-only list, NOT user accounts).
-No wallet coupling, no cache bumps. See Recent fixes + the subscribers schema note under
-"Data model".
+**Note — Sprint MOMENTUM (Momentum activity route + closed-position Capital G/L) shipped
+as `750f566`:** Sui Capital G/L is now COMPLETE across all three Sui CLMM protocols
+(Cetus, Bluefin, Momentum). See Recent fixes.
 
 **Carry-overs (not blockers):**
-- **Sui closed positions now Capital-G/L-integrated for Cetus + Bluefin only**
-  (Sprint 2.2b) — Momentum's 2 closed positions and the Solana closed positions are
-  still excluded (Sprint MOMENTUM / Sprint 3).
+- **Sui closed positions Capital-G/L-integrated for ALL three Sui CLMM protocols**
+  (Cetus + Bluefin Sprint 2.2b; Momentum Sprint MOMENTUM `750f566`) — only Solana closed
+  positions remain excluded (this sprint, gated on Helius). Sui closed positions are
+  counted in Capital G/L but not yet shown as Closed rows (Sprint 4 queue item).
+- **CG-historical vs DeFiLlama-historical per-position daily-price tolerance (Sprint
+  MOMENTUM finding):** the Sui closed-position SUI side prefers CoinGecko-historical
+  (`getHistoricalOnlySuiPrice`) and falls to DeFiLlama-historical-by-coin-type only when
+  CoinGecko 429s — BOTH are Rule 1c valid claim-date historical sources, never spot. So a
+  position's per-event SUI price (and thus its Capital G/L) can vary by the daily-price
+  delta between the two sources depending on which answered (e.g. Momentum A1 verified at
+  −$306.59 combined vs a −$311.85 DeFiLlama-only scratch estimate, −1.7%). This is
+  expected daily-granularity tolerance, NOT a leak; the wallet-scope combined figure is
+  stable within a few percent.
 - **HyperEVM Tier 2 archive is a non-functional fallback for positions >~57 days
   old** (Sprint 1.14) — mitigated for CLOSED positions by the Redis deposit cache;
   OPEN HyperEVM positions >57 days rely on Tier 1 (but have the value>0 client
@@ -91,23 +102,17 @@ No wallet coupling, no cache bumps. See Recent fixes + the subscribers schema no
 In order. One active at a time. Each sprint must ship before the next
 begins.
 
-1. **Momentum activity route + closed-position integration** (active, Sprint MOMENTUM) —
-   build the Momentum activity route modeled on Bluefin (Rule 1a historical-only
-   fee-claim cascade from the start: stable → $1; SUI → CG-historical → DeFiLlama;
-   other non-stable → DeFiLlama; else pending; no spot — the Bluefin `17c5101`
-   template), AND fold Momentum's closed positions into Capital G/L via the Sprint
-   2.2b `suiClosedPositions.ts` lib (add `'momentum'` to `SuiClmmProtocol`; its
-   deposit/withdrawal events are self-contained — verified Sprint 2.2 Phase A).
-2. **Closed Solana position fee recovery via Helius** (Sprint 3) — Solana event
+1. **Closed Solana position fee recovery via Helius** (active, Sprint 3) — Solana event
    indexer; parse Orca/Raydium program instructions from wallet tx history; feeds
-   Capital G/L.
-3. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
+   Capital G/L. **GATED on the paid Helius (~$49/mo) upgrade decision** — free tier too
+   slow to scan full program-instruction history within the route budget.
+2. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number. The Sprint
    2.2b `SuiClosedPosition` summary fields are already shaped for this.
-4. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
+3. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
    positions are now retrieved for Capital G/L but not yet shown as Closed rows).
-5. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+4. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
@@ -119,6 +124,39 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`750f566`** — Sprint MOMENTUM: Momentum (Sui) activity route + closed-position
+  Capital G/L. Completes Sui Capital G/L — **all three Sui CLMM protocols (Cetus,
+  Bluefin, Momentum) now reconstruct closed positions** and fold realized Capital G/L +
+  lifetime fees into analytics, valued historical-only (Rule 1a) from day one. NEW
+  `app/api/momentum/activity/route.ts` modeled on Bluefin (`17c5101`),
+  `withActivityRouteCache`, per-position + wallet-scope (`positionId=all`). Event mapping
+  (verified on-chain, Phase A): position-id field `position_id`; amounts
+  `amount_x`/`amount_y`; `AddLiquidityEvent`=deposit, `RemoveLiquidityEvent`=withdrawal,
+  `FeeCollectedEvent`=fee_claim, `CollectPoolRewardEvent`=reward_claim (carries the FULL
+  `reward_coin_type`, so rewards are valued historical-only via `resolveToken` — **no
+  spot+LKG exception needed**, unlike the CETUS reward token); ever-owned set from
+  `AddLiquidityEvent`+`OpenPositionEvent`. Fee/reward claims CLAIM-DATE historical ONLY:
+  stable→$1; SUI→`getHistoricalOnlySuiPrice` (pure historical, NOT the spot-capable
+  `getCachedSuiPriceForTimestamp`)→DeFiLlama→pending; other non-stable→DeFiLlama→pending;
+  **NO spot** (the Rule 2 deposit/withdrawal spot last-resort is unreachable by claims).
+  `suiClosedPositions.ts`: `'momentum'` added to `SuiClmmProtocol` + `MOMENTUM_PKG` +
+  `POSITION_TYPE`/`POSITION_ID_FIELD`/`eventPackageMatches` + a `parseCloseEvent` momentum
+  branch (`amount_x`/`amount_y`; **`sqrt` ALWAYS null** — Momentum liquidity events carry
+  no `current_sqrt_price`, so every deposit/withdrawal rides the existing historical-sides
+  fallback, Rule-1a-clean for SUI/USDC). Valuation cascade / Redis cache /
+  `computePositionPnL` UNCHANGED; `sui-closed-positions` route folds momentum in.
+  `useLpPnl` (ACTIVITY_PROTOCOLS + buildActivityUrl + closed-DTO union + label map);
+  `useWalletLevelFees` (Momentum SUI/USDC fallback context + wallet-scope scan recovers
+  closed `FeeCollectedEvent`s into Fee Income); analytics label →
+  "EVM + Sui (Cetus, Bluefin, Momentum)". Cache bumps: lp-pnl-events v26→v27,
+  analytics-activity v18→v19 (`closed_pos_sui_v1` NOT bumped — Momentum uses the new
+  `:momentum:` key namespace; cetus/bluefin entries byte-identical). Verified (both Sui
+  wallets, live engine): **A1 2 closed positions combined −$306.59** (within 1.7% of the
+  −$311.85 Phase A estimate; per-position daily-price variance is CG-historical-preferred
+  vs DeFiLlama-fallback, both Rule 1c), **A2 exactly $0** (no Momentum LP positions, only
+  swaps); **0 spot, 0 pending** across all events; per-position fees reconcile on-chain to
+  `FeeCollectedEvent` amounts; tsc + build clean. **Solana closed positions remain the
+  last excluded closed-position chain → Sprint 3 (gated on paid Helius).**
 - **`5b583f7`** — Sprint EMAIL: homepage email capture (ship notifications). Adds a
   privacy-respecting email-capture section to the homepage so visitors can subscribe to
   ship notifications — a simple email-only list, **NOT user accounts** (no login, no
@@ -249,55 +287,16 @@ shorthand.
   build+tsc clean. Velodrome fix is platform-prophylactic (Account 1 has 0
   Velodrome positions). **Bluefin/Momentum still carry the spot-fee-claim leak →
   now the active sprint.**
-- **`4752416`** — Sprint 1.15: Cetus fee claims route through DeFiLlama historical
-  before any spot (Rule 1a fix). Eliminates the latent FIX-A violation surfaced in
-  1.12: Cetus FEE claims fell back to CURRENT cg-spot when CoinGecko SUI-historical
-  missed (cold/rate-limited) or for a non-SUI/non-stable side, and the USDC stable
-  side was priced off the current-spot fallback rather than $1-anchored. Fix
-  (REPLACE, user-approved like the 1.12 Orca decision): fee claims are now valued
-  historical-ONLY, per side — stablecoin → $1; SUI side → CoinGecko historical then
-  DeFiLlama historical-by-coin-type; any other non-stable side → DeFiLlama
-  historical; if a side can't be priced historically the claim stays pending (no
-  spot). The cg-spot / FIX-A fee-claim fallback is REMOVED; the 1.12 DeFiLlama
-  prewarm is expanded to include the SUI side; the 1.12 null-only DeFiLlama block
-  is folded into the cascade as a first-class historical tier (reuses the 1.12
-  helper). **Memory #28 CETUS reward-token spot+LKG path PRESERVED** (separate
-  reward_claim branch). No cache bump. Verified (Account 2 USDC/SUI): build+tsc
-  clean; 3/3 fee claims via sui-historical with USDC=$1; **0 cg-spot for fee_claims**
-  (the only cg-spot are 3 reward_claim/CETUS — the designated exception); DeFiLlama-
-  SUI fallback warmed + wired (`defillama_historical_used` for 0x2::sui::SUI at all
-  3 dates); Bluefin 38/38 unchanged; scope limited to cetus/activity + docs.
-  CG-miss→DeFiLlama-SUI proven by construction (CoinGecko can't be forced to miss
-  locally). **Bluefin/Momentum carry the same latent pattern → queued follow-up.**
-- **`65d6328`** — Sprint 1.14: persist closed-position deposit history in Redis
-  (fixes the "Deposit history could not be retrieved" banner on 1 of 4 Account 2
-  ProjectX positions, which persisted past Sprint 1.13). DIAGNOSIS: these closed
-  positions are retrievable ONLY via Tier 1 (Etherscan V2, `fromBlock=0`). Tier 2
-  (Chainstack archive) is a non-functional fallback for them — it scans only the
-  last `SCAN_DEPTH`≈5M blocks = **~57 days** at HyperEVM's ~1s block time, but the
-  deposits are 68-97 days old (blocks 29.25M-32.5M vs a 33.45M window floor), AND
-  a true `fromBlock=0` archive query is **plan-blocked** (`-32002`). So when
-  Etherscan's free-tier rate limit throttles Tier 1 for one position under
-  concurrent production load, it falls to a Tier 2 that physically cannot find the
-  deposit → 0 deposits → analytics excludes the closed (value=0, no client
-  fallback) position. Sprint 1.13's dedup cut call VOLUME but can't help when the
-  one remaining Etherscan call is throttled. FIX (additive, free-tier): a closed
-  position's on-chain history is IMMUTABLE → new `app/lib/depositHistoryCache.ts`
-  persists the raw logs in Upstash Redis keyed by `(nftManager, tokenId)`, 30d TTL
-  (Sprint 1.6 contract). hyperswap/activity reads it first for closed positions
-  (new `tier_used: 'redis-cache'`) and writes on the first complete live success;
-  once warmed, every later load — any instance/user, even while Etherscan
-  throttles — serves from Redis, never re-hitting Etherscan. CLOSED-only (`closed=1`
-  from `pos.status` in both useLpPnl + useAllPositionsActivity); open positions
-  never cached. Paired guards: Tier 1 now treats 0 IncreaseLiquidity logs as a
-  FAILURE (`etherscan-increase-missing`) instead of a deposit-less "success"; an
-  empty result is NEVER persisted. No cache-version bump (persistent Redis, not a
-  versioned key; cached logs byte-identical to a fresh retrieval). Verified
-  (Account 2, 4 closed ProjectX): build+tsc clean; cold → tier etherscan-v2 +
-  Redis key written; restart → tier redis-cache, 0 Etherscan calls, byte-identical
-  md5, claims 5/5 resolved, 0 cg-spot (Rule 1a); open-path writes no key; all 4
-  persist. Prod Etherscan-throttle not locally reproducible (free key); mechanics
-  verified.
+- _(Sprint 1.15 `4752416` — Cetus fee claims route through DeFiLlama historical
+  before any spot, removing the latent FIX-A cg-spot fee-claim fallback;
+  historical-ONLY per side (stable $1 / SUI CG→DeFiLlama / other non-stable
+  DeFiLlama / else pending). Memory #28 CETUS reward spot+LKG preserved — rolled off
+  this list; see git history.)_
+- _(Sprint 1.14 `65d6328` — persist a CLOSED HyperEVM position's immutable deposit
+  logs in Upstash Redis (`depositHistoryCache.ts`, keyed `(nftManager, tokenId)`,
+  30d TTL) so a throttled free-tier Etherscan can't drop them; Tier 2 archive only
+  covers ~57 days and true `fromBlock=0` is plan-blocked — rolled off this list; see
+  git history.)_
 - _(Sprint 1.13 `2dcd3cb` — server-side activity-route cache + in-flight dedup
   (`app/lib/activityRouteCache.ts` `withActivityRouteCache` wraps all 9
   `/api/{protocol}/activity` GETs): collapses the 2-3× redundant multi-hook fetch
@@ -454,16 +453,21 @@ open positions, the Sugar contract's enumeration returns empty, causing
 `buildClosedPositions` to be skipped. Fees are recovered but closed-record
 display is gated. Pending fix.
 
-**Sui closed positions — Capital G/L RESOLVED for Cetus + Bluefin (Sprint 2.2b
-`bb7fc0d`).** The position object is destroyed on close, but `app/lib/
-suiClosedPositions.ts` reconstructs the lifecycle from wallet tx history and folds
-Capital G/L into `useLpPnl` (Redis-cached `closed_pos_sui_v1`). Remaining gaps:
-**Momentum** closed positions are NOT yet included (Sprint MOMENTUM — its events are
-self-contained but folded in with its activity route); closed Sui positions are not
-yet shown as **Closed rows** in the dashboard/Closed tab (only counted in Capital
-G/L — separate queue item); and **reward claims** are not valued in the
-closed-position path (Cap G/L excludes them by Rule 4; the displayed Fees Collected
-already recovers closed-Sui fees+rewards via the wallet-scope pipeline).
+**Sui closed positions — Capital G/L COMPLETE for ALL THREE Sui CLMM protocols
+(Cetus + Bluefin Sprint 2.2b `bb7fc0d`; Momentum Sprint MOMENTUM `750f566`).** The
+position object is destroyed on close, but `app/lib/suiClosedPositions.ts`
+reconstructs each lifecycle from wallet tx history and folds Capital G/L into
+`useLpPnl` (Redis-cached `closed_pos_sui_v1`, now `:cetus:` / `:bluefin:` / `:momentum:`
+key namespaces). Momentum rides the historical-sides fallback (its liquidity events
+carry no `current_sqrt_price`, so the sqrtprice-historical PRIMARY never fires —
+stable $1 + SUI CG/DeFiLlama historical, which is exact for SUI/USDC pools). Remaining
+gaps: closed Sui positions are not yet shown as **Closed rows** in the dashboard/Closed
+tab (only counted in Capital G/L — Sprint 3 queue item, NOT the Solana sprint); and
+**reward claims** are not valued in the closed-position Capital G/L path (Cap G/L
+excludes them by Rule 4; the displayed Fees Collected already recovers closed-Sui
+fees+rewards via the wallet-scope pipeline — Momentum's wallet-scope route now values
+rewards historical-only via `reward_coin_type`, no spot+LKG exception). **Solana** is
+the only chain still missing closed-position Capital G/L (Sprint 3, gated on Helius).
 
 **Sui open-position fee-claim cg-spot leak — RESOLVED (Sprint 2.2c `bfabf3f`).** The
 Cetus (1.15) and Bluefin (Sprint NEW) *open*-position fee cascades called
@@ -565,21 +569,29 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
-- `lp-pnl-events-v26` (Sprint 2.2c — Cetus + Bluefin fee-claim SUI side now reads
-  `getHistoricalOnlySuiPrice` (pure historical) instead of the spot-capable
-  `getCachedSuiPriceForTimestamp`; flush spot-contaminated cold-cache fee values.
-  Parity with analytics-activity v18. NOT bumped in 2.2b)
-- `analytics-activity-v18` (Sprint 2.2c — same fee-claim historical-only migration;
-  re-resolve analytics Fee Income in lockstep with LP-P&L. NOT bumped in 2.2b)
+- `lp-pnl-events-v27` (Sprint MOMENTUM — Momentum is now an ACTIVITY_PROTOCOL (open
+  positions route to `/api/momentum/activity` instead of being surfaced as unsupported
+  rejections) AND its closed positions fold into Capital G/L; both change cached LP-P&L
+  output. Parity with analytics-activity v19. v26 was Sprint 2.2c: Cetus + Bluefin
+  fee-claim SUI side → `getHistoricalOnlySuiPrice`)
+- `analytics-activity-v19` (Sprint MOMENTUM — Momentum fee + historical-only reward
+  claims now enter analytics Fee Income; re-resolve in lockstep with LP-P&L. v18 was
+  Sprint 2.2c)
 - `cetus-activity-v4` (Sprint 2.2c — Cetus fee-claim SUI side historical-only via
   `getHistoricalOnlySuiPrice`; FIX-C spotFallback no longer reachable for fee claims)
 - `bluefin-activity-v5` (Sprint 2.2c — Bluefin fee-claim SUI side historical-only via
   `getHistoricalOnlySuiPrice`; FIX-C spotFallback no longer reachable for fee claims.
   v4 had: stable → $1; SUI → CG-historical → DeFiLlama; else pending)
-- `closed_pos_sui_v1` (Sprint 2.2b — Upstash Redis cache of reconstructed CLOSED
-  Cetus/Bluefin positions' Capital G/L, keyed `closed_pos_sui_v1:{protocol}:{wallet}`,
-  30d TTL, Sprint 1.14 immutable contract. Bump to invalidate on a closed-position
-  valuation-logic change. Env: `PRICE_CACHE_KV_*`, shared Upstash DB — avoid flushes)
+- `momentum-activity` (Sprint MOMENTUM — NEW `/api/momentum/activity`, wrapped in the
+  in-process `withActivityRouteCache` (URL-keyed, NO `-vN` suffix — clears on every
+  deploy by construction, cache-versioning Rule 4). Fee/reward claims historical-only,
+  Rule 1a; reward valued via `reward_coin_type` → resolveToken, never spot)
+- `closed_pos_sui_v1` (Sprint 2.2b — Upstash Redis cache of reconstructed CLOSED Sui
+  positions' Capital G/L, keyed `closed_pos_sui_v1:{protocol}:{wallet}`, now `:cetus:`
+  / `:bluefin:` / `:momentum:` namespaces, 30d TTL, Sprint 1.14 immutable contract.
+  NOT bumped for Sprint MOMENTUM — Momentum is a NEW protocol key, so cetus/bluefin
+  entries are byte-identical. Bump to invalidate on a closed-position valuation-logic
+  change. Env: `PRICE_CACHE_KV_*`, shared Upstash DB — avoid flushes)
 
 ---
 

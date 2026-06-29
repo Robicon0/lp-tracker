@@ -45,11 +45,12 @@ updated when versions are bumped.
 
 | Cache key            | Current version | Last bump reason |
 |----------------------|-----------------|------------------|
-| lp-pnl-events        | v26             | Sprint 2.2c — Cetus + Bluefin fee-claim SUI side now reads `getHistoricalOnlySuiPrice` (pure historical) instead of the spot-capable `getCachedSuiPriceForTimestamp`; flush spot-contaminated cold-cache fee values. Parity with analytics-activity v18 |
-| analytics-activity   | v18             | Sprint 2.2c — same fee-claim historical-only migration; flush so analytics Fee Income re-resolves in lockstep with LP-P&L |
+| lp-pnl-events        | v27             | Sprint MOMENTUM — Momentum is now an ACTIVITY_PROTOCOL (open positions route to `/api/momentum/activity` instead of being surfaced as unsupported rejections) AND its closed positions fold into Capital G/L; both change cached LP-P&L output. Parity with analytics-activity v19 |
+| analytics-activity   | v19             | Sprint MOMENTUM — Momentum fee + historical-only reward claims now enter analytics Fee Income; re-resolve in lockstep with LP-P&L |
 | cetus-activity       | v4              | Sprint 2.2c — Cetus fee-claim SUI side historical-only via `getHistoricalOnlySuiPrice` (FIX-C spotFallback no longer reachable for fee claims; Rule 1a) |
 | bluefin-activity     | v5              | Sprint 2.2c — Bluefin fee-claim SUI side historical-only via `getHistoricalOnlySuiPrice` (FIX-C spotFallback no longer reachable for fee claims; Rule 1a) |
-| closed_pos_sui       | v1              | Sprint 2.2b — NEW Redis cache of reconstructed CLOSED Cetus/Bluefin positions' Capital G/L (key `closed_pos_sui_v1:{protocol}:{wallet}`, 30d TTL). Bump on a closed-position valuation-logic change. lp-pnl-events / analytics-activity were NOT bumped this sprint — their per-position event caches are byte-identical (closed Sui has its own key, this one) |
+| momentum-activity    | (in-process)    | Sprint MOMENTUM — NEW `/api/momentum/activity` wrapped in `withActivityRouteCache` (in-process, URL-keyed, NO `-vN` suffix; clears on every deploy by construction — Rule 4). Fee/reward claims historical-only (Rule 1a); reward valued via `reward_coin_type` → resolveToken, never spot |
+| closed_pos_sui       | v1              | Sprint 2.2b — Redis cache of reconstructed CLOSED Sui positions' Capital G/L (key `closed_pos_sui_v1:{protocol}:{wallet}`, now `:cetus:`/`:bluefin:`/`:momentum:` namespaces, 30d TTL). NOT bumped for Sprint MOMENTUM — Momentum is a NEW protocol key, so cetus/bluefin entries are byte-identical. Bump on a closed-position valuation-logic change |
 
 If a version listed here doesn't match what's in code, code is the source
 of truth. Update this table to match code, not the other way around.
