@@ -47,38 +47,44 @@ const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
 const STABLE_CGIDS = new Set(['usd-coin', 'tether', 'dai']);
 
-// ── Scope (Sprint 2.2b: Cetus + Bluefin; Momentum deferred to Sprint MOMENTUM) ──
-export type SuiClmmProtocol = 'cetus' | 'bluefin';
+// ── Scope (Sprint 2.2b: Cetus + Bluefin; Sprint MOMENTUM adds Momentum) ────────
+export type SuiClmmProtocol = 'cetus' | 'bluefin' | 'momentum';
 
-// ── Package allowlists (verified on-chain, Sprint 2.2 Phase A) ─────────────────
-// Filtering is by PACKAGE PREFIX, never name-only: Momentum emits identically-
-// named AddLiquidityEvent / RemoveLiquidityEvent, so a name-only filter would
-// cross-capture Momentum events. These mirror the allowlists already used by
-// app/api/cetus/activity/route.ts and app/api/bluefin/activity/route.ts.
+// ── Package allowlists (verified on-chain, Sprint 2.2 Phase A + Sprint MOMENTUM)
+// Filtering is by PACKAGE PREFIX, never name-only: Momentum emits an identically-
+// named AddLiquidityEvent / RemoveLiquidityEvent (Cetus has AddLiquidityEvent
+// too), so a name-only filter would cross-capture across protocols. These mirror
+// the allowlists in app/api/{cetus,bluefin,momentum}/activity/route.ts.
 const CETUS_PKGS = [
   '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb', // fees + lifecycle (CollectFeeEvent, Open/ClosePositionEvent)
   '0xdb5cd62a06c79695bfc9982eb08534706d3752fe123b48e0144f480209b3117f', // V2 deposits/withdrawals (Add/RemoveLiquidityV2Event)
   '0xdc67d6de3f00051c505da10d8f6fbab3b3ec21ec65f0dc22a2f36c13fc102110', // V2 rewards (CollectRewardV2Event)
 ] as const;
 const BLUEFIN_PKG = '0x3492c874c1e3b3e2984e8c41b589e642d4d0a5d6459e5a9cfc2d52fd7c89c267';
+// Sprint MOMENTUM — single package; emits AddLiquidityEvent / RemoveLiquidityEvent
+// / FeeCollectedEvent / OpenPositionEvent / ClosePositionEvent (no current_sqrt_price
+// on liquidity events — closed-position valuation rides the historical-sides fallback).
+const MOMENTUM_PKG = '0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860';
 
 // Sui object types for currently-owned (open) position discovery — used by
 // retrieveClosedPositions to subtract still-owned positions from ever-opened.
 const POSITION_TYPE: Record<SuiClmmProtocol, string> = {
   cetus: `${CETUS_PKGS[0]}::position::Position`,
   bluefin: `${BLUEFIN_PKG}::position::Position`,
+  momentum: `${MOMENTUM_PKG}::position::Position`,
 };
 
 // The on-chain field that holds the position object id, per protocol.
 const POSITION_ID_FIELD: Record<SuiClmmProtocol, string> = {
   cetus: 'position',        // Cetus events carry `position`
   bluefin: 'position_id',   // Bluefin events carry `position_id`
+  momentum: 'position_id',  // Momentum events carry `position_id`
 };
 
 function eventPackageMatches(protocol: SuiClmmProtocol, eventType: string): boolean {
-  return protocol === 'cetus'
-    ? CETUS_PKGS.some((p) => eventType.startsWith(p))
-    : eventType.startsWith(BLUEFIN_PKG);
+  if (protocol === 'cetus') return CETUS_PKGS.some((p) => eventType.startsWith(p));
+  if (protocol === 'momentum') return eventType.startsWith(MOMENTUM_PKG);
+  return eventType.startsWith(BLUEFIN_PKG);
 }
 
 function bigintOrNull(v: unknown): bigint | null {
@@ -328,6 +334,21 @@ export function parseCloseEvent(
     aRaw = bigintOrNull(pj.amount_a);
     bRaw = bigintOrNull(pj.amount_b);
     if (kind !== 'fee_claim') sqrt = bigintOrNull(pj.current_sqrt_price);
+  } else if (protocol === 'momentum') {
+    // Momentum (Sprint MOMENTUM): AddLiquidityEvent / RemoveLiquidityEvent
+    //   (amount_x, amount_y; NO current_sqrt_price — Momentum liquidity events
+    //   carry no pool price). Fees: FeeCollectedEvent (amount_x, amount_y; no
+    //   sqrt). CollectPoolRewardEvent is a separate reward path (excluded from
+    //   Capital G/L per Rule 4). sqrt is ALWAYS null → every deposit/withdrawal
+    //   rides the historical-sides fallback (stable $1 + SUI historical), which
+    //   is Rule-1a-clean for the SUI/USDC pools Momentum runs.
+    if (name === 'AddLiquidityEvent') kind = 'deposit';
+    else if (name === 'RemoveLiquidityEvent') kind = 'withdrawal';
+    else if (name === 'FeeCollectedEvent') kind = 'fee_claim';
+    else return null;
+    aRaw = bigintOrNull(pj.amount_x);
+    bRaw = bigintOrNull(pj.amount_y);
+    // sqrt stays null for all Momentum events (no current_sqrt_price field).
   } else {
     // Bluefin: LiquidityProvided / LiquidityRemoved (coin_a_amount, coin_b_amount,
     //   current_sqrt_price). Fees: UserFeeCollected (coin_a_amount, coin_b_amount;

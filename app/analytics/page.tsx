@@ -1747,8 +1747,8 @@ export default function Analytics() {
                     label: "Capital G/L",
                     val: fmt$Signed(lpPnl.capitalGL),
                     color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright,
-                    sub: "closed positions, EVM + Sui (Cetus, Bluefin)",
-                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.) plus Sui (Cetus, Bluefin), reconstructed from on-chain events and valued at historical prices. Solana closed-position exit data is not yet available on-chain.",
+                    sub: "closed positions, EVM + Sui (Cetus, Bluefin, Momentum)",
+                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.) plus Sui (Cetus, Bluefin, Momentum), reconstructed from on-chain events and valued at historical prices. Solana closed-position exit data is not yet available on-chain.",
                   },
                   {
                     label: "Imperm. Loss",

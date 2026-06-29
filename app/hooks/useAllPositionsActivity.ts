@@ -123,7 +123,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // getCachedSuiPriceForTimestamp, which could return the FIX-C cg-spot fallback on a
 // CoinGecko-historical miss (Rule 1a leak). Flush so analytics Fee Income & LP-P&L
 // re-resolve any spot-contaminated fee value (parity with useLpPnl's v25 → v26).
-function cacheKey(id: string) { return `analytics-activity-v18-${id}`; }
+// Bumped v18 → v19: Sprint MOMENTUM. Momentum is now an activity protocol —
+// /api/momentum/activity contributes fee (and historical-only reward) claims to
+// analytics Fee Income, and its open positions get per-position activity entries
+// that didn't exist before. Flush v18 so Fee Income re-resolves with Momentum
+// included (parity with useLpPnl's v26 → v27).
+function cacheKey(id: string) { return `analytics-activity-v19-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

@@ -72,6 +72,22 @@ const CETUS_FALLBACK = {
   priceA: 1,
 } as const;
 
+// Momentum (Sprint MOMENTUM) fallback context. Momentum's canonical pool is
+// SUI(x=A,9) / USDC(y=B,6) — the SAME ordering as Bluefin, the REVERSE of Cetus
+// (verified on-chain Phase A: Pool<0x2::sui::SUI, 0xdba34672…::usdc::USDC>). The
+// Momentum dashboard route does not expose coinTypeA/coinTypeB on its positions,
+// so unlike Cetus there is no per-open-position context to prefer — every Sui
+// wallet's Momentum fee history is scanned with this fixed fallback (which is
+// what recovers the closed positions' FeeCollectedEvents). `priceA` (SUI) is
+// injected at call site from the live SUI spot; USDC anchors at $1.
+const MOMENTUM_FALLBACK = {
+  coinTypeA: "0x2::sui::SUI",
+  coinTypeB: "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+  decimalsA: 9,
+  decimalsB: 6,
+  priceB: 1,
+} as const;
+
 // Aerodrome (Base) wallet-scope context — EVM analog of the Sui contexts above.
 // Aerodrome Slipstream BURNS the position NFT on full close, so Sugar (position
 // discovery) can't return closed positions; a positionId=all scan of the
@@ -410,6 +426,36 @@ export function useWalletLevelFees(
           )
           .catch((err) => {
             console.error("[wallet-fees cetus] fetch failed:", err);
+            return [];
+          }),
+      );
+
+      // Momentum wallet-scope fee + reward scan — same model as Cetus/Bluefin.
+      // Momentum positions don't expose coinTypeA/coinTypeB, so the fixed
+      // SUI(A)/USDC(B) fallback is always used (priceA = live SUI). Recovers fee
+      // (and historical-only reward) claims from fully-closed Momentum positions.
+      // Tagged protocol="Momentum"; deduped by (protocol, txHash, amount0,
+      // amount1) against any per-position open-position events.
+      const momentumCtx: SuiPoolContext = {
+        account: acct,
+        ...MOMENTUM_FALLBACK,
+        priceA: suiPriceA,
+      };
+      const momentumUrl =
+        `/api/momentum/activity?positionId=all` +
+        `&account=${encodeURIComponent(momentumCtx.account)}` +
+        `&coinTypeA=${encodeURIComponent(momentumCtx.coinTypeA)}` +
+        `&coinTypeB=${encodeURIComponent(momentumCtx.coinTypeB)}` +
+        `&decimalsA=${momentumCtx.decimalsA}&decimalsB=${momentumCtx.decimalsB}` +
+        `&priceA=${momentumCtx.priceA}&priceB=${momentumCtx.priceB}`;
+      fetches.push(
+        fetch(momentumUrl)
+          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
+          .then((j) =>
+            (j.events ?? []).map((e) => ({ event: e, protocol: "Momentum", chain: "Sui" })),
+          )
+          .catch((err) => {
+            console.error("[wallet-fees momentum] fetch failed:", err);
             return [];
           }),
       );

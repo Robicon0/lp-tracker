@@ -203,7 +203,7 @@ const HYPEREVM_NFT_MANAGERS: Record<string, string> = {
 // ── Supported protocols ─────────────────────────────────────────────────────
 
 const ACTIVITY_PROTOCOLS = new Set([
-  "Aerodrome", "Bluefin", "Cetus", "Orca", "Raydium",
+  "Aerodrome", "Bluefin", "Cetus", "Momentum", "Orca", "Raydium",
   "HyperSwap", "KittenSwap", "ProjectX",
   "Uniswap V3", "Velodrome", "PancakeSwap V3",
 ]);
@@ -254,6 +254,18 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.walletAddress) p.set("account", pos.walletAddress);
     appendTicks();
     return `/api/cetus/activity?${p}`;
+  }
+  if (pos.protocol === "Momentum") {
+    p.set("positionId", pos.id.replace("momentum-", ""));
+    p.set("decimalsA", String(pos.token0Decimals ?? 9));
+    p.set("decimalsB", String(pos.token1Decimals ?? 6));
+    if (pos.coinTypeA) p.set("coinTypeA", pos.coinTypeA);
+    if (pos.coinTypeB) p.set("coinTypeB", pos.coinTypeB);
+    if (pos.price0 != null) p.set("priceA", String(pos.price0));
+    if (pos.price1 != null) p.set("priceB", String(pos.price1));
+    if (pos.walletAddress) p.set("account", pos.walletAddress);
+    appendTicks();
+    return `/api/momentum/activity?${p}`;
   }
   if (pos.protocol === "Orca") {
     p.set("positionId", pos.id.replace("orca-", ""));
@@ -439,7 +451,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // instead of getCachedSuiPriceForTimestamp, which could return the FIX-C cg-spot
 // fallback on a CoinGecko-historical miss (Rule 1a leak). v25 entries may carry
 // spot-contaminated fee values; flush so they re-resolve via DeFiLlama / pending.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v26-";
+// Bumped v26 → v27: Sprint MOMENTUM parity with analytics-activity v18 → v19.
+// Momentum is now an ACTIVITY_PROTOCOL (open positions route to
+// /api/momentum/activity instead of being surfaced as unsupported rejections)
+// AND its closed positions fold into Capital G/L via /api/sui-closed-positions.
+// Both change cached LP-P&L output, so flush v26 so every user re-resolves.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v27-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
@@ -941,10 +958,18 @@ function aggregate(
 // locally so the client hook never imports the SERVER lib (which pulls in Redis).
 interface SuiClosedPositionDTO {
   positionId: string;
-  protocol: "cetus" | "bluefin";
+  protocol: "cetus" | "bluefin" | "momentum";
   pair: string;
   events: ActivityEventForPnL[];
 }
+
+// Closed Sui position protocol → display label (used for the Capital G/L
+// breakdown / warning banner metadata).
+const SUI_CLOSED_PROTOCOL_LABEL: Record<SuiClosedPositionDTO["protocol"], string> = {
+  cetus: "Cetus",
+  bluefin: "Bluefin",
+  momentum: "Momentum",
+};
 
 // Sprint 2.2b — optional Sui addresses (connected + watched) whose CLOSED
 // Cetus/Bluefin positions should be folded into Capital G/L. The analytics page
@@ -1000,7 +1025,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             if (!pnl.ok) continue;
             const id = `sui-closed-${sp.protocol}-${sp.positionId}`;
             newMap.set(id, pnl);
-            newMeta.set(id, { pair: sp.pair, protocol: sp.protocol === "cetus" ? "Cetus" : "Bluefin", chain: "Sui" });
+            newMeta.set(id, { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui" });
           }
         } catch { /* graceful — a Sui address that fails contributes nothing */ }
       }));

@@ -11,7 +11,8 @@ import { getCachedClosedPositionCapitalGL, type SuiClosedPosition } from '../../
 // cached per (protocol, wallet) under the Sprint 1.14 immutable contract, so the
 // expensive tx scan is paid once then served warm.
 //
-// Scope: Cetus + Bluefin (Sprint 2.2b). Momentum deferred to Sprint MOMENTUM.
+// Scope: Cetus + Bluefin (Sprint 2.2b) + Momentum (Sprint MOMENTUM). All three
+// Sui CLMM protocols now reconstruct closed positions through the same engine.
 // useLpPnl fetches this per connected/watched Sui address and folds the returned
 // positions' Capital G/L + fees into the same totals as EVM closed positions.
 
@@ -23,11 +24,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [cetus, bluefin] = await Promise.all([
+    const [cetus, bluefin, momentum] = await Promise.all([
       getCachedClosedPositionCapitalGL(account, 'cetus'),
       getCachedClosedPositionCapitalGL(account, 'bluefin'),
+      getCachedClosedPositionCapitalGL(account, 'momentum'),
     ]);
-    const positions: SuiClosedPosition[] = [...cetus, ...bluefin];
+    const positions: SuiClosedPosition[] = [...cetus, ...bluefin, ...momentum];
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (err) {
     console.error('[sui-closed-positions] error:', err);
