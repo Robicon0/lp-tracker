@@ -175,6 +175,35 @@ claims rely on CoinGecko. If both sources miss, leave the claim pending (Rule 1a
 never spot. A new protocol inherits this just by calling the helper with
 `{chain, contract, timestamp}`.
 
+### Invariant (i) — resolve token types per event from on-chain state, never a hardcoded representative
+
+**A wallet-scope / closed-position fee scan MUST resolve each fee event's token
+identities (coinType/mint/address + decimals) from on-chain pool state per event —
+NEVER from a single hardcoded "representative" pair per wallet.** A closed-only
+wallet (whose positions are all destroyed/burned) has no open position to read the
+real pair from, so a per-wallet fallback context can only ever encode ONE pair; any
+fee claim from a DIFFERENT pool (or a typo in the fallback) then mis-prices or — when
+the wrong side fails to price — DROPS the entire claim (Rule 1a marks it null and the
+analytics layer skips it). This is the Sprint TOKEN-RESOLUTION root cause: the Bluefin
+`BLUEFIN_FALLBACK.coinTypeB` typo silently dropped ~$3,847 of Fee Income for closed-only
+Sui wallets while Cetus/Momentum survived only by luck (their fallbacks happened to match
+the real pools).
+
+The fee event already carries its pool reference (Sui: `pool` / `pool_id`; EVM Collect:
+the pool address; Solana: the position/pool account). Resolve it on-chain and price each
+side through the SAME historical cascade:
+- **Sui:** `app/lib/suiPoolContext.ts` — `resolveSuiPoolContexts(poolIds)` → `Map<poolId,
+  {coinTypeA, coinTypeB, decimalsA, decimalsB}>` from the pool's immutable `Pool<A,B>` type
+  params (cached in-process, no TTL). Used by bluefin/cetus/momentum activity routes.
+- **Solana (Sprint 3 onward):** resolve each closed position's pool → token mints + decimals
+  from on-chain pool data, then value by the on-chain MINT via DeFiLlama-by-mint (never a
+  hardcoded `KNOWN_TOKENS` map — the ZEC mint Osho LP'd was NOT the hardcoded one).
+- **Future chains:** same rule — derive the pair from on-chain state per event.
+
+If the pool can't be resolved, mark the claim **pending** (`pending_pool_unresolved`, surfaced)
+— NEVER price it with a guessed/hardcoded type, NEVER fall to spot. Every new protocol on every
+chain inherits this from day one.
+
 ### Token identity resolution (symbol / decimals / CoinGecko id)
 
 **Do NOT create a per-protocol `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map.**

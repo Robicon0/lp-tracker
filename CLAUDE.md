@@ -62,7 +62,27 @@ positions remain excluded from Capital G/L (label already scopes to "EVM + Sui")
 any fee/capital path; reuse the closed-position engine pattern + `computePositionPnL`
 (Protocol Correctness Contract), no per-chain branches.
 
-**Status:** Not started — gated on the Helius paid-upgrade decision.
+**Status:** Phase A (read-only investigation) COMPLETE — **gated on the Helius paid-upgrade
+decision**. Phase A empirically confirmed (live free-tier scan of Account 1's Solana wallet):
+Helius **Developer at $49/mo (50 RPS)** is required — the free tier (10 RPS) 429-storms the
+N+1 `getSignaturesForAddress`→`getTransaction` backfill (22 HTTP 429s on one 649-tx wallet in
+90s), exceeding the route budget for any non-trivial wallet. Orca = Category B (the NFT is
+burned on close → `getNftMints`'s `amount===1` filter can't see it → closed positions need
+wallet-tx-history reconstruction). On-chain surprise to resolve before Phase B: **Account 1
+has 18 closed Orca positions, not 2** (the 2 sheet positions match — SOL/USDC `79rS8kcm…`,
+ZEC/USDC `FDhkNvkf…` — plus 15 re-range artifacts that net ≈$0 and 1 omitted Nov-2025 SOL/USDC
+position); summing all 18 per-position capitalGL ≈ correct realized total. Also: the ZEC mint
+Osho actually LP'd is `A7bdiYdS…` (DeFiLlama-priceable), NOT the `zRwbz…` hardcoded in
+orca/route.ts — **Phase B must value by the on-chain mint via DeFiLlama-by-mint, never a
+hardcoded map** (this is the Sprint TOKEN-RESOLUTION lesson applied to Solana from day one).
+Ship Orca-only; Raydium deferred (Account 1 has 0 Raydium positions). Full findings in memory
+`sprint-3-phase-a-findings`.
+
+**Note — Sprint TOKEN-RESOLUTION (per-event Sui pool resolution) shipped as `a866576`:** an
+out-of-band fix for a platform Fee-Income bug found while verifying Bluefin records (~$3,847
+missing for closed-only Sui wallets). See Recent fixes. Sprint 3's Solana indexer MUST inherit
+its per-event-token-resolution-from-on-chain-state pattern (Protocol Correctness Contract
+invariant (i)).
 
 **Note — Sprint MOMENTUM (Momentum activity route + closed-position Capital G/L) shipped
 as `750f566`:** Sui Capital G/L is now COMPLETE across all three Sui CLMM protocols
@@ -100,12 +120,15 @@ as `750f566`:** Sui Capital G/L is now COMPLETE across all three Sui CLMM protoc
 ## Sprint queue
 
 In order. One active at a time. Each sprint must ship before the next
-begins.
+begins. _(Sprint TOKEN-RESOLUTION `a866576` shipped out-of-band — see Recent fixes.)_
 
-1. **Closed Solana position fee recovery via Helius** (active, Sprint 3) — Solana event
-   indexer; parse Orca/Raydium program instructions from wallet tx history; feeds
-   Capital G/L. **GATED on the paid Helius (~$49/mo) upgrade decision** — free tier too
-   slow to scan full program-instruction history within the route budget.
+1. **Closed Solana position fee recovery via Helius** (active, Sprint 3; Phase A done) —
+   Solana event indexer; parse Orca/Raydium program instructions from wallet tx history;
+   feeds Capital G/L. **GATED on the paid Helius Developer ($49/mo, 50 RPS) upgrade decision**
+   — Phase A empirically confirmed the free tier (10 RPS) is too slow. Phase B must value by
+   the on-chain mint (DeFiLlama-by-mint), never a hardcoded map (Sprint TOKEN-RESOLUTION
+   lesson), and inherit per-event token resolution from on-chain pool state from day one
+   (Protocol Correctness Contract invariant (i)). Orca-only first; Raydium deferred.
 2. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number. The Sprint
@@ -116,6 +139,13 @@ begins.
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
+5. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
+   TOKEN-RESOLUTION per-event pool-context pattern to the EVM wallet-scope fee scans
+   (aerodrome/velodrome/uniswap). EVM is NOT currently broken — its fallback addresses are
+   correct and Sprint 2.1b (`5b8f6b7`) routes closed positions through per-position scans
+   with correct context, so the single-representative-pool risk is mitigated — but resolving
+   each Collect event's token0/token1 from its pool on-chain would remove the last residual
+   of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
 
 ---
 
@@ -124,6 +154,37 @@ begins.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`a866576`** — Sprint TOKEN-RESOLUTION: per-event Sui pool resolution for wallet-scope
+  fee claims. The Bluefin `BLUEFIN_FALLBACK` typo discovered **~$3,847 missing Fee Income for
+  closed-only wallets** (A1 $142.59 vs $1,818.55; A2 $211.37 vs $2,382.53). **Root cause was
+  architectural** — the wallet-scope (`positionId=all`) fee pipelines priced EVERY fee claim
+  with a single representative `(coinTypeA, coinTypeB)` from a hardcoded fallback context that
+  assumed one token pair per protocol per wallet; `BLUEFIN_FALLBACK.coinTypeB` held a
+  corrupted USDC address (`…50a4ae…` vs real `…50a5ae…`), so every closed-position fee claim's
+  USDC side priced to null and the whole claim was DROPPED (only SUI rewards survived via the
+  spot-capable reward path → Bluefin showed ~8%). **Fixed** by a new shared lib
+  `app/lib/suiPoolContext.ts` (`resolveSuiPoolContext`/`resolveSuiPoolContexts`) that resolves
+  each fee claim's REAL pool `(coinTypeA/B + decimals)` from its on-chain pool object per event
+  — Bluefin/Momentum fee events carry `pool_id`, Cetus carries `pool` (immutable `Pool<A,B>`
+  type params → cached in-process, no TTL). Bluefin/Cetus/Momentum activity routes now price
+  each wallet-scope fee claim through the SAME historical cascade (stable→$1 / SUI
+  `getHistoricalOnlySuiPrice` / DeFiLlama-by-coin-type / else **pending**) using the correct
+  token per side — NEVER a guessed/hardcoded type, NEVER spot (Rule 1a); an unresolvable pool
+  is surfaced as `pending_pool_unresolved`, never silently dropped. Same pattern hardened
+  across all three Sui CLMM protocols (Cetus/Momentum were NOT actively dropping fees — their
+  fallbacks happened to match the real pools — but now use the same resilient code path).
+  Per-position mode unchanged (already gets the right coin types from the open position).
+  **EVM verified unaffected** (Sprint 2.1b `5b8f6b7` per-position scans mitigate the same bug
+  class; correct fallback addresses). `BLUEFIN_FALLBACK.coinTypeB` corrected to native USDC
+  for hygiene (now inert for fee pricing). Verified (B7, claim-date DeFiLlama-historical
+  replication): Bluefin A1 →~$1,828.63 (+0.6%), A2 →~$2,420.24 (+1.6%); **all 47 dropped
+  fee_claims recovered, 0 pending**; Cetus/Momentum fee USD byte-identical (no regression);
+  Capital G/L (`suiClosedPositions.ts`) + EVM untouched; non-Osho SUI/USDT simulation prices
+  both sides correctly; tsc + build clean. **No cache bumps** (per-position byte-identical;
+  wallet-scope `useWalletLevelFees` has no persistent cache; the route-level
+  `withActivityRouteCache` is in-process URL-keyed and clears on deploy; `suiPoolContext` is a
+  new in-process cache with no version). **Sprint 3 (Solana) Phase B must inherit this
+  per-event-token-resolution-from-on-chain-state pattern from day one (Contract invariant (i)).**
 - **`750f566`** — Sprint MOMENTUM: Momentum (Sui) activity route + closed-position
   Capital G/L. Completes Sui Capital G/L — **all three Sui CLMM protocols (Cetus,
   Bluefin, Momentum) now reconstruct closed positions** and fold realized Capital G/L +
@@ -375,6 +436,13 @@ shorthand.
 - `app/lib/tokenConstants.ts` — pinned native tokens + canonical stables per
   chain (the only identities that never auto-resolve), `CG_PLATFORM` /
   `DEFILLAMA_CHAIN` slugs, and identifier normalization.
+- `app/lib/suiPoolContext.ts` (Sprint TOKEN-RESOLUTION `a866576`) —
+  `resolveSuiPoolContext(poolId)` / `resolveSuiPoolContexts(poolIds)` →
+  `{coinTypeA, coinTypeB, decimalsA, decimalsB}` from a Sui CLMM pool's on-chain
+  `Pool<A,B>` type params (immutable → in-process Map cache, no TTL). The
+  bluefin/cetus/momentum activity routes call it to resolve each wallet-scope fee
+  claim's REAL pool per event instead of a single hardcoded representative pair
+  (Protocol Correctness Contract invariant (i)).
 
 **Claim-date historical pricing** (two sources — see pricing-invariants Rule 1c):
 - `app/lib/cgPriceHistory.ts` — `fetchTokenPriceAtDate(cgId, ts)`, CoinGecko
