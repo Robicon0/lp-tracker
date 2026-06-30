@@ -41,11 +41,20 @@ interface SuiPoolContext {
 }
 
 // Bluefin fallback context — Bluefin pools are conventionally SUI(A)/USDC(B).
-// Used for Sui wallets with no open Bluefin position. `priceA` is injected
-// at call site from the live SUI spot.
+// Used for Sui wallets with no open Bluefin position, as (a) the trigger that
+// fires the wallet-scope scan and (b) the reward-path / per-position context.
+// Sprint TOKEN-RESOLUTION: fee-claim USD valuation NO LONGER depends on these
+// coin types — the Bluefin activity route resolves each fee claim's REAL pool
+// (and its coin types) on-chain per event. This `coinTypeB` previously carried a
+// CORRUPTED USDC address (`…50a4ae…`, a fat-fingered Wormhole USDC) that matched
+// no stablecoin and was unpriceable on DeFiLlama, so every closed-position fee
+// claim's USDC side priced to null and the whole claim was dropped from Fee
+// Income (~$3,847 missing across Osho's two wallets). Corrected to native Circle
+// USDC — the type the real Bluefin SUI/USDC pool uses (and a member of the
+// route's STABLECOINS set) — so it's also correct as a last-resort context.
 const BLUEFIN_FALLBACK = {
   coinTypeA: "0x2::sui::SUI",
-  coinTypeB: "0x5d4b302506645c37ff133b98c4b50a4ae4614bb0aef5ba1e3af8bc33af2a9d5f::coin::COIN",
+  coinTypeB: "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
   decimalsA: 9,
   decimalsB: 6,
   priceB: 1,

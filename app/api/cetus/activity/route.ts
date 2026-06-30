@@ -3,6 +3,7 @@ import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
+import { resolveSuiPoolContexts, type SuiPoolContext } from '../../../lib/suiPoolContext';
 import { logPrice } from '../../../lib/priceLogger';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 
@@ -303,6 +304,7 @@ async function GET_impl(request: Request) {
       amount1Raw: bigint;
       rewardSymbol?: string;
       rewardDecimals?: number;
+      poolId?: string;        // fee_claim only — for per-event pool-context resolution
     }
 
     const rawEvents: RawEvent[] = [];
@@ -351,7 +353,7 @@ async function GET_impl(request: Request) {
           const a0 = BigInt((pj.amount_a as string) ?? '0');
           const a1 = BigInt((pj.amount_b as string) ?? '0');
           fees0 += a0; fees1 += a1;
-          rawEvents.push({ type: 'fee_claim', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+          rawEvents.push({ type: 'fee_claim', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1, poolId: (pj.pool as string) ?? undefined });
 
         } else if (evName === 'CollectRewardV2Event') {
           const rewardAmt = BigInt((pj.amount as string) ?? '0');
@@ -374,18 +376,37 @@ async function GET_impl(request: Request) {
     // Sort chronologically (oldest first) so the cumulative fee total is correct.
     rawEvents.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Sprint TOKEN-RESOLUTION: resolve each fee claim's REAL pool context from its
+    // on-chain pool object (Cetus fee events carry `pool`), so the historical
+    // cascade prices the correct token on each side instead of a single
+    // representative/hardcoded (coinTypeA, coinTypeB). Wallet-scope only;
+    // per-position mode already gets the right coin types from the open position.
+    // Immutable `Pool<A,B>` type params → cached in-process.
+    const resolvedPools: Map<string, SuiPoolContext> = walletScope
+      ? await resolveSuiPoolContexts(
+          rawEvents.filter((e) => e.type === 'fee_claim' && e.poolId).map((e) => e.poolId!),
+        )
+      : new Map();
+    // Effective per-fee-claim pool context: resolved REAL pool in wallet-scope,
+    // else the passed (open-position) context. null → pending (Rule 1a), never
+    // priced with a guessed/hardcoded token type.
+    const feeCtxFor = (ev: RawEvent): SuiPoolContext | null =>
+      walletScope
+        ? (ev.poolId ? (resolvedPools.get(ev.poolId) ?? null) : null)
+        : { coinTypeA, coinTypeB, decimalsA, decimalsB };
+
     // Historical SUI pricing for fee_claim / reward_claim — see Bluefin
-    // activity route for full rationale. Detects which side of the pool is
-    // SUI (`0x2::sui::SUI`, case-insensitive) and prewarms the shared
-    // per-date cache in parallel for every claim timestamp.
+    // activity route for full rationale. Prewarms the per-date cache for every
+    // claim whose (per-event) pool has a SUI side, plus every SUI reward.
     const suiCanonical = '0x2::sui::sui';
-    const suiSideIsA = coinTypeA.toLowerCase() === suiCanonical;
-    const suiSideIsB = coinTypeB.toLowerCase() === suiCanonical;
-    if (suiSideIsA || suiSideIsB) {
+    {
       const histTimestamps: number[] = [];
       for (const e of rawEvents) {
         if (e.type === 'fee_claim') {
-          histTimestamps.push(e.timestamp);
+          const c = feeCtxFor(e);
+          if (c && (c.coinTypeA.toLowerCase() === suiCanonical || c.coinTypeB.toLowerCase() === suiCanonical)) {
+            histTimestamps.push(e.timestamp);
+          }
         } else if (e.type === 'reward_claim') {
           const sym = (e.rewardSymbol ?? '').trim().toUpperCase();
           if (sym === 'SUI') histTimestamps.push(e.timestamp);
@@ -428,13 +449,24 @@ async function GET_impl(request: Request) {
     // designated Rule 1 exception and is untouched — rewards are not prewarmed
     // or priced via DeFiLlama.
     {
-      const __feeTs = rawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.timestamp);
-      if (__feeTs.length > 0) {
-        const __eligible = (ct: string) => !!ct && !STABLECOINS.has(ct.toLowerCase());
-        const __dl: Array<{ chain: 'sui'; contract: string; timestamps: number[] }> = [];
-        if (__eligible(coinTypeA)) __dl.push({ chain: 'sui', contract: coinTypeA, timestamps: __feeTs });
-        if (__eligible(coinTypeB)) __dl.push({ chain: 'sui', contract: coinTypeB, timestamps: __feeTs });
-        if (__dl.length > 0) await prewarmDefillamaPrices(__dl);
+      const __eligible = (ct: string) => !!ct && !STABLECOINS.has(ct.toLowerCase());
+      const __dlByCoin = new Map<string, Set<number>>();
+      const __addDl = (ct: string, ts: number) => {
+        if (!__eligible(ct)) return;
+        const set = __dlByCoin.get(ct) ?? __dlByCoin.set(ct, new Set()).get(ct)!;
+        set.add(ts);
+      };
+      for (const e of rawEvents) {
+        if (e.type !== 'fee_claim') continue;
+        const c = feeCtxFor(e);
+        if (!c) continue;
+        __addDl(c.coinTypeA, e.timestamp);
+        __addDl(c.coinTypeB, e.timestamp);
+      }
+      if (__dlByCoin.size > 0) {
+        await prewarmDefillamaPrices(
+          [...__dlByCoin].map(([contract, ts]) => ({ chain: 'sui' as const, contract, timestamps: [...ts] })),
+        );
       }
     }
 
@@ -451,10 +483,20 @@ async function GET_impl(request: Request) {
       let amount0: number;
       let amount1: number;
 
+      // Effective pool context for a fee claim (resolved REAL pool in wallet-scope,
+      // else the passed open-position context). Drives BOTH amount scaling and
+      // pricing, so a closed position in a pool with different decimals is correct.
+      const fctx = ev.type === 'fee_claim' ? feeCtxFor(ev) : null;
+
       if (ev.type === 'reward_claim') {
         const scale = BigInt(10) ** BigInt(ev.rewardDecimals ?? 9);
         amount0 = Number(ev.amount0Raw) / Number(scale);
         amount1 = 0;
+      } else if (ev.type === 'fee_claim') {
+        const dA = fctx ? fctx.decimalsA : decimalsA;
+        const dB = fctx ? fctx.decimalsB : decimalsB;
+        amount0 = Number(ev.amount0Raw) / 10 ** dA;
+        amount1 = Number(ev.amount1Raw) / 10 ** dB;
       } else {
         amount0 = Number(ev.amount0Raw) / Number(scaleA);
         amount1 = Number(ev.amount1Raw) / Number(scaleB);
@@ -528,41 +570,49 @@ async function GET_impl(request: Request) {
           usdAtTime = null;
         }
       } else if (ev.type === 'fee_claim') {
-        // Sprint 1.15: Cetus fee claims are valued at CLAIM-DATE historical ONLY
-        // (pricing-invariants Rule 1a) — NEVER current spot. Per side: a
-        // stablecoin is $1; the SUI side uses CoinGecko historical (prewarmed)
-        // then DeFiLlama historical-by-coin-type as its historical fallback; any
-        // other non-stable side uses DeFiLlama historical. If a side cannot be
-        // priced historically the claim stays UNRESOLVED (null) and surfaces as
-        // "pending price resolution" — the prior current-spot / FIX-A spot
-        // fallback is REMOVED. (The CETUS reward token's spot+LKG path above is a
-        // separate, designated Rule 1 exception and is untouched.)
-        const __sA = STABLECOINS.has(coinTypeA.toLowerCase());
-        const __sB = STABLECOINS.has(coinTypeB.toLowerCase());
-        const __histSui = getHistoricalOnlySuiPrice(ev.timestamp);
-        let __usedDl = false;
-        let __usedSuiHist = false;
-        const priceSide = (coinType: string, isStable: boolean, isSui: boolean): number | null => {
-          if (isStable) return 1;
-          if (isSui) {
-            if (__histSui != null) { __usedSuiHist = true; return __histSui; }
+        // Sprint TOKEN-RESOLUTION: price each side using the REAL pool's coin types
+        // (resolved per event via `fctx`), NOT a single representative. Cetus fee
+        // claims are valued at CLAIM-DATE historical ONLY (pricing-invariants Rule
+        // 1a) — NEVER current spot. Per side: a stablecoin is $1; the SUI side uses
+        // CoinGecko historical (prewarmed) then DeFiLlama historical-by-coin-type;
+        // any other non-stable side uses DeFiLlama historical. If a side cannot be
+        // priced historically — OR the pool could not be resolved — the claim stays
+        // UNRESOLVED (null) and surfaces as "pending price resolution"; it is NEVER
+        // priced with a guessed/hardcoded token type. (The CETUS reward token's
+        // spot+LKG path above is a separate, designated Rule 1 exception, untouched.)
+        if (fctx) {
+          const __cA = fctx.coinTypeA, __cB = fctx.coinTypeB;
+          const __sA = STABLECOINS.has(__cA.toLowerCase());
+          const __sB = STABLECOINS.has(__cB.toLowerCase());
+          const __suiA = __cA.toLowerCase() === suiCanonical;
+          const __suiB = __cB.toLowerCase() === suiCanonical;
+          const __histSui = getHistoricalOnlySuiPrice(ev.timestamp);
+          let __usedDl = false;
+          let __usedSuiHist = false;
+          const priceSide = (coinType: string, isStable: boolean, isSui: boolean): number | null => {
+            if (isStable) return 1;
+            if (isSui) {
+              if (__histSui != null) { __usedSuiHist = true; return __histSui; }
+              const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
+              if (dl != null) __usedDl = true;
+              return dl;
+            }
             const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
             if (dl != null) __usedDl = true;
             return dl;
+          };
+          const pxA = priceSide(__cA, __sA, __suiA);
+          const pxB = priceSide(__cB, __sB, __suiB);
+          if (pxA != null && pxB != null) {
+            price0AtTime = pxA;
+            price1AtTime = pxB;
+            usdAtTime = amount0 * pxA + amount1 * pxB;
+            __feeClaimSrc = __usedDl ? 'defillama-historical' : __usedSuiHist ? 'sui-historical' : 'stablecoin-fixed';
           }
-          const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
-          if (dl != null) __usedDl = true;
-          return dl;
-        };
-        const pxA = priceSide(coinTypeA, __sA, suiSideIsA);
-        const pxB = priceSide(coinTypeB, __sB, suiSideIsB);
-        if (pxA != null && pxB != null) {
-          price0AtTime = pxA;
-          price1AtTime = pxB;
-          usdAtTime = amount0 * pxA + amount1 * pxB;
-          __feeClaimSrc = __usedDl ? 'defillama-historical' : __usedSuiHist ? 'sui-historical' : 'stablecoin-fixed';
+          // else: usdAtTime stays null → pending (Rule 1a — no spot fallback).
+        } else {
+          __feeClaimSrc = 'pending_pool_unresolved';
         }
-        // else: usdAtTime stays null → pending (Rule 1a — no spot fallback).
       } else if (usdAtTime == null) {
         // Withdrawal / deposit where on-chain derivation (deriveDepositPrices)
         // was unavailable: current-spot last resort. Allowed by pricing-invariants
