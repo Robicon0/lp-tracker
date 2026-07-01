@@ -204,6 +204,28 @@ If the pool can't be resolved, mark the claim **pending** (`pending_pool_unresol
 — NEVER price it with a guessed/hardcoded type, NEVER fall to spot. Every new protocol on every
 chain inherits this from day one.
 
+### Invariant (j) — the spot (current-value) path is resilient by construction
+
+**An OPEN position's current-value spot price MUST go through the shared resilient spot helper
+`fetchCachedCoinGeckoPrices` (priceCache.ts) — never a raw CoinGecko call.** That helper (Sprint
+SPOT-RESILIENCE) is tiered so a transient CoinGecko 429 under the analytics page's concurrent
+multi-route load can never zero an open position and fire a bogus "Current price data
+unavailable" banner:
+- **In-process Map (L1, 60 s)** → **Upstash Redis cross-instance LKG (L2, `redisSpotCache.ts`,
+  key `cg_spot_v1:{cgId}`, 24 h retention / 5-min freshness)** → **CoinGecko (paced, standalone
+  concurrency-2 queue — NOT the historical `withCgPacing` concurrency-1 chain, to avoid a
+  nesting deadlock)**.
+- **Tier A** stablecoin cgIds (usd-coin/tether/dai) → always **$1** (pricing-invariants Rule 3).
+- **Tier B/C** on a live-fetch miss → return the **last-known-good** price (Map or Redis, any
+  age), NEVER 0. So a returned **0 means "genuinely unpriceable"** (no price ever seen), which
+  is exactly when `positionPnl.ts`'s `missing_current_prices` guard SHOULD exclude the position.
+
+A new protocol/chain inherits this automatically by pricing current values through
+`fetchCachedCoinGeckoPrices` (feed it the resolved cgId from invariant-(i) token resolution).
+Do NOT reintroduce a per-route raw spot fetch or a `|| 0` that bypasses the LKG. This is the
+SPOT path (Rule 2 current value) — it is SEPARATE from and MUST NOT be confused with the
+historical fee-claim path (Rule 1a / `cgPriceHistory` + DeFiLlama), which is untouched by it.
+
 ### Token identity resolution (symbol / decimals / CoinGecko id)
 
 **Do NOT create a per-protocol `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map.**

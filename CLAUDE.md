@@ -71,12 +71,20 @@ burned on close → `getNftMints`'s `amount===1` filter can't see it → closed 
 wallet-tx-history reconstruction). On-chain surprise to resolve before Phase B: **Account 1
 has 18 closed Orca positions, not 2** (the 2 sheet positions match — SOL/USDC `79rS8kcm…`,
 ZEC/USDC `FDhkNvkf…` — plus 15 re-range artifacts that net ≈$0 and 1 omitted Nov-2025 SOL/USDC
-position); summing all 18 per-position capitalGL ≈ correct realized total. Also: the ZEC mint
-Osho actually LP'd is `A7bdiYdS…` (DeFiLlama-priceable), NOT the `zRwbz…` hardcoded in
-orca/route.ts — **Phase B must value by the on-chain mint via DeFiLlama-by-mint, never a
-hardcoded map** (this is the Sprint TOKEN-RESOLUTION lesson applied to Solana from day one).
-Ship Orca-only; Raydium deferred (Account 1 has 0 Raydium positions). Full findings in memory
-`sprint-3-phase-a-findings`.
+position); summing all 18 per-position capitalGL ≈ correct realized total. Also (confirmed
+again in Sprint SOLANA-CURRENT-PRICE Phase A): the ZEC mint Osho actually LP'd is `A7bdiYdS…`
+(→ CoinGecko id `omnibridge-bridged-zcash-solana` $395.99; DeFiLlama-priceable), NOT the
+`zRwbz…` hardcoded at orca/route.ts:34; and the ORCA entry there is a **placeholder mint**
+(`orcaEKTdK7…ABCDE`, real is `…uGZE`). **Sprint 3 must correct BOTH via "value by the on-chain
+mint," never a hardcoded map** (the Sprint TOKEN-RESOLUTION lesson applied to Solana from day
+one). Ship Orca-only; Raydium deferred (Account 1 has 0 Raydium positions). Full findings in
+memory `sprint-3-phase-a-findings`.
+
+**Note — Sprint SPOT-RESILIENCE (tiered Redis LKG for the CoinGecko spot path) shipped as
+`92e779a`:** fixed the persistent "Current price data unavailable" banner on OPEN Orca
+positions (SOL/USDC + ZEC/USDC) — a platform-wide spot-path fragility (also hit a Sui Cetus
+position), NOT a Solana-specific bug. See Recent fixes + Protocol Correctness Contract
+invariant (j).
 
 **Note — Sprint TOKEN-RESOLUTION (per-event Sui pool resolution) shipped as `a866576`:** an
 out-of-band fix for a platform Fee-Income bug found while verifying Bluefin records (~$3,847
@@ -119,8 +127,9 @@ as `750f566`:** Sui Capital G/L is now COMPLETE across all three Sui CLMM protoc
 
 ## Sprint queue
 
-In order. One active at a time. Each sprint must ship before the next
-begins. _(Sprint TOKEN-RESOLUTION `a866576` shipped out-of-band — see Recent fixes.)_
+In order. One active at a time. Each sprint must ship before the next begins.
+_(Sprint TOKEN-RESOLUTION `a866576` + Sprint SPOT-RESILIENCE `92e779a` shipped out-of-band —
+see Recent fixes.)_
 
 1. **Closed Solana position fee recovery via Helius** (active, Sprint 3; Phase A done) —
    Solana event indexer; parse Orca/Raydium program instructions from wallet tx history;
@@ -128,7 +137,10 @@ begins. _(Sprint TOKEN-RESOLUTION `a866576` shipped out-of-band — see Recent f
    — Phase A empirically confirmed the free tier (10 RPS) is too slow. Phase B must value by
    the on-chain mint (DeFiLlama-by-mint), never a hardcoded map (Sprint TOKEN-RESOLUTION
    lesson), and inherit per-event token resolution from on-chain pool state from day one
-   (Protocol Correctness Contract invariant (i)). Orca-only first; Raydium deferred.
+   (Protocol Correctness Contract invariant (i)). **Also corrects the wrong ZEC mint
+   (`zRwbz…` → `A7bdiYdS…`) and placeholder ORCA mint (`…ABCDE` → `…uGZE`) in orca/route.ts by
+   valuing OPEN Solana positions from the on-chain mint too** (not just closed). Orca-only
+   first; Raydium deferred.
 2. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number. The Sprint
@@ -146,6 +158,13 @@ begins. _(Sprint TOKEN-RESOLUTION `a866576` shipped out-of-band — see Recent f
    with correct context, so the single-representative-pool risk is mitigated — but resolving
    each Collect event's token0/token1 from its pool on-chain would remove the last residual
    of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
+6. **Sprint SPOT-RESILIENCE-V2 (optional, non-blocking)** — the fuller version of the spot
+   fix: `null`/"pending" propagation from `fetchCachedCoinGeckoPrices` through the position
+   type + `useLpPnl` + `positionPnl` + a distinct softer UI banner ("Price refreshing…"), plus
+   per-tier staleness caps (Tier B 10-min LKG / Tier C pending-not-LKG). Sprint SPOT-RESILIENCE
+   `92e779a` already resolves the bogus banner via LKG; V2 is a larger, higher-risk change —
+   **ship ONLY if a user-visible need emerges** (e.g. a genuinely-dead token showing a stale
+   price is judged confusing). Not currently planned.
 
 ---
 
@@ -154,6 +173,42 @@ begins. _(Sprint TOKEN-RESOLUTION `a866576` shipped out-of-band — see Recent f
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`92e779a`** — Sprint SPOT-RESILIENCE: tiered Redis-backed last-known-good (LKG) for the
+  CoinGecko SPOT path. Fixed the **persistent "Current price data unavailable" banner on OPEN
+  positions** (Account 1 SOL/USDC + ZEC/USDC on Orca; the same class earlier hit a Sui Cetus
+  position). Root cause: `fetchCachedCoinGeckoPrices` (`priceCache.ts`) had only a 60 s
+  in-process Map cache (no cross-instance tier, unlike the Sprint 1.6 historical path), so
+  under the analytics page's concurrent multi-route load a **cold Vercel instance 429s
+  CoinGecko and returned 0** → `price0/price1 = 0` → `positionPnl.ts:104` `missing_current_prices`
+  guard fired the bogus banner on every load. **Fix (contained in the shared spot helper — the
+  ~20 callers are UNCHANGED, return type stays `Record<string,number>`):** NEW
+  `app/lib/redisSpotCache.ts` — cross-instance Upstash Redis spot tier, key `cg_spot_v1:{cgId}`,
+  stores `{usd, at}`, 24 h LKG retention / 5-min freshness, Sprint 1.6 no-op-stub contract (own
+  client, never throws, fire-and-forget). `fetchCachedCoinGeckoPrices` tiered policy: **Tier A**
+  stablecoin cgIds (usd-coin/tether/dai) → always **$1** (Rule 3; also removes them from the
+  CoinGecko request, cutting 429 pressure); **Tier B/C** on a live-fetch miss → return the
+  last-known price (in-process or Redis LKG, ANY age) instead of 0 — so a returned **0 means
+  "genuinely unpriceable"** (no price ever seen), which is exactly when the
+  `missing_current_prices` guard SHOULD fire (**no `positionPnl`/plumbing change** — the guard
+  is correct by construction). **Part 2** a standalone **concurrency-2** spot-fetch queue
+  (deliberately NOT the shared `withCgPacing` concurrency-1 chain, to avoid a nesting deadlock
+  with `tokenResolver`'s historical CoinGecko calls). **Rule 1a untouched** — this is the
+  SPOT/current-value path (Rule 2), NOT the historical fee-claim path; **Fee Income + Capital
+  G/L unchanged** (they read the historical caches — Bluefin still ~$1,818 / ~$2,382).
+  **Scope deviations (user-approved):** (1) kept the number return type + used LKG instead of
+  null/pending propagation + `positionPnl` change (would touch ~20 callers + position type +
+  useLpPnl + banner); (2) uniform LKG (any-age, 24 h TTL) rather than per-tier staleness caps
+  (nothing to fall to without null/pending plumbing); (3) UI banner copy ("Price refreshing")
+  deferred — the banner now shows ONLY for genuinely-unpriceable tokens (correct). A follow-up
+  **Sprint SPOT-RESILIENCE-V2** (null/pending propagation + per-tier caps + softer banner copy)
+  is queued as OPTIONAL, ship only if a user-visible need emerges. Verified (B7, real
+  `fetchCachedCoinGeckoPrices` + real Upstash, simulated 429): Tier A → $1; Redis-fresh
+  cross-instance → served the cached price (not 0); Redis-stale → LKG (not 0);
+  genuinely-unpriceable → 0 (guard applies); live fetch → priced + written to Redis; tsc + build
+  clean. **New Redis namespace `cg_spot_v1`; no localStorage cache bumps** (spot is upstream of
+  `lp-pnl-events`/`analytics-activity`). Stablecoin current values shift ~0.03% (0.9997→$1,
+  Rule-3-consistent). The wrong ZEC + placeholder ORCA mints are NOT fixed here (Sprint 3, via
+  value-by-on-chain-mint).
 - **`a866576`** — Sprint TOKEN-RESOLUTION: per-event Sui pool resolution for wallet-scope
   fee claims. The Bluefin `BLUEFIN_FALLBACK` typo discovered **~$3,847 missing Fee Income for
   closed-only wallets** (A1 $142.59 vs $1,818.55; A2 $211.37 vs $2,382.53). **Root cause was
@@ -601,7 +656,10 @@ investigating.
 - Upstash Redis (`defidesh-price-cache`, free tier, us-east-1) — persistent
   historical-price cache (Sprint 1.6) + DeFiLlama claim prices (Sprint 1.12,
   `price:historical:defillama:*`) + closed-position deposit history (Sprint 1.14,
-  `deposit:logs:hyperevm:{nftManager}:{tokenId}`, 30d TTL). Env:
+  `deposit:logs:hyperevm:{nftManager}:{tokenId}`, 30d TTL) + closed-Sui-position
+  Capital G/L (Sprint 2.2b, `closed_pos_sui_v1:*`) + **SPOT-price LKG (Sprint
+  SPOT-RESILIENCE `92e779a`, `cg_spot_v1:{cgId}` → `{usd, at}`, 24h retention /
+  5-min freshness; `app/lib/redisSpotCache.ts`)**. Env:
   `PRICE_CACHE_KV_REST_API_URL` + `PRICE_CACHE_KV_REST_API_TOKEN` (pass explicitly
   to the `@upstash/redis` client — it auto-reads only `UPSTASH_*`/`KV_*`, not
   `PRICE_CACHE_KV_*`). Connected to Production/Preview/Development; shared, so
