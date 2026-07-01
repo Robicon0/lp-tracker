@@ -159,6 +159,21 @@ pricing-invariants Rule 1/1a (never spot-value a historical fee claim) and any
 designated exceptions (e.g. CETUS reward token uses spot + LKG by design — that
 path is NOT routed through Redis or historical).
 
+**Cross-instance Redis is MANDATORY for EVERY historical price path (all chains).**
+A historical daily price is immutable, so it MUST be cached in Upstash Redis (via
+the shared `redisPriceCache.ts` helper — `getCachedHistoricalPrice(cgId, ts)` /
+`setCachedHistoricalPrice(...)`, or its DeFiLlama analogue), NOT only in an
+in-process Map. An in-process-only cache is empty on every cold Vercel instance, so
+the route re-fetches each date serially through the 1100 ms-gap `withCgPacing` queue
+— which made the Sui wallet-scope routes take ~100 s cold (~57 dates × 1.1 s) and
+dropped the closed-only Sui protocols from Fee Income after every deploy. Sprint
+SUI-HISTORICAL-REDIS (`776fcaa`) routed the last offender (`suiPriceHistory.ts`)
+through `redisPriceCache` with cgId `sui` (key `price:historical:sui:{YYYYMMDD}`),
+closing the gap: read order is **in-process Map → Redis → CoinGecko-historical
+(paced) → on success populate BOTH**. A new protocol/chain that adds any bespoke
+historical fetch MUST wire it through the shared Redis helper the same way — never
+ship an in-process-only historical cache.
+
 **Secondary historical source — DeFiLlama-by-contract (Sprint 1.12).** When
 CoinGecko can't price a claim token historically (long-tail Sui/Solana tokens not
 mapped to a CoinGecko id), value the claim at its claim-date price via

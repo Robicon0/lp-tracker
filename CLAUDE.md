@@ -165,6 +165,12 @@ see Recent fixes.)_
    `92e779a` already resolves the bogus banner via LKG; V2 is a larger, higher-risk change —
    **ship ONLY if a user-visible need emerges** (e.g. a genuinely-dead token showing a stale
    price is judged confusing). Not currently planned.
+7. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
+   SUI-HISTORICAL-REDIS `776fcaa` the Sui wallet-scope routes drop from ~111 s to ~18–20 s; the
+   residual floor is the **~17 s public-Sui-RPC `queryTransactionBlocks` + `multiGet` scan** (240
+   digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
+   cross-instance (immutable ledger) or use a faster RPC. **Address only if <10 s becomes a UX
+   need** — the Fee-Income regression is already resolved at ~18–20 s.
 
 ---
 
@@ -173,6 +179,34 @@ see Recent fixes.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`776fcaa`** — Sprint SUI-HISTORICAL-REDIS: cross-instance Redis tier for SUI historical
+  prices. Fixes the **post-deploy regression where the 3 Sui protocols (Cetus, Bluefin,
+  Momentum) vanished from the analytics Fee Income breakdown**. Root cause (Sprint
+  SPOT-RESILIENCE post-ship investigation): the Sui wallet-scope activity routes took
+  **~100–120 s on cold Vercel instances** because `app/lib/suiPriceHistory.ts` had ONLY an
+  in-process Map cache — **no cross-instance Redis tier** (unlike `cgPriceHistory` Sprint 1.6 and
+  `defillamaPriceHistory` Sprint 1.12) — so every cold instance re-fetched each claim date's SUI
+  historical price serially through the 1100 ms-gap `withCgPacing` queue (~57 dates × 1.1 s ≈
+  63 s). The client rendered before the slow Sui routes finished, dropping the closed-only Sui
+  protocols (whose fees come SOLELY from these wallet-scope routes) while fast EVM/Orca
+  per-position fees remained. **NOT caused by SPOT-RESILIENCE's code** (bluefin/momentum don't
+  import `priceCache`; their route code is byte-identical before/after `92e779a`) — the deploy
+  merely cold-started instances and surfaced the pre-existing latency. **Fix:** reuse the Sprint
+  1.6 shared helper `redisPriceCache.ts` with cgId `sui` (key `price:historical:sui:{YYYYMMDD}`,
+  30 d TTL). `fetchSuiPriceAtDate` checks Redis BEFORE the CoinGecko fetch (populates the
+  in-process cache on a hit); on a CoinGecko success, fire-and-forget writes to Redis. **Pure
+  historical path — never spot (Rule 1a holds)**; the FIX-C `spotFallback` (cg-spot recovery) is
+  UNTOUCHED (out of scope; already Redis-backed via SPOT-RESILIENCE's `cg_spot_v1`). Verified
+  (B7, real `suiPriceHistory` + real Upstash): cross-instance sim — prime populates Redis from
+  CoinGecko; a fresh process with CoinGecko forced 503 serves **byte-identical** prices from
+  Redis. Timing: 20 dates **22,025 ms cold** (1,101 ms/date serial) → **299 ms warm Redis**
+  (15 ms/date) = **~74× faster/date**. Projected Bluefin A1 route **~111 s → ~18–20 s** (SUI
+  historical prewarm ~63 s → ~1 s; **residual ~17 s public-Sui-RPC tx scan is a separate,
+  out-of-scope concern** — future sprint if UX needs <10 s). Data integrity: Redis stores exact
+  CoinGecko values, fee USD unchanged (~$1,828 Bluefin A1); 0 dropped, 0 null. No regressions
+  (spot path / EVM / Orca / Capital G/L unchanged). **No cache-version bumps** (server-side
+  historical, upstream of localStorage). All historical price paths on all chains now have a
+  cross-instance Redis tier — this closed the last gap.
 - **`92e779a`** — Sprint SPOT-RESILIENCE: tiered Redis-backed last-known-good (LKG) for the
   CoinGecko SPOT path. Fixed the **persistent "Current price data unavailable" banner on OPEN
   positions** (Account 1 SOL/USDC + ZEC/USDC on Orca; the same class earlier hit a Sui Cetus
@@ -654,8 +688,11 @@ investigating.
   `app/api/subscribe/route.ts` on first POST. Export via manual SQL
   (`SELECT email FROM subscribers ORDER BY created_at`) when an announcement ships.
 - Upstash Redis (`defidesh-price-cache`, free tier, us-east-1) — persistent
-  historical-price cache (Sprint 1.6) + DeFiLlama claim prices (Sprint 1.12,
-  `price:historical:defillama:*`) + closed-position deposit history (Sprint 1.14,
+  historical-price cache (Sprint 1.6, `price:historical:{cgId}:{YYYYMMDD}` — now
+  incl. `price:historical:sui:*` from Sprint SUI-HISTORICAL-REDIS `776fcaa`, which
+  routed `suiPriceHistory.ts` through the same shared `redisPriceCache` helper) +
+  DeFiLlama claim prices (Sprint 1.12, `price:historical:defillama:*`) +
+  closed-position deposit history (Sprint 1.14,
   `deposit:logs:hyperevm:{nftManager}:{tokenId}`, 30d TTL) + closed-Sui-position
   Capital G/L (Sprint 2.2b, `closed_pos_sui_v1:*`) + **SPOT-price LKG (Sprint
   SPOT-RESILIENCE `92e779a`, `cg_spot_v1:{cgId}` → `{usd, at}`, 24h retention /
