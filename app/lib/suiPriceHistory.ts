@@ -23,6 +23,7 @@
 // once fetched they stay valid for the life of the server instance.
 
 import { withCgPacing } from './cgPriceHistory';
+import { getCachedHistoricalPrice, setCachedHistoricalPrice } from './redisPriceCache';
 import { logPrice } from './priceLogger';
 import { fetchCachedCoinGeckoPrices } from './priceCache';
 
@@ -129,6 +130,19 @@ export async function fetchSuiPriceAtDate(timestampSeconds: number): Promise<num
   // AFTER the pacing slot is released — it never holds up the historical queue.)
   const promise: Promise<number | null> = (async () => {
     try {
+      // Sprint SUI-HISTORICAL-REDIS: cross-instance Upstash Redis tier (reuses the
+      // Sprint 1.6 shared helper — key `price:historical:sui:{YYYYMMDD}`, 30d TTL)
+      // checked BEFORE the CoinGecko fetch. On a COLD Vercel instance this serves
+      // each historical SUI date from Redis instead of re-fetching it through the
+      // 1100ms-gapped `withCgPacing` queue — the pre-existing ~100s cold-start
+      // cause for Sui wallet-scope routes. Historical daily prices are immutable,
+      // so a hit is authoritative. Rule 1a-safe: this is the pure historical path
+      // (never spot). On a Redis miss we fall through to CoinGecko exactly as before.
+      const redisHit = await getCachedHistoricalPrice('sui', timestampSeconds);
+      if (redisHit != null) {
+        cache.set(date, redisHit);
+        return redisHit;
+      }
       const hist = await withCgPacing(async () => {
         const __t0 = Date.now();
         try {
@@ -151,6 +165,10 @@ export async function fetchSuiPriceAtDate(timestampSeconds: number): Promise<num
           const price = json?.market_data?.current_price?.usd;
           if (typeof price === 'number' && price > 0) {
             cache.set(date, price);
+            // Fire-and-forget cross-instance write (Sprint SUI-HISTORICAL-REDIS) so
+            // the next COLD instance — any user, post-deploy — serves this date from
+            // Redis instead of paying the 1100ms CoinGecko fetch again.
+            void setCachedHistoricalPrice('sui', timestampSeconds, price);
             logPrice({
               event: 'price_lookup',
               caller: 'suiPriceHistory',
