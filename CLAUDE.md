@@ -171,6 +171,13 @@ see Recent fixes.)_
    digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
    cross-instance (immutable ledger) or use a faster RPC. **Address only if <10 s becomes a UX
    need** — the Fee-Income regression is already resolved at ~18–20 s.
+8. **Sprint PERFORMANCE-2 (hardening candidates, non-blocking)** — the deferred Phase A items:
+   **#4** Redis-cache the Aerodrome positions route's ever-owned tokenId scan + closed-position
+   reconstruction (~30 s, the remaining first-load straggler — now non-blocking behind the
+   "still scanning" chip); **#5** Redis-cache CLOSED positions' activity route outputs
+   (immutable — extend the Sprint 1.14 deposit-cache pattern beyond HyperEVM); **#6** move
+   `withActivityRouteCache` success results to Redis (5-min TTL, errors never cached) so route
+   outputs are shared across instances/users. Ship when performance next becomes the priority.
 
 ---
 
@@ -179,6 +186,43 @@ see Recent fixes.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`f4b58ac`** — Sprint PERFORMANCE: market_chart batch-fill + patient fetch + progressive
+  rendering. Fixes the **>2-minute load on Dashboard AND Analytics** (both accounts). Phase A
+  waterfall found three stacked causes; all three fixed:
+  **(1) Batch-fill SUI historical dailies** — every CG `/coins/{id}/history` call shares ONE
+  concurrency-1 queue with a 1100 ms gap; Sui routes need ~55–70 SUI dates and under page-load
+  burst CG 429s kept the Redis tier from warming, so every load re-paid a 60–150 s serial crawl
+  (Sui wallet-scope routes measured 168→>179 s; the Cetus PER-POSITION route >179 s was the
+  dashboard killer). NEW `fetchDailyClosesRange(cgId, from, to)` in `cgPriceHistory.ts`: ONE
+  `market_chart/range` call (span padded ≥92 d so CG returns DAILY 00:00 UTC points,
+  **byte-identical to `/history` — verified 0.0000% on 11 dates**) fills every missing date;
+  `suiPriceHistory.ts` prewarm is now tiered: in-process → parallel Redis reads → >5 missing =
+  batch call → write all needed dates to the same `price:historical:sui:{YYYYMMDD}` keys →
+  residual per-date fallback unchanged. **This is the standard pattern for any future
+  historical-price backfill need** (generic, keyed by cgId). Rule 1c: same CG daily source,
+  batched — DeFiLlama stays fallback; never spot.
+  **(2) Patient fetch, no timeout-retry storms** (`useLpPnl.ts`) — the 60/60/90 s
+  abort-and-retry pattern spawned up to 3 duplicate server executions per slow position
+  (aborting a fetch does NOT stop the lambda) and burned ~213 s before marking a healthy
+  position errored. Now ONE 150 s attempt; at most one retry, ONLY on network error / HTTP 5xx
+  — **never on timeout**; the position stays "still loading", not errored.
+  **(3) Progressive rendering** — `PositionsContext` now runs one React Query per (source,
+  address) (`useQueries`) instead of a single `Promise.all` that blanked the page until the
+  slowest route (Aerodrome ~35 s) though nine routes finish ≤4 s; rows render as each protocol
+  resolves with a subtle fixed-height "still scanning: X" chip on the dashboard.
+  `useWalletLevelFees` is progressive on first load / atomic-swap on refreshes (totals never
+  dip); `useAllPositionsActivity` merges per-fetch. **Required for correctness: in-flight dedup**
+  (by position id in useAllPositionsActivity, by URL in useWalletLevelFees) so per-wave effect
+  re-runs attach to existing fetches instead of re-firing duplicates — this is the standard
+  pattern for any hook consuming the streaming positions array.
+  Verified (B7, local prod-mode server, real env): fee targets matched (A1 Bluefin $1,817.94 /
+  Cetus $1,627.17 / Momentum $370.32; A2 $2,392.51 / $3,270.98 / $0), 0 dropped, 0 pending;
+  Capital G/L byte-consistent (A1 Sui −$7,099.16 = 2.2b + MOMENTUM exactly; A2 −$13,578.28
+  byte-identical to 2.2b). Timing: **Sui wallet-scope 111–179 s → 9–24 s** (scan-bound);
+  **Cetus per-position >179 s → 10.7 s**; warm route 12 ms; **first meaningful render ~35 s →
+  ~1–4 s**. No cache bumps (cached contents byte-identical). SPOT-RESILIENCE + closed-position
+  engine untouched. **#4 aerodrome positions route (~30 s, now a non-blocking straggler behind
+  the chip), #5 activity output caching, #6 Redis route cache → Sprint PERFORMANCE-2.**
 - **`776fcaa`** — Sprint SUI-HISTORICAL-REDIS: cross-instance Redis tier for SUI historical
   prices. Fixes the **post-deploy regression where the 3 Sui protocols (Cetus, Bluefin,
   Momentum) vanished from the analytics Fee Income breakdown**. Root cause (Sprint
@@ -330,113 +374,20 @@ shorthand.
   capture confirmed, test rows cleaned up; tsc + build clean. **No email-sending,
   unsubscribe endpoint, captcha, or analytics** — deferred per Memory #29 (wait for
   traction). Export subscribers via manual SQL when an announcement goes out.
-- **`bfabf3f`** — Sprint 2.2c: close the open-position SUI fee-claim cg-spot leak
-  (Rule 1a). The Cetus (1.15) + Bluefin (Sprint NEW) OPEN-position fee cascades read the
-  SUI side via `getCachedSuiPriceForTimestamp`, which returns `cache ?? spotFallback` —
-  so on a CoinGecko-historical miss it returned the FIX-C **current cg-spot** value and,
-  being non-null, PRE-EMPTED the DeFiLlama-historical tier in `priceSide`. A fee claim's
-  SUI side could thus be spot-valued (the leak found during 2.2b; the closed-position
-  path already avoided it). FIX (fee claims only, scope-locked): the 2 fee-claim
-  `__histSui` sites (bluefin:433, cetus:542) + the 2 `[PRICE_LOG]` re-derivation sites
-  (bluefin:480, cetus:622) now call `getHistoricalOnlySuiPrice` (pure historical `cache`,
-  never `spotFallback`) → on a CG miss `__histSui` is null → existing DeFiLlama tier →
-  else pending; NO spot. The 2 reward-claim sites (bluefin:402, cetus:500) UNCHANGED
-  (CETUS reward spot+LKG is the designated Memory #28 exception; Bluefin reward historical
-  migration separately deferred); `getCachedSuiPriceForTimestamp` retained for them. Cache
-  bumps (precedent Sprint NEW): cetus-activity v3→v4, bluefin-activity v4→v5,
-  analytics-activity v17→v18, lp-pnl-events v25→v26. Verified (both Sui wallets, both
-  routes, wallet-scope, spot priceA=2.5 like prod): **0 cg-spot for fee_claims** (cg-spot
-  only in the untouched reward path); 0 real pending (cetus zero-amount dust → $0); Bluefin
-  Account 2 **19/19 historical** (matches Sprint NEW baseline); fee USD byte-identical
-  old==new on the CG-hit path (**$0.00 shift**) — only transient CG-miss dates differ and
-  there resolve via DeFiLlama-historical, never spot; tsc + build clean.
-- **`bb7fc0d`** — Sprint 2.2b: Sui closed-position Capital G/L integration for Cetus +
-  Bluefin (Sprint 2.2 Phase A was the read-only investigation that approved this). A
-  closed Sui CLMM position's object is DESTROYED on close, so `suix_getOwnedObjects`
-  can't return it (unlike an EVM NFT). New `app/lib/suiClosedPositions.ts` reconstructs
-  each closed position's lifecycle from wallet tx history (the SAME
-  `suix_queryTransactionBlocks` + multiGet the activity routes already run; closed =
-  ever-opened ∧ not-currently-owned) and values it via the historical-ONLY cascade
-  (stable $1 → event-captured `current_sqrt_price` at the deposit/withdrawal BLOCK,
-  historical-by-construction like the 2.1b EVM sqrtPriceX96 archive read, NOT spot →
-  DeFiLlama-historical → CG-SUI-historical → pending), then reuses the EVM engine
-  `computePositionPnL` so `capitalGL = closingValue − initialValue` (Rule 4; fees
-  separate). New `/api/sui-closed-positions` route; `useLpPnl` folds results into
-  `capitalGL` alongside EVM (`'Sui'` added to `CAPITAL_GL_CHAINS`) via a SEPARATE ref
-  immune to the positions-array eviction. Rule-1a hardening: added
-  `getHistoricalOnlySuiPrice` (reads ONLY the pure historical cache, never the FIX-C
-  cg-spot `spotFallback` that `getCachedSuiPriceForTimestamp` can return). Redis cache
-  `closed_pos_sui_v1` (Sprint 1.14 immutable contract: 30d TTL, own client, no-op
-  stub, fire-and-forget, never cache empty); cold ~49s scan → warm ~1s. New
-  `[PRICE_LOG] sui_closed_position_valued`. **lp-pnl-events / analytics-activity NOT
-  bumped** (their per-position event caches are byte-identical — closed Sui has its
-  own key). UI label "EVM only" → "EVM + Sui (Cetus, Bluefin)". Reward claims NOT
-  valued here (Cap G/L excludes them; displayed Fees Collected already recovers
-  closed-Sui fees+rewards via the wallet-scope `positionId=all` pipeline). Verified
-  (both accounts, per-position reconciled vs on-chain tx digests, user-approved at the
-  B7 gate): A1 Sui contribution −$6,792.57 (27 pos), A2 −$13,578.28 (25); combined Cap
-  G/L A1 ~−$3,571→−$10,364, A2 ~−$1,861→−$15,439 (~3% off the Phase A daily-price
-  estimates, the gap is sqrtPrice exact-block vs daily); 0 pending, 0 spot across all
-  52; build+tsc clean. **Momentum deferred to Sprint MOMENTUM; FIX-C → Sprint 2.2c.**
-- **`17c5101`** — Sprint NEW: Bluefin fee claims historical-only — the LAST cg-spot
-  fee-claim leak on the platform. Sprint 1.15's investigation flagged that Bluefin
-  (and Momentum) carried the same latent FIX-A pattern Cetus had. CONFIRMED in the
-  Bluefin activity route: fee claims started `pxA=fallbackA`/`pxB=fallbackB` (current
-  spot query params) and set `usdAtTime` non-null whenever any spot was passed,
-  PRE-EMPTING the Sprint 1.12 DeFiLlama block (which only fired when
-  `usdAtTime==null`) — so DeFiLlama was effectively dead code for fee claims and the
-  SUI/non-stable sides rode current spot on cold-cache loads (Rule 1a leak). FIX
-  (REPLACE, user-approved like 1.12/1.15/2.1b): a dedicated `else if (ev.type ===
-  'fee_claim')` branch placed before the deposit/withdrawal spot last-resort, valuing
-  fee claims claim-date historical-ONLY per side — stablecoin → $1; SUI →
-  CoinGecko-historical → DeFiLlama-historical → pending; other non-stable →
-  DeFiLlama-historical → pending; NO spot. DeFiLlama is folded in as a first-class
-  historical tier and the prewarm is WIDENED to include the SUI side (cold CG-history
-  SUI miss → DeFiLlama, not spot), mirroring Cetus 1.15. Deposit/withdrawal spot
-  last-resort (Rule 2) PRESERVED; reward branch PRESERVED byte-identical (Bluefin
-  reward events carry only a symbol, no coin type; empirical historical migration
-  deferred, same caution as the CETUS spot+LKG exception). **MOMENTUM was a no-op** —
-  dashboard-only, NO activity route / NO fee-claim path (unsupported in `useLpPnl`),
-  so no leak; its cascade is deferred into the future "Momentum activity route"
-  sprint. Cache bumps: bluefin-activity v3→v4, analytics-activity v16→v17,
-  lp-pnl-events v24→v25. Verified (Account 2, Bluefin wallet-scope, spot priceA=2.0
-  passed like prod): fee claims 19/19 historical (10 defillama-historical + 9
-  sui-historical), **0 cg-spot / 0 unknown**; route_summary 38/38 resolved 0 failed;
-  defillama_historical 10 used / 0 missing / 0 error; the 10 cg-spot in the breakdown
-  are all REWARD claims (untouched path); build+tsc clean. **Platform-wide: Rule 1a
-  now fully enforced — every fee claim on every protocol on every chain is historical
-  only** (sole exception: CETUS reward-token spot+LKG, a designated source not a
-  fallback).
-- **`5b8f6b7`** — Sprint 2.1b: Aerodrome/Velodrome closed-position Fee Income fix +
-  cg-spot Rule 1a cleanup. Investigation (Sprint 2.1, read-only) found the
-  long-standing "~$57 vs hundreds" Account-1 Aerodrome symptom is largely resolved
-  (1.10/1.11/1.13/1.14 side effects) BUT a residual bug remained: closed
-  Aerodrome/Velodrome positions were skipped per-position
-  (`useAllPositionsActivity.ts`) and delegated to the wallet-scope `positionId=all`
-  scan, which prices EVERY ever-owned tokenId with ONE representative pool context.
-  A wallet with 2+ pairs where a non-largest pair is fully closed had that pair's
-  Collect events decoded with the WRONG decimals/pool → crushed to ~$0. Account 1's
-  closed USDC/cbBTC NFT 50087147: true lifetime fees ~$296 shown as $0.21; Aerodrome
-  Fee Income $1,277.67 vs true ~$1,576. FIX (REPLACE, user-approved like 1.12/1.15):
-  closed Aerodrome/Velodrome positions with resolved token context (token0Address +
-  token1Address + poolAddress all present) now flow through the SAME per-position
-  scan used by Capital G/L + the LP P&L "Fees Collected" card; wallet-scope retained
-  as a SAFETY NET for context-less burned positions; analytics Fee Income dedup now
-  keys on (protocol, txHash, **logIndex**) — propagated from both EVM V3 routes — so
-  per-position values win over the wallet-scope duplicate. BONUS (Rule 1a): the
-  cg-spot last resort is REMOVED from the Aerodrome AND Velodrome activity routes;
-  fee claims value historical-only (sqrtPriceX96 archive → CoinGecko historical →
-  DeFiLlama historical-by-contract, prewarmed only for sqrtPrice-missed claims →
-  pending), same template as Cetus 1.15. Cache bumps: analytics-activity v15→v16,
-  lp-pnl-events v23→v24. Verified (Account 1): cbBTC $0.21→~$296; merged Fee Income
-  ~$1,576; 45/45 wallet-scope claims deduped (per-position wins); **0 cg-spot for
-  aerodrome/velodrome fee claims** (3 formerly-leaking claims now defillama-
-  historical); Capital G/L computation path byte-identical (A/B stash-proven
-  old==new — the −$2,670→−$2,755 numeric drift is pre-existing sqrtPrice-archive
-  run-to-run variance on one single-sided withdrawal block, NOT this fix);
-  build+tsc clean. Velodrome fix is platform-prophylactic (Account 1 has 0
-  Velodrome positions). **Bluefin/Momentum still carry the spot-fee-claim leak →
-  now the active sprint.**
+- _(Sprint 2.2c `bfabf3f` — open-position SUI fee-claim cg-spot leak closed: the 2 fee-claim
+  + 2 `[PRICE_LOG]` sites in cetus/bluefin now call `getHistoricalOnlySuiPrice` (never the
+  FIX-C spotFallback); reward sites untouched (Memory #28 exception). Cache bumps v26/v18/v4/v5
+  — rolled off this list; see git history.)_
+- _(Sprint 2.2b `bb7fc0d` — Sui closed-position Capital G/L for Cetus + Bluefin:
+  `app/lib/suiClosedPositions.ts` reconstructs destroyed-object positions from wallet tx
+  history, values them historical-only, reuses `computePositionPnL`; Redis `closed_pos_sui_v1`;
+  `getHistoricalOnlySuiPrice` added — rolled off this list; see git history.)_
+- _(Sprint NEW `17c5101` — Bluefin fee claims historical-only (the last cg-spot fee-claim
+  leak); DeFiLlama folded in as a first-class historical tier — rolled off this list; see git
+  history.)_
+- _(Sprint 2.1b `5b8f6b7` — Aerodrome/Velodrome closed positions route through per-position
+  scans with correct context (cbBTC $0.21→~$296); cg-spot removed from both routes' fee claims;
+  dedup keys on (protocol, txHash, logIndex) — rolled off this list; see git history.)_
 - _(Sprint 1.15 `4752416` — Cetus fee claims route through DeFiLlama historical
   before any spot, removing the latent FIX-A cg-spot fee-claim fallback;
   historical-ONLY per side (stable $1 / SUI CG→DeFiLlama / other non-stable
@@ -536,6 +487,12 @@ shorthand.
 **Claim-date historical pricing** (two sources — see pricing-invariants Rule 1c):
 - `app/lib/cgPriceHistory.ts` — `fetchTokenPriceAtDate(cgId, ts)`, CoinGecko
   historical (PRIMARY), wrapped by the Sprint 1.6 Redis tier (`redisPriceCache.ts`).
+  Also `fetchDailyClosesRange(cgId, from, to)` (Sprint PERFORMANCE `f4b58ac`) — ONE
+  `market_chart/range` call returning every daily close in the span (byte-identical
+  to `/history`; span padded ≥92 d for daily granularity). The standard pattern for
+  any historical-price backfill: N missing dates = 1 CG call, written to the same
+  `price:historical:{cgId}:{YYYYMMDD}` Redis keys. Used by `suiPriceHistory.ts`'s
+  tiered prewarm (in-process → Redis → batch → per-date fallback).
 - `app/lib/defillamaPriceHistory.ts` (Sprint 1.12) — `fetchDefillamaPriceAtDate` /
   `prewarmDefillamaPrices` / `getCachedOnlyDefillamaPrice`, DeFiLlama
   historical-by-contract (SECONDARY), keyed by on-chain contract/mint/coin-type,
@@ -560,6 +517,16 @@ Investigate-first, always. Before any fix:
 All changes are additive unless explicitly replacing broken logic.
 Every fix is a platform fix that benefits all current and future users
 with similar position shapes. Never wallet-specific framing.
+
+**Performance is a platform requirement (Sprint PERFORMANCE `f4b58ac` baselines).**
+New sprints must not regress: **first meaningful render ~1–4 s** (positions stream
+per source — never reintroduce an all-or-nothing `Promise.all` gate on the
+positions array) and **Sui activity routes ~10–24 s** (scan-bound; the SUI
+historical prewarm is batch-filled via `fetchDailyClosesRange` + Redis). Any hook
+consuming the streaming positions array MUST carry in-flight dedup (by position id
+or URL) so per-wave effect re-runs never re-fire an in-flight fetch; client fetch
+policy is one patient attempt, retry only on network/5xx, never on timeout. Verify
+these numbers as part of B7 for any sprint touching the load path.
 
 ---
 
