@@ -180,6 +180,14 @@ export function useWalletLevelFees(
   const [events, setEvents] = useState<TaggedFeeEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fetchedKeyRef = useRef<string>("");
+  // Sprint PERFORMANCE: per-URL result/in-flight dedup. Positions now STREAM in
+  // per source (PositionsContext), so this effect's context key can change
+  // several times during one page load — without this, each key change re-fired
+  // EVERY wallet-scope scan (including the expensive Sui tx-history routes) as a
+  // duplicate server execution. The URL fully encodes the scan (account + pool
+  // context + prices), so reusing a resolved/in-flight URL is exact. Failures
+  // are evicted so the next run retries them.
+  const urlCacheRef = useRef<Map<string, Promise<TaggedFeeEvent[]>>>(new Map());
 
   useEffect(() => {
     // Group Bluefin positions by wallet. Pick the highest-value position per
@@ -388,6 +396,23 @@ export function useWalletLevelFees(
     // Build fetches only after confirming the key changed.
     const fetches: Array<Promise<TaggedFeeEvent[]>> = [];
 
+    // Per-URL dedup helper (see urlCacheRef above): resolved/in-flight URLs are
+    // reused across effect re-runs; a failed fetch is evicted so it retries.
+    const dedupFetch = (url: string, protocol: string, chain: string): Promise<TaggedFeeEvent[]> => {
+      const hit = urlCacheRef.current.get(url);
+      if (hit) return hit;
+      const p = fetch(url)
+        .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
+        .then((j) => (j.events ?? []).map((e) => ({ event: e, protocol, chain })))
+        .catch((err) => {
+          console.error(`[wallet-fees ${protocol.toLowerCase()}] fetch failed:`, err);
+          urlCacheRef.current.delete(url);
+          return [] as TaggedFeeEvent[];
+        });
+      urlCacheRef.current.set(url, p);
+      return p;
+    };
+
     for (const ctx of bluefinByWallet.values()) {
       const url =
         `/api/bluefin/activity?positionId=all` +
@@ -396,17 +421,7 @@ export function useWalletLevelFees(
         `&coinTypeB=${encodeURIComponent(ctx.coinTypeB)}` +
         `&decimalsA=${ctx.decimalsA}&decimalsB=${ctx.decimalsB}` +
         `&priceA=${ctx.priceA}&priceB=${ctx.priceB}`;
-      fetches.push(
-        fetch(url)
-          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-          .then((j) =>
-            (j.events ?? []).map((e) => ({ event: e, protocol: "Bluefin", chain: "Sui" })),
-          )
-          .catch((err) => {
-            console.error("[wallet-fees bluefin] fetch failed:", err);
-            return [];
-          }),
-      );
+      fetches.push(dedupFetch(url, "Bluefin", "Sui"));
     }
 
     for (const acct of suiWallets.values()) {
@@ -427,17 +442,7 @@ export function useWalletLevelFees(
         `&coinTypeB=${encodeURIComponent(ctx.coinTypeB)}` +
         `&decimalsA=${ctx.decimalsA}&decimalsB=${ctx.decimalsB}` +
         `&priceA=${ctx.priceA}&priceB=${ctx.priceB}`;
-      fetches.push(
-        fetch(cetusUrl)
-          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-          .then((j) =>
-            (j.events ?? []).map((e) => ({ event: e, protocol: "Cetus", chain: "Sui" })),
-          )
-          .catch((err) => {
-            console.error("[wallet-fees cetus] fetch failed:", err);
-            return [];
-          }),
-      );
+      fetches.push(dedupFetch(cetusUrl, "Cetus", "Sui"));
 
       // Momentum wallet-scope fee + reward scan — same model as Cetus/Bluefin.
       // Momentum positions don't expose coinTypeA/coinTypeB, so the fixed
@@ -457,17 +462,7 @@ export function useWalletLevelFees(
         `&coinTypeB=${encodeURIComponent(momentumCtx.coinTypeB)}` +
         `&decimalsA=${momentumCtx.decimalsA}&decimalsB=${momentumCtx.decimalsB}` +
         `&priceA=${momentumCtx.priceA}&priceB=${momentumCtx.priceB}`;
-      fetches.push(
-        fetch(momentumUrl)
-          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-          .then((j) =>
-            (j.events ?? []).map((e) => ({ event: e, protocol: "Momentum", chain: "Sui" })),
-          )
-          .catch((err) => {
-            console.error("[wallet-fees momentum] fetch failed:", err);
-            return [];
-          }),
-      );
+      fetches.push(dedupFetch(momentumUrl, "Momentum", "Sui"));
     }
 
     // Aerodrome (Base) wallet-scope fee scan — recovers Collect events from
@@ -482,17 +477,7 @@ export function useWalletLevelFees(
         `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
         `&pool=${encodeURIComponent(ctx.pool)}` +
         `&p0=${ctx.price0}&p1=${ctx.price1}`;
-      fetches.push(
-        fetch(aeroUrl)
-          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-          .then((j) =>
-            (j.events ?? []).map((e) => ({ event: e, protocol: "Aerodrome", chain: "Base" })),
-          )
-          .catch((err) => {
-            console.error("[wallet-fees aerodrome] fetch failed:", err);
-            return [];
-          }),
-      );
+      fetches.push(dedupFetch(aeroUrl, "Aerodrome", "Base"));
     }
 
     // Velodrome (Optimism) wallet-scope fee scan — recovers Collect events from
@@ -507,17 +492,7 @@ export function useWalletLevelFees(
         `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
         `&pool=${encodeURIComponent(ctx.pool)}` +
         `&p0=${ctx.price0}&p1=${ctx.price1}`;
-      fetches.push(
-        fetch(veloUrl)
-          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-          .then((j) =>
-            (j.events ?? []).map((e) => ({ event: e, protocol: "Velodrome", chain: "Optimism" })),
-          )
-          .catch((err) => {
-            console.error("[wallet-fees velodrome] fetch failed:", err);
-            return [];
-          }),
-      );
+      fetches.push(dedupFetch(veloUrl, "Velodrome", "Optimism"));
     }
 
     // Uniswap V3 (multi-chain) wallet-scope fee scan — recovers Collect events
@@ -534,36 +509,47 @@ export function useWalletLevelFees(
         `&p0=${ctx.price0}&p1=${ctx.price1}`;
       const displayChain = UNI_CHAIN_DISPLAY[ctx.chain] ?? ctx.chain;
       fetches.push(
-        fetch(uniUrl)
-          .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-          .then((j) =>
-            (j.events ?? [])
-              // Drop decimals-mismatch overflow artifacts: a wallet with MULTIPLE
-              // distinct pairs on one chain has its non-representative pair scaled
-              // by the single representative context, which for a decimals
-              // mismatch yields billions. Real fee claims are far under $50M, so
-              // this strips only the garbage and never a legitimate claim.
-              .filter((e) => Math.abs(e.usdAtTime ?? 0) <= 50_000_000)
-              .map((e) => ({ event: e, protocol: "Uniswap V3", chain: displayChain })),
-          )
-          .catch((err) => {
-            console.error("[wallet-fees uniswap] fetch failed:", err);
-            return [];
-          }),
+        dedupFetch(uniUrl, "Uniswap V3", displayChain).then((group) =>
+          // Drop decimals-mismatch overflow artifacts: a wallet with MULTIPLE
+          // distinct pairs on one chain has its non-representative pair scaled
+          // by the single representative context, which for a decimals
+          // mismatch yields billions. Real fee claims are far under $50M, so
+          // this strips only the garbage and never a legitimate claim.
+          group.filter((t) => Math.abs(t.event.usdAtTime ?? 0) <= 50_000_000),
+        ),
       );
     }
 
     let cancelled = false;
     setIsLoading(true);
-    Promise.all(fetches).then((groups) => {
+    // Sprint PERFORMANCE: progressive delivery. On the FIRST load (no events
+    // shown yet) each wallet-scope scan's results are appended to state as that
+    // fetch resolves, so fast protocols (EVM, per-position-cheap chains) appear
+    // in Fee Income immediately while slow scans (Sui tx-history routes) fill
+    // in when ready — instead of the previous single Promise.all state update
+    // that held the whole breakdown hostage to the slowest route. On REFRESHES
+    // (events already displayed) the old set stays visible and is replaced
+    // atomically at the end, so totals never visibly dip to a partial sum
+    // mid-refresh. Fetch failures still contribute [] (unchanged).
+    const acc: TaggedFeeEvent[] = [];
+    const firstLoad = events.length === 0;
+    for (const f of fetches) {
+      f.then((group) => {
+        if (cancelled || group.length === 0) return;
+        acc.push(...group);
+        if (firstLoad) setEvents([...acc]);
+      });
+    }
+    Promise.all(fetches).then(() => {
       if (cancelled) return;
-      setEvents(groups.flat());
+      setEvents([...acc]);
       setIsLoading(false);
     });
 
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions, suiWalletAddresses, suiPrice]);
 
   return { events, isLoading };

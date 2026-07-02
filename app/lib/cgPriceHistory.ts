@@ -99,6 +99,56 @@ export function tsToCoinGeckoDate(timestampSeconds: number): string {
   return `${dd}-${mm}-${yyyy}`;
 }
 
+// ── Sprint PERFORMANCE: batch daily closes via ONE market_chart/range call ────
+// A wallet with N distinct claim dates used to cost N serial /coins/{id}/history
+// calls through the 1100ms-gap queue above (~N×1.1s+; under page-load burst the
+// free tier 429s most of them, so the Redis tier never warms and EVERY load
+// re-pays the crawl — the ~170s Sui-route cold cost). market_chart/range returns
+// EVERY daily close in the span with a single request. Rule 1c note: this is the
+// SAME CoinGecko daily source at the same granularity — batching, not a source
+// change; CoinGecko stays primary, DeFiLlama stays the fallback, never spot.
+//
+// Granularity contract: CoinGecko auto-granularity returns hourly points for
+// 1-90 day spans and DAILY 00:00 UTC points (the same snapshot /history serves)
+// only above that — so the span is padded to ≥92 days to guarantee daily points
+// aligned with /history values. Extra returned dates are valid immutable dailies.
+//
+// Returns Map<YYYYMMDD, usd> or null on any failure (caller falls back to the
+// per-date path). One withCgPacing slot — respects the shared CG budget.
+const MIN_RANGE_SPAN_SEC = 92 * 86400;
+
+export async function fetchDailyClosesRange(
+  coingeckoId: string,
+  fromSec: number,
+  toSec: number,
+): Promise<Map<string, number> | null> {
+  if (!coingeckoId || !Number.isFinite(fromSec) || !Number.isFinite(toSec)) return null;
+  const to = Math.floor(toSec) + 86400; // include the last day's 00:00 UTC point
+  const from = Math.min(Math.floor(fromSec) - 86400, to - MIN_RANGE_SPAN_SEC);
+  return withCgPacing(async () => {
+    try {
+      const url = `https://api.coingecko.com/api/v3/coins/${coingeckoId}/market_chart/range?vs_currency=usd&from=${from}&to=${to}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const json = await res.json();
+      const prices: unknown = json?.prices;
+      if (!Array.isArray(prices)) return null;
+      const out = new Map<string, number>();
+      for (const point of prices) {
+        if (!Array.isArray(point)) continue;
+        const [ms, usd] = point as [number, number];
+        if (typeof ms !== 'number' || typeof usd !== 'number' || !(usd > 0)) continue;
+        const d = new Date(ms);
+        const ymd = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+        out.set(ymd, usd); // daily granularity = one 00:00 UTC point per day
+      }
+      return out.size > 0 ? out : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
 function keyOf(coingeckoId: string, date: string): string {
   return `${coingeckoId}:${date}`;
 }

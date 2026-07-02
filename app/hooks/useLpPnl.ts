@@ -506,16 +506,26 @@ function isTransportError(reason: string): boolean {
   return ERROR_REASONS.has(reason) || reason.startsWith("HTTP ");
 }
 
-// Retry policy: 1 initial attempt + up to 2 retries (per user spec).
-// Backoff: 1s, 2s. Per-attempt timeouts: 60s, 60s, 90s — last attempt gets the
-// most patience. Raised from 30/30/45s so legitimately-slow routes don't get
-// abandoned mid-flight: the HyperEVM closed-position activity route awaits a
-// ~25s CoinGecko historical prewarm (be94edf), and archival scans (Tenderly,
-// Sui full tx history) can run long under concurrency — the old budget gave up
-// before the route returned and surfaced healthy positions as errored.
-// Uniform across ALL chains — no per-chain override.
-const ATTEMPT_TIMEOUTS_MS = [60_000, 60_000, 90_000];
-const ATTEMPT_BACKOFF_MS  = [0,      1_000,  2_000];
+// Retry policy (Sprint PERFORMANCE): ONE patient attempt with a 150s ceiling,
+// plus at most one retry that fires ONLY on a network error or HTTP 5xx —
+// NEVER on a timeout. The previous 60/60/90s abort-and-retry pattern was a
+// self-inflicted amplifier: aborting the client fetch does NOT stop the
+// server-side route (the lambda keeps computing), so a slow-but-healthy route
+// (e.g. a Sui activity scan crawling the CoinGecko-historical queue) spawned up
+// to 3 duplicate server executions per position — tripling the very contention
+// that made it slow — and burned ~213s of client wall-clock before surfacing a
+// healthy position as errored. A single patient attempt lets the route finish
+// once; while it runs the position stays in the inflight ("still loading")
+// state, not an error state. Uniform across ALL chains — no per-chain override.
+const ATTEMPT_TIMEOUTS_MS = [150_000, 150_000];
+const ATTEMPT_BACKOFF_MS  = [0,       1_000];
+
+// Retry ONLY these failures: transient transport problems where a second
+// attempt can genuinely change the answer. A timeout is explicitly NOT here —
+// the server is still working; re-sending the request just duplicates its work.
+function isRetryableFailure(reason: string): boolean {
+  return reason === "fetch error" || /^HTTP 5\d\d/.test(reason);
+}
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -640,10 +650,13 @@ async function fetchAndCompute(
     rawEvents = cached.events;
     console.log(`${tag} cache hit — ${rawEvents.length} events`);
   } else {
-    // Retry loop: per-position transient failures (timeout / fetch error /
-    // HTTP 5xx) get up to 2 retries with backoff before being surfaced as
-    // `errored`. Definitive failures (HTTP 4xx, route error, empty events)
-    // skip retries — retrying won't change the answer.
+    // Retry loop (Sprint PERFORMANCE): one patient 150s attempt; at most one
+    // retry, fired ONLY for a retryable transport failure (network error /
+    // HTTP 5xx — see isRetryableFailure). A TIMEOUT never retries: the server
+    // is still computing the aborted request, and re-sending it just spawns a
+    // duplicate execution that worsens the contention that made it slow.
+    // Definitive failures (HTTP 4xx, route error, empty events) also skip
+    // retries — retrying won't change the answer.
     let lastFailure: { reason: string } = { reason: "no attempts" };
     for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS_MS.length; attempt++) {
       if (attempt > 0) {
@@ -673,8 +686,9 @@ async function fetchAndCompute(
         }
         return { ok: false, reason: result.reason };
       }
-      // Stop retrying if this isn't a transport error (HTTP 4xx etc.).
-      if (!isTransportError(result.reason)) {
+      // Only a retryable transport failure earns the second attempt. Timeouts
+      // and definitive failures (HTTP 4xx etc.) surface immediately.
+      if (!isRetryableFailure(result.reason)) {
         return { ok: false, reason: result.reason };
       }
     }

@@ -22,7 +22,7 @@
 // Cache has NO TTL — historical SUI prices for past days are immutable;
 // once fetched they stay valid for the life of the server instance.
 
-import { withCgPacing } from './cgPriceHistory';
+import { withCgPacing, fetchDailyClosesRange } from './cgPriceHistory';
 import { getCachedHistoricalPrice, setCachedHistoricalPrice } from './redisPriceCache';
 import { logPrice } from './priceLogger';
 import { fetchCachedCoinGeckoPrices } from './priceCache';
@@ -218,24 +218,70 @@ export async function fetchSuiPriceAtDate(timestampSeconds: number): Promise<num
   return promise;
 }
 
+// Representative noon-UTC timestamp for a DD-MM-YYYY date key (same convention
+// fetchSuiPriceAtDate uses, and the ts redisPriceCache keys by → same YYYYMMDD).
+function dateKeyToNoonTs(date: string): number {
+  const [dd, mm, yyyy] = date.split('-').map(Number);
+  return Math.floor(Date.UTC(yyyy, (mm ?? 1) - 1, dd ?? 1, 12, 0, 0) / 1000);
+}
+function dateKeyToYmd(date: string): string {
+  const [dd, mm, yyyy] = date.split('-');
+  return `${yyyy}${mm}${dd}`;
+}
+
 // Pre-warm the cache for every unique date implied by the given timestamps.
-// Issues one CoinGecko request per unique date IN PARALLEL. After this
-// resolves, getCachedSuiPriceForTimestamp() returns synchronously for any
-// of those timestamps — so the event-build loop can stay synchronous.
+// After this resolves, getCachedSuiPriceForTimestamp() /
+// getHistoricalOnlySuiPrice() return synchronously for any of those timestamps.
+//
+// Sprint PERFORMANCE tiering (read order per date):
+//   1. in-process cache / inFlight / spotFallback (instance-local)
+//   2. Redis cross-instance tier (Sprint SUI-HISTORICAL-REDIS) — parallel reads
+//   3. >5 dates still missing → ONE CoinGecko market_chart/range call returns
+//      every daily close in the span (fetchDailyClosesRange) → populate the
+//      in-process cache AND Redis for each needed date. Same CG daily source,
+//      same granularity as /history (Rule 1c: batching, not a source change).
+//   4. Any residual (≤5 missing, or batch failed/gapped) → the existing
+//      per-date /coins/sui/history path (fetchSuiPriceAtDate), unchanged.
+// This replaces the N-serial-calls-through-the-1100ms-queue cold path that made
+// Sui wallet-scope routes take ~170s when CG 429s kept Redis from warming.
 export async function prewarmSuiPricesForTimestamps(timestamps: number[]): Promise<void> {
   const uniqueDates = new Set<string>();
   for (const ts of timestamps) {
     if (Number.isFinite(ts) && ts > 0) uniqueDates.add(tsToCoinGeckoDate(ts));
   }
   if (uniqueDates.size === 0) return;
-  await Promise.all([...uniqueDates].map((date) => {
-    if (cache.has(date) || inFlight.has(date) || spotFallback.has(date)) return Promise.resolve();
-    // Convert date string back to a representative timestamp (noon UTC of
-    // that day) so fetchSuiPriceAtDate computes the same DD-MM-YYYY key.
-    const [dd, mm, yyyy] = date.split('-').map(Number);
-    const ts = Math.floor(Date.UTC(yyyy, (mm ?? 1) - 1, dd ?? 1, 12, 0, 0) / 1000);
-    return fetchSuiPriceAtDate(ts);
+
+  const missing = [...uniqueDates].filter(
+    (date) => !cache.has(date) && !inFlight.has(date) && !spotFallback.has(date),
+  );
+  if (missing.length === 0) return;
+
+  // Tier 2: parallel cross-instance Redis reads → populate the in-process cache.
+  await Promise.all(missing.map(async (date) => {
+    const hit = await getCachedHistoricalPrice('sui', dateKeyToNoonTs(date));
+    if (hit != null) cache.set(date, hit);
   }));
+  let stillMissing = missing.filter((date) => !cache.has(date));
+
+  // Tier 3: batch fill — one market_chart/range call for the whole span.
+  if (stillMissing.length > 5) {
+    const tss = stillMissing.map(dateKeyToNoonTs);
+    const closes = await fetchDailyClosesRange('sui', Math.min(...tss), Math.max(...tss));
+    if (closes) {
+      for (const date of stillMissing) {
+        const px = closes.get(dateKeyToYmd(date));
+        if (px != null && px > 0) {
+          cache.set(date, px);
+          // Fire-and-forget cross-instance write — same key the per-date path uses.
+          void setCachedHistoricalPrice('sui', dateKeyToNoonTs(date), px);
+        }
+      }
+      stillMissing = stillMissing.filter((date) => !cache.has(date));
+    }
+  }
+
+  // Tier 4: residual per-date path (Redis re-check inside is a cheap hit-miss).
+  await Promise.all(stillMissing.map((date) => fetchSuiPriceAtDate(dateKeyToNoonTs(date))));
 }
 
 // Synchronous cache lookup — returns null on miss. Use AFTER awaiting

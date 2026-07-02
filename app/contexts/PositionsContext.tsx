@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import { useQueries, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
@@ -23,6 +23,10 @@ interface PositionsContextValue {
   isUsingDemoData: boolean;
   dataUpdatedAt: number;
   refetch: () => void;
+  // Sprint PERFORMANCE: sources (protocol names) whose FIRST load hasn't
+  // resolved yet — lets pages show a subtle "still scanning X…" hint while
+  // already-arrived positions render. Empty once everything has loaded.
+  pendingSources: string[];
 }
 
 const PositionsContext = createContext<PositionsContextValue>({
@@ -32,7 +36,20 @@ const PositionsContext = createContext<PositionsContextValue>({
   isUsingDemoData: false,
   dataUpdatedAt: 0,
   refetch: () => {},
+  pendingSources: [],
 });
+
+// One entry per (protocol source, wallet address) — each becomes its own React
+// Query so positions stream into the UI as each source resolves, instead of the
+// previous single Promise.all that blanked the page until the SLOWEST route
+// (Aerodrome, ~35s) finished while nine sub-4s routes sat ready (Sprint
+// PERFORMANCE item 3). Fetchers already catch and return [] on failure, so a
+// failed source contributes nothing (same behavior as before).
+interface SourceQuery {
+  label: string; // protocol display label for pendingSources
+  address: string;
+  fetcher: (address: string) => Promise<AerodromePosition[]>;
+}
 
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const { address } = useAccount();
@@ -41,6 +58,7 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // here because those can reflect locked/silent-reconnect state.
   const { solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets, scanAddress } = useWatchedWallets();
+  const queryClient = useQueryClient();
 
   // SCAN MODE: when scanAddress is set (from /dashboard?address=&chain=),
   // ignore connected wallets AND saved watched wallets entirely — fetch ONLY
@@ -97,53 +115,74 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [address, solanaAddress, suiAddress]);
 
-  const evmKey = evmAddresses.join(",");
-  const solKey = solanaAddresses.join(",");
-  const suiKey = suiAddresses.join(",");
+  // Build the per-(source, address) query list. Order is stable for a given
+  // address set, and each query is independently keyed, so one slow source
+  // never gates the others.
+  const sources: SourceQuery[] = [];
+  for (const a of evmAddresses) {
+    sources.push(
+      { label: "Aerodrome", address: a, fetcher: fetchAerodromePositions },
+      { label: "Uniswap V3", address: a, fetcher: fetchUniswapV3Positions },
+      { label: "Velodrome", address: a, fetcher: fetchVelodromePositions },
+      { label: "HyperEVM", address: a, fetcher: fetchHyperSwapPositions },
+      { label: "PancakeSwap", address: a, fetcher: fetchPancakeSwapPositions },
+    );
+  }
+  for (const a of solanaAddresses) {
+    sources.push(
+      { label: "Raydium", address: a, fetcher: fetchRaydiumPositions },
+      { label: "Orca", address: a, fetcher: fetchOrcaPositions },
+    );
+  }
+  for (const a of suiAddresses) {
+    sources.push(
+      { label: "Cetus", address: a, fetcher: fetchCetusPositions },
+      { label: "Bluefin", address: a, fetcher: fetchBluefinPositions },
+      { label: "Momentum", address: a, fetcher: fetchMomentumPositions },
+    );
+  }
 
-  const { data: walletPositions, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
-    queryKey: ["positions", evmKey, solKey, suiKey],
-    queryFn: async () => {
-      const promises: Promise<AerodromePosition[]>[] = [];
-
-      for (const a of evmAddresses) {
-        promises.push(
-          fetchAerodromePositions(a),
-          fetchUniswapV3Positions(a),
-          fetchVelodromePositions(a),
-          fetchHyperSwapPositions(a),
-          fetchPancakeSwapPositions(a),
-        );
-      }
-
-      for (const a of solanaAddresses) {
-        promises.push(
-          fetchRaydiumPositions(a),
-          fetchOrcaPositions(a),
-        );
-      }
-
-      for (const a of suiAddresses) {
-        promises.push(
-          fetchCetusPositions(a),
-          fetchBluefinPositions(a),
-          fetchMomentumPositions(a),
-        );
-      }
-
-      const results = await Promise.all(promises);
-      return results.flat();
-    },
-    enabled: hasWallet,
-    staleTime: 60_000,
-    refetchInterval: hasWallet ? 60_000 : false,
-    placeholderData: keepPreviousData,
+  const queries = useQueries({
+    queries: sources.map((s) => ({
+      queryKey: ["positions", s.label, s.address],
+      queryFn: () => s.fetcher(s.address),
+      enabled: hasWallet,
+      staleTime: 60_000,
+      refetchInterval: hasWallet ? 60_000 : false,
+      // Keep the previous source's rows visible during the 60s background
+      // refresh — no flash/blank between refetches (same UX as before).
+      placeholderData: keepPreviousData,
+    })),
   });
 
-  const positions = walletPositions || [];
+  // Combine per-source results. Memoized on a stable signature (per-query
+  // dataUpdatedAt) so the positions array identity only changes when some
+  // source actually delivered new data — downstream hooks (useLpPnl etc.)
+  // depend on that identity and were built for wave-by-wave arrival.
+  const signature = queries.map((q) => q.dataUpdatedAt).join(",") + `|${sources.length}`;
+  const positions = useMemo(
+    () => queries.flatMap((q) => q.data ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signature],
+  );
+
+  // isLoading = nothing has arrived yet (initial blank state only). Once ANY
+  // source resolves, rows render and isLoading drops — the remaining sources
+  // are reported via pendingSources/isFetching instead of blanking the page.
+  const isLoading = hasWallet && queries.length > 0 && queries.every((q) => q.isPending);
+  const isFetching = queries.some((q) => q.isFetching);
+  const dataUpdatedAt = queries.reduce((m, q) => Math.max(m, q.dataUpdatedAt), 0);
+  const pendingSources = useMemo(() => {
+    const labels = new Set<string>();
+    queries.forEach((q, i) => { if (q.isPending) labels.add(sources[i].label); });
+    return [...labels];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, queries.filter((q) => q.isPending).length]);
+
+  const refetch = () => { void queryClient.invalidateQueries({ queryKey: ["positions"] }); };
 
   return (
-    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch }}>
+    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch, pendingSources }}>
       {children}
     </PositionsContext.Provider>
   );

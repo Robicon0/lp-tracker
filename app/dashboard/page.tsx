@@ -258,7 +258,7 @@ function ScanModeListener() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch } = usePositions();
+  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch, pendingSources } = usePositions();
   // Per-position activity events — used for proper P&L calculation per row.
   // Per-row P&L on the positions table comes from the SAME on-chain pipeline
   // that feeds the analytics LP P&L totals — no parallel calculation, no
@@ -1708,6 +1708,17 @@ export default function Dashboard() {
                 );
               })}
             </div>
+
+            {/* Sprint PERFORMANCE: positions stream in per source — rows render
+                as each protocol resolves. This subtle line names the sources
+                still scanning so late arrivals aren't mistaken for missing
+                positions. Fixed-height inline text, no layout shift. */}
+            {mounted && !isLoading && pendingSources.length > 0 && (
+              <div style={{ fontSize: 11, color: C.text, opacity: 0.55, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
+                <span className="spin-icon" style={{ display: "inline-block", marginRight: 6 }}>↻</span>
+                still scanning: {pendingSources.join(" · ")}
+              </div>
+            )}
 
             {/* Table */}
             {mounted && isLoading ? (

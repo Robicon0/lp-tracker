@@ -347,6 +347,22 @@ export function useAllPositionsActivity(
   const [isLoading, setIsLoading] = useState(false);
   // Track which set of position IDs we've already fetched for
   const fetchedForRef = useRef<string>("");
+  // Sprint PERFORMANCE: positions now STREAM into the array per source (the
+  // PositionsContext Promise.all was replaced with per-source queries), so this
+  // effect re-runs once per arrival wave. In-flight dedup by position id makes
+  // those re-runs attach to the EXISTING fetch instead of re-firing a duplicate
+  // server execution for a slow route (the exact amplification the retry-policy
+  // fix removed). Entries are deleted on settle; unmount guards use mountedRef
+  // (a later wave legitimately consumes an earlier wave's resolution).
+  const inflightRef = useRef<Map<string, Promise<[string, PositionPerformance, ActivityEvent[]]>>>(new Map());
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  // Monotonic run id — only the LATEST effect run may clear isLoading, so an
+  // early wave completing after a later wave started can't blank the spinner.
+  const runIdRef = useRef(0);
 
   useEffect(() => {
     // Fetch for ALL positions with supported activity protocols (including closed).
@@ -406,7 +422,7 @@ export function useAllPositionsActivity(
     if (key === fetchedForRef.current) return;
     fetchedForRef.current = key;
 
-    let cancelled = false;
+    const runId = ++runIdRef.current;
     setIsLoading(true);
 
     type FetchResult = [string, PositionPerformance, ActivityEvent[]];
@@ -431,32 +447,42 @@ export function useAllPositionsActivity(
     // the same way and benefit from the parallel fan-out.
     let hyperEvmChain: Promise<unknown> = Promise.resolve();
 
-    const fetches = eligible.map(async (pos): Promise<FetchResult> => {
+    const fetches = eligible.map((pos): Promise<FetchResult> => {
       const tag = `[activity] ${pos.protocol} ${pos.chain} ${pos.id}`;
       // Check cache first — serialising doesn't apply when we'd skip the
       // network anyway. Cache TTL is 5 min; subsequent loads in that window
       // serve instantly and incur zero Etherscan pressure.
       const cached = readCache(pos.id);
       if (cached) {
-        return [pos.id, computePerformance(cached.events, pos), cached.events];
+        return Promise.resolve([pos.id, computePerformance(cached.events, pos), cached.events]);
       }
 
-      // Queue HyperEVM positions behind the previous one in the chain.
-      // Non-HyperEVM positions skip this and fetch immediately in parallel.
-      if (HYPEREVM_PROTOCOLS.has(pos.protocol)) {
-        const previous = hyperEvmChain;
-        let releaseChain!: () => void;
-        hyperEvmChain = new Promise<void>((resolve) => { releaseChain = resolve; });
-        try {
-          await previous;
-          if (cancelled) return [pos.id, emptyPerf, []];
-          return await runFetch(pos, tag);
-        } finally {
-          releaseChain();
+      // Streaming-wave dedup: if a previous effect run already has this
+      // position's fetch in flight, attach to it — never re-fire a duplicate
+      // server execution for a slow route.
+      const existing = inflightRef.current.get(pos.id);
+      if (existing) return existing;
+
+      const p = (async (): Promise<FetchResult> => {
+        // Queue HyperEVM positions behind the previous one in the chain.
+        // Non-HyperEVM positions skip this and fetch immediately in parallel.
+        if (HYPEREVM_PROTOCOLS.has(pos.protocol)) {
+          const previous = hyperEvmChain;
+          let releaseChain!: () => void;
+          hyperEvmChain = new Promise<void>((resolve) => { releaseChain = resolve; });
+          try {
+            await previous;
+            if (!mountedRef.current) return [pos.id, emptyPerf, []];
+            return await runFetch(pos, tag);
+          } finally {
+            releaseChain();
+          }
         }
-      }
-
-      return runFetch(pos, tag);
+        return runFetch(pos, tag);
+      })();
+      inflightRef.current.set(pos.id, p);
+      void p.finally(() => inflightRef.current.delete(pos.id));
+      return p;
     });
 
     // Hoisted so both the HyperEVM-chained path and the parallel path call
@@ -505,16 +531,29 @@ export function useAllPositionsActivity(
     for (const p of eligible) {
       metaSnapshot.set(p.id, { protocol: p.protocol, chain: p.chain });
     }
+    setMetaMap(metaSnapshot);
 
-    Promise.all(fetches).then((results) => {
-      if (cancelled) return;
-      setPerfMap(new Map(results.map(([id, perf]) => [id, perf])));
-      setEventsMap(new Map(results.map(([id, , events]) => [id, events])));
-      setMetaMap(metaSnapshot);
+    // Sprint PERFORMANCE: progressive delivery — each position's perf/events
+    // merge into the maps as its fetch resolves (functional setState so
+    // concurrent resolutions never clobber each other), instead of one
+    // all-or-nothing state update after Promise.all that held every consumer
+    // memo (fee income, performance cards) hostage to the slowest route.
+    // Positions already fetched keep their entries (merge, not replace);
+    // isLoading drops only when every fetch has settled — consumers keep
+    // their existing "still loading" affordances.
+    for (const f of fetches) {
+      f.then(([id, perf, events]) => {
+        if (!mountedRef.current) return;
+        setPerfMap((prev) => new Map(prev).set(id, perf));
+        setEventsMap((prev) => new Map(prev).set(id, events));
+      });
+    }
+    Promise.all(fetches).then(() => {
+      // Only the LATEST run clears the spinner — an earlier wave finishing
+      // after a later wave started must not hide its in-flight fetches.
+      if (!mountedRef.current || runIdRef.current !== runId) return;
       setIsLoading(false);
     });
-
-    return () => { cancelled = true; };
   }, [positions]);
 
   return { perfMap, eventsMap, metaMap, isLoading };
