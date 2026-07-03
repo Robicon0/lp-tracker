@@ -122,6 +122,12 @@ as `750f566`:** Sui Capital G/L is now COMPLETE across all three Sui CLMM protoc
   verified structurally + warm baseline (~8s); eyeball on the deploy.
 - **Token-resolver coverage** — Tier 2 routes (uniswap/v3, pancakeswap) + activity
   routes still use hardcoded maps; future sprint migrates + removes them (Rule 9).
+- **Sprint POSITION-DETAIL numeric-eyeball follow-up (`82d4954`)** — the Sui pending-reward
+  reads were proven numerically on Cetus ($81.10 vs on-chain $81.09) but only STRUCTURALLY on
+  Bluefin/Momentum (no live non-zero pending-reward position existed in the test sample; code
+  is identical to the proven Cetus path). **The first time a live Bluefin or Momentum position
+  has non-zero pending rewards, eyeball DefiDesh's Uncollected total against the protocol app**
+  to confirm the numeric match. Contract invariant (k).
 
 ---
 
@@ -131,7 +137,15 @@ In order. One active at a time. Each sprint must ship before the next begins.
 _(Sprint TOKEN-RESOLUTION `a866576` + Sprint SPOT-RESILIENCE `92e779a` shipped out-of-band —
 see Recent fixes.)_
 
-1. **Closed Solana position fee recovery via Helius** (active, Sprint 3; Phase A done) —
+1. **Sprint POSITION-DETAIL-2** — the deferred pending-reward paths from Sprint POSITION-DETAIL
+   (`82d4954`): **B3** Solana pending rewards (Orca whirlpool `rewardInfos` offsets already
+   documented in orca/route.ts comments; Raydium equivalent) so Orca/Raydium detail pages show
+   reward emissions like the Sui ones now do; **B4** EVM gauge emissions (Aerodrome/Velodrome
+   staked AERO/VELO via the gauge `earned()`) — **staked EVM positions (e.g. Osho's Aerodrome
+   WETH/USDC) UNDER-REPORT uncollected value vs the protocol UI until B4 ships**. Same Contract
+   invariant (k): value pending rewards at current spot (Rule 2), never a fee-claim (Rule 1a).
+   **The next actionable sprint** — Sprint 3 below remains gated on the Helius $49/mo decision.
+2. **Closed Solana position fee recovery via Helius** (active, Sprint 3; Phase A done) —
    Solana event indexer; parse Orca/Raydium program instructions from wallet tx history;
    feeds Capital G/L. **GATED on the paid Helius Developer ($49/mo, 50 RPS) upgrade decision**
    — Phase A empirically confirmed the free tier (10 RPS) is too slow. Phase B must value by
@@ -141,37 +155,37 @@ see Recent fixes.)_
    (`zRwbz…` → `A7bdiYdS…`) and placeholder ORCA mint (`…ABCDE` → `…uGZE`) in orca/route.ts by
    valuing OPEN Solana positions from the on-chain mint too** (not just closed). Orca-only
    first; Raydium deferred.
-2. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
+3. **Clickable Capital G/L breakdown** (Sprint 4) — trust-through-transparency:
    make the Capital G/L figure expand to a per-position breakdown (deposited vs
    withdrawn USD, per closed position) so users can verify the number. The Sprint
    2.2b `SuiClosedPosition` summary fields are already shaped for this.
-3. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
+4. **UI for closed Sui + Solana positions** — Closed tab support (Sui closed
    positions are now retrieved for Capital G/L but not yet shown as Closed rows).
-4. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+5. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
-5. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
+6. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
    TOKEN-RESOLUTION per-event pool-context pattern to the EVM wallet-scope fee scans
    (aerodrome/velodrome/uniswap). EVM is NOT currently broken — its fallback addresses are
    correct and Sprint 2.1b (`5b8f6b7`) routes closed positions through per-position scans
    with correct context, so the single-representative-pool risk is mitigated — but resolving
    each Collect event's token0/token1 from its pool on-chain would remove the last residual
    of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
-6. **Sprint SPOT-RESILIENCE-V2 (optional, non-blocking)** — the fuller version of the spot
+7. **Sprint SPOT-RESILIENCE-V2 (optional, non-blocking)** — the fuller version of the spot
    fix: `null`/"pending" propagation from `fetchCachedCoinGeckoPrices` through the position
    type + `useLpPnl` + `positionPnl` + a distinct softer UI banner ("Price refreshing…"), plus
    per-tier staleness caps (Tier B 10-min LKG / Tier C pending-not-LKG). Sprint SPOT-RESILIENCE
    `92e779a` already resolves the bogus banner via LKG; V2 is a larger, higher-risk change —
    **ship ONLY if a user-visible need emerges** (e.g. a genuinely-dead token showing a stale
    price is judged confusing). Not currently planned.
-7. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
+8. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
    SUI-HISTORICAL-REDIS `776fcaa` the Sui wallet-scope routes drop from ~111 s to ~18–20 s; the
    residual floor is the **~17 s public-Sui-RPC `queryTransactionBlocks` + `multiGet` scan** (240
    digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
    cross-instance (immutable ledger) or use a faster RPC. **Address only if <10 s becomes a UX
    need** — the Fee-Income regression is already resolved at ~18–20 s.
-8. **Sprint PERFORMANCE-2 (hardening candidates, non-blocking)** — the deferred Phase A items:
+9. **Sprint PERFORMANCE-2 (hardening candidates, non-blocking)** — the deferred Phase A items:
    **#4** Redis-cache the Aerodrome positions route's ever-owned tokenId scan + closed-position
    reconstruction (~30 s, the remaining first-load straggler — now non-blocking behind the
    "still scanning" chip); **#5** Redis-cache CLOSED positions' activity route outputs
@@ -186,6 +200,36 @@ see Recent fixes.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`82d4954`** — Sprint POSITION-DETAIL: Sui pending REWARD emissions + Estimated-APR
+  fallback (position-detail page only). **Bug 1** — the Uncollected panel didn't match the
+  protocol's own claimable UI: the Sui routes computed pending TRADING FEES only; pending
+  REWARD EMISSIONS were never read (Cetus USDC/SUI `0x63301cc4` showed $64.39 vs the Cetus
+  app's $71.42 — the gap WAS the rewards). **Fix (Cetus/Bluefin/Momentum):** compute
+  per-rewarder pending amounts from data the routes ALREADY fetch — pool rewarder state
+  (`reward_coin_type` + `reward_growth_global`) + the position's per-rewarder checkpoint
+  (`reward_growth_inside_last` + `coins_owed*`) + the tick nodes' `reward_growths_outside[]`
+  — same Q64 growth math + underflow guard as fees, **zero extra Sui RPC** (all fields ride
+  objects already fetched; shapes verified LIVE on-chain, never docs). New
+  `app/lib/suiRewardMeta.ts` resolves each reward coin type (invariant (i), never hardcoded)
+  and prices it at CURRENT SPOT via the SPOT-RESILIENCE tiered helper (invariant (j) — Rule 2
+  current-value domain, so Rule 1a claim valuation is UNTOUCHED). Exposed as optional
+  `pendingRewards[]` + `rewardsUsd` on the position type — **SEPARATE from `fees0/fees1`** so
+  analytics aggregation over `fees` is byte-identical. Detail-page Uncollected panel adds
+  reward rows + folds them into the total (matches "Claimable Yield"). **Bug 2** — Estimated
+  APR showed N/A for long-tail pools (ZEC/USDC absent from Orca's pool list; Momentum
+  hardcodes `apy 0`). **Fix (`position/[id]/page.tsx`, frontend-only):** when `pos.apy <= 0`,
+  derive APR from the position's own observables `(lifetime claimed + uncollected incl.
+  rewards) / age × 365 / value`, labeled "derived from position earnings"; guarded to
+  "— / too early to estimate" when <24 h or zero earnings; pool-APY path unchanged when a real
+  number exists. Any pool, any chain, zero per-token config. Verified (B7, local prod-mode +
+  same-minute on-chain recompute): **Cetus total $81.10 vs on-chain claimable $81.09** (reward
+  amounts byte-identical); A2 Cetus rewards $17.17; Bluefin/Momentum zero-accrual paths clean
+  (**non-zero path verified STRUCTURALLY — code-identical to the proven Cetus path; must be
+  eyeballed vs the protocol app the first time a live non-zero Bluefin/Momentum reward
+  exists**); ZEC/USDC N/A → ~213.4% derived; SOL/USDC +97.3% unchanged; A2 Cetus `fees 149.51`
+  byte-identical local vs prod. tsc + build clean. **No cache bumps** (fees byte-identical;
+  rewards additive). **B3 (Solana pending rewards) + B4 (EVM gauge emissions) → Sprint
+  POSITION-DETAIL-2.** Full B7 report in `reports/position-detail-phase-b-report.md`.
 - **`f4b58ac`** — Sprint PERFORMANCE: market_chart batch-fill + patient fetch + progressive
   rendering. Fixes the **>2-minute load on Dashboard AND Analytics** (both accounts). Phase A
   waterfall found three stacked causes; all three fixed:
@@ -351,29 +395,10 @@ shorthand.
   swaps); **0 spot, 0 pending** across all events; per-position fees reconcile on-chain to
   `FeeCollectedEvent` amounts; tsc + build clean. **Solana closed positions remain the
   last excluded closed-position chain → Sprint 3 (gated on paid Helius).**
-- **`5b583f7`** — Sprint EMAIL: homepage email capture (ship notifications). Adds a
-  privacy-respecting email-capture section to the homepage so visitors can subscribe to
-  ship notifications — a simple email-only list, **NOT user accounts** (no login, no
-  password, no wallet coupling; gating/identity stays architecturally separate per the
-  wallet-security forward-looking note). New `POST /api/subscribe`
-  (`app/api/subscribe/route.ts`) mirrors the existing `position-entries` pattern
-  (`@vercel/postgres` `sql.query`, `isDbConfigured()` guard, idempotent
-  `CREATE TABLE IF NOT EXISTS subscribers`): server-side RFC-shape validation, email
-  lowercased before storage (case-insensitive UNIQUE), duplicates `ON CONFLICT DO
-  NOTHING` and return **200 — no existence leak** (privacy), `x-forwarded-for` captured
-  for spam-protection only, best-effort in-memory **5/IP/hour** rate limit, opaque 500 on
-  DB error. New `ShipNotifications` client component matches the hero SCAN-input terminal
-  aesthetic (`#00ff41`, `>_` prefix, JetBrains Mono — used the established brand green,
-  not the prompt's `#4ade80` which appears nowhere in the codebase); inline confirmation
-  replaces the input on success with **no layout shift**; a11y `role=status`/`role=alert`,
-  `aria-label`, real submit `<button>` in a `<form>`. Wired into `app/page.tsx` between
-  FEATURES and the footer (user-confirmed placement; the FEATURES section sits between
-  Supported Protocols and the footer). **No new deps, env vars, or cache-version bumps.**
-  Verified locally against Neon: valid→200, duplicate(diff case)→200 single row,
-  invalid/empty→400 `invalid_email`, 6th/IP/hour→429; schema + dedup + rate-limit + IP
-  capture confirmed, test rows cleaned up; tsc + build clean. **No email-sending,
-  unsubscribe endpoint, captcha, or analytics** — deferred per Memory #29 (wait for
-  traction). Export subscribers via manual SQL when an announcement goes out.
+- _(Sprint EMAIL `5b583f7` — homepage ship-notification email capture: `POST /api/subscribe`
+  + `subscribers` table (email-only list, NOT accounts), server-side validation, idempotent,
+  no existence leak, 5/IP/hr rate limit; `ShipNotifications` client component — rolled off this
+  list; see git history.)_
 - _(Sprint 2.2c `bfabf3f` — open-position SUI fee-claim cg-spot leak closed: the 2 fee-claim
   + 2 `[PRICE_LOG]` sites in cetus/bluefin now call `getHistoricalOnlySuiPrice` (never the
   FIX-C spotFallback); reward sites untouched (Memory #28 exception). Cache bumps v26/v18/v4/v5

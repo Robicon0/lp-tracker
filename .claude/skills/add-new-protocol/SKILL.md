@@ -241,6 +241,28 @@ Do NOT reintroduce a per-route raw spot fetch or a `|| 0` that bypasses the LKG.
 SPOT path (Rule 2 current value) — it is SEPARATE from and MUST NOT be confused with the
 historical fee-claim path (Rule 1a / `cgPriceHistory` + DeFiLlama), which is untouched by it.
 
+### Invariant (k) — position-detail uncollected value = ALL claimable components
+
+**The position-detail "Uncollected" total MUST include every component a user can claim —
+trading fees AND pending reward emissions — so it matches the protocol's own claimable/"yield"
+UI to the penny.** A CLMM protocol that runs incentives keeps pending rewards in a SEPARATE
+on-chain structure from trading fees (pool rewarder state + a per-position reward checkpoint +
+per-tick reward-growth-outside), computed with the SAME growth math + underflow guard as fees.
+Reading only trading fees under-reports vs the protocol app (Sprint POSITION-DETAIL: Cetus
+USDC/SUI showed $64.39 vs the Cetus app's $71.42 — the gap was pending CETUS+SUI emissions).
+
+Every new protocol MUST either implement pending-reward reads or explicitly document that it
+has NO emissions. For Sui CLMMs, the pattern is proven (Cetus/Bluefin/Momentum, `82d4954`):
+read `pool.reward_infos[]/rewarder_manager` + `position.reward_infos[]`/`PositionInfo.rewards[]`
++ tick `reward_growths_outside[]` (all ride objects the fee path already fetches — zero extra
+RPC), then resolve each reward coin type (invariant (i), never hardcoded) and value it at
+CURRENT SPOT via `app/lib/suiRewardMeta.ts` (invariant (j)). Keep rewards on a SEPARATE
+position field (`pendingRewards[]` / `rewardsUsd`) from `fees0/fees1` so analytics aggregation
+over `fees` stays byte-identical; the detail page folds rewards into the displayed total only.
+Pending rewards are a CURRENT-VALUE display (Rule 2 spot), NOT a fee claim (Rule 1a historical)
+— do not confuse the two. (Deferred as of `82d4954`: Solana whirlpool rewards + EVM gauge
+`earned()` emissions → Sprint POSITION-DETAIL-2; until then staked EVM positions under-report.)
+
 ### Token identity resolution (symbol / decimals / CoinGecko id)
 
 **Do NOT create a per-protocol `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map.**
