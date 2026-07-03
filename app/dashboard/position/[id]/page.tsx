@@ -535,10 +535,29 @@ export default function PositionDetail() {
   }, 0);
   const uncollectedUSD = pos.fees;
   const lifetimeUSD = claimedUSD + uncollectedUSD;
+  // Sprint POSITION-DETAIL (Contract invariant (k)): pending REWARD EMISSIONS,
+  // read from on-chain rewarder state by the position routes. Folded into the
+  // DISPLAYED uncollected total below so it matches the protocol's own
+  // claimable UI (e.g. Cetus "Claimable Yield" = fees + emissions). pos.fees
+  // itself stays fees-only — analytics aggregation is untouched.
+  const pendingRewards = pos.pendingRewards ?? [];
+  const rewardsUsd = pos.rewardsUsd ?? 0;
+  const totalUncollectedUSD = uncollectedUSD + rewardsUsd;
   const firstDeposit = deposits.length > 0 ? deposits[deposits.length - 1] : null;
   const firstTs = firstDeposit?.timestamp ?? 0;
   const nowTs = Math.floor(Date.now() / 1000);
   const daysActive = firstTs > 0 ? (nowTs - firstTs) / 86400 : 0;
+  // Sprint POSITION-DETAIL (B2): when the external pool-APY source has no entry
+  // for this pool (pos.apy <= 0 → hasApr false — long-tail pools, Momentum),
+  // derive APR from the position's OWN observables instead of showing N/A:
+  // (lifetime claimed + uncollected incl. rewards) / age × 365 / value. Works
+  // for any pool on any chain with zero per-token configuration. Guarded: a
+  // position younger than 24h (or with zero earnings) shows "—" rather than a
+  // misleading annualization of hours of data.
+  const derivedApr =
+    !hasApr && (pos.value ?? 0) > 0 && daysActive >= 1 && (claimedUSD + totalUncollectedUSD) > 0
+      ? ((claimedUSD + totalUncollectedUSD) / daysActive) * 365 / pos.value * 100
+      : null;
   // Forward projection (Sprint 1.8b): prefer real claims; for new positions with
   // no claim history yet, fall back to an uncollected-fees-based estimate so the
   // metrics aren't dark from day 1. Byte-identical to the prior inline formulas
@@ -808,25 +827,28 @@ export default function PositionDetail() {
             </div>
             <div style={{ ...subStyle, opacity: 0.7 }}>live mark-to-market</div>
           </div>
-          {/* Uncollected Fees */}
+          {/* Uncollected (trading fees + pending reward emissions — invariant (k),
+              matches the protocol's own claimable total) */}
           <div style={{ padding: "24px 28px", borderRight: `1px solid ${C.border}`, background: C.bg }}>
             <div style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 5, height: 5, background: C.green }} />
-              Uncollected Fees
+              {rewardsUsd > 0 ? "Uncollected" : "Uncollected Fees"}
             </div>
             <div style={{
               fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em",
-              color: pos.fees > 0 ? C.green : C.text,
-              textShadow: pos.fees > 0 ? "0 0 20px rgba(0,255,65,0.25)" : "none",
+              color: totalUncollectedUSD > 0 ? C.green : C.text,
+              textShadow: totalUncollectedUSD > 0 ? "0 0 20px rgba(0,255,65,0.25)" : "none",
               fontVariantNumeric: "tabular-nums",
             }}>
-              {fmt$(pos.fees)}
+              {fmt$(totalUncollectedUSD)}
             </div>
-            <div style={{ ...subStyle, color: pos.fees > 0 ? C.green : C.text }}>
-              {pos.fees > 0 ? "↑ ready to collect" : "no fees pending"}
+            <div style={{ ...subStyle, color: totalUncollectedUSD > 0 ? C.green : C.text }}>
+              {rewardsUsd > 0 ? "fees + rewards · ready to collect" : totalUncollectedUSD > 0 ? "↑ ready to collect" : "no fees pending"}
             </div>
           </div>
-          {/* Estimated APR */}
+          {/* Estimated APR — pool APY when the external source has it; otherwise
+              derived from the position's own earnings (B2 fallback, any pool any
+              chain); "—" while too young to annualize honestly. */}
           <div style={{ padding: "24px 28px", borderRight: `1px solid ${C.border}`, background: C.bg }}>
             <div style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 5, height: 5, background: C.green }} />
@@ -834,13 +856,15 @@ export default function PositionDetail() {
             </div>
             <div style={{
               fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em",
-              color: hasApr ? C.cyan : C.text,
-              textShadow: hasApr ? "0 0 16px rgba(0,212,255,0.2)" : "none",
+              color: hasApr || derivedApr != null ? C.cyan : C.text,
+              textShadow: hasApr || derivedApr != null ? "0 0 16px rgba(0,212,255,0.2)" : "none",
               fontVariantNumeric: "tabular-nums",
             }}>
-              {hasApr ? `+${pos.apy.toFixed(1)}%` : "N/A"}
+              {hasApr ? `+${pos.apy.toFixed(1)}%` : derivedApr != null ? `~${derivedApr.toFixed(1)}%` : "—"}
             </div>
-            <div style={subStyle}>based on pool APY</div>
+            <div style={subStyle}>
+              {hasApr ? "based on pool APY" : derivedApr != null ? "derived from position earnings" : "too early to estimate"}
+            </div>
           </div>
           {/* Est. Cashflow (mini list) */}
           <div style={{ padding: "24px 28px", background: C.bg }}>
@@ -945,13 +969,15 @@ export default function PositionDetail() {
           </Section>
         )}
 
-        {/* ── UNCOLLECTED FEES ─────────────────────────────────────────── */}
-        {hasFees && (
+        {/* ── UNCOLLECTED FEES + REWARD EMISSIONS (invariant (k)) ───────── */}
+        {(hasFees || pendingRewards.length > 0) && (
           <Section
             icon="[$]"
-            title="Uncollected Fees"
-            sub="Trading fees earned but not yet claimed on-chain"
-            right={pos.fees > 0 && manageUrl ? (
+            title={pendingRewards.length > 0 ? "Uncollected Fees & Rewards" : "Uncollected Fees"}
+            sub={pendingRewards.length > 0
+              ? "Trading fees + reward emissions earned but not yet claimed on-chain"
+              : "Trading fees earned but not yet claimed on-chain"}
+            right={totalUncollectedUSD > 0 && manageUrl ? (
               <a href={manageUrl} target="_blank" rel="noopener noreferrer"
                 className="btn-primary"
                 style={{
@@ -1007,6 +1033,39 @@ export default function PositionDetail() {
                 );
               })}
             </div>
+            {/* Pending reward emissions (Sprint POSITION-DETAIL) — one cell per
+                reward token, read from on-chain rewarder state, valued at spot.
+                Absent entirely when the pool has no accrued rewards. */}
+            {pendingRewards.length > 0 && (
+              <div className="pd-tokens" style={{
+                margin: "0 40px",
+                display: "grid", gridTemplateColumns: `repeat(${Math.min(pendingRewards.length, 3)}, 1fr)`,
+                border: `1px solid ${C.border}`, borderTop: "none",
+              }}>
+                {pendingRewards.map((r, i) => (
+                  <div key={`${r.coinType}-${i}`} style={{
+                    padding: "22px 26px",
+                    borderRight: i === pendingRewards.length - 1 ? "none" : `1px solid ${C.border}`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ fontSize: 14, color: C.cyan, fontWeight: 700, letterSpacing: "0.08em" }}>{r.symbol}</span>
+                      <span style={{
+                        fontSize: 11, color: C.text, letterSpacing: "0.1em",
+                        padding: "2px 8px", border: `1px solid ${C.borderHi}`, textTransform: "uppercase",
+                      }}>
+                        reward
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 30, fontWeight: 700, color: C.textWhite, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                      {r.amount.toLocaleString("en-US", { maximumFractionDigits: 6 })}
+                    </div>
+                    <div style={{ fontSize: 14, color: C.text, marginTop: 4, opacity: 0.7 }}>
+                      {fmt$(r.usd)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{
               margin: "0 40px",
               padding: "14px 26px", borderTop: `1px solid ${C.border}`,
@@ -1016,14 +1075,14 @@ export default function PositionDetail() {
               <span style={{ fontSize: 14, color: C.text, letterSpacing: "0.06em" }}>Total Uncollected</span>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                 <span style={{ fontSize: 12, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
-                  ready to collect
+                  {pendingRewards.length > 0 ? "fees + rewards · ready to collect" : "ready to collect"}
                 </span>
                 <span style={{
                   fontSize: 17, fontWeight: 700, color: C.green,
                   textShadow: "0 0 12px rgba(0,255,65,0.2)",
                   fontVariantNumeric: "tabular-nums",
                 }}>
-                  {fmt$(pos.fees)}
+                  {fmt$(totalUncollectedUSD)}
                 </span>
               </div>
             </div>
@@ -1037,7 +1096,7 @@ export default function PositionDetail() {
             <div className="pd-perf-top" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${C.border}` }}>
               {[
                 { label: "Total Claimed", val: activityLoading ? "…" : fmt$(claimedUSD), color: C.green, sub: activityLoading ? "loading…" : isActivityProtocol ? `${feeClaims.length} claim${feeClaims.length !== 1 ? "s" : ""} on-chain` : "no data" },
-                { label: "Uncollected", val: fmt$(uncollectedUSD), color: C.green, sub: "pending" },
+                { label: "Uncollected", val: fmt$(totalUncollectedUSD), color: C.green, sub: pendingRewards.length > 0 ? "fees + rewards pending" : "pending" },
                 { label: "Total Lifetime", val: fmt$(lifetimeUSD), color: C.textWhite, sub: "claimed + pending" },
                 {
                   // Actual APR cell — label now carries the D/W/M/Y
@@ -1081,7 +1140,7 @@ export default function PositionDetail() {
                   color: C.green,
                   sub: projFromUncollected ? "from uncollected (early estimate)" : "from real claims",
                 },
-                { label: "Estimated APR", val: hasApr ? `~${(pos.apy / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : "N/A", color: C.cyan, sub: "pool APY" },
+                { label: "Estimated APR", val: hasApr ? `~${(pos.apy / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : derivedApr != null ? `~${(derivedApr / APR_DIVISOR[aprView]).toFixed(aprView === "D" ? 3 : 1)}%` : "—", color: C.cyan, sub: hasApr ? "pool APY" : derivedApr != null ? "derived from earnings" : "too early to estimate" },
                 { label: "Position Age", val: daysLabel, color: C.textWhite, sub: openedDate ? `since ${openedDate}` : "tracking age" },
               ].map((c, i) => (
                 // Key is the index because c.label is now ReactNode for the

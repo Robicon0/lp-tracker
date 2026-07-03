@@ -34,6 +34,15 @@ export interface AerodromePosition {
   // Populated by EVM V3-style routes (Uniswap V3, Aerodrome CL, Velodrome CL,
   // HyperSwap/KittenSwap/PRJX, PancakeSwap). Absent for non-V3 protocols.
   poolAddress?: string;
+  // Sprint POSITION-DETAIL — pending (unclaimed) REWARD EMISSIONS, separate from
+  // trading fees (fees/fees0/fees1 stay fees-only so analytics aggregation is
+  // untouched). Read from on-chain rewarder state per position (Protocol
+  // Correctness Contract invariant (k)): the position-detail Uncollected panel
+  // folds these into its total so it matches the protocol's own claimable UI.
+  // Valued at CURRENT SPOT (Rule 2 current-value domain, same as uncollected
+  // fees). Absent/empty when the pool has no active rewarders.
+  pendingRewards?: Array<{ symbol: string; coinType: string; amount: number; usd: number }>;
+  rewardsUsd?: number;
 }
 
 interface AerodromeResponse {

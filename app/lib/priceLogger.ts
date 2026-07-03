@@ -199,6 +199,9 @@ interface CetusPendingFeeComputedEvent {
   pending_token0_raw: string;  // bigint as decimal string
   pending_token1_raw: string;
   pending_usd_total: number;
+  // Sprint POSITION-DETAIL (additive): reward tokens with a non-zero pending
+  // amount for this position (Contract invariant (k) observability).
+  pending_reward_count?: number;
 }
 
 // Emitted when a Cetus pending-fee read fails (Sprint 1.8) — the route falls

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
 import { safeCalcPendingFee, calcFeeGrowthInside, emitFeeUnderflow } from '../../lib/clmmFeeMath';
+import { resolveSuiRewardTokens, buildPendingRewards } from '../../lib/suiRewardMeta';
 import { logPrice } from '../../lib/priceLogger';
 
 // Cetus tick range is [-443636, 443636]; the tick_manager.ticks move_stl SkipList
@@ -239,7 +240,7 @@ function cetusTableId(manager: unknown, key: string): string | null {
 // tick's own index must equal the requested index, else the read is treated as a
 // failure (returns null) — so a future Cetus score-formula change fails loudly
 // rather than silently mis-reading a neighbouring tick.
-async function fetchCetusTick(skipListId: string, tickIndex: number): Promise<{ a: bigint; b: bigint } | null> {
+async function fetchCetusTick(skipListId: string, tickIndex: number): Promise<{ a: bigint; b: bigint; rewards: bigint[] } | null> {
   const score = (tickIndex + CETUS_TICK_SCORE_OFFSET).toString();
   const res = await suiRpc('suix_getDynamicFieldObject', [skipListId, { type: 'u64', value: score }]) as
     { data?: { content?: { fields?: Record<string, unknown> } } } | null;
@@ -251,6 +252,13 @@ async function fetchCetusTick(skipListId: string, tickIndex: number): Promise<{ 
   return {
     a: BigInt((tick.fee_growth_outside_a as string) || '0'),
     b: BigInt((tick.fee_growth_outside_b as string) || '0'),
+    // Per-rewarder growth outside (Sprint POSITION-DETAIL) — same tick node,
+    // zero extra RPC. Verified on-chain: `rewards_growth_outside` is a vector
+    // of u128 strings, one per pool rewarder, index-aligned with
+    // rewarder_manager.rewarders.
+    rewards: Array.isArray(tick.rewards_growth_outside)
+      ? (tick.rewards_growth_outside as string[]).map((x) => BigInt(x || '0'))
+      : [],
   };
 }
 
@@ -270,7 +278,7 @@ async function computeCetusPendingFees(
   priceA: number,
   priceB: number,
   pair: string,
-): Promise<{ fees0: number; fees1: number; feesUsd: number } | null> {
+): Promise<{ fees0: number; fees1: number; feesUsd: number; pendingRewardsRaw: Array<{ coinType: string; raw: bigint }> } | null> {
   const positionId = pos.objectId as string;
   const poolId = pos.pool as string;
   const fail = (reason: 'position_info_missing' | 'tick_lower_mismatch' | 'tick_upper_mismatch' | 'rpc_error') => {
@@ -325,11 +333,44 @@ async function computeCetusPendingFees(
     const fees1 = Number(raw1) / 10 ** decimalsB;
     const feesUsd = fees0 * priceA + fees1 * priceB;
 
+    // (g) Pending REWARD EMISSIONS (Sprint POSITION-DETAIL, Contract invariant
+    // (k)) — same growth math per rewarder, from data ALREADY fetched above:
+    // pool rewarder_manager.rewarders[i].growth_global, the PositionInfo's
+    // rewards[i] checkpoint (growth_inside + amount_owned), and the tick nodes'
+    // rewards_growth_outside[i] (returned by fetchCetusTick). Verified on-chain
+    // (Phase A): fees + these rewards ≈ the Cetus app's "Claimable Yield".
+    // Conservative: indexes the position has NO checkpoint for are SKIPPED
+    // (Cetus extends the vector lazily on touch; assuming a 0 checkpoint for a
+    // rewarder added later would overstate). Raw amounts only — the handler
+    // resolves each reward coin type (invariant (i)) and prices it at spot.
+    const pendingRewardsRaw: Array<{ coinType: string; raw: bigint }> = [];
+    const rewarders = ((suiFields(pool.rewarder_manager)?.rewarders as unknown[]) ?? []).map((r) => suiFields(r));
+    const posRewards = ((pi.rewards as unknown[]) ?? []).map((r) => suiFields(r));
+    for (let i = 0; i < Math.min(rewarders.length, posRewards.length); i++) {
+      const rw = rewarders[i];
+      const pr = posRewards[i];
+      if (!rw || !pr) continue;
+      const coinType = extractCoinType(rw.reward_coin);
+      if (!coinType) continue;
+      const growthGlobal = BigInt((rw.growth_global as string) || '0');
+      const checkpoint = BigInt((pr.growth_inside as string) || '0');
+      const owed = BigInt(((pr.amount_owned ?? pr.amount_owed) as string) || '0');
+      const insideR = calcFeeGrowthInside(
+        tickLower, tickUpper, tickCurrent, growthGlobal,
+        lower.rewards[i] ?? 0n, upper.rewards[i] ?? 0n,
+      );
+      const pendR = safeCalcPendingFee(liquidity, insideR, checkpoint);
+      emitFeeUnderflow(pendR, { ...uctx, side: `reward${i}` as 'token0' });
+      const rawR = owed + pendR.fee;
+      if (rawR > 0n) pendingRewardsRaw.push({ coinType, raw: rawR });
+    }
+
     logPrice({
       event: 'cetus_pending_fee_computed', positionId: `cetus-${positionId}`, poolId,
       pending_token0_raw: raw0.toString(), pending_token1_raw: raw1.toString(), pending_usd_total: feesUsd,
+      pending_reward_count: pendingRewardsRaw.length,
     });
-    return { fees0, fees1, feesUsd };
+    return { fees0, fees1, feesUsd, pendingRewardsRaw };
   } catch {
     return fail('rpc_error');
   }
@@ -405,7 +446,7 @@ export async function GET(request: Request) {
     // dynamic-field reads — run as a parallel pass so the build map stays sync.
     // On any read failure a position falls back to 0 (the pre-fix display) and a
     // cetus_pending_fee_read_failed event is emitted. Shared math (Sprint 1.7e).
-    const cetusFeeMap: Record<string, { fees0: number; fees1: number; feesUsd: number }> = {};
+    const cetusFeeMap: Record<string, { fees0: number; fees1: number; feesUsd: number; pendingRewardsRaw: Array<{ coinType: string; raw: bigint }> }> = {};
     await Promise.all(rawPositions.map(async (pos) => {
       const pool = poolMap[pos.pool as string];
       if (!pool) return; // no pool data → leave fees at 0
@@ -421,6 +462,14 @@ export async function GET(request: Request) {
       );
       if (result) cetusFeeMap[pos.objectId as string] = result;
     }));
+
+    // 3c. Resolve + price pending REWARD tokens (Sprint POSITION-DETAIL). Reward
+    // coin types come from on-chain rewarder state per position (invariant (i) —
+    // never a hardcoded map); identity via the shared resolver, USD at CURRENT
+    // SPOT through the resilient tiered helper (SPOT-RESILIENCE invariant (j)).
+    const rewardMeta = await resolveSuiRewardTokens(
+      Object.values(cetusFeeMap).flatMap((f) => f.pendingRewardsRaw.map((r) => r.coinType)),
+    );
 
     // 4. Build positions.
     // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
@@ -444,6 +493,10 @@ export async function GET(request: Request) {
       const decimalsB = metaB?.decimals ?? 9;
 
       const fee = cetusFeeMap[pos.objectId as string]; // pending fees (Sprint 1.8); undefined → 0 fallback
+      // Sprint POSITION-DETAIL: pending reward emissions (separate from fees so
+      // analytics aggregation over `fees` is byte-identical).
+      const pendingRewards = fee ? buildPendingRewards(fee.pendingRewardsRaw, rewardMeta) : [];
+      const rewardsUsd = Math.round(pendingRewards.reduce((s, r) => s + r.usd, 0) * 100) / 100;
       const liquidity = BigInt((pos.liquidity as string) || '0');
       // I32 struct: { type: "...::i32::I32", fields: { bits: N } }
       const tickLower = bitsToI32(extractI32Bits(pos.tick_lower_index));
@@ -480,6 +533,7 @@ export async function GET(request: Request) {
         token1Symbol: symbolB,
         fees0: fee ? Math.round(fee.fees0 * 1_000_000) / 1_000_000 : 0,
         fees1: fee ? Math.round(fee.fees1 * 1_000_000) / 1_000_000 : 0,
+        ...(pendingRewards.length > 0 ? { pendingRewards, rewardsUsd } : {}),
         tickLower,
         tickUpper,
         token0Decimals: decimalsA,

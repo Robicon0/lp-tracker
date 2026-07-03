@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
 import { safeCalcPendingFee, emitFeeUnderflow, type UnderflowLogContext } from '../../lib/clmmFeeMath';
+import { resolveSuiRewardTokens, buildPendingRewards } from '../../lib/suiRewardMeta';
 
 const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
@@ -209,7 +210,7 @@ function getTicksTableId(poolFields: Record<string, unknown>): string | null {
 async function fetchTick(
   ticksTableId: string,
   tickIndex: number,
-): Promise<{ feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint } | null> {
+): Promise<{ feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint; rewardGrowthsOutside: bigint[] } | null> {
   try {
     const bits = tickIndex < 0 ? tickIndex + 4294967296 : tickIndex;
     const result = await suiRpc('suix_getDynamicFieldObject', [
@@ -226,6 +227,12 @@ async function fetchTick(
     return {
       feeGrowthOutsideA: BigInt((tickFields.fee_growth_outside_a as string) || '0'),
       feeGrowthOutsideB: BigInt((tickFields.fee_growth_outside_b as string) || '0'),
+      // Sprint POSITION-DETAIL: per-rewarder growth outside — same tick object,
+      // zero extra RPC. Verified on-chain: `reward_growths_outside` is a vector
+      // of u128 strings index-aligned with pool.reward_infos.
+      rewardGrowthsOutside: Array.isArray(tickFields.reward_growths_outside)
+        ? (tickFields.reward_growths_outside as string[]).map((x) => BigInt(x || '0'))
+        : [],
     };
   } catch {
     return null;
@@ -359,7 +366,7 @@ export async function GET(request: Request) {
     }
 
     // Fetch all needed ticks in parallel
-    const tickDataMap: Record<string, { feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint }> = {};
+    const tickDataMap: Record<string, { feeGrowthOutsideA: bigint; feeGrowthOutsideB: bigint; rewardGrowthsOutside: bigint[] }> = {};
     await Promise.all(
       [...ticksToFetch].map(async (key) => {
         const colonIdx = key.indexOf(':');
@@ -368,6 +375,61 @@ export async function GET(request: Request) {
         const data = await fetchTick(tableId, tickIdx);
         if (data) tickDataMap[key] = data;
       }),
+    );
+
+    // Sprint POSITION-DETAIL (Contract invariant (k)): pending REWARD EMISSIONS
+    // per position, from data already fetched — pool.reward_infos[i]
+    // (reward_coin_type + reward_growth_global), the position object's
+    // reward_infos[i] checkpoint ({ reward_growth_inside_last,
+    // coins_owed_reward }, verified on-chain), and the tick nodes'
+    // reward_growths_outside[i]. Same Q64 growth math as fees. Raw amounts are
+    // resolved (invariant (i)) + priced at spot via the shared reward helper;
+    // kept SEPARATE from fees0/fees1 so analytics aggregation is untouched.
+    const rewardsRawByPosition: Record<string, Array<{ coinType: string; raw: bigint }>> = {};
+    for (const pos of rawWithNormalized) {
+      const poolId = pos.pool_id as string;
+      const pool = poolMap[poolId];
+      const tableId = poolTicksTableIds[poolId];
+      if (!pool || !tableId) continue;
+      const tl = bitsToI32(extractI32Bits(pos.lower_tick));
+      const tu = bitsToI32(extractI32Bits(pos.upper_tick));
+      const lowerTick = tickDataMap[`${tableId}:${tl}`];
+      const upperTick = tickDataMap[`${tableId}:${tu}`];
+      if (!lowerTick || !upperTick) continue;
+      const tickCurrent = bitsToI32(extractI32Bits(pool.current_tick_index));
+      const liquidity = BigInt((pos.liquidity as string) || '0');
+      const poolRewarders = ((pool.reward_infos as unknown[]) ?? []).map((r) => (r as { fields?: Record<string, unknown> })?.fields ?? (r as Record<string, unknown>));
+      const posRewards = ((pos.reward_infos as unknown[]) ?? []).map((r) => (r as { fields?: Record<string, unknown> })?.fields ?? (r as Record<string, unknown>));
+      const out: Array<{ coinType: string; raw: bigint }> = [];
+      // Conservative: only indexes the position has a checkpoint for (a 0
+      // checkpoint for a rewarder added after the position's last touch would
+      // overstate).
+      for (let i = 0; i < Math.min(poolRewarders.length, posRewards.length); i++) {
+        const rw = poolRewarders[i];
+        const pr = posRewards[i];
+        if (!rw || !pr) continue;
+        const coinType = (rw.reward_coin_type as string) || '';
+        if (!coinType) continue;
+        const insideR = calcFeeGrowthInside(
+          tickCurrent, tl, tu,
+          BigInt((rw.reward_growth_global as string) || '0'),
+          lowerTick.rewardGrowthsOutside[i] ?? 0n,
+          upperTick.rewardGrowthsOutside[i] ?? 0n,
+        );
+        const uctx: Omit<UnderflowLogContext, 'side'> = { protocol: 'bluefin', chain: 'sui', positionId: `bluefin-${pos.objectId as string}`, pair: 'reward' };
+        const rawR = calcPendingFees(
+          BigInt((pr.coins_owed_reward as string) || '0'),
+          insideR,
+          BigInt((pr.reward_growth_inside_last as string) || '0'),
+          liquidity,
+          { ...uctx, side: 'token0' },
+        );
+        if (rawR > 0n) out.push({ coinType, raw: rawR });
+      }
+      if (out.length > 0) rewardsRawByPosition[pos.objectId as string] = out;
+    }
+    const rewardMeta = await resolveSuiRewardTokens(
+      Object.values(rewardsRawByPosition).flatMap((rs) => rs.map((r) => r.coinType)),
     );
 
     // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
@@ -459,6 +521,13 @@ export async function GET(request: Request) {
         token1Symbol: symbolB,
         fees0: Math.round(fees0 * 1_000_000) / 1_000_000,
         fees1: Math.round(fees1 * 1_000_000) / 1_000_000,
+        ...(() => {
+          // Sprint POSITION-DETAIL: pending reward emissions (separate from fees).
+          const pendingRewards = buildPendingRewards(rewardsRawByPosition[pos.objectId as string] ?? [], rewardMeta);
+          return pendingRewards.length > 0
+            ? { pendingRewards, rewardsUsd: Math.round(pendingRewards.reduce((s, r) => s + r.usd, 0) * 100) / 100 }
+            : {};
+        })(),
         tickLower,
         tickUpper,
         token0Decimals: decimalsA,
