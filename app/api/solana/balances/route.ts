@@ -17,7 +17,9 @@ const KNOWN_TOKENS: Record<string, { symbol: string; name: string; decimals: num
   'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': { symbol: 'JUP', name: 'Jupiter', decimals: 6, coingeckoId: 'jupiter-exchange-solana' },
   'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm': { symbol: '$WIF', name: 'dogwifhat', decimals: 6, coingeckoId: 'dogwifcoin' },
   'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3': { symbol: 'PYTH', name: 'Pyth Network', decimals: 6, coingeckoId: 'pyth-network' },
-  'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1ABCDE': { symbol: 'ORCA', name: 'Orca', decimals: 6, coingeckoId: 'orca' },
+  // Sprint 3-FREE: removed the placeholder ORCA entry (`orcaEKTdK7…ABCDE`) — an
+  // INVALID Solana pubkey that could never match a real mint (invariant i:
+  // value by the on-chain mint, never a hardcoded map).
 };
 
 async function rpc(method: string, params: unknown[]) {

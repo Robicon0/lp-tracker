@@ -776,11 +776,20 @@ function aggregate(
   // merged here so they flow through the IDENTICAL per-position loop as EVM.
   suiClosed: Map<string, PosResult> = new Map(),
   suiClosedMeta: Map<string, PositionMeta> = new Map(),
+  // Sprint 3-FREE: closed Solana (Orca) positions, reconstructed from wallet tx
+  // history (burned NFTs) and pre-computed via computePositionPnL in the hook's
+  // Solana effect. Same disjoint-map contract as suiClosed — distinct ids
+  // (solana-closed-*), chain "Solana", folded into Capital G/L identically.
+  solanaClosed: Map<string, PosResult> = new Map(),
+  solanaClosedMeta: Map<string, PositionMeta> = new Map(),
 ): LpPnlResult {
-  // Merge the Sui-closed map/meta into the inputs the loop iterates. The Sui set
-  // is disjoint from resultsMap (destroyed objects, distinct ids), so no override.
-  const results = suiClosed.size ? new Map([...resultsMap, ...suiClosed]) : resultsMap;
-  const meta = suiClosedMeta.size ? new Map([...positionMeta, ...suiClosedMeta]) : positionMeta;
+  // Merge the external-closed map/meta (Sui + Solana) into the inputs the loop
+  // iterates. Both sets are disjoint from resultsMap (destroyed objects / burned
+  // NFTs, distinct ids) and from each other, so no override.
+  const externalClosed = suiClosed.size || solanaClosed.size ? new Map([...suiClosed, ...solanaClosed]) : suiClosed;
+  const externalClosedMeta = suiClosedMeta.size || solanaClosedMeta.size ? new Map([...suiClosedMeta, ...solanaClosedMeta]) : suiClosedMeta;
+  const results = externalClosed.size ? new Map([...resultsMap, ...externalClosed]) : resultsMap;
+  const meta = externalClosedMeta.size ? new Map([...positionMeta, ...externalClosedMeta]) : positionMeta;
   let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let capitalGL = 0;
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
@@ -797,9 +806,13 @@ function aggregate(
   // from on-chain events (their objects are destroyed on close) and injected via
   // the separate suiClosedResults map below; they carry chain "Sui" and a reliable
   // historically-valued closingValue/initialValue, so they fold into Capital G/L
-  // exactly like EVM closed positions. (Solana still excluded — Sprint 3.)
+  // exactly like EVM closed positions. Sprint 3-FREE: "Solana" added — closed
+  // Orca positions (burned NFTs) are reconstructed from wallet tx history (scanned
+  // via the free Alchemy endpoint) and injected via the separate solanaClosed map,
+  // carrying chain "Solana" and a reliable historically-valued closingValue/
+  // initialValue, so they fold into Capital G/L exactly like EVM + Sui closed.
   const CAPITAL_GL_CHAINS = new Set([
-    "HyperEVM", "Base", "Arbitrum", "Optimism", "Polygon", "Ethereum", "BNB Chain", "Sui",
+    "HyperEVM", "Base", "Arbitrum", "Optimism", "Polygon", "Ethereum", "BNB Chain", "Sui", "Solana",
   ]);
   const errorReasons = new Set<string>();
   // Per-position record built from the same map the totals come from — any
@@ -985,11 +998,24 @@ const SUI_CLOSED_PROTOCOL_LABEL: Record<SuiClosedPositionDTO["protocol"], string
   momentum: "Momentum",
 };
 
+// Sprint 3-FREE — shape of one closed Solana (Orca) position returned by
+// /api/solana-closed-positions (the JSON wire form of SolanaClosedPosition).
+// Declared locally so the client hook never imports the SERVER lib (Redis + web3).
+interface SolanaClosedPositionDTO {
+  positionId: string;
+  protocol: "orca";
+  pair: string;
+  events: ActivityEventForPnL[];
+}
+const SOLANA_CLOSED_PROTOCOL_LABEL: Record<SolanaClosedPositionDTO["protocol"], string> = {
+  orca: "Orca",
+};
+
 // Sprint 2.2b — optional Sui addresses (connected + watched) whose CLOSED
 // Cetus/Bluefin positions should be folded into Capital G/L. The analytics page
 // already builds this list (it passes the same to useWalletLevelFees). Omitted /
 // empty → no Sui closed-position fetch (e.g. the dashboard caller).
-export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: string[] = []): LpPnlResult {
+export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: string[] = [], solanaWalletAddresses: string[] = []): LpPnlResult {
   const [result, setResult] = useState<LpPnlResult>({ ...EMPTY });
   // Per-position results map — persists across renders, never reset.
   const resultsRef = useRef<Map<string, PosResult>>(new Map());
@@ -1009,6 +1035,11 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   // positions-array eviction can't drop them; merged in aggregate().
   const suiClosedRef = useRef<Map<string, PosResult>>(new Map());
   const suiClosedMetaRef = useRef<Map<string, PositionMeta>>(new Map());
+  // Sprint 3-FREE — CLOSED Solana (Orca) positions, reconstructed server-side
+  // (burned NFTs) and pre-computed via computePositionPnL. Same SEPARATE-map
+  // contract as suiClosedRef so positions-array eviction can't drop them.
+  const solanaClosedRef = useRef<Map<string, PosResult>>(new Map());
+  const solanaClosedMetaRef = useRef<Map<string, PositionMeta>>(new Map());
 
   // Fetch + value closed Sui positions whenever the Sui address set changes.
   // Disjoint from the open/closed positions in `positions` (destroyed objects),
@@ -1019,7 +1050,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       if (suiClosedRef.current.size > 0) {
         suiClosedRef.current = new Map();
         suiClosedMetaRef.current = new Map();
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
       }
       return;
     }
@@ -1046,10 +1077,50 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       if (cancelled || !mountedRef.current) return;
       suiClosedRef.current = newMap;
       suiClosedMetaRef.current = newMeta;
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
     })();
     return () => { cancelled = true; };
   }, [suiWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sprint 3-FREE — fetch + value closed Solana (Orca) positions whenever the
+  // Solana address set changes. Mirrors the Sui effect above exactly: burned-NFT
+  // positions are disjoint from `positions`, reconstructed server-side, valued via
+  // the SAME computePositionPnL engine, kept in a separate ref, merged in aggregate.
+  useEffect(() => {
+    const addrs = solanaWalletAddresses.filter(Boolean);
+    if (addrs.length === 0) {
+      if (solanaClosedRef.current.size > 0) {
+        solanaClosedRef.current = new Map();
+        solanaClosedMetaRef.current = new Map();
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+      }
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const newMap = new Map<string, PosResult>();
+      const newMeta = new Map<string, PositionMeta>();
+      await Promise.all(addrs.map(async (addr) => {
+        try {
+          const res = await fetch(`/api/solana-closed-positions?account=${encodeURIComponent(addr)}`);
+          if (!res.ok) return;
+          const json = await res.json();
+          for (const sp of (json.positions ?? []) as SolanaClosedPositionDTO[]) {
+            const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
+            if (!pnl.ok) continue;
+            const id = `solana-closed-${sp.protocol}-${sp.positionId}`;
+            newMap.set(id, pnl);
+            newMeta.set(id, { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana" });
+          }
+        } catch { /* graceful — a Solana address that fails contributes nothing */ }
+      }));
+      if (cancelled || !mountedRef.current) return;
+      solanaClosedRef.current = newMap;
+      solanaClosedMetaRef.current = newMeta;
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+    })();
+    return () => { cancelled = true; };
+  }, [solanaWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1142,13 +1213,13 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     if (toFetch.length === 0) {
       // All positions already fetched — just recompute totals (in case
       // positions array changed order but same IDs).
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
       return;
     }
 
     // Mark as inflight and update loading state.
     for (const p of toFetch) inflightRef.current.add(p.id);
-    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
 
     // Fetch each position, paced PER activity endpoint (paceByEndpoint /
     // MAX_PER_ENDPOINT). A wallet with many positions on one provider — e.g. 4
@@ -1176,7 +1247,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
       });
     }
   }, [positions]);

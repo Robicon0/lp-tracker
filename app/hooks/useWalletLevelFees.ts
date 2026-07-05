@@ -176,6 +176,13 @@ export function useWalletLevelFees(
   // Live SUI spot price (USD) — used as priceA for the closed-wallet fallback
   // context so SUI-denominated fees are valued correctly instead of $0.
   suiPrice?: number,
+  // Sprint 3-FREE — Solana wallet addresses (connected + watched) whose CLOSED
+  // Orca positions' fee claims should fold into Fee Income. Closed Orca positions
+  // (burned NFTs) are reconstructed server-side by /api/solana-closed-positions
+  // (historical-only, real mints); their fee_claim events are emitted here tagged
+  // Orca/Solana and deduped by (protocol, txHash, amount0, amount1) against the
+  // per-position OPEN Orca fees — so closed and open fees never double-count.
+  solanaWalletAddresses?: string[],
 ): { events: TaggedFeeEvent[]; isLoading: boolean } {
   const [events, setEvents] = useState<TaggedFeeEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -363,8 +370,12 @@ export function useWalletLevelFees(
       }
     }
 
+    // Solana wallets (connected + watched) — scanned for CLOSED Orca fee history.
+    const solanaWallets = new Map<string, string>(); // lowercase → original casing
+    for (const a of solanaWalletAddresses ?? []) { if (a) solanaWallets.set(a.toLowerCase(), a); }
+
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
-    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && velodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0) {
+    if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && velodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0 && solanaWallets.size === 0) {
       setEvents([]);
       setIsLoading(false);
       return;
@@ -389,7 +400,8 @@ export function useWalletLevelFees(
       .map((c) => `${c.account.toLowerCase()}:${c.chain}:${c.token0}:${c.token1}`)
       .sort()
       .join(",");
-    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]` + `::velo[${veloSig}]` + `::uni[${uniSig}]`;
+    const solSig = [...solanaWallets.keys()].sort().join(",");
+    const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]` + `::velo[${veloSig}]` + `::uni[${uniSig}]` + `::sol[${solSig}]`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
 
@@ -520,6 +532,42 @@ export function useWalletLevelFees(
       );
     }
 
+    // Solana (Orca) CLOSED-position fee scan — recovers fee claims from
+    // burned-NFT positions the per-position Orca activity route (which scans by
+    // position PDA) can't see. The server engine reconstructs each closed position
+    // from wallet tx history (free Alchemy scan), values fees historical-only
+    // (DeFiLlama-by-mint → CG-historical → pending; NEVER spot), and Redis-caches
+    // the result. We flatten each position's fee_claim events into TaggedFeeEvents
+    // tagged Orca/Solana; the analytics feeIncome memo dedupes by
+    // (protocol, txHash, amount0, amount1), so a fee also seen per-position (open
+    // positions) is never double-counted. Uses a bespoke fetch (the endpoint
+    // returns { positions: [{ events }] }, not the { events } shape dedupFetch expects).
+    for (const acct of solanaWallets.values()) {
+      const solUrl = `/api/solana-closed-positions?account=${encodeURIComponent(acct)}`;
+      const cached = urlCacheRef.current.get(solUrl);
+      if (cached) { fetches.push(cached); continue; }
+      const p = fetch(solUrl)
+        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ events?: ActivityEvent[] }> }>) : { positions: [] }))
+        .then((j) => {
+          const out: TaggedFeeEvent[] = [];
+          for (const pos of j.positions ?? []) {
+            for (const e of pos.events ?? []) {
+              if (e.type !== "fee_claim") continue;
+              if (e.usdAtTime == null) continue; // pending (Rule 1a) — surfaced elsewhere, not counted
+              out.push({ event: e, protocol: "Orca", chain: "Solana" });
+            }
+          }
+          return out;
+        })
+        .catch((err) => {
+          console.error("[wallet-fees orca-closed] fetch failed:", err);
+          urlCacheRef.current.delete(solUrl);
+          return [] as TaggedFeeEvent[];
+        });
+      urlCacheRef.current.set(solUrl, p);
+      fetches.push(p);
+    }
+
     let cancelled = false;
     setIsLoading(true);
     // Sprint PERFORMANCE: progressive delivery. On the FIRST load (no events
@@ -550,7 +598,7 @@ export function useWalletLevelFees(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions, suiWalletAddresses, suiPrice]);
+  }, [positions, suiWalletAddresses, suiPrice, solanaWalletAddresses]);
 
   return { events, isLoading };
 }

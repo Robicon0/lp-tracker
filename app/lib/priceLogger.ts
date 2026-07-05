@@ -307,6 +307,27 @@ interface SuiClosedPositionValuedEvent {
   sourceBreakdown: Record<string, number>;
 }
 
+// Sprint 3-FREE — emitted once per CLOSED Solana (Orca) position valued by
+// app/lib/solanaClosedPositions.ts. A closed Solana CLMM position's NFT is
+// BURNED on close, so it's reconstructed from wallet tx history (scanned via
+// the free Alchemy endpoint) and valued historical-only (DeFiLlama-by-mint →
+// CoinGecko-historical → pending; stable $1; NEVER spot, Rule 1a) using the
+// REAL on-chain mints (invariant i). Mirrors sui_closed_position_valued.
+// sourceBreakdown keys are cascade tiers: stablecoin-fixed | defillama-historical
+// | cg-historical | pending | zero_amount. `cg-spot`/any spot tier MUST NEVER appear.
+interface SolanaClosedPositionValuedEvent {
+  event: 'solana_closed_position_valued';
+  protocol: string;            // orca
+  positionId: string;          // Orca position PDA
+  pair: string;
+  depositUSD: number;
+  withdrawalUSD: number;
+  feesUSD: number;
+  capitalGL: number;           // withdrawalUSD − depositUSD (Rule 4; NO fees)
+  pendingEventCount: number;
+  sourceBreakdown: Record<string, number>;
+}
+
 // Emitted once per activity-route invocation by the shared server-side cache
 // (Sprint 1.13, app/lib/activityRouteCache.ts). The analytics page fetches each
 // position's activity route 2-3x (useAllPositionsActivity + useLpPnl +
@@ -342,6 +363,7 @@ export type PriceLogEvent =
   | TokenResolverUsedEvent
   | TokenResolutionFailedEvent
   | SuiClosedPositionValuedEvent
+  | SolanaClosedPositionValuedEvent
   | DefillamaHistoricalUsedEvent
   | DefillamaHistoricalMissingEvent
   | DefillamaHistoricalErrorEvent;

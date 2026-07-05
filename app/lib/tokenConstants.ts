@@ -101,6 +101,13 @@ export function normalizeIdentifier(chain: Chain, raw: string): string {
 const NATIVE: Record<Chain, Record<string, ConstantToken>> = {
   solana: {
     So11111111111111111111111111111111111111112: { symbol: 'SOL', decimals: 9, cgId: 'solana' },
+    // ZEC on Solana (Sprint 3-FREE) — the VERIFIED mint Osho actually LPs on Orca
+    // (decimals 8 confirmed on-chain via DAS; CoinGecko id verified priceable,
+    // DeFiLlama-by-mint priceable). Pinned as a high-stakes identity because the
+    // previous per-route hardcode carried a WRONG mint for this token (architecture
+    // Rule 9: high-stakes pins live here; everything else auto-resolves). Makes ZEC
+    // decimals deterministic even if a DAS metadata lookup misses.
+    A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS: { symbol: 'ZEC', decimals: 8, cgId: 'omnibridge-bridged-zcash-solana' },
   },
   sui: {
     '0x2::sui::SUI': { symbol: 'SUI', decimals: 9, cgId: 'sui' },

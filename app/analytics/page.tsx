@@ -604,6 +604,18 @@ export default function Analytics() {
     for (const w of watchedWallets) if (w.chain === "sui") addrs.push(w.address);
     return [...new Set(addrs.map((a) => a.toLowerCase()))];
   }, [suiAddress, watchedWallets]);
+  // Sprint 3-FREE — all Solana wallet addresses (connected + watched), passed to
+  // useLpPnl + useWalletLevelFees so CLOSED Orca positions' Capital G/L + fees are
+  // folded in even when every Orca position is closed (burned NFT, no open
+  // position to read the address from). NOTE: Solana base58 is case-sensitive, so
+  // (unlike EVM/Sui) these are NOT lowercased — the engine keys/scan need the exact
+  // on-chain casing.
+  const solanaWalletAddresses = useMemo(() => {
+    const addrs: string[] = [];
+    if (solanaAddress) addrs.push(solanaAddress);
+    for (const w of watchedWallets) if (w.chain === "solana") addrs.push(w.address);
+    return [...new Set(addrs)];
+  }, [solanaAddress, watchedWallets]);
   // Live SUI spot price for the closed-wallet Bluefin fee fallback. Fetched
   // once on mount via the /api/prices CoinGecko proxy (60s-cached server
   // side); defaults to 0 on failure so the fallback degrades gracefully to
@@ -620,8 +632,8 @@ export default function Analytics() {
       .catch(() => { /* graceful — leave suiPrice at 0 */ });
     return () => { cancelled = true; };
   }, []);
-  const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice);
-  const lpPnl = useLpPnl(filteredPositions, suiWalletAddresses);
+  const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
+  const lpPnl = useLpPnl(filteredPositions, suiWalletAddresses, solanaWalletAddresses);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -1685,11 +1697,13 @@ export default function Analytics() {
                         → OPEN positions only (useLpPnl.aggregate excludes
                           closed positions from these fields by design).
                       Fees Collected → ALL positions (open + closed lifetime).
-                      Capital G/L → CLOSED positions only, EVM whitelist
+                      Capital G/L → CLOSED positions only, chain whitelist
                         (HyperEVM, Base, Arbitrum, Optimism, Polygon,
-                        Ethereum, BNB Chain). Solana / Sui skipped — their
-                        on-chain close artifacts (NFT burn / Move object
-                        destroy) make closingValue unreliable.
+                        Ethereum, BNB Chain, Sui, Solana). Sui (Sprint 2.2b/
+                        MOMENTUM) + Solana Orca (Sprint 3-FREE) reconstruct
+                        their destroyed/burned close artifacts from wallet tx
+                        history and value them historically, so closingValue
+                        is reliable for them too.
                       Net P&L = Current + Fees Collected + Fees Unclaimed
                                 + Capital G/L − Total Deposited. */}
                 {(() => {
@@ -1747,7 +1761,7 @@ export default function Analytics() {
                     label: "Capital G/L",
                     val: fmt$Signed(lpPnl.capitalGL),
                     color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright,
-                    sub: "closed positions, EVM + Sui (Cetus, Bluefin, Momentum)",
+                    sub: "closed positions, EVM + Sui + Solana (Orca)",
                     tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.) plus Sui (Cetus, Bluefin, Momentum), reconstructed from on-chain events and valued at historical prices. Solana closed-position exit data is not yet available on-chain.",
                   },
                   {

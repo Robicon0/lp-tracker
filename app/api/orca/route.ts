@@ -23,15 +23,23 @@ const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingecko
   'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': { symbol: 'mSOL', decimals: 9, coingeckoId: 'msol' },
   '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs': { symbol: 'ETH', decimals: 8, coingeckoId: 'ethereum' },
   'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': { symbol: 'BONK', decimals: 5, coingeckoId: 'bonk' },
-  'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1ABCDE': { symbol: 'ORCA', decimals: 6, coingeckoId: 'orca' },
+  // Sprint 3-FREE: the placeholder ORCA entry (`orcaEKTdK7…ABCDE`) was an INVALID
+  // Solana pubkey that could never match a real mint — removed. ORCA (and any
+  // long-tail Solana token) now resolves by its on-chain mint via the DAS +
+  // resolveToken fallback below (Protocol Correctness Contract invariant i:
+  // value by the on-chain mint, never a hardcoded map).
   // RENDER on Solana — real mint is rndriz…, NOT 7vfCXTUXx5… (that's
   // Wormhole ETH above). CoinGecko ID is 'render-token' ('render' 404s).
   // decimals verified on-chain via Helius getAsset = 8.
   'rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof': { symbol: 'RENDER', decimals: 8, coingeckoId: 'render-token' },
   // Fartcoin (pump.fun token) — decimals verified on-chain = 6.
   '9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump': { symbol: 'Fartcoin', decimals: 6, coingeckoId: 'fartcoin' },
-  // Zcash on Solana (zRwbz…) — decimals 8, CoinGecko ID 'zcash'.
-  'zRwbzAUoaJABQdvBwZj3YGxiSWjAL2jNX2PBXEBfkMt': { symbol: 'ZEC', decimals: 8, coingeckoId: 'zcash' },
+  // Sprint 3-FREE: the previous hardcoded ZEC entry (a `zR…`-prefixed mint) was the WRONG token —
+  // the ZEC that's actually LP'd on Orca is `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS`
+  // (CoinGecko `omnibridge-bridged-zcash-solana`, DeFiLlama-priceable, dec 8). The
+  // wrong entry was inert (nothing keyed off it) but a landmine — removed. ZEC now
+  // resolves by its on-chain mint via the DAS + resolveToken fallback below
+  // (invariant i: value by the on-chain mint, never a hardcoded map).
 };
 
 async function solanaRpc(method: string, params: unknown[]): Promise<unknown> {
