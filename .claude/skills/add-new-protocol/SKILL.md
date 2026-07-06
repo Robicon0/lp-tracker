@@ -210,9 +210,22 @@ side through the SAME historical cascade:
 - **Sui:** `app/lib/suiPoolContext.ts` — `resolveSuiPoolContexts(poolIds)` → `Map<poolId,
   {coinTypeA, coinTypeB, decimalsA, decimalsB}>` from the pool's immutable `Pool<A,B>` type
   params (cached in-process, no TTL). Used by bluefin/cetus/momentum activity routes.
-- **Solana (Sprint 3 onward):** resolve each closed position's pool → token mints + decimals
-  from on-chain pool data, then value by the on-chain MINT via DeFiLlama-by-mint (never a
-  hardcoded `KNOWN_TOKENS` map — the ZEC mint Osho LP'd was NOT the hardcoded one).
+- **Solana — DELIVERED (Sprint 3-FREE `d1bf447`):** `app/lib/solanaClosedPositions.ts`
+  resolves each closed position's pool → token mints + vaults + decimals from the on-chain
+  Whirlpool account per event, and values by the on-chain MINT (DeFiLlama-by-mint →
+  CG-historical via resolver cgId). **Closed Solana positions inherit ALL Contract
+  invariants from day one** — (i) per-event on-chain resolution, (j) resilient spot for any
+  current-value need, Rule 1a historical-only claims, Rule 4 Capital G/L, immutable Redis
+  caching, `computePositionPnL` reuse. The same sprint removed the platform-wide
+  hardcoded-mint landmine this invariant exists to prevent: the wrong ZEC mint and an
+  INVALID placeholder ORCA mint in `orca/route.ts` + `solana/balances/route.ts` (dead
+  entries that could never match on-chain state); the verified ZEC mint is pinned in
+  `tokenConstants.ts` as a Rule 9 high-stakes identity. Two hard-won Solana parsing rules:
+  the position's account INDEX varies by instruction (identify by ever-opened-set match,
+  never a fixed index), and instruction discriminators are not exhaustive (Orca ships a
+  liquidity-add variant whose discriminator matches no documented name — classify
+  unrecognized position-referencing instructions by vault-transfer DIRECTION, never by
+  hardcoding opaque hex).
 - **Future chains:** same rule — derive the pair from on-chain state per event.
 
 If the pool can't be resolved, mark the claim **pending** (`pending_pool_unresolved`, surfaced)

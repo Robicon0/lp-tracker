@@ -136,9 +136,26 @@ Requirement: integrate open positions first. Queue closed-position recovery
 as a separate sprint. Document the temporary gap in the about page so users
 understand why closed positions on that chain are pending.
 
-Currently planned (not yet built):
-- Sui event reconstruction → Sprint 3 (Bluefin, Cetus, Momentum)
-- Solana transaction history parsing → Sprint 5 (Orca, Raydium)
+Currently IMPLEMENTED:
+- Sui event reconstruction — `app/lib/suiClosedPositions.ts` (Cetus + Bluefin
+  Sprint 2.2b `bb7fc0d`; Momentum Sprint MOMENTUM `750f566`).
+- Solana tx-history parsing — `app/lib/solanaClosedPositions.ts` (Orca,
+  Sprint 3-FREE `d1bf447`; Raydium queued — same engine, new discriminators).
+
+**Canonical Category-B pattern (proven twice — Sui `bb7fc0d`, Solana `d1bf447`):**
+scan the wallet's full immutable history ONCE → reconstruct per-position
+lifecycles from on-chain artifacts (Sui: event payloads; Solana: instruction
+accounts + inner transfers matched against the pool's on-chain VAULT addresses,
+position identified by ever-opened-set match, never a fixed account index) →
+closed = ever-opened − currently-owned → value historical-only (never spot) →
+reuse `computePositionPnL` → persist in a versioned immutable Redis key
+(`closed_pos_{chain}_v1`, empty-never-cached). For chains whose free-tier RPC
+throttles the backfill, use the **Alchemy free-tier paced-scan pattern**
+(Sprint 3-FREE): serial small batches + exponential backoff on 429 +
+retry-until-complete — target 100% completeness, not speed (a naive burst
+dropped 37% of txs); the scan is background + cached-once-per-wallet, so
+latency is a non-issue and a paid RPC tier is unnecessary until sustained
+hundreds of NEW wallets/day.
 
 ### Category C: Closed positions are not retrievable at all
 Example: a hypothetical chain that destroys all on-chain history at close

@@ -224,8 +224,21 @@ P&L for closed positions requires event-log reconstruction.
   **open**-position fee-claim SUI side to `getHistoricalOnlySuiPrice` too, so no fee
   claim on any Sui route can be spot-valued — only the CETUS reward token's designated
   spot+LKG path (Memory #28) remains a deliberate spot exception.
-- **Sui Momentum + Solana (orca/raydium)** closed positions: still pending event-log
-  reconstruction (Sprint MOMENTUM / Sprint 3).
+- **Sui Momentum — IMPLEMENTED (Sprint MOMENTUM, `750f566`).** Same engine; Momentum
+  liquidity events carry no `current_sqrt_price`, so deposits/withdrawals ride the
+  historical-sides fallback (exact for SUI/USDC pools).
+- **Solana Orca — IMPLEMENTED (Sprint 3-FREE, `d1bf447`).**
+  `app/lib/solanaClosedPositions.ts` reconstructs each closed (burned-NFT) position
+  from the wallet's tx history — scanned via the FREE Alchemy endpoint with paced
+  batches + backoff (100% completeness required; burst drops txs) — matching each
+  Whirlpool instruction's inner SPL transfers against the pool's on-chain VAULT
+  addresses (variant-independent; the position is identified by ever-opened-set
+  match, never a fixed account index). Valuation per side, NEVER spot: stablecoin →
+  $1 → DeFiLlama historical-by-MINT → CoinGecko historical (by resolver cgId) →
+  pending. Mints come from on-chain pool state (invariant i), never a hardcoded map.
+  Capital G/L = withdrawal − deposit (Rule 4); reuses `computePositionPnL`.
+- **Solana Raydium** closed positions: pending (queued) — same engine, Raydium
+  discriminators/layout; no known user impact yet.
 
 ---
 
@@ -258,8 +271,9 @@ Capital G/L is separate from Fees Collected.
 Net P&L = Fees Collected + Capital G/L − Impermanent Loss
 ```
 
-Currently the UI shows "Capital G/L EVM only." Sui and Solana are pending
-(Sprint 6 in the sprint queue).
+Capital G/L is COMPLETE across EVM + Sui + Solana (Orca) as of Sprint 3-FREE
+(`d1bf447`); the UI label reads "closed positions, EVM + Sui + Solana (Orca)".
+Raydium closed positions are queued (no user impact yet).
 
 ---
 
@@ -284,7 +298,9 @@ Currently the UI shows "Capital G/L EVM only." Sui and Solana are pending
 **Is it a deposit, withdrawal, or IL calculation?**
 - EVM (not HyperEVM) → v3PriceDerivation sqrtPrice + tick
 - HyperEVM → CoinGecko historical, awaited
-- Sui / Solana closed position → event-log reconstruction (Sprint 3/5)
+- Sui closed position → event-log reconstruction (`suiClosedPositions.ts`)
+- Solana closed position → tx-history reconstruction (`solanaClosedPositions.ts`;
+  Orca live, Raydium queued)
 
 **Is it a current portfolio value?**
 - CoinGecko spot price for all non-stablecoin tokens
