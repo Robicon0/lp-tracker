@@ -547,14 +547,17 @@ export function useWalletLevelFees(
       const cached = urlCacheRef.current.get(solUrl);
       if (cached) { fetches.push(cached); continue; }
       const p = fetch(solUrl)
-        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ events?: ActivityEvent[] }> }>) : { positions: [] }))
+        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }> }>) : { positions: [] }))
         .then((j) => {
           const out: TaggedFeeEvent[] = [];
           for (const pos of j.positions ?? []) {
+            // Sprint RAYDIUM: tag by the position's protocol (orca | raydium) so
+            // Fee Income attributes closed-position fees to the right protocol.
+            const protocol = pos.protocol === "raydium" ? "Raydium" : "Orca";
             for (const e of pos.events ?? []) {
               if (e.type !== "fee_claim") continue;
               if (e.usdAtTime == null) continue; // pending (Rule 1a) — surfaced elsewhere, not counted
-              out.push({ event: e, protocol: "Orca", chain: "Solana" });
+              out.push({ event: e, protocol, chain: "Solana" });
             }
           }
           return out;

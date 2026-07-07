@@ -105,51 +105,68 @@ interface RaydiumPoolData {
   liquidity: bigint;
 }
 
-// Fetch and decode Raydium CLMM personal position account for a given NFT mint
-async function fetchRaydiumPosition(nftMint: string): Promise<RawRaydiumPosition | null> {
-  const mintPubkey = new PublicKey(nftMint);
-  const mintBase58 = mintPubkey.toBase58();
+// Fetch and decode Raydium CLMM personal position accounts for the wallet's NFT
+// mints — via DIRECT PDA derivation (["position", nftMint] under the CLMM
+// program) + one batched getMultipleAccounts, mirroring the Orca route. This
+// replaces the previous per-mint getProgramAccounts memcmp at offset 8, which
+// could NEVER match: Raydium's Anchor accounts are BUMP-FIRST (a `bump: u8` at
+// byte [8]), so nftMint actually lives at [9..41] — the memcmp silently returned
+// no positions for EVERY Raydium wallet (Sprint RAYDIUM Phase A finding,
+// byte-verified on live accounts). PDA derivation is layout-independent.
+const PERSONAL_POSITION_DISC = Buffer.from('466f967ee60f1975', 'hex'); // sha256("account:PersonalPositionState")[..8]
 
-  const result = await solanaRpc('getProgramAccounts', [
-    RAYDIUM_CLMM_PROGRAM,
-    {
-      encoding: 'base64',
-      filters: [
-        { memcmp: { offset: 8, bytes: mintBase58 } },
-      ],
-    },
-  ]) as Array<{ pubkey: string; account: { data: [string, string] } }> | null;
+function deriveRaydiumPositionPda(nftMint: string): string | null {
+  try {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from('position'), new PublicKey(nftMint).toBytes()],
+      new PublicKey(RAYDIUM_CLMM_PROGRAM),
+    )[0].toBase58();
+  } catch { return null; }
+}
 
-  if (!result || result.length === 0) return null;
-
-  const positionPubkey = result[0].pubkey;
-  const data = Buffer.from(result[0].account.data[0], 'base64');
-  if (data.length < 144) return null;
-
-  // Raydium CLMM PersonalPositionState layout:
-  // [0..8]   discriminator
-  // [8..40]  nftMint (pubkey)
-  // [40..72] poolId (pubkey)
-  // [72..76] tickLower (i32 LE)
-  // [76..80] tickUpper (i32 LE)
-  // [80..96] liquidity (u128 LE)
-  // [96..112]  feeGrowthInside0LastX64 (u128)
-  // [112..128] feeGrowthInside1LastX64 (u128)
-  // [128..136] tokenFeesOwed0 (u64 LE)
-  // [136..144] tokenFeesOwed1 (u64 LE)
-
-  const liquidity = readU128LE(data, 80);
-
-  return {
-    nftMint,
-    positionPubkey,
-    poolId: readPubkey(data, 40),
-    tickLower: readI32LE(data, 72),
-    tickUpper: readI32LE(data, 76),
-    liquidity,
-    tokenFeesOwed0: readU64LE(data, 128),
-    tokenFeesOwed1: readU64LE(data, 136),
-  };
+async function fetchRaydiumPositions(nftMints: string[]): Promise<RawRaydiumPosition[]> {
+  const entries = nftMints
+    .map((mint) => ({ mint, pda: deriveRaydiumPositionPda(mint) }))
+    .filter((e): e is { mint: string; pda: string } => !!e.pda);
+  const out: RawRaydiumPosition[] = [];
+  for (let i = 0; i < entries.length; i += 100) {
+    const batch = entries.slice(i, i + 100);
+    const result = await solanaRpc('getMultipleAccounts', [
+      batch.map((e) => e.pda), { encoding: 'base64' },
+    ]) as { value: Array<{ data: [string, string]; owner: string } | null> } | null;
+    const values = result?.value ?? [];
+    batch.forEach((e, k) => {
+      const acc = values[k];
+      if (!acc?.data?.[0] || acc.owner !== RAYDIUM_CLMM_PROGRAM) return;
+      const data = Buffer.from(acc.data[0], 'base64');
+      // Raydium CLMM PersonalPositionState layout (BUMP-FIRST — every field is
+      // one byte later than the pre-Sprint-RAYDIUM comments assumed; verified
+      // byte-for-byte on-chain, Phase A):
+      // [0..8]    discriminator (466f967ee60f1975)
+      // [8]       bump (u8)
+      // [9..41]   nftMint (pubkey)
+      // [41..73]  poolId (pubkey)
+      // [73..77]  tickLower (i32 LE)
+      // [77..81]  tickUpper (i32 LE)
+      // [81..97]  liquidity (u128 LE)
+      // [97..113]  feeGrowthInside0LastX64 (u128)
+      // [113..129] feeGrowthInside1LastX64 (u128)
+      // [129..137] tokenFeesOwed0 (u64 LE)
+      // [137..145] tokenFeesOwed1 (u64 LE)
+      if (data.length < 145 || !data.subarray(0, 8).equals(PERSONAL_POSITION_DISC)) return;
+      out.push({
+        nftMint: e.mint,
+        positionPubkey: e.pda,
+        poolId: readPubkey(data, 41),
+        tickLower: readI32LE(data, 73),
+        tickUpper: readI32LE(data, 77),
+        liquidity: readU128LE(data, 81),
+        tokenFeesOwed0: readU64LE(data, 129),
+        tokenFeesOwed1: readU64LE(data, 137),
+      });
+    });
+  }
+  return out;
 }
 
 // Fetch and decode Raydium CLMM pool account
@@ -164,29 +181,31 @@ async function fetchRaydiumPool(poolId: string): Promise<RaydiumPoolData | null>
   const data = Buffer.from(result.value.data[0], 'base64');
   if (data.length < 280) return null;
 
-  // Raydium CLMM PoolState layout:
-  // [0..8]    discriminator
-  // [8..40]   ammConfig (pubkey)
-  // [40..72]  owner (pubkey)
-  // [72..104] tokenMint0 (pubkey)
-  // [104..136] tokenMint1 (pubkey)
-  // [136..168] tokenVault0 (pubkey)
-  // [168..200] tokenVault1 (pubkey)
-  // [200..232] observationId (pubkey)
-  // [232]     mintDecimals0 (u8)
-  // [233]     mintDecimals1 (u8)
-  // [234..236] tickSpacing (u16 LE)
-  // [236..252] liquidity (u128 LE)
-  // [252..268] sqrtPriceX64 (u128 LE)
-  // [268..272] tickCurrent (i32 LE)
+  // Raydium CLMM PoolState layout (BUMP-FIRST — Sprint RAYDIUM Phase A verified
+  // on-chain; the pre-fix offsets were one byte early, e.g. decimals read 138):
+  // [0..8]    discriminator (f7ede3f5d7c3de46 = sha256("account:PoolState")[..8])
+  // [8]       bump (u8)
+  // [9..41]   ammConfig (pubkey)
+  // [41..73]  owner (pubkey)
+  // [73..105] tokenMint0 (pubkey)
+  // [105..137] tokenMint1 (pubkey)
+  // [137..169] tokenVault0 (pubkey)
+  // [169..201] tokenVault1 (pubkey)
+  // [201..233] observationKey (pubkey)
+  // [233]     mintDecimals0 (u8)
+  // [234]     mintDecimals1 (u8)
+  // [235..237] tickSpacing (u16 LE)
+  // [237..253] liquidity (u128 LE)
+  // [253..269] sqrtPriceX64 (u128 LE)
+  // [269..273] tickCurrent (i32 LE)
 
   return {
-    tokenMint0: readPubkey(data, 72),
-    tokenMint1: readPubkey(data, 104),
-    mintDecimals0: data[232],
-    mintDecimals1: data[233],
-    tickCurrent: readI32LE(data, 268),
-    liquidity: readU128LE(data, 236),
+    tokenMint0: readPubkey(data, 73),
+    tokenMint1: readPubkey(data, 105),
+    mintDecimals0: data[233],
+    mintDecimals1: data[234],
+    tickCurrent: readI32LE(data, 269),
+    liquidity: readU128LE(data, 237),
   };
 }
 
@@ -307,10 +326,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ positions: [], count: 0, account });
     }
 
-    // 2. Fetch Raydium position accounts for each NFT (in parallel)
-    const rawPositions = (
-      await Promise.all(nftMints.map((mint) => fetchRaydiumPosition(mint)))
-    ).filter((p): p is RawRaydiumPosition => p !== null);
+    // 2. Fetch Raydium position accounts for all NFT mints in ONE batched call
+    // (direct PDA derivation — see fetchRaydiumPositions for why memcmp is gone)
+    const rawPositions = await fetchRaydiumPositions(nftMints);
 
     if (rawPositions.length === 0) {
       return NextResponse.json({ positions: [], count: 0, account });

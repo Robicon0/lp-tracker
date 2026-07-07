@@ -317,8 +317,8 @@ interface SuiClosedPositionValuedEvent {
 // | cg-historical | pending | zero_amount. `cg-spot`/any spot tier MUST NEVER appear.
 interface SolanaClosedPositionValuedEvent {
   event: 'solana_closed_position_valued';
-  protocol: string;            // orca
-  positionId: string;          // Orca position PDA
+  protocol: string;            // orca | raydium
+  positionId: string;          // position PDA (["position", nftMint] under the protocol's program)
   pair: string;
   depositUSD: number;
   withdrawalUSD: number;

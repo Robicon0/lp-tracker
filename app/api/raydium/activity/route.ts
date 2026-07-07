@@ -25,8 +25,16 @@ function anchorDisc(name: string): Buffer {
 const DISC = {
   open_position:                anchorDisc('open_position'),
   open_position_with_metadata:  anchorDisc('open_position_with_metadata'),
+  // Sprint RAYDIUM: v2 + Token-2022 variants — ALL modern Raydium positions use
+  // these (live census: open_position_v2, open_position_with_token22_nft,
+  // increase/decrease_liquidity_v2 dominate; the v1 names appear only in older
+  // history). Without them a modern position's every event was invisible.
+  open_position_v2:             anchorDisc('open_position_v2'),
+  open_position_with_token22_nft: anchorDisc('open_position_with_token22_nft'),
   increase_liquidity:           anchorDisc('increase_liquidity'),
+  increase_liquidity_v2:        anchorDisc('increase_liquidity_v2'),
   decrease_liquidity:           anchorDisc('decrease_liquidity'),
+  decrease_liquidity_v2:        anchorDisc('decrease_liquidity_v2'),
   close_position:               anchorDisc('close_position'),
   collect_remaining_rewards:    anchorDisc('collect_remaining_rewards'),
 };
@@ -70,14 +78,16 @@ function classifyInstruction(b58Data: string): ActivityEventType | null {
   if (bytes.length < 8) return null;
 
   if (matchDisc(bytes, DISC.open_position) || matchDisc(bytes, DISC.open_position_with_metadata) ||
-      matchDisc(bytes, DISC.increase_liquidity)) {
+      matchDisc(bytes, DISC.open_position_v2) || matchDisc(bytes, DISC.open_position_with_token22_nft) ||
+      matchDisc(bytes, DISC.increase_liquidity) || matchDisc(bytes, DISC.increase_liquidity_v2)) {
     return 'deposit';
   }
   if (matchDisc(bytes, DISC.close_position)) {
     return 'withdrawal';
   }
-  if (matchDisc(bytes, DISC.decrease_liquidity)) {
-    // bytes 8..24 = liquidity u128 LE — if 0, this is a pure fee claim
+  if (matchDisc(bytes, DISC.decrease_liquidity) || matchDisc(bytes, DISC.decrease_liquidity_v2)) {
+    // bytes 8..24 = liquidity u128 LE (same arg layout v1/v2) — if 0, this is a
+    // pure fee claim (Raydium bundles fee collection into decrease_liquidity)
     if (bytes.length >= 24) {
       const liquidity = readU128LE(bytes, 8);
       if (liquidity === 0n) return 'fee_claim';

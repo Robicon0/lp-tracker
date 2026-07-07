@@ -1003,12 +1003,13 @@ const SUI_CLOSED_PROTOCOL_LABEL: Record<SuiClosedPositionDTO["protocol"], string
 // Declared locally so the client hook never imports the SERVER lib (Redis + web3).
 interface SolanaClosedPositionDTO {
   positionId: string;
-  protocol: "orca";
+  protocol: "orca" | "raydium";
   pair: string;
   events: ActivityEventForPnL[];
 }
 const SOLANA_CLOSED_PROTOCOL_LABEL: Record<SolanaClosedPositionDTO["protocol"], string> = {
   orca: "Orca",
+  raydium: "Raydium",
 };
 
 // Sprint 2.2b — optional Sui addresses (connected + watched) whose CLOSED

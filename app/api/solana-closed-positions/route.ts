@@ -13,10 +13,12 @@ import { getCachedClosedPositionCapitalGL, type SolanaClosedPosition } from '../
 // Redis-cached per wallet under the Sprint 1.14 immutable contract
 // (closed_pos_solana_v1), so the ~25k-CU tx scan is paid once then served warm.
 //
-// Scope: Orca only (Account 1 has zero Raydium positions; Raydium = future
-// sprint). useLpPnl fetches this per connected/watched Solana address and folds
-// the returned positions' Capital G/L into the same totals as EVM + Sui closed
-// positions; useWalletLevelFees folds their fee claims into Fee Income.
+// Scope: Orca + Raydium (Sprint RAYDIUM) — BOTH protocols reconstructed from at
+// most ONE shared wallet scan (per-protocol Redis sub-keys :orca:/:raydium:).
+// useLpPnl fetches this per connected/watched Solana address and folds the
+// returned positions' Capital G/L into the same totals as EVM + Sui closed
+// positions; useWalletLevelFees folds their fee claims into Fee Income (tagged
+// by each position's protocol).
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
