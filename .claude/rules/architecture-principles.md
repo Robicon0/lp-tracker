@@ -139,8 +139,9 @@ understand why closed positions on that chain are pending.
 Currently IMPLEMENTED:
 - Sui event reconstruction — `app/lib/suiClosedPositions.ts` (Cetus + Bluefin
   Sprint 2.2b `bb7fc0d`; Momentum Sprint MOMENTUM `750f566`).
-- Solana tx-history parsing — `app/lib/solanaClosedPositions.ts` (Orca,
-  Sprint 3-FREE `d1bf447`; Raydium queued — same engine, new discriminators).
+- Solana tx-history parsing — `app/lib/solanaClosedPositions.ts` (Orca Sprint
+  3-FREE `d1bf447`; Raydium Sprint RAYDIUM `d7c6c81` — ONE shared wallet scan
+  serves both protocols, since the scan is per-WALLET not per-protocol).
 
 **Canonical Category-B pattern (proven twice — Sui `bb7fc0d`, Solana `d1bf447`):**
 scan the wallet's full immutable history ONCE → reconstruct per-position

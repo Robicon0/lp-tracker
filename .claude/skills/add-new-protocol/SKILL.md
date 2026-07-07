@@ -276,6 +276,30 @@ Pending rewards are a CURRENT-VALUE display (Rule 2 spot), NOT a fee claim (Rule
 — do not confuse the two. (Deferred as of `82d4954`: Solana whirlpool rewards + EVM gauge
 `earned()` emissions → Sprint POSITION-DETAIL-2; until then staked EVM positions under-report.)
 
+### Verification lesson — third-party wallets are MANDATORY when Osho holds no position of that type
+
+**A protocol integration is NOT verified until it has been run against real on-chain wallets
+that actually hold (and have closed) positions on that protocol.** When Osho's accounts hold
+none, find 2–3 public wallets by scanning the protocol program's recent history for
+lifecycle instructions (e.g. `close_position`) and use them as ground truth — including at
+least one BLIND wallet never used during development, as a generalization check.
+
+Why this is a hard rule (Sprint RAYDIUM, `d7c6c81`): the Raydium open-position route shipped
+with a one-byte account-layout error — Raydium's Anchor accounts are **bump-first** (`bump:
+u8` at byte [8]), so the `memcmp {offset: 8}` position lookup could NEVER match and **every
+Raydium user worldwide silently saw zero positions**. The bug was invisible for months
+because every verification wallet was Raydium-empty: empty-in/empty-out is indistinguishable
+from correct. The first real foreign wallet exposed it in minutes. Structural bugs — byte
+offsets, discriminators, PDA seeds, event-log layouts — only surface when real foreign data
+hits them. Corollaries:
+- Prefer **layout-independent lookups** (derive the `["position", nftMint]` PDA and check the
+  account discriminator) over memcmp offset-hunting — a layout change then degrades loudly,
+  not silently.
+- Byte-verify every documented account layout against a LIVE account before trusting it
+  (Anchor programs may prepend fields like `bump` that shift everything).
+- Never treat "route returns empty for the test wallet" as a pass when the test wallet is
+  legitimately empty — that observation has zero verification power.
+
 ### Token identity resolution (symbol / decimals / CoinGecko id)
 
 **Do NOT create a per-protocol `KNOWN_COINS` / `KNOWN_TOKENS` / `TOKENS` map.**

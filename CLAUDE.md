@@ -23,7 +23,7 @@ branch `main`. Local dev: `~/lp-tracker-fresh`. Twitter: `@defidesh`.
 **Chains and protocols:**
 - EVM (Base, Arbitrum, Optimism, Ethereum, Polygon, HyperEVM): Aerodrome,
   Uniswap V3, Velodrome, HyperSwap, KittenSwap, ProjectX
-- Solana: Orca (incl. closed-position Capital G/L), Raydium (open only; closed queued)
+- Solana: Orca + Raydium (both full: open positions, closed-position Capital G/L, lifetime fees)
 - Sui: Bluefin, Cetus, Momentum (full: dashboard, activity, P&L, closed-position Capital G/L)
 - Lending/borrowing: AAVE V3, Dolomite, Kamino, Jupiter Lend, Suilend,
   AlphaFi, HyperLend, Hypurr, HypurrFi
@@ -77,7 +77,7 @@ hundreds of NEW Solana wallets/day.
   `.env.local`). The engine degrades gracefully without it (returns no closed positions,
   never errors), so production silently shows NO Solana Capital G/L until the var is set.
 - **Closed positions are counted everywhere but not yet shown as Closed rows** — Sui
-  (Cetus/Bluefin/Momentum) AND now Solana (Orca) closed positions fold into Capital G/L +
+  (Cetus/Bluefin/Momentum) AND Solana (Orca, Raydium) closed positions fold into Capital G/L +
   Fee Income but have no dashboard/Closed-tab rows (queue item "UI for closed rows").
 - **Sheet reconciliation gap (~$610) is valuation basis, NOT a scan miss:** Osho's Business
   P&L records ~$2,370 Orca fees vs $1,760.01 on-chain (`collect_fees` complete, 0 dropped
@@ -120,51 +120,50 @@ hundreds of NEW Solana wallets/day.
 In order. One active at a time. Each sprint must ship before the next begins.
 _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 
-1. **Raydium closed positions** — extend the Sprint 3-FREE Solana engine
-   (`solanaClosedPositions.ts`) to Raydium CLMM: same Alchemy paced scan + same
-   value-by-on-chain-mint cascade; Raydium discriminators + account layout are the only new
-   work. No known user impact yet (Account 1 has 0 Raydium positions) — ship when a real
-   Raydium user need appears or bundle with the next Solana-touching sprint.
-2. **Sprint POSITION-DETAIL-2** — the deferred pending-reward paths from Sprint POSITION-DETAIL
+1. **Sprint POSITION-DETAIL-2** — the deferred pending-reward paths from Sprint POSITION-DETAIL
    (`82d4954`): **B3** Solana pending rewards (Orca whirlpool `rewardInfos` offsets already
    documented in orca/route.ts comments; Raydium equivalent) so Orca/Raydium detail pages show
    reward emissions like the Sui ones now do; **B4** EVM gauge emissions (Aerodrome/Velodrome
    staked AERO/VELO via the gauge `earned()`) — **staked EVM positions (e.g. Osho's Aerodrome
    WETH/USDC) UNDER-REPORT uncollected value vs the protocol UI until B4 ships**. Same Contract
    invariant (k): value pending rewards at current spot (Rule 2), never a fee-claim (Rule 1a).
-3. **Sprint PERFORMANCE-2 (hardening candidates)** — the deferred Phase A items:
+   **B3 head start (Sprint RAYDIUM):** every reconstructed closed Raydium position already
+   carries `rewardAmountsRaw[3]` (exact per-slot emission totals from
+   `DecreaseLiquidityEvent`) — read it, don't re-scan; reward MINTS come from
+   PoolState.reward_infos.
+2. **Sprint PERFORMANCE-2 (hardening candidates)** — the deferred Phase A items:
    **#4** Redis-cache the Aerodrome positions route's ever-owned tokenId scan +
    closed-position reconstruction (~30 s, the remaining first-load straggler — non-blocking
    behind the "still scanning" chip); **#5** Redis-cache CLOSED positions' activity route
    outputs (immutable — extend the Sprint 1.14 deposit-cache pattern beyond HyperEVM);
    **#6** move `withActivityRouteCache` success results to Redis (5-min TTL, errors never
    cached) so route outputs are shared across instances/users.
-4. **Orca APR-fallback + reward-eyeball verification** — the deferred numeric eyeballs:
+3. **Orca APR-fallback + reward-eyeball verification** — the deferred numeric eyeballs:
    (a) the Sprint POSITION-DETAIL derived-APR fallback on the new open Orca positions
    (ZEC/USDC showed ~213.4% at ship; re-ranged since) vs the Orca app; (b) Contract
    invariant (k) — the first live non-zero Bluefin/Momentum pending reward vs the protocol
    app (code-identical to the proven Cetus path, verified structurally only).
-5. **UI for closed Sui + Solana positions** — Closed tab support (Sui + Solana closed
+4. **UI for closed Sui + Solana positions** — Closed tab support (Sui + Solana closed
    positions are retrieved for Capital G/L but not yet shown as Closed rows).
-6. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+5. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
-7. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
+6. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
    TOKEN-RESOLUTION per-event pool-context pattern to the EVM wallet-scope fee scans
    (aerodrome/velodrome/uniswap). EVM is NOT currently broken — its fallback addresses are
    correct and Sprint 2.1b (`5b8f6b7`) routes closed positions through per-position scans
    with correct context, so the single-representative-pool risk is mitigated — but resolving
    each Collect event's token0/token1 from its pool on-chain would remove the last residual
    of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
-8. **Sprint SPOT-RESILIENCE-V2 (optional, non-blocking)** — the fuller version of the spot
+7. **Sprint SPOT-RESILIENCE-V2 (optional, non-blocking)** — the fuller version of the spot
    fix: `null`/"pending" propagation from `fetchCachedCoinGeckoPrices` through the position
    type + `useLpPnl` + `positionPnl` + a distinct softer UI banner ("Price refreshing…"), plus
    per-tier staleness caps (Tier B 10-min LKG / Tier C pending-not-LKG). Sprint SPOT-RESILIENCE
    `92e779a` already resolves the bogus banner via LKG; V2 is a larger, higher-risk change —
    **ship ONLY if a user-visible need emerges** (e.g. a genuinely-dead token showing a stale
    price is judged confusing). Not currently planned.
-9. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
+8. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
    SUI-HISTORICAL-REDIS `776fcaa` the Sui wallet-scope routes drop from ~111 s to ~18–20 s; the
    residual floor is the **~17 s public-Sui-RPC `queryTransactionBlocks` + `multiGet` scan** (240
    digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
@@ -178,6 +177,38 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`d7c6c81`** — Sprint RAYDIUM: Raydium closed-position Capital G/L + **fix for a SILENT
+  PLATFORM-WIDE Raydium open-position failure**. Solana now has BOTH protocols (Orca +
+  Raydium) at full parity; label → "EVM + Sui + Solana (Orca, Raydium)". **The bug:**
+  Raydium's Anchor accounts are BUMP-FIRST (`bump: u8` at byte [8]; every field one byte
+  later than raydium/route.ts assumed), so the `getProgramAccounts` memcmp at offset 8 could
+  NEVER match — **every Raydium user worldwide saw zero Raydium positions**, invisible
+  because no verification wallet ever held one (empty-in/empty-out looks correct). Fixed via
+  direct PDA derivation (`["position", nftMint]` + batched gMA + account-disc check —
+  layout-independent) + all PersonalPositionState/PoolState offsets corrected (pool decimals
+  previously decoded as 138); v2/Token-2022 discriminators added to raydium/activity (modern
+  positions' events were invisible too). **Closed positions:** `solanaClosedPositions.ts`
+  `raydium` branch — ONE shared wallet scan serves both protocols (zero extra RPC); discovery
+  via the variant-independent mint↔PDA trick; **EXACT principal/fee/reward separation via
+  `DecreaseLiquidityEvent` program-data logs** (Raydium bundles fees into decrease_liquidity;
+  the event log separates them more precisely than Orca's inference) with vault-direction
+  fallback; retry-until-complete gMA (a silently-dropped batch hid a pool in Phase A);
+  `rewardAmountsRaw[3]` carried on the position shape so POSITION-DETAIL-2 reads reward
+  emissions without re-scanning. Redis sub-key `closed_pos_solana_v1:raydium:{wallet}`
+  (`:orca:` byte-compatible). **Cache-contract refinement (user-approved):** EMPTY results
+  cached ONLY after a provably-100%-complete scan, 24 h TTL (30 d non-empty; transient
+  failures still never cached) — single-AMM wallets no longer re-pay the scan every load.
+  Verified (B7, all third-party wallets — Osho holds no Raydium): open fix proven live on
+  both NFT eras ([] → SOL/PUMP In Range $5,545.53; decimals 9/6 not 138); census wallets
+  reproduce Phase A to the cent on overlapping positions (94/$1,341.52, 38/$2.32 incl.
+  overnight bot accrual); **BLIND wallet generalization** 2,544/2,544 txs (967 throttles
+  absorbed), 38 closed CARD/USDC, $6,907.87 fees / +$14,039.63 capGL, 47-event lifecycles;
+  **NO REGRESSION — A1 Orca byte-identical** (19 / $1,760.01 / −$1,818.78, 3 ground-truth
+  PDAs exact); 0 pending, 0 spot across all 170 Raydium + 19 Orca; no cache bumps (no Raydium
+  localStorage entries could exist — the route returned [] for everyone); tsc + build clean.
+  **Contract lesson: verify against third-party on-chain wallets whenever Osho holds no
+  position of that type** — structural bugs (byte offsets, discriminators) hide until real
+  foreign data hits them.
 - **`d1bf447`** — Sprint 3-FREE: Solana (Orca) closed-position Capital G/L on FREE Alchemy
   infra. **MILESTONE: cross-chain Capital G/L COMPLETE across EVM + Sui + Solana** — the
   planned $49/mo Helius upgrade was never needed. NEW `app/lib/solanaClosedPositions.ts`
@@ -340,37 +371,10 @@ shorthand.
   `lp-pnl-events`/`analytics-activity`). Stablecoin current values shift ~0.03% (0.9997→$1,
   Rule-3-consistent). The wrong ZEC + placeholder ORCA mints are NOT fixed here (Sprint 3, via
   value-by-on-chain-mint).
-- **`a866576`** — Sprint TOKEN-RESOLUTION: per-event Sui pool resolution for wallet-scope
-  fee claims. The Bluefin `BLUEFIN_FALLBACK` typo discovered **~$3,847 missing Fee Income for
-  closed-only wallets** (A1 $142.59 vs $1,818.55; A2 $211.37 vs $2,382.53). **Root cause was
-  architectural** — the wallet-scope (`positionId=all`) fee pipelines priced EVERY fee claim
-  with a single representative `(coinTypeA, coinTypeB)` from a hardcoded fallback context that
-  assumed one token pair per protocol per wallet; `BLUEFIN_FALLBACK.coinTypeB` held a
-  corrupted USDC address (`…50a4ae…` vs real `…50a5ae…`), so every closed-position fee claim's
-  USDC side priced to null and the whole claim was DROPPED (only SUI rewards survived via the
-  spot-capable reward path → Bluefin showed ~8%). **Fixed** by a new shared lib
-  `app/lib/suiPoolContext.ts` (`resolveSuiPoolContext`/`resolveSuiPoolContexts`) that resolves
-  each fee claim's REAL pool `(coinTypeA/B + decimals)` from its on-chain pool object per event
-  — Bluefin/Momentum fee events carry `pool_id`, Cetus carries `pool` (immutable `Pool<A,B>`
-  type params → cached in-process, no TTL). Bluefin/Cetus/Momentum activity routes now price
-  each wallet-scope fee claim through the SAME historical cascade (stable→$1 / SUI
-  `getHistoricalOnlySuiPrice` / DeFiLlama-by-coin-type / else **pending**) using the correct
-  token per side — NEVER a guessed/hardcoded type, NEVER spot (Rule 1a); an unresolvable pool
-  is surfaced as `pending_pool_unresolved`, never silently dropped. Same pattern hardened
-  across all three Sui CLMM protocols (Cetus/Momentum were NOT actively dropping fees — their
-  fallbacks happened to match the real pools — but now use the same resilient code path).
-  Per-position mode unchanged (already gets the right coin types from the open position).
-  **EVM verified unaffected** (Sprint 2.1b `5b8f6b7` per-position scans mitigate the same bug
-  class; correct fallback addresses). `BLUEFIN_FALLBACK.coinTypeB` corrected to native USDC
-  for hygiene (now inert for fee pricing). Verified (B7, claim-date DeFiLlama-historical
-  replication): Bluefin A1 →~$1,828.63 (+0.6%), A2 →~$2,420.24 (+1.6%); **all 47 dropped
-  fee_claims recovered, 0 pending**; Cetus/Momentum fee USD byte-identical (no regression);
-  Capital G/L (`suiClosedPositions.ts`) + EVM untouched; non-Osho SUI/USDT simulation prices
-  both sides correctly; tsc + build clean. **No cache bumps** (per-position byte-identical;
-  wallet-scope `useWalletLevelFees` has no persistent cache; the route-level
-  `withActivityRouteCache` is in-process URL-keyed and clears on deploy; `suiPoolContext` is a
-  new in-process cache with no version). **Sprint 3 (Solana) Phase B must inherit this
-  per-event-token-resolution-from-on-chain-state pattern from day one (Contract invariant (i)).**
+- _(Sprint TOKEN-RESOLUTION `a866576` — per-event Sui pool resolution for wallet-scope fee
+  claims; fixed ~$3,847 missing Fee Income for closed-only Sui wallets (hardcoded
+  single-pair fallback was the architectural root cause); `suiPoolContext.ts`; Contract
+  invariant (i) — rolled off this list; see git history.)_
 - _(Sprint MOMENTUM `750f566` — Momentum (Sui) activity route + closed-position Capital G/L;
   completed Sui Capital G/L across all three Sui CLMM protocols (Cetus, Bluefin, Momentum);
   A1 −$306.59 / A2 $0, 0 spot, 0 pending; cache bumps lp-pnl-events v27 /
@@ -611,15 +615,17 @@ exception; Bluefin reward historical migration remains deferred). Platform-wide,
 fee claim on every protocol on every chain is now historical-only** — the sole exception
 is the CETUS reward token's designated spot+LKG path.
 
-**Solana closed positions — RESOLVED for Orca in Sprint 3-FREE (`d1bf447`).**
-The position NFT is burned on close, but `app/lib/solanaClosedPositions.ts`
-reconstructs each lifecycle from wallet tx history via the FREE Alchemy endpoint
-(`ALCHEMY_SOLANA_RPC` — the paid Helius upgrade was never needed) and folds
-Capital G/L + fees into `useLpPnl`/`useWalletLevelFees` (Redis-cached
-`closed_pos_solana_v1`, immutable). Remaining gaps: **Raydium** closed positions
-(queue item 1 — same engine, Raydium discriminators; no known user impact yet)
-and Closed-row UI (queue item 5, shared with Sui). ⚠️ Production requires
-`ALCHEMY_SOLANA_RPC` in Vercel env vars — without it the engine degrades
+**Solana closed positions — RESOLVED for BOTH protocols (Orca Sprint 3-FREE
+`d1bf447`; Raydium Sprint RAYDIUM `d7c6c81`).** The position NFT is burned on
+close, but `app/lib/solanaClosedPositions.ts` reconstructs each lifecycle from
+wallet tx history via the FREE Alchemy endpoint (`ALCHEMY_SOLANA_RPC` — the paid
+Helius upgrade was never needed), with ONE shared scan serving both protocols,
+and folds Capital G/L + fees into `useLpPnl`/`useWalletLevelFees` (Redis-cached
+`closed_pos_solana_v1:{orca|raydium}:{wallet}`). Sprint RAYDIUM also fixed a
+SILENT PLATFORM-WIDE bug: Raydium OPEN positions returned `[]` for every user
+(bump-first account layout broke the memcmp lookup — now direct PDA derivation).
+Remaining gap: Closed-row UI (queue item 4, shared with Sui). ⚠️ Production
+requires `ALCHEMY_SOLANA_RPC` in Vercel env vars — without it the engine degrades
 gracefully to "no Solana closed positions" (no errors, silently incomplete).
 
 **Suilend APY not showing.** Reserve interest rate fields need parsing.
@@ -739,14 +745,18 @@ investigating.
   NOT bumped for Sprint MOMENTUM — Momentum is a NEW protocol key, so cetus/bluefin
   entries are byte-identical. Bump to invalidate on a closed-position valuation-logic
   change. Env: `PRICE_CACHE_KV_*`, shared Upstash DB — avoid flushes)
-- `closed_pos_solana_v1` (Sprint 3-FREE `d1bf447` — Upstash Redis cache of reconstructed
-  CLOSED Solana (Orca) positions' Capital G/L + fees, keyed
-  `closed_pos_solana_v1:orca:{wallet}`, 30d TTL, Sprint 1.14 immutable contract
-  (empty-never-cached, fire-and-forget, no-op stub without env). Caches a COMPUTED
-  valued result → versioned key; bump on a closed-position valuation-logic change.
-  `lp-pnl-events`/`analytics-activity` NOT bumped for Sprint 3-FREE — closed Solana
-  positions were never in the dashboard positions array, so cached contents are
-  byte-identical (same reasoning as Sprint 2.2b). Env: `PRICE_CACHE_KV_*`)
+- `closed_pos_solana_v1` (Sprint 3-FREE `d1bf447` + Sprint RAYDIUM `d7c6c81` — Upstash
+  Redis cache of reconstructed CLOSED Solana positions' Capital G/L + fees, per-protocol
+  sub-keys `closed_pos_solana_v1:orca:{wallet}` and `:raydium:{wallet}` (ONE shared scan
+  writes both). Non-empty: 30d TTL. **Refined empty rule (Sprint RAYDIUM, user-approved):
+  an EMPTY result is cached ONLY when the scan was provably 100% complete
+  (`stats.complete`), with a 24h TTL** — transient/partial-scan empties still never cache
+  (Sprint 1.14 intent preserved); this stops single-AMM wallets re-paying the 40–120s scan
+  every load. Caches a COMPUTED valued result → versioned key; bump on a valuation-logic
+  change. `lp-pnl-events`/`analytics-activity` NOT bumped for either sprint — closed
+  Solana positions were never in the dashboard positions array, and no Raydium
+  localStorage entries could exist (the open-position route returned [] for everyone).
+  Env: `PRICE_CACHE_KV_*`)
 
 ---
 

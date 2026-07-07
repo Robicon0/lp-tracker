@@ -51,7 +51,7 @@ updated when versions are bumped.
 | bluefin-activity     | v5              | Sprint 2.2c — Bluefin fee-claim SUI side historical-only via `getHistoricalOnlySuiPrice` (FIX-C spotFallback no longer reachable for fee claims; Rule 1a) |
 | momentum-activity    | (in-process)    | Sprint MOMENTUM — NEW `/api/momentum/activity` wrapped in `withActivityRouteCache` (in-process, URL-keyed, NO `-vN` suffix; clears on every deploy by construction — Rule 4). Fee/reward claims historical-only (Rule 1a); reward valued via `reward_coin_type` → resolveToken, never spot |
 | closed_pos_sui       | v1              | Sprint 2.2b — Redis cache of reconstructed CLOSED Sui positions' Capital G/L (key `closed_pos_sui_v1:{protocol}:{wallet}`, now `:cetus:`/`:bluefin:`/`:momentum:` namespaces, 30d TTL). NOT bumped for Sprint MOMENTUM — Momentum is a NEW protocol key, so cetus/bluefin entries are byte-identical. Bump on a closed-position valuation-logic change |
-| closed_pos_solana    | v1              | Sprint 3-FREE — Redis cache of reconstructed CLOSED Solana (Orca) positions' Capital G/L + fees (key `closed_pos_solana_v1:orca:{wallet}`, 30d TTL, same immutable contract as closed_pos_sui: empty-never-cached, fire-and-forget, no-op stub). Caches a COMPUTED valued result → versioned; bump on a closed-position valuation-logic change. `lp-pnl-events`/`analytics-activity` NOT bumped for Sprint 3-FREE (closed Solana positions were never in the dashboard positions array — Sprint 2.2b reasoning) |
+| closed_pos_solana    | v1              | Sprint 3-FREE + Sprint RAYDIUM — Redis cache of reconstructed CLOSED Solana positions' Capital G/L + fees, per-protocol sub-keys `closed_pos_solana_v1:orca:{wallet}` / `:raydium:{wallet}` (ONE shared wallet scan writes both). Non-empty 30d TTL. **Refined empty rule (Sprint RAYDIUM, user-approved): EMPTY results cached ONLY when the scan was provably 100% complete (`stats.complete`), 24h TTL** — transient/partial-scan empties still never cache. Caches a COMPUTED valued result → versioned; bump on a valuation-logic change. `lp-pnl-events`/`analytics-activity` NOT bumped for either sprint (closed Solana positions never in the dashboard array; no Raydium localStorage entries could exist — the open route returned [] for everyone) |
 
 If a version listed here doesn't match what's in code, code is the source
 of truth. Update this table to match code, not the other way around.
@@ -152,18 +152,29 @@ cache per-position activity events for positions in the dashboard array, and
 closed (destroyed-object) Sui positions were never in that array, so their cached
 contents are byte-identical (Rule 1: bump only when cached contents change).
 
-### Closed-Solana-position Capital G/L cache (Sprint 3-FREE)
+### Closed-Solana-position Capital G/L cache (Sprint 3-FREE + Sprint RAYDIUM)
 `app/lib/solanaClosedPositions.ts` persists each wallet's reconstructed CLOSED
-Orca positions (Capital G/L + fees + valued events) in Upstash Redis, keyed
-`closed_pos_solana_v1:orca:{wallet}`, 30-day TTL — the direct Solana analogue of
-the Sprint 2.2b cache above, under the identical contract (versioned COMPUTED
-result; own client, `PRICE_CACHE_KV_*`, no-op stub, never throws, fire-and-forget,
-EMPTY never cached). It matters more here than on Sui: the underlying scan is a
-paced free-tier Alchemy wallet-history backfill (~25–40k CU, ~40–120 s once per
-wallet), so the cache is what makes the feature free at scale — every repeat load
-(any instance, any user) is ~0 CU / ~0.2–0.8 s. One nuance observed in B7: an
-immediate same-process re-read can race the fire-and-forget write (harmless — the
-re-read just rescans); production requests seconds apart always serve warm.
+positions (Capital G/L + fees + valued events) in Upstash Redis, per-protocol
+sub-keys `closed_pos_solana_v1:orca:{wallet}` / `:raydium:{wallet}` — ONE shared
+wallet scan writes BOTH (the scan is per-wallet, not per-protocol). The direct
+Solana analogue of the Sprint 2.2b cache above, under the same contract
+(versioned COMPUTED result; own client, `PRICE_CACHE_KV_*`, no-op stub, never
+throws, fire-and-forget). It matters more here than on Sui: the underlying scan
+is a paced free-tier Alchemy wallet-history backfill (~25–225k CU, ~40 s–19 min
+once per wallet), so the cache is what makes the feature free at scale — every
+repeat load (any instance, any user) is ~0 CU / ~0.2–0.8 s.
+
+**Refined empty rule (Sprint RAYDIUM, user-approved deviation from the Sprint
+1.14 "empty never cached" wording):** an EMPTY protocol result IS cached, but
+ONLY when the scan was provably 100% complete (`stats.complete === true`), and
+with a short 24 h TTL (vs 30 d non-empty). The original rule's intent — a
+TRANSIENT failure must never freeze in as "no closed positions" — is preserved
+exactly (partial/failed scans still never cache). Without this refinement, a
+wallet legitimately empty on one protocol (the common case: most wallets use ONE
+AMM) would re-pay the full scan on EVERY load, since the miss is indistinguishable
+from never-scanned. One nuance observed in B7: an immediate same-process re-read
+can race the fire-and-forget write (harmless — the re-read just rescans);
+production requests seconds apart always serve warm.
 
 ### Client-side (for per-user data only)
 Use client-side caching only for data that's specific to one wallet:

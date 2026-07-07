@@ -237,8 +237,14 @@ P&L for closed positions requires event-log reconstruction.
   $1 → DeFiLlama historical-by-MINT → CoinGecko historical (by resolver cgId) →
   pending. Mints come from on-chain pool state (invariant i), never a hardcoded map.
   Capital G/L = withdrawal − deposit (Rule 4); reuses `computePositionPnL`.
-- **Solana Raydium** closed positions: pending (queued) — same engine, Raydium
-  discriminators/layout; no known user impact yet.
+- **Solana Raydium — IMPLEMENTED (Sprint RAYDIUM, `d7c6c81`).** Same engine, ONE
+  shared wallet scan with Orca. Raydium bundles fee collection into
+  `decrease_liquidity` (no separate collect instruction), so fee/principal/reward
+  separation comes from the `DecreaseLiquidityEvent` program-data log (EXACT
+  per-event amounts — more precise than Orca's transfer inference), with
+  vault-direction matching as fallback. Raydium accounts are BUMP-FIRST (fields
+  +1 byte); positions are found by direct `["position", nftMint]` PDA derivation,
+  never a memcmp offset.
 
 ---
 
@@ -300,7 +306,7 @@ Raydium closed positions are queued (no user impact yet).
 - HyperEVM → CoinGecko historical, awaited
 - Sui closed position → event-log reconstruction (`suiClosedPositions.ts`)
 - Solana closed position → tx-history reconstruction (`solanaClosedPositions.ts`;
-  Orca live, Raydium queued)
+  Orca + Raydium, one shared scan)
 
 **Is it a current portfolio value?**
 - CoinGecko spot price for all non-stablecoin tokens
