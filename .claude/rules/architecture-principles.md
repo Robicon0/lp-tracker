@@ -303,6 +303,41 @@ page.
 
 ---
 
+## Rule 10: Aggregate blocks render progressively — never "no partial totals reveal"
+
+Any UI block that aggregates over data arriving from multiple independent async
+sources (positions across chains, per-position activity fetches, closed-position
+scans, wallet-scope fee scans) MUST render its **partial** result as soon as the
+FIRST input lands, and show remaining work as a **non-blocking status indicator**
+— never skeleton/spinner the whole block until the LAST input completes.
+
+This is the "no partial totals reveal" anti-pattern, removed platform-wide in
+Sprint LPPNL-PERF (`535453e`). The analytics LP P&L block used to skeleton every
+cell while `lpPnl.isLoading` (= any per-position fetch in flight), showing
+"calculating…" for 5+ minutes on a heavy first-time wallet — even though the
+aggregate was already recomputed on every landed fetch. Sprint PERFORMANCE
+(`f4b58ac`) had fixed the identical gate for the positions TABLE (progressive rows)
+but the aggregate block was missed.
+
+### The rule in practice
+- Gate the initial skeleton on "nothing computed yet" (`included === 0 && loading`),
+  NOT on "everything computed" (`loading`). Once any item lands, show live partials.
+- Slow/optional contributors (e.g. a closed-position tx-history scan) are surfaced
+  as a **badge** ("scanning {chain} closed history…"), never a block-wide gate;
+  cells that depend on them show the current partial + a sub-note, then finalize.
+- Every long/unbounded contributor needs: a **client-side budget** (so a value is
+  never silently pending forever), **in-flight dedup** (so concurrent consumers
+  don't launch duplicate scans — module-level per-key promise map +
+  `withActivityRouteCache`), and a server **`maxDuration`** (so the scan completes
+  and caches instead of 504-looping). See PERFORMANCE baselines in CLAUDE.md.
+
+### Test
+Before shipping any aggregate/summary block, ask: "For a brand-new wallet with
+significant history and NO warm cache, does this block show *some* real number
+within a few seconds, and never an endless spinner?" If not, it violates Rule 10.
+
+---
+
 ## Decision tree: "Is this fix platform-level?"
 
 Ask in order:

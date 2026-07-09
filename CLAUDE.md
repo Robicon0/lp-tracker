@@ -169,14 +169,46 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
    digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
    cross-instance (immutable ledger) or use a faster RPC. **Address only if <10 s becomes a UX
    need** — the Fee-Income regression is already resolved at ~18–20 s.
-
----
+9. **Resumable/background closed-Solana scan (optional, build ONLY if it surfaces)** — Sprint
+   LPPNL-PERF `535453e` proved a 2,544-tx heavy wallet's isolated single scan completes in
+   ~217 s, under the `maxDuration=300` budget, so no resumability was needed. A wallet heavier
+   than **~3,000–3,500 txs** could still exceed 300 s single-scan on the free Alchemy tier.
+   **Build the fix ONLY if such a wallet is reported in production:** a signature-cursor
+   resumable scan (persist distilled per-position accumulator + cursor across requests,
+   process oldest→newest so discovery precedes events, finalize+cache when the cursor drains)
+   OR Vercel Fluid (800 s). Until then the degradation is graceful — partial LP P&L numbers +
+   a "scanning Solana closed history…" badge + the 305 s client budget, never a 504-loop.
 
 ## Recent fixes
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`535453e`** — Sprint LPPNL-PERF: kill the 5-min analytics LP P&L **"calculating…"
+  spinner** for first-time wallets + make closed-Solana **Capital G/L always complete**. TWO
+  independent bugs, no pricing/reconstruction-math changes (A1 Orca byte-identical
+  19/$1,760.01/−$1,818.78). **Bug 1 (spinner):** the LP P&L block skeletoned EVERY cell while
+  `lpPnl.isLoading` (= per-position `inflight>0`, minutes for a heavy wallet at 2/endpoint
+  throttle) — the "no partial totals reveal" all-or-nothing gate PERFORMANCE fixed for the
+  positions TABLE but never for the LP P&L AGGREGATE (numbers were already computed
+  progressively). **Part A:** a cell skeletons ONLY while `included===0 && isLoading` (first
+  ~2 s); then every cell shows its live partial value; header chip "computing N of M" → softer
+  "scanning {Sui/Solana} closed history…"; Capital G/L / Net P&L show "scanning closed
+  positions…" then finalize. `useLpPnl` exposes `inflightCount`/`sui`/`solanaClosedLoading`
+  (additive). **Part C:** the closed-scan effects had NO client timeout → added a 305 s budget
+  + per-chain status badge (never silently-pending). **Bug 2 (never completes):**
+  `/api/solana-closed-positions` is unbounded, had NO `maxDuration` (died at Vercel default →
+  504 → never cached → re-scan every load) AND was fetched TWICE concurrently
+  (useLpPnl + useWalletLevelFees) with no dedup. **B1:** `maxDuration=300` on both closed
+  routes + `vercel.json` `functions` glob `app/api/**/*:300`. **B2:** module-level in-flight
+  dedup (wallet / protocol+wallet). **B3:** solana-closed route wrapped in
+  `withActivityRouteCache` (URL-keyed dedup). **B4:** heavy 2,544-tx wallet ISOLATED single
+  scan = **216.9 s < 300 s** (complete, cached) — the Phase A 19-min figure was contention +
+  the double-scan, so NO resumable/background refactor needed (queued follow-up only if a
+  >3,000-tx wallet surfaces). Verified (B7): first numbers ~2 s (was minutes); heavy 8ZSjKbkF
+  215.0 s cold + WARM 707 ms (no 504-loop); dedup proven (route log 1 miss + 1 dedup, ~50% CU
+  saved); A1 byte-identical, A2 + EVM/Sui untouched; tsc + build clean. **No cache-version
+  bumps** (render-gating / dedup / timeouts / route-config only — no stored contents change).
 - **`d7c6c81`** — Sprint RAYDIUM: Raydium closed-position Capital G/L + **fix for a SILENT
   PLATFORM-WIDE Raydium open-position failure**. Solana now has BOTH protocols (Orca +
   Raydium) at full parity; label → "EVM + Sui + Solana (Orca, Raydium)". **The bug:**
@@ -335,42 +367,10 @@ shorthand.
   (spot path / EVM / Orca / Capital G/L unchanged). **No cache-version bumps** (server-side
   historical, upstream of localStorage). All historical price paths on all chains now have a
   cross-instance Redis tier — this closed the last gap.
-- **`92e779a`** — Sprint SPOT-RESILIENCE: tiered Redis-backed last-known-good (LKG) for the
-  CoinGecko SPOT path. Fixed the **persistent "Current price data unavailable" banner on OPEN
-  positions** (Account 1 SOL/USDC + ZEC/USDC on Orca; the same class earlier hit a Sui Cetus
-  position). Root cause: `fetchCachedCoinGeckoPrices` (`priceCache.ts`) had only a 60 s
-  in-process Map cache (no cross-instance tier, unlike the Sprint 1.6 historical path), so
-  under the analytics page's concurrent multi-route load a **cold Vercel instance 429s
-  CoinGecko and returned 0** → `price0/price1 = 0` → `positionPnl.ts:104` `missing_current_prices`
-  guard fired the bogus banner on every load. **Fix (contained in the shared spot helper — the
-  ~20 callers are UNCHANGED, return type stays `Record<string,number>`):** NEW
-  `app/lib/redisSpotCache.ts` — cross-instance Upstash Redis spot tier, key `cg_spot_v1:{cgId}`,
-  stores `{usd, at}`, 24 h LKG retention / 5-min freshness, Sprint 1.6 no-op-stub contract (own
-  client, never throws, fire-and-forget). `fetchCachedCoinGeckoPrices` tiered policy: **Tier A**
-  stablecoin cgIds (usd-coin/tether/dai) → always **$1** (Rule 3; also removes them from the
-  CoinGecko request, cutting 429 pressure); **Tier B/C** on a live-fetch miss → return the
-  last-known price (in-process or Redis LKG, ANY age) instead of 0 — so a returned **0 means
-  "genuinely unpriceable"** (no price ever seen), which is exactly when the
-  `missing_current_prices` guard SHOULD fire (**no `positionPnl`/plumbing change** — the guard
-  is correct by construction). **Part 2** a standalone **concurrency-2** spot-fetch queue
-  (deliberately NOT the shared `withCgPacing` concurrency-1 chain, to avoid a nesting deadlock
-  with `tokenResolver`'s historical CoinGecko calls). **Rule 1a untouched** — this is the
-  SPOT/current-value path (Rule 2), NOT the historical fee-claim path; **Fee Income + Capital
-  G/L unchanged** (they read the historical caches — Bluefin still ~$1,818 / ~$2,382).
-  **Scope deviations (user-approved):** (1) kept the number return type + used LKG instead of
-  null/pending propagation + `positionPnl` change (would touch ~20 callers + position type +
-  useLpPnl + banner); (2) uniform LKG (any-age, 24 h TTL) rather than per-tier staleness caps
-  (nothing to fall to without null/pending plumbing); (3) UI banner copy ("Price refreshing")
-  deferred — the banner now shows ONLY for genuinely-unpriceable tokens (correct). A follow-up
-  **Sprint SPOT-RESILIENCE-V2** (null/pending propagation + per-tier caps + softer banner copy)
-  is queued as OPTIONAL, ship only if a user-visible need emerges. Verified (B7, real
-  `fetchCachedCoinGeckoPrices` + real Upstash, simulated 429): Tier A → $1; Redis-fresh
-  cross-instance → served the cached price (not 0); Redis-stale → LKG (not 0);
-  genuinely-unpriceable → 0 (guard applies); live fetch → priced + written to Redis; tsc + build
-  clean. **New Redis namespace `cg_spot_v1`; no localStorage cache bumps** (spot is upstream of
-  `lp-pnl-events`/`analytics-activity`). Stablecoin current values shift ~0.03% (0.9997→$1,
-  Rule-3-consistent). The wrong ZEC + placeholder ORCA mints are NOT fixed here (Sprint 3, via
-  value-by-on-chain-mint).
+- _(Sprint SPOT-RESILIENCE `92e779a` — tiered Redis LKG for the CoinGecko SPOT path
+  (`redisSpotCache.ts`, `cg_spot_v1`); fixed the persistent "Current price data unavailable"
+  banner on OPEN positions; Rule 1a untouched (SPOT/Rule 2 path only); Contract invariant (j)
+  — rolled off this list; see git history.)_
 - _(Sprint TOKEN-RESOLUTION `a866576` — per-event Sui pool resolution for wallet-scope fee
   claims; fixed ~$3,847 missing Fee Income for closed-only Sui wallets (hardcoded
   single-pair fallback was the architectural root cause); `suiPoolContext.ts`; Contract
@@ -527,15 +527,27 @@ All changes are additive unless explicitly replacing broken logic.
 Every fix is a platform fix that benefits all current and future users
 with similar position shapes. Never wallet-specific framing.
 
-**Performance is a platform requirement (Sprint PERFORMANCE `f4b58ac` baselines).**
+**Performance is a platform requirement (Sprint PERFORMANCE `f4b58ac` +
+LPPNL-PERF `535453e` baselines).**
 New sprints must not regress: **first meaningful render ~1–4 s** (positions stream
 per source — never reintroduce an all-or-nothing `Promise.all` gate on the
-positions array) and **Sui activity routes ~10–24 s** (scan-bound; the SUI
-historical prewarm is batch-filled via `fetchDailyClosesRange` + Redis). Any hook
-consuming the streaming positions array MUST carry in-flight dedup (by position id
-or URL) so per-wave effect re-runs never re-fire an in-flight fetch; client fetch
-policy is one patient attempt, retry only on network/5xx, never on timeout. Verify
-these numbers as part of B7 for any sprint touching the load path.
+positions array); **the analytics LP P&L aggregate block shows first numbers ~2 s
+and NEVER an endless "calculating…" spinner for ANY wallet** (Sprint LPPNL-PERF —
+cells render partial values once `included>0`, closed-scan progress shows as a
+non-blocking badge, never a full-block skeleton); and **Sui activity routes
+~10–24 s** (scan-bound; the SUI historical prewarm is batch-filled via
+`fetchDailyClosesRange` + Redis). Any hook consuming the streaming positions array
+MUST carry in-flight dedup (by position id or URL) so per-wave effect re-runs never
+re-fire an in-flight fetch; the closed-scan routes are in-flight-deduped
+(`withActivityRouteCache` + a module-level per-wallet promise map) so the concurrent
+useLpPnl + useWalletLevelFees double-fetch collapses to ONE scan. **Any aggregate
+block MUST render progressively — the "no partial totals reveal" all-or-nothing
+gate is a removed anti-pattern (architecture-principles Rule 10).** Client fetch
+policy is one patient attempt, retry only on network/5xx, never on timeout; the
+closed-scan client fetch carries a 305 s budget so Capital G/L is never silently
+pending forever. Long server scans set `maxDuration=300` (vercel.json glob
+`app/api/**/*`). Verify these numbers as part of B7 for any sprint touching the
+load path.
 
 ---
 
