@@ -1657,24 +1657,33 @@ export default function Analytics() {
               title="LP Profit & Loss"
               sub="Aggregated from on-chain deposit & fee events across all LP positions"
               action={
-                lpPnl.isLoading ? (
-                  <span
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      fontSize: 11, color: C.green, letterSpacing: "0.14em", textTransform: "uppercase",
-                    }}
-                  >
-                    <span
-                      className="spin-icon"
-                      style={{
-                        width: 10, height: 10,
-                        border: `2px solid ${C.greenFaint}`,
-                        borderTopColor: C.green,
-                      }}
-                    />
-                    Loading
-                  </span>
-                ) : null
+                // Sprint LPPNL-PERF (Part A): progressive status chip instead of a
+                // block-wide "Loading" gate. While OPEN positions are still being
+                // fetched, show "computing N of M"; once those are done but a
+                // closed-position scan is still running, show a softer "scanning
+                // closed history…". Numbers below render partially throughout —
+                // this chip is informational, never a blank spinner.
+                (() => {
+                  const total = lpPnl.included + lpPnl.excluded + lpPnl.errored + lpPnl.inflightCount;
+                  if (lpPnl.inflightCount > 0) {
+                    return (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: C.green, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                        <span className="spin-icon" style={{ width: 10, height: 10, border: `2px solid ${C.greenFaint}`, borderTopColor: C.green }} />
+                        computing {total - lpPnl.inflightCount} of {total}
+                      </span>
+                    );
+                  }
+                  if (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading) {
+                    const chain = lpPnl.solanaClosedLoading && lpPnl.suiClosedLoading ? "Sui + Solana" : lpPnl.solanaClosedLoading ? "Solana" : "Sui";
+                    return (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                        <span className="spin-icon" style={{ width: 10, height: 10, border: `2px solid ${C.border}`, borderTopColor: C.text }} />
+                        scanning {chain} closed history…
+                      </span>
+                    );
+                  }
+                  return null;
+                })()
               }
             >
               <div
@@ -1762,7 +1771,8 @@ export default function Analytics() {
                     val: fmt$Signed(lpPnl.capitalGL),
                     color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright,
                     sub: "closed positions, EVM + Sui + Solana (Orca, Raydium)",
-                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.) plus Sui (Cetus, Bluefin, Momentum), reconstructed from on-chain events and valued at historical prices. Solana closed-position exit data is not yet available on-chain.",
+                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.), Sui (Cetus, Bluefin, Momentum), and Solana (Orca, Raydium) — all reconstructed from on-chain events and valued at historical prices.",
+                    pendingClosed: true,
                   },
                   {
                     label: "Imperm. Loss",
@@ -1776,8 +1786,9 @@ export default function Analytics() {
                     val: fmt$Signed(adjustedNetPnl),
                     color: adjustedNetPnl >= 0 ? C.cyan : C.red,
                     sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
+                    pendingClosed: true,
                   },
-                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string }>);
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean }>);
                 })().map((c, i, arr) => (
                   <div
                     key={c.label}
@@ -1791,7 +1802,16 @@ export default function Analytics() {
                       {c.label}
                       {c.tooltip && <InfoTooltip text={c.tooltip} />}
                     </div>
-                    {lpPnl.isLoading ? (
+                    {/* Sprint LPPNL-PERF (Part A): PROGRESSIVE render. A cell
+                        skeletons ONLY when nothing has computed yet (included===0
+                        AND still fetching) — the first ~1-4s. Once any position
+                        lands (included>0) every cell shows its live partial value
+                        (the aggregate streams in via setResult on each landed
+                        fetch). Capital G/L / Net P&L (pendingClosed) additionally
+                        show a "scanning closed positions…" sub-note while a
+                        closed-chain scan is still running, then finalize — never a
+                        blank full-block spinner. */}
+                    {(lpPnl.included === 0 && lpPnl.isLoading) ? (
                       <div
                         aria-label="Loading"
                         style={{
@@ -1811,13 +1831,18 @@ export default function Analytics() {
                           color: c.color,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                           textShadow: c.color === C.green ? "0 0 12px rgba(0,255,65,0.22)" : "none",
+                          opacity: (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading)) ? 0.6 : 1,
                         }}
                       >
                         {c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
-                      {lpPnl.isLoading ? "calculating…" : c.sub}
+                      {(lpPnl.included === 0 && lpPnl.isLoading)
+                        ? "calculating…"
+                        : (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading))
+                          ? "scanning closed positions…"
+                          : c.sub}
                     </div>
                   </div>
                 ))}

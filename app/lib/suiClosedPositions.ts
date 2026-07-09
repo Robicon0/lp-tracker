@@ -641,14 +641,27 @@ function writeClosedPosCache(protocol: SuiClmmProtocol, walletAddress: string, p
 // B4 — Redis-cached top-level entry point. Read-first; on miss, retrieve +
 // reconstruct + value all closed positions, write fire-and-forget. Empty results
 // are NEVER cached. This is what useLpPnl (B5) calls per (wallet, protocol).
-export async function getCachedClosedPositionCapitalGL(
+//
+// Sprint LPPNL-PERF (Part B2): module-level in-flight dedup keyed by
+// (protocol, wallet) so the sui-closed route's concurrent 3-protocol Promise.all
+// (and any effect re-run) never launches two identical scans within a warm
+// instance — the expensive tx-history walk runs once per (protocol, wallet).
+const _inFlightSuiScans = new Map<string, Promise<SuiClosedPosition[]>>();
+export function getCachedClosedPositionCapitalGL(
   walletAddress: string,
   protocol: SuiClmmProtocol,
 ): Promise<SuiClosedPosition[]> {
-  if (!walletAddress) return [];
-  const cached = await readClosedPosCache(protocol, walletAddress);
-  if (cached) return cached;
-  const fresh = await getClosedPositionsForWallet(walletAddress, protocol);
-  writeClosedPosCache(protocol, walletAddress, fresh);
-  return fresh;
+  if (!walletAddress) return Promise.resolve([]);
+  const key = `${protocol}:${walletAddress.toLowerCase()}`;
+  const existing = _inFlightSuiScans.get(key);
+  if (existing) return existing;
+  const p = (async (): Promise<SuiClosedPosition[]> => {
+    const cached = await readClosedPosCache(protocol, walletAddress);
+    if (cached) return cached;
+    const fresh = await getClosedPositionsForWallet(walletAddress, protocol);
+    writeClosedPosCache(protocol, walletAddress, fresh);
+    return fresh;
+  })();
+  _inFlightSuiScans.set(key, p);
+  return p.finally(() => { _inFlightSuiScans.delete(key); });
 }

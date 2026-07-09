@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getCachedClosedPositionCapitalGL, type SuiClosedPosition } from '../../lib/suiClosedPositions';
 
+// Sprint LPPNL-PERF (Part B1): pin to the Vercel Pro ceiling so the tx-history
+// scan (public-Sui-RPC queryTransactionBlocks + multiGet, ~18–50 s cold) never
+// dies at the low default before it can complete + write its Redis cache.
+export const maxDuration = 300;
+
 // Sprint 2.2b — closed Sui position retrieval for Capital G/L.
 //
 // A closed Sui CLMM position's object is DESTROYED on close, so it cannot be

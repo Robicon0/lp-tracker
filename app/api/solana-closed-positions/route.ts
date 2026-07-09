@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getCachedClosedPositionCapitalGL, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
+import { withActivityRouteCache } from '../../lib/activityRouteCache';
+
+// Sprint LPPNL-PERF (Part B1): the wallet tx-history scan is unbounded (scales
+// with tx count). Without maxDuration the route dies at Vercel's low default →
+// 504 → never caches → re-scan+re-fail every load. 300 s is the Pro ceiling and
+// covers the vast majority of real wallets; only extreme bot wallets exceed it.
+export const maxDuration = 300;
 
 // Sprint 3-FREE — closed Solana (Orca) position retrieval for Capital G/L.
 //
@@ -20,7 +27,15 @@ import { getCachedClosedPositionCapitalGL, type SolanaClosedPosition } from '../
 // positions; useWalletLevelFees folds their fee claims into Fee Income (tagged
 // by each position's protocol).
 
-export async function GET(request: Request) {
+// Sprint LPPNL-PERF (Part B2/B3): wrapped in withActivityRouteCache for
+// **in-flight dedup**. This route is fetched CONCURRENTLY by TWO client hooks on
+// every fresh load — useLpPnl (Capital G/L) and useWalletLevelFees (Fee Income) —
+// with the identical `?account=` URL. Un-deduped, that ran the heavy scan TWICE
+// at once (double CU + double Alchemy contention, worsening throttling). The
+// wrapper's URL-keyed in-flight map collapses both callers onto ONE scan (the
+// dominant win), plus a short TTL result mirror. The authoritative durable cache
+// remains Redis `closed_pos_solana_v1:*` inside getCachedClosedPositionCapitalGL.
+async function GET_impl(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
   if (!account) {
@@ -38,3 +53,5 @@ export async function GET(request: Request) {
     );
   }
 }
+
+export const GET = withActivityRouteCache(GET_impl);

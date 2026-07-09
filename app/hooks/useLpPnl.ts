@@ -41,6 +41,20 @@ export interface LpPnlResult {
   errored: number;    // positions whose fetch failed (timeout, HTTP error, etc.)
   errorReasons: string[]; // first-seen unique error reasons (for UI display)
   isLoading: boolean;
+  // Sprint LPPNL-PERF (Part A/C): progressive-render signals so the analytics
+  // LP P&L block can show PARTIAL totals immediately instead of skeletoning
+  // every cell until the last fetch lands. `isLoading` (= inflightCount > 0) is
+  // retained for back-compat, but the block should render numbers as soon as
+  // `included > 0` and use these to show a non-blocking status chip.
+  //   inflightCount        — per-position OPEN/EVM-closed fetches still running.
+  //   suiClosedLoading      — the closed-Sui reconstruction fetch is in flight.
+  //   solanaClosedLoading   — the closed-Solana reconstruction fetch is in flight.
+  // The closed-* flags drive the "still scanning {chain} closed history…" badge;
+  // Capital G/L / Net P&L are partial-but-shown while either is true, and
+  // finalize when both clear (never an endless spinner).
+  inflightCount: number;
+  suiClosedLoading: boolean;
+  solanaClosedLoading: boolean;
   // Per-position results keyed by position.id — lets per-row UI (dashboard
   // positions table) read EXACTLY the same on-chain P&L numbers that flow
   // into the aggregated totals. A position appears here ONLY when its
@@ -70,6 +84,7 @@ const EMPTY: LpPnlResult = {
   initialValue: 0, currentValue: 0, closingValue: 0, feesCollected: 0, feesUnclaimed: 0,
   ilUSD: 0, capitalGL: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
   errored: 0, errorReasons: [], isLoading: false,
+  inflightCount: 0, suiClosedLoading: false, solanaClosedLoading: false,
   perPosition: {},
   excludedPositions: [],
   estimatedPositionCount: 0,
@@ -529,6 +544,27 @@ function isRetryableFailure(reason: string): boolean {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Sprint LPPNL-PERF (Part C): client-side budget for the closed-position scan
+// fetches (sui/solana-closed-positions). Without this the closed effects had NO
+// timeout, so a slow/hung route left Capital G/L's "scanning" badge on forever.
+// Set just above the server maxDuration (300s) so the client normally receives
+// the server's result (or its 504) rather than giving up early; if the fetch is
+// still pending past the budget it's aborted and the badge clears (the server's
+// scan continues + caches, so a reload shows the completed data). NEVER an
+// endless pending state.
+const CLOSED_SCAN_CLIENT_BUDGET_MS = 305_000;
+async function fetchClosedWithBudget(url: string): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CLOSED_SCAN_CLIENT_BUDGET_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch {
+    return null; // aborted (budget) or network error — treat as "no closed data this load"
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Per-endpoint client-side concurrency limiter ────────────────────────────
 // Caps concurrent fetches PER activity endpoint pathname (e.g.
 // /api/hyperswap/activity, /api/aerodrome/activity, /api/cetus/activity). Keying
@@ -782,6 +818,10 @@ function aggregate(
   // (solana-closed-*), chain "Solana", folded into Capital G/L identically.
   solanaClosed: Map<string, PosResult> = new Map(),
   solanaClosedMeta: Map<string, PositionMeta> = new Map(),
+  // Sprint LPPNL-PERF: closed-scan in-flight flags (non-blocking status only —
+  // they do NOT gate `isLoading`, which stays per-position-driven).
+  suiClosedLoading = false,
+  solanaClosedLoading = false,
 ): LpPnlResult {
   // Merge the external-closed map/meta (Sui + Solana) into the inputs the loop
   // iterates. Both sets are disjoint from resultsMap (destroyed objects / burned
@@ -966,6 +1006,9 @@ function aggregate(
     ilUSD, capitalGL, netPnl, netPnlPct, included, excluded,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
+    inflightCount: inflight,
+    suiClosedLoading,
+    solanaClosedLoading,
     perPosition,
     excludedPositions,
     estimatedPositionCount,
@@ -1041,6 +1084,11 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   // contract as suiClosedRef so positions-array eviction can't drop them.
   const solanaClosedRef = useRef<Map<string, PosResult>>(new Map());
   const solanaClosedMetaRef = useRef<Map<string, PositionMeta>>(new Map());
+  // Sprint LPPNL-PERF (Part C) — in-flight flags for the two closed-scan effects,
+  // surfaced (non-blocking) so the LP P&L block shows a "still scanning {chain}
+  // closed history…" badge instead of leaving Capital G/L silently pending.
+  const suiClosedLoadingRef = useRef<boolean>(false);
+  const solanaClosedLoadingRef = useRef<boolean>(false);
 
   // Fetch + value closed Sui positions whenever the Sui address set changes.
   // Disjoint from the open/closed positions in `positions` (destroyed objects),
@@ -1051,18 +1099,20 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       if (suiClosedRef.current.size > 0) {
         suiClosedRef.current = new Map();
         suiClosedMetaRef.current = new Map();
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
       }
       return;
     }
     let cancelled = false;
+    suiClosedLoadingRef.current = true;
+    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     (async () => {
       const newMap = new Map<string, PosResult>();
       const newMeta = new Map<string, PositionMeta>();
       await Promise.all(addrs.map(async (addr) => {
         try {
-          const res = await fetch(`/api/sui-closed-positions?account=${encodeURIComponent(addr)}`);
-          if (!res.ok) return;
+          const res = await fetchClosedWithBudget(`/api/sui-closed-positions?account=${encodeURIComponent(addr)}`);
+          if (!res || !res.ok) return;
           const json = await res.json();
           for (const sp of (json.positions ?? []) as SuiClosedPositionDTO[]) {
             // Value via the SAME pure engine EVM closed positions use, so the
@@ -1075,12 +1125,13 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
           }
         } catch { /* graceful — a Sui address that fails contributes nothing */ }
       }));
+      suiClosedLoadingRef.current = false;
       if (cancelled || !mountedRef.current) return;
       suiClosedRef.current = newMap;
       suiClosedMetaRef.current = newMeta;
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; suiClosedLoadingRef.current = false; };
   }, [suiWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sprint 3-FREE — fetch + value closed Solana (Orca) positions whenever the
@@ -1093,18 +1144,23 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       if (solanaClosedRef.current.size > 0) {
         solanaClosedRef.current = new Map();
         solanaClosedMetaRef.current = new Map();
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
       }
       return;
     }
     let cancelled = false;
+    // Part A/C: flag the scan in-flight so the LP P&L block shows a non-blocking
+    // "still scanning Solana closed history…" badge (Capital G/L stays partial-
+    // but-shown, never a full-block spinner).
+    solanaClosedLoadingRef.current = true;
+    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     (async () => {
       const newMap = new Map<string, PosResult>();
       const newMeta = new Map<string, PositionMeta>();
       await Promise.all(addrs.map(async (addr) => {
         try {
-          const res = await fetch(`/api/solana-closed-positions?account=${encodeURIComponent(addr)}`);
-          if (!res.ok) return;
+          const res = await fetchClosedWithBudget(`/api/solana-closed-positions?account=${encodeURIComponent(addr)}`);
+          if (!res || !res.ok) return;
           const json = await res.json();
           for (const sp of (json.positions ?? []) as SolanaClosedPositionDTO[]) {
             const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
@@ -1115,12 +1171,13 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
           }
         } catch { /* graceful — a Solana address that fails contributes nothing */ }
       }));
+      solanaClosedLoadingRef.current = false;
       if (cancelled || !mountedRef.current) return;
       solanaClosedRef.current = newMap;
       solanaClosedMetaRef.current = newMeta;
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; solanaClosedLoadingRef.current = false; };
   }, [solanaWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1214,13 +1271,13 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     if (toFetch.length === 0) {
       // All positions already fetched — just recompute totals (in case
       // positions array changed order but same IDs).
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
       return;
     }
 
     // Mark as inflight and update loading state.
     for (const p of toFetch) inflightRef.current.add(p.id);
-    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
 
     // Fetch each position, paced PER activity endpoint (paceByEndpoint /
     // MAX_PER_ENDPOINT). A wallet with many positions on one provider — e.g. 4
@@ -1248,7 +1305,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current));
+        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
       });
     }
   }, [positions]);

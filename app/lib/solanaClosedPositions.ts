@@ -887,15 +887,29 @@ function writeClosedPosCache(protocol: SolanaClmmProtocol, wallet: string, posit
 // sub-keys first; if either misses, run the single shared scan once, write both,
 // and return the fresh result (fresh is a superset of cached — it also captures
 // positions closed since the cache was written).
-export async function getCachedClosedPositionCapitalGL(wallet: string): Promise<SolanaClosedPosition[]> {
-  if (!wallet) return [];
-  const [cachedOrca, cachedRay] = await Promise.all([
-    readClosedPosCache('orca', wallet),
-    readClosedPosCache('raydium', wallet),
-  ]);
-  if (cachedOrca !== null && cachedRay !== null) return [...cachedOrca, ...cachedRay];
-  const { orca, raydium, stats } = await getClosedPositionsForWallet(wallet);
-  writeClosedPosCache('orca', wallet, orca, stats.complete);
-  writeClosedPosCache('raydium', wallet, raydium, stats.complete);
-  return [...orca, ...raydium];
+// Sprint LPPNL-PERF (Part B2): module-level in-flight dedup keyed by wallet. The
+// route is fetched concurrently by useLpPnl + useWalletLevelFees; even with the
+// route-level withActivityRouteCache dedup, this guarantees that within a warm
+// instance the expensive scan runs ONCE per wallet no matter how many callers
+// (or effect re-runs) arrive while it's in flight. Deleted on settle so a later
+// load re-reads cache / re-scans normally.
+const _inFlightScans = new Map<string, Promise<SolanaClosedPosition[]>>();
+export function getCachedClosedPositionCapitalGL(wallet: string): Promise<SolanaClosedPosition[]> {
+  if (!wallet) return Promise.resolve([]);
+  const key = wallet.toLowerCase();
+  const existing = _inFlightScans.get(key);
+  if (existing) return existing;
+  const p = (async (): Promise<SolanaClosedPosition[]> => {
+    const [cachedOrca, cachedRay] = await Promise.all([
+      readClosedPosCache('orca', wallet),
+      readClosedPosCache('raydium', wallet),
+    ]);
+    if (cachedOrca !== null && cachedRay !== null) return [...cachedOrca, ...cachedRay];
+    const { orca, raydium, stats } = await getClosedPositionsForWallet(wallet);
+    writeClosedPosCache('orca', wallet, orca, stats.complete);
+    writeClosedPosCache('raydium', wallet, raydium, stats.complete);
+    return [...orca, ...raydium];
+  })();
+  _inFlightScans.set(key, p);
+  return p.finally(() => { _inFlightScans.delete(key); });
 }
