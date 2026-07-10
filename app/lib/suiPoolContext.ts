@@ -19,19 +19,21 @@
 // Rule 1a holds; this is purely about getting the correct token identity into the
 // existing cascade.
 //
-// CACHE
-// A Sui CLMM pool is a SHARED object whose `Pool<A, B>` type params are IMMUTABLE
-// (they survive the position's destruction). So the (poolId → context) mapping is
-// cached in an in-process module Map with NO TTL — it can never go stale, and it
-// clears naturally on cold start. A known-unresolvable id is cached as `null` so a
-// bad id is not refetched. Per distinct pool this costs one `sui_getObject` (plus,
-// only for non-pinned tokens, a `suix_getCoinMetadata`); SUI/USDC/USDT decimals
-// come from tokenConstants with no RPC. The activity routes are themselves wrapped
-// in `withActivityRouteCache`, so repeated identical requests pay nothing.
+// CACHE (Sprint SUI-RPC-RELIABILITY)
+// A Sui CLMM pool is a SHARED object whose `Pool<A, B>` type params are IMMUTABLE.
+// Two-tier cache: L1 in-process Map (no TTL) + L2 Upstash Redis
+// (`sui_pool_ctx_v1:{poolId}`, 90-day TTL) so a warmed context survives cold
+// starts and is shared cross-instance/user — repeat loads pay ZERO RPC. A
+// known-unresolvable id is cached as `null` (L1 only) so a bad id is not refetched.
+//
+// RPC (Sprint SUI-RPC-RELIABILITY)
+// Reads go through the shared paced+failover `suiRpc` client (was a bare fetch on
+// a single flaky endpoint). Multiple pools are resolved in ONE `sui_multiGetObjects`
+// batch (was N individual `sui_getObject` calls into the concurrent burst).
 
 import { lookupHardcodedToken, normalizeSuiType } from './tokenConstants';
-
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
+import { suiRpc } from './suiRpc';
+import { Redis } from '@upstash/redis';
 
 export interface SuiPoolContext {
   coinTypeA: string;
@@ -44,65 +46,118 @@ export interface SuiPoolContext {
 // refetch a known-bad id). Immutable pool type params → no TTL.
 const _poolCtxCache = new Map<string, SuiPoolContext | null>();
 
-async function suiRpc(method: string, params: unknown[]): Promise<unknown> {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  return (await res.json()).result;
+// ── L2 Redis (Sprint 1.14 contract: own client, no-op stub, never throws) ─────
+const POOL_CTX_CACHE_VERSION = 'sui_pool_ctx_v1';
+const POOL_CTX_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days (immutable; TTL for hygiene)
+const _redisUrl = process.env.PRICE_CACHE_KV_REST_API_URL;
+const _redisToken = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
+let _redis: Redis | null = null;
+if (_redisUrl && _redisToken) {
+  try { _redis = new Redis({ url: _redisUrl, token: _redisToken }); }
+  catch (err) { console.warn('[suiPoolContext] Redis client construction failed; no-op stub:', err); _redis = null; }
+}
+const poolCtxKey = (poolId: string) => `${POOL_CTX_CACHE_VERSION}:${poolId}`;
+
+async function redisGetPoolCtxs(ids: string[]): Promise<Map<string, SuiPoolContext>> {
+  const out = new Map<string, SuiPoolContext>();
+  if (!_redis || ids.length === 0) return out;
+  try {
+    const raw = await _redis.mget<(SuiPoolContext | string | null)[]>(...ids.map(poolCtxKey));
+    ids.forEach((id, i) => {
+      const v = raw?.[i];
+      if (v == null) return;
+      const ctx = typeof v === 'string' ? (JSON.parse(v) as SuiPoolContext) : v;
+      if (ctx && ctx.coinTypeA && ctx.coinTypeB && typeof ctx.decimalsA === 'number') out.set(id, ctx);
+    });
+  } catch { /* treat as miss */ }
+  return out;
+}
+function redisSetPoolCtx(id: string, ctx: SuiPoolContext): void {
+  if (!_redis) return;
+  _redis.set(poolCtxKey(id), JSON.stringify(ctx), { ex: POOL_CTX_TTL_SECONDS })
+    .catch(() => { /* fire-and-forget */ });
 }
 
-// Decimals from the pinned high-stakes constants first (SUI/USDC/USDT — no RPC),
-// then the coin's on-chain metadata, then a Sui-default 9.
+// ── Decimals: pinned constants (no RPC) → on-chain metadata → default 9 ────────
+const _decimalsCache = new Map<string, number>();
 async function resolveDecimals(coinType: string): Promise<number> {
-  const tok = lookupHardcodedToken('sui', normalizeSuiType(coinType));
+  const norm = normalizeSuiType(coinType);
+  const tok = lookupHardcodedToken('sui', norm);
   if (tok) return tok.decimals;
+  if (_decimalsCache.has(norm)) return _decimalsCache.get(norm)!;
+  let dec = 9;
   try {
     const meta = (await suiRpc('suix_getCoinMetadata', [coinType])) as { decimals?: number } | null;
-    if (meta && typeof meta.decimals === 'number') return meta.decimals;
-  } catch { /* ignore — fall through to default */ }
-  return 9;
+    if (meta && typeof meta.decimals === 'number') dec = meta.decimals;
+  } catch { /* default 9 */ }
+  _decimalsCache.set(norm, dec);
+  return dec;
 }
 
-// Resolve ONE pool id → its coin types + decimals (cached, immutable).
-export async function resolveSuiPoolContext(poolId: string): Promise<SuiPoolContext | null> {
-  if (!poolId) return null;
-  if (_poolCtxCache.has(poolId)) return _poolCtxCache.get(poolId)!;
-
-  let ctx: SuiPoolContext | null = null;
-  try {
-    const obj = (await suiRpc('sui_getObject', [poolId, { showType: true }])) as { data?: { type?: string } } | null;
-    const typ = obj?.data?.type ?? '';
-    // Pool<A, B[, ...]> — the first two type params are the pool's coins.
-    const m = typ.match(/<([^,]+),\s*([^,>]+)/);
-    if (m) {
-      const coinTypeA = normalizeSuiType(m[1].trim());
-      const coinTypeB = normalizeSuiType(m[2].trim());
-      const [decimalsA, decimalsB] = await Promise.all([
-        resolveDecimals(coinTypeA),
-        resolveDecimals(coinTypeB),
-      ]);
-      ctx = { coinTypeA, coinTypeB, decimalsA, decimalsB };
-    }
-  } catch {
-    ctx = null;
-  }
-  _poolCtxCache.set(poolId, ctx);
-  return ctx;
+// Extract the first two `Pool<A, B[, ...]>` type params from an object type string.
+function parsePoolCoinTypes(typ: string): { a: string; b: string } | null {
+  const m = typ.match(/<([^,]+),\s*([^,>]+)/);
+  if (!m) return null;
+  return { a: normalizeSuiType(m[1].trim()), b: normalizeSuiType(m[2].trim()) };
 }
 
-// Resolve MANY pool ids in parallel → Map of only the successfully-resolved ones.
+// ── Batch resolver: ONE multiGetObjects for the uncached pools ────────────────
 // Callers treat a missing id as "pool unresolved" → that fee claim stays pending
 // (usdAtTime null, Rule 1a), never priced with a guessed/hardcoded token type.
 export async function resolveSuiPoolContexts(poolIds: Iterable<string>): Promise<Map<string, SuiPoolContext>> {
   const ids = [...new Set([...poolIds].filter(Boolean))];
   const out = new Map<string, SuiPoolContext>();
-  await Promise.all(
-    ids.map(async (id) => {
-      const ctx = await resolveSuiPoolContext(id);
-      if (ctx) out.set(id, ctx);
-    }),
-  );
+
+  // L1 in-process
+  const need: string[] = [];
+  for (const id of ids) {
+    if (_poolCtxCache.has(id)) { const c = _poolCtxCache.get(id); if (c) out.set(id, c); }
+    else need.push(id);
+  }
+  if (need.length === 0) return out;
+
+  // L2 Redis (batched mget)
+  const fromRedis = await redisGetPoolCtxs(need);
+  const stillNeed: string[] = [];
+  for (const id of need) {
+    const c = fromRedis.get(id);
+    if (c) { _poolCtxCache.set(id, c); out.set(id, c); }
+    else stillNeed.push(id);
+  }
+  if (stillNeed.length === 0) return out;
+
+  // RPC: ONE multiGetObjects per 50-id chunk (Sui's per-call limit), then resolve
+  // each pool's decimals (pinned constants are free; others one metadata call).
+  for (let i = 0; i < stillNeed.length; i += 50) {
+    const chunk = stillNeed.slice(i, i + 50);
+    const objs = (await suiRpc('sui_multiGetObjects', [chunk, { showType: true }])) as
+      Array<{ data?: { objectId?: string; type?: string } }> | null;
+    // multiGetObjects returns results in request order; map back by index (and by
+    // objectId when present, in case an endpoint reorders).
+    const byId = new Map<string, string>();
+    (objs ?? []).forEach((o, k) => {
+      const id = o?.data?.objectId ?? chunk[k];
+      const typ = o?.data?.type ?? '';
+      if (id) byId.set(id, typ);
+    });
+    await Promise.all(chunk.map(async (id) => {
+      const typ = byId.get(id) ?? '';
+      const pair = parsePoolCoinTypes(typ);
+      if (!pair) { _poolCtxCache.set(id, null); return; } // unresolvable → cache null (L1)
+      const [decimalsA, decimalsB] = await Promise.all([resolveDecimals(pair.a), resolveDecimals(pair.b)]);
+      const ctx: SuiPoolContext = { coinTypeA: pair.a, coinTypeB: pair.b, decimalsA, decimalsB };
+      _poolCtxCache.set(id, ctx);
+      redisSetPoolCtx(id, ctx);
+      out.set(id, ctx);
+    }));
+  }
   return out;
+}
+
+// Resolve ONE pool id → its coin types + decimals (thin wrapper over the batch).
+export async function resolveSuiPoolContext(poolId: string): Promise<SuiPoolContext | null> {
+  if (!poolId) return null;
+  if (_poolCtxCache.has(poolId)) return _poolCtxCache.get(poolId)!;
+  const m = await resolveSuiPoolContexts([poolId]);
+  return m.get(poolId) ?? _poolCtxCache.get(poolId) ?? null;
 }

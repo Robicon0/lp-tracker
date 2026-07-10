@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../../lib/suiRpc';
 
 // AlphaFi / AlphaLend on Sui — raw Sui RPC
 //
@@ -24,8 +25,6 @@ import { NextResponse } from 'next/server';
 //   Receipt pkg: 0x9bbd650b8442abb082c20f3bc95a9434a8d47b4bef98b0832dab57c1a8ba7123
 //   Type: alphapool::Receipt
 
-const SUI_RPC = process.env.SUI_RPC_URL ?? 'https://fullnode.mainnet.sui.io:443';
-
 const ALPHALEND_PKG_OLD = '0xd631cd66138909636fc3f73ed75820d0c5b76332d1644608ed1c85ea2b8219b4';
 const ALPHALEND_PKG_NEW = '0x5209a18e1ae6ac994dd5a188a2d8deb17b2bbab29f63a7b5457bdfe040f69f61';
 const POSITION_CAP_OLD  = `${ALPHALEND_PKG_OLD}::position::PositionCap`;
@@ -39,15 +38,11 @@ const MARKETS_TABLE   = '0x2326d387ba8bb7d24aa4cfa31f9a1e58bf9234b097574afb06c5d
 
 type AssetEntry = { symbol: string; amount: number; usdValue: number; apy: number | null };
 
+// Sprint SUI-RPC-RELIABILITY: routed through the shared paced+failover Sui client.
 async function suiPost(method: string, params: unknown[]): Promise<unknown> {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json() as { result?: unknown; error?: { message: string } };
-  if (json.error) throw new Error(`Sui RPC error: ${json.error.message}`);
-  return json.result;
+  const result = await suiRpc(method, params);
+  if (result === undefined) throw new Error(`Sui RPC failed (all endpoints) for ${method}`);
+  return result;
 }
 
 async function getOwnedObjects(account: string, structType: string): Promise<Record<string, unknown>[]> {

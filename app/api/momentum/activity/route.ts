@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../../lib/suiRpc';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -26,7 +27,6 @@ import { logPrice } from '../../../lib/priceLogger';
 // `current_sqrt_price`, so deposit/withdrawal pricing relies on the tick
 // derivation (same as Bluefin when sqrt is unavailable).
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 const MOMENTUM_PKG = '0x70285592c97965e811e0c6f98dccc3a9c2b4ad854b3594faab9597ada267b860';
 
@@ -75,15 +75,6 @@ interface ActivityResponse {
   totalFees1: number;
 }
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 // Normalize a Sui coin type to short form (`0x2::sui::SUI`), stripping the
 // leading zero-padding the RPC returns for reward_coin_type TypeName structs.

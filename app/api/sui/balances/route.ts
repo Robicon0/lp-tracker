@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../../lib/suiRpc';
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 const KNOWN_COINS: Record<string, { symbol: string; name: string; decimals: number }> = {
   '0x2::sui::SUI': { symbol: 'SUI', name: 'Sui', decimals: 9 },
@@ -14,15 +14,6 @@ const KNOWN_COINS: Record<string, { symbol: string; name: string; decimals: numb
   '0xbde4ba4c2e274a60ce15c1cfff9e5c42e41654ac8b6d906a57efa4bd3c29f47d::hasui::HASUI': { symbol: 'haSUI', name: 'Haedal Staked SUI', decimals: 9 },
 };
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

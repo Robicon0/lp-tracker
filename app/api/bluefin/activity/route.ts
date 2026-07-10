@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../../lib/suiRpc';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -6,7 +7,6 @@ import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../li
 import { resolveSuiPoolContexts, type SuiPoolContext } from '../../../lib/suiPoolContext';
 import { logPrice } from '../../../lib/priceLogger';
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 const BLUEFIN_PKG = '0x3492c874c1e3b3e2984e8c41b589e642d4d0a5d6459e5a9cfc2d52fd7c89c267';
 
@@ -59,15 +59,6 @@ interface ActivityResponse {
   totalFees1: number;
 }
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 // Fetch the set of Bluefin Position object IDs CURRENTLY owned by `account`.
 // This is one half of the wallet-scope "ever owned" set; the other half is

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
 import { safeCalcPendingFee, calcFeeGrowthInside, emitFeeUnderflow } from '../../lib/clmmFeeMath';
@@ -11,7 +12,6 @@ import { logPrice } from '../../lib/priceLogger';
 // returned-index check in fetchCetusTick ensures a future module change fails loudly.
 const CETUS_TICK_SCORE_OFFSET = 443636;
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 // Cetus CLMM position type on Sui mainnet
 const CETUS_POSITION_TYPE =
@@ -29,15 +29,6 @@ const KNOWN_COINS: Record<string, { symbol: string; name: string; decimals: numb
   '0x06864a6f921804860930db6ddbe2e16acdf8504495ea7481637a1c8b9a8fe54b::cetus::CETUS': { symbol: 'CETUS', name: 'Cetus Protocol', decimals: 9, coingeckoId: 'cetus-protocol' },
 };
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 // Decode Sui I32 (stored as u32 bits)
 function bitsToI32(bits: number): number {

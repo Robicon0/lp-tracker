@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
 import { safeCalcPendingFee, emitFeeUnderflow, type UnderflowLogContext } from '../../lib/clmmFeeMath';
 import { resolveSuiRewardTokens, buildPendingRewards } from '../../lib/suiRewardMeta';
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 // Momentum CLMM position type on Sui mainnet
 const MOMENTUM_POSITION_TYPE =
@@ -24,15 +24,6 @@ const KNOWN_COINS: Record<string, { symbol: string; name: string; decimals: numb
   '0x027792d9fed7f9844eb4839566001bb6f6cb4804f66aa2da6fe1ee242d896881::coin::COIN': { symbol: 'WBTC', name: 'Wrapped Bitcoin', decimals: 8, coingeckoId: 'bitcoin' },
 };
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 function bitsToI32(bits: number): number {
   return bits > 2147483647 ? bits - 4294967296 : bits;

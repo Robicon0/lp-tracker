@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../../lib/suiRpc';
 
 // Suilend on Sui — raw Sui RPC (no SDK)
 //
@@ -13,22 +14,17 @@ import { NextResponse } from 'next/server';
 //
 // Decimal type: { fields: { value: string } } where value = amount_in_base_units * 10^18
 
-const SUI_RPC = process.env.SUI_RPC_URL ?? 'https://fullnode.mainnet.sui.io:443';
-
 const SUILEND_PKG     = '0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf';
 const MAIN_POOL       = `${SUILEND_PKG}::suilend::MAIN_POOL`;
 const OBLIG_CAP_TYPE  = `${SUILEND_PKG}::lending_market::ObligationOwnerCap<${MAIN_POOL}>`;
 const LENDING_MARKET  = '0x84030d26d85eaa7035084a057f2f11f701b7e2e4eda87551becbc7c97505ece1';
 
+// Sprint SUI-RPC-RELIABILITY: routed through the shared paced+failover Sui client.
+// Preserves the throw-on-failure contract (all endpoints exhausted → undefined → throw).
 async function suiPost(method: string, params: unknown[]): Promise<unknown> {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json() as { result?: unknown; error?: { message: string } };
-  if (json.error) throw new Error(`Sui RPC error: ${json.error.message}`);
-  return json.result;
+  const result = await suiRpc(method, params);
+  if (result === undefined) throw new Error(`Sui RPC failed (all endpoints) for ${method}`);
+  return result;
 }
 
 // Extract symbol from Sui TypeName struct or plain string

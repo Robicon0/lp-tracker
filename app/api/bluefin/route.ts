@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
 import { safeCalcPendingFee, emitFeeUnderflow, type UnderflowLogContext } from '../../lib/clmmFeeMath';
 import { resolveSuiRewardTokens, buildPendingRewards } from '../../lib/suiRewardMeta';
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 // Bluefin spot CLMM position type on Sui mainnet
 const BLUEFIN_POSITION_TYPE =
@@ -20,15 +20,6 @@ const KNOWN_COINS: Record<string, { symbol: string; name: string; decimals: numb
   '0x06864a6f921804860930db6ddbe2e16acdf8504495ea7481637a1c8b9a8fe54b::cetus::CETUS': { symbol: 'CETUS', name: 'Cetus Protocol', decimals: 9, coingeckoId: 'cetus-protocol' },
 };
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 function bitsToI32(bits: number): number {
   return bits > 2147483647 ? bits - 4294967296 : bits;

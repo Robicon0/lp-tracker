@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { suiRpc } from '../../../lib/suiRpc';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -23,7 +24,6 @@ import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 // identically-named AddLiquidityEvent / RemoveLiquidityEvent, so a name-only
 // filter would cross-capture Momentum events as Cetus activity.
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 
 // Verified Cetus packages (allowlist). Matched with `startsWith`.
 const CETUS_PKGS = [
@@ -137,15 +137,6 @@ interface ActivityResponse {
   totalFees1: number;
 }
 
-async function suiRpc(method: string, params: unknown[]) {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = await res.json();
-  return json.result;
-}
 
 // Fetch the set of Cetus Position object IDs CURRENTLY owned by `account`.
 // This is one half of the wallet-scope "ever owned" set; the other half is

@@ -49,6 +49,7 @@ import { Redis } from '@upstash/redis';
 import { withCgPacing } from './cgPriceHistory';
 import { resolveCgId } from './cgSymbolSearch';
 import { logPrice } from './priceLogger';
+import { suiRpc } from './suiRpc';
 import {
   type Chain,
   CG_PLATFORM,
@@ -153,7 +154,6 @@ const EVM_RPC: Partial<Record<Chain, string>> = {
   polygon: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY}`,
   hyperevm: 'https://rpc.hyperliquid.xyz/evm',
 };
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ''}`;
 
 const EVM_CHAINS: ReadonlySet<Chain> = new Set<Chain>([
@@ -222,13 +222,8 @@ interface OnchainMeta {
 
 async function suiMetadata(coinType: string): Promise<OnchainMeta | null> {
   try {
-    const res = await fetch(SUI_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'suix_getCoinMetadata', params: [coinType] }),
-    });
-    const json = await res.json();
-    const r = json?.result as { decimals?: number; symbol?: string } | null;
+    // Sprint SUI-RPC-RELIABILITY: shared paced+failover Sui client (was a bare fetch).
+    const r = (await suiRpc('suix_getCoinMetadata', [coinType])) as { decimals?: number; symbol?: string } | null;
     if (r && (typeof r.symbol === 'string' || typeof r.decimals === 'number')) {
       return { symbol: r.symbol ?? null, decimals: typeof r.decimals === 'number' ? r.decimals : null };
     }

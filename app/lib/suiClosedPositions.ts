@@ -41,8 +41,8 @@ import { lookupHardcodedToken, normalizeSuiType } from './tokenConstants';
 import { prewarmSuiPricesForTimestamps, getHistoricalOnlySuiPrice } from './suiPriceHistory';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillamaPriceHistory';
 import { logPrice } from './priceLogger';
+import { suiRpc } from './suiRpc';
 
-const SUI_RPC = process.env.SUI_RPC_URL || 'https://fullnode.mainnet.sui.io:443';
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
 const STABLE_CGIDS = new Set(['usd-coin', 'tether', 'dai']);
@@ -159,14 +159,8 @@ export interface SuiClosedPosition {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Internal Sui JSON-RPC + tx-history loading ────────────────────────────────
-async function suiRpc(method: string, params: unknown[]): Promise<unknown> {
-  const res = await fetch(SUI_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  return (await res.json()).result;
-}
+// Sprint SUI-RPC-RELIABILITY: routed through the shared paced+failover client
+// (was a bare fetch with no timeout/fallback).
 
 // Currently-owned (open) position object IDs — the set we subtract from the
 // ever-opened set to find CLOSED (destroyed-object) positions.
