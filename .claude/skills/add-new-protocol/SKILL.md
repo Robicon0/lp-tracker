@@ -276,6 +276,27 @@ Pending rewards are a CURRENT-VALUE display (Rule 2 spot), NOT a fee claim (Rule
 — do not confuse the two. (Deferred as of `82d4954`: Solana whirlpool rewards + EVM gauge
 `earned()` emissions → Sprint POSITION-DETAIL-2; until then staked EVM positions under-report.)
 
+### Invariant (l) — chain RPC reads use a reliable endpoint with automatic fallback + pacing + timeout
+
+**Every chain's RPC reads MUST go through a shared, per-chain client that provides (1) an
+ordered endpoint list with AUTOMATIC failover (reliable provider primary → public node
+fallback), (2) a per-call timeout so a hung call fails fast into the fallback, and (3) a
+global concurrency semaphore so the app's own burst can never saturate an endpoint's per-IP
+rate limit. NEVER a bare `fetch(RPC_URL)` per route against a single endpoint.**
+
+Why (Sprint SUI-RPC-RELIABILITY, `8d82287`): every Sui call site had its own bare fetch — no
+timeout/retry/fallback/pacing. A full analytics load fires 100+ concurrent Sui calls; measured:
+the public fullnode 429-drops 55% at 150 concurrent, Alchemy 38% (both clean ≤40). On Vercel's
+shared datacenter IP the per-IP limit bites far sooner than from a residential IP, so 2–3
+positions per load were dropped from the LP P&L totals in production ("RPC timeout" banner)
+while local testing looked fine. The fix is transport-only and token/protocol-agnostic:
+`app/lib/suiRpc.ts` (failover + 12 s timeout + semaphore 8) — the Sui reference implementation.
+Solana's paced-scan client (backoff + retry-until-complete, Sprint 3-FREE) is the same
+principle for a different failure mode. A NEW CHAIN inherits this by building its shared
+client FIRST and routing every read through it — never by copying a bare-fetch helper into
+each route. Immutable chain metadata (pool coin types/decimals) belongs in Redis
+(`sui_pool_ctx_v1` pattern) so cold instances don't re-pay reads into the burst.
+
 ### Verification lesson — third-party wallets are MANDATORY when Osho holds no position of that type
 
 **A protocol integration is NOT verified until it has been run against real on-chain wallets

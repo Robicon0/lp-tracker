@@ -184,6 +184,31 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`8d82287`** — Sprint SUI-RPC-RELIABILITY: shared paced+failover Sui RPC client — fixes
+  the recurring production failure where **2–3 Sui positions per load (USDC/SUI, DEEP/SUI on
+  Cetus) failed with "RPC timeout after 3 attempts" and were EXCLUDED from LP P&L totals**,
+  making Capital G/L / Fees / Net P&L incomplete. **Root cause (measured):** every Sui call
+  site had its own bare `fetch(SUI_RPC)` — no timeout, no retry, no fallback, no pacing — and
+  a full 3-account analytics load fires 100+ concurrent Sui calls; the endpoint's per-IP rate
+  limit 429s under that burst (public fullnode 55% dropped at 150 concurrent; Alchemy 38%;
+  both clean ≤40). On Vercel's shared datacenter IP the limit bites far sooner than locally
+  (why it reproduced only in prod). Drops were NOT token-specific — whichever calls landed in
+  the 429'd slice. **Fix (pure transport):** NEW `app/lib/suiRpc.ts` — ordered endpoints
+  (`SUI_RPC_URL`/Alchemy primary → public fullnode fallback, automatic failover on
+  timeout/429/5xx), 12 s per-call AbortController timeout, global concurrency semaphore of 8
+  (mirrors `withCgPacing`); **12 call sites swapped** (cetus/bluefin/momentum route+activity,
+  sui/balances, suiPoolContext, suiClosedPositions, tokenResolver, lending suilend+alphafi —
+  no raw Sui endpoint remains); `suiPoolContext` batched to ONE `sui_multiGetObjects` + NEW
+  Redis namespace `sui_pool_ctx_v1` (90 d, immutable pool coinType/decimals survive cold
+  starts). Verified (B7): burst 150 concurrent through the shared client = **150/150 ZERO
+  drops** (bare baseline 38–55% dropped); A1 Cetus USDC/SUI loads at $13,010.54 (the exact
+  pair that dropped); closed-Sui reconstruction **byte-deterministic** through the new client
+  (two fresh scans identical — 30 positions / 130 events / $0.00 delta; the −$7,478 vs the
+  −$7,099 PERFORMANCE-era baseline is wallet drift, not code); DEEP + BTC (non-pinned)
+  resolve decimals from on-chain metadata with zero hardcode; warm pool-context 26 ms; tsc +
+  build clean. **No cache bumps** (transport + a new Redis namespace only). Contract extended:
+  invariant (l) — all chain RPC reads use a reliable endpoint with automatic fallback +
+  pacing + timeout, never a single flaky public node hit concurrently.
 - **`535453e`** — Sprint LPPNL-PERF: kill the 5-min analytics LP P&L **"calculating…"
   spinner** for first-time wallets + make closed-Solana **Capital G/L always complete**. TWO
   independent bugs, no pricing/reconstruction-math changes (A1 Orca byte-identical
@@ -339,34 +364,10 @@ shorthand.
   ~1–4 s**. No cache bumps (cached contents byte-identical). SPOT-RESILIENCE + closed-position
   engine untouched. **#4 aerodrome positions route (~30 s, now a non-blocking straggler behind
   the chip), #5 activity output caching, #6 Redis route cache → Sprint PERFORMANCE-2.**
-- **`776fcaa`** — Sprint SUI-HISTORICAL-REDIS: cross-instance Redis tier for SUI historical
-  prices. Fixes the **post-deploy regression where the 3 Sui protocols (Cetus, Bluefin,
-  Momentum) vanished from the analytics Fee Income breakdown**. Root cause (Sprint
-  SPOT-RESILIENCE post-ship investigation): the Sui wallet-scope activity routes took
-  **~100–120 s on cold Vercel instances** because `app/lib/suiPriceHistory.ts` had ONLY an
-  in-process Map cache — **no cross-instance Redis tier** (unlike `cgPriceHistory` Sprint 1.6 and
-  `defillamaPriceHistory` Sprint 1.12) — so every cold instance re-fetched each claim date's SUI
-  historical price serially through the 1100 ms-gap `withCgPacing` queue (~57 dates × 1.1 s ≈
-  63 s). The client rendered before the slow Sui routes finished, dropping the closed-only Sui
-  protocols (whose fees come SOLELY from these wallet-scope routes) while fast EVM/Orca
-  per-position fees remained. **NOT caused by SPOT-RESILIENCE's code** (bluefin/momentum don't
-  import `priceCache`; their route code is byte-identical before/after `92e779a`) — the deploy
-  merely cold-started instances and surfaced the pre-existing latency. **Fix:** reuse the Sprint
-  1.6 shared helper `redisPriceCache.ts` with cgId `sui` (key `price:historical:sui:{YYYYMMDD}`,
-  30 d TTL). `fetchSuiPriceAtDate` checks Redis BEFORE the CoinGecko fetch (populates the
-  in-process cache on a hit); on a CoinGecko success, fire-and-forget writes to Redis. **Pure
-  historical path — never spot (Rule 1a holds)**; the FIX-C `spotFallback` (cg-spot recovery) is
-  UNTOUCHED (out of scope; already Redis-backed via SPOT-RESILIENCE's `cg_spot_v1`). Verified
-  (B7, real `suiPriceHistory` + real Upstash): cross-instance sim — prime populates Redis from
-  CoinGecko; a fresh process with CoinGecko forced 503 serves **byte-identical** prices from
-  Redis. Timing: 20 dates **22,025 ms cold** (1,101 ms/date serial) → **299 ms warm Redis**
-  (15 ms/date) = **~74× faster/date**. Projected Bluefin A1 route **~111 s → ~18–20 s** (SUI
-  historical prewarm ~63 s → ~1 s; **residual ~17 s public-Sui-RPC tx scan is a separate,
-  out-of-scope concern** — future sprint if UX needs <10 s). Data integrity: Redis stores exact
-  CoinGecko values, fee USD unchanged (~$1,828 Bluefin A1); 0 dropped, 0 null. No regressions
-  (spot path / EVM / Orca / Capital G/L unchanged). **No cache-version bumps** (server-side
-  historical, upstream of localStorage). All historical price paths on all chains now have a
-  cross-instance Redis tier — this closed the last gap.
+- _(Sprint SUI-HISTORICAL-REDIS `776fcaa` — cross-instance Redis tier for SUI historical
+  prices; fixes the post-deploy regression where the 3 Sui protocols vanished from the
+  analytics Fee Income breakdown (cold-instance ~63s serial SUI-price crawl); Sui
+  wallet-scope routes ~111s → ~18–20s — rolled off this list; see git history.)_
 - _(Sprint SPOT-RESILIENCE `92e779a` — tiered Redis LKG for the CoinGecko SPOT path
   (`redisSpotCache.ts`, `cg_spot_v1`); fixed the persistent "Current price data unavailable"
   banner on OPEN positions; Rule 1a untouched (SPOT/Rule 2 path only); Contract invariant (j)
@@ -475,6 +476,17 @@ shorthand.
   `calcFeeGrowthInside`, `emitFeeUnderflow`. Used by Orca, Bluefin, Momentum.
 - `app/lib/clmmTickDecoder.ts` — `solanaCLMMTickRegistry` (binary tick-array
   dispatch) + `anchorDiscriminator`. Solana only; Sui uses JSON extraction.
+
+**Shared chain RPC transport** (canonical — Contract invariant (l), Sprint
+SUI-RPC-RELIABILITY `8d82287`):
+- `app/lib/suiRpc.ts` — `suiRpc(method, params)`: EVERY Sui read routes through
+  it. Ordered endpoints (`SUI_RPC_URL`/Alchemy primary → public fullnode
+  fallback) with automatic failover on timeout/429/5xx; 12 s per-call timeout;
+  global concurrency semaphore 8. Never add a bare `fetch(SUI_RPC)` to a route.
+  A new chain builds its shared client FIRST (Solana's paced-scan client in
+  `solanaClosedPositions.ts` is the same principle for backfill scans).
+- `app/lib/suiPoolContext.ts` also L2-caches immutable pool coinType/decimals in
+  Redis (`sui_pool_ctx_v1:{poolId}`, 90 d) and batches via `sui_multiGetObjects`.
 
 **Shared token resolution** (canonical — see architecture-principles Rule 9):
 - `app/lib/tokenResolver.ts` — `resolveToken({chain, contractAddress|mint|suiType})`
@@ -692,9 +704,12 @@ investigating.
   DeFiLlama claim prices (Sprint 1.12, `price:historical:defillama:*`) +
   closed-position deposit history (Sprint 1.14,
   `deposit:logs:hyperevm:{nftManager}:{tokenId}`, 30d TTL) + closed-Sui-position
-  Capital G/L (Sprint 2.2b, `closed_pos_sui_v1:*`) + **SPOT-price LKG (Sprint
-  SPOT-RESILIENCE `92e779a`, `cg_spot_v1:{cgId}` → `{usd, at}`, 24h retention /
-  5-min freshness; `app/lib/redisSpotCache.ts`)**. Env:
+  Capital G/L (Sprint 2.2b, `closed_pos_sui_v1:*`) + closed-Solana-position
+  Capital G/L (Sprints 3-FREE/RAYDIUM, `closed_pos_solana_v1:{orca|raydium}:*`) +
+  **SPOT-price LKG (Sprint SPOT-RESILIENCE `92e779a`, `cg_spot_v1:{cgId}` →
+  `{usd, at}`, 24h retention / 5-min freshness; `app/lib/redisSpotCache.ts`)** +
+  immutable Sui pool metadata (Sprint SUI-RPC-RELIABILITY `8d82287`,
+  `sui_pool_ctx_v1:{poolId}`, 90d). Env:
   `PRICE_CACHE_KV_REST_API_URL` + `PRICE_CACHE_KV_REST_API_TOKEN` (pass explicitly
   to the `@upstash/redis` client — it auto-reads only `UPSTASH_*`/`KV_*`, not
   `PRICE_CACHE_KV_*`). Connected to Production/Preview/Development; shared, so
@@ -709,6 +724,10 @@ investigating.
   Vercel env vars (currently `.env.local` only).
 - Helius — Solana dashboard/positions routes (`HELIUS_API_KEY`). The $49/mo paid upgrade
   once planned for closed-position tx history is NO LONGER NEEDED (Alchemy free covers it).
+- Alchemy Sui (`SUI_RPC_URL`, confirmed set in Vercel) — PRIMARY for ALL Sui reads via the
+  shared `app/lib/suiRpc.ts` client (Sprint SUI-RPC-RELIABILITY `8d82287`: automatic
+  failover to the public fullnode + 12 s timeout + concurrency semaphore 8 — never a bare
+  fetch against a single endpoint; Contract invariant (l)).
 
 **Price and pool data:**
 - CoinGecko API — spot + historical (rate limit management active)
