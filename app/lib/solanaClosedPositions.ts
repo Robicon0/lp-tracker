@@ -48,8 +48,12 @@ import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillama
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from './cgPriceHistory';
 import { resolveToken } from './tokenResolver';
 import { logPrice } from './priceLogger';
+import { rpcUrlFromEnv } from './rpcEnv';
 
-const ALCHEMY_RPC = process.env.ALCHEMY_SOLANA_RPC || '';
+// rpcUrlFromEnv: a malformed value (bare API key) behaves like UNSET → the
+// engine's existing graceful degrade (empty result, stats.complete=false so
+// nothing is cached) instead of a fetch URL-parse throw → route 500.
+const ALCHEMY_RPC = rpcUrlFromEnv('ALCHEMY_SOLANA_RPC');
 const WHIRLPOOL_PROGRAM = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
 const WHIRLPOOL_PROGRAM_PK = new PublicKey(WHIRLPOOL_PROGRAM);
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';

@@ -7,6 +7,7 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { getCachedDepositLogs, setCachedDepositLogs } from '../../../lib/depositHistoryCache';
 import { logPrice } from '../../../lib/priceLogger';
+import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 
 // ── HyperEVM log source — 3-tier fallback chain ─────────────────────────────
 // TIER 1 (PRIMARY): Etherscan V2 with chainid=999 — archive-backed full history.
@@ -193,7 +194,7 @@ async function isPositionClosed(nftManager: string, tokenIdBig: bigint): Promise
 }
 
 async function rpcCallArchive(body: object): Promise<{ result?: unknown; error?: { message: string } }> {
-  const url = process.env.HYPEREVM_ARCHIVE_RPC;
+  const url = rpcUrlFromEnv('HYPEREVM_ARCHIVE_RPC');
   if (!url) {
     return { error: { message: 'HYPEREVM_ARCHIVE_RPC not configured' } };
   }
@@ -468,7 +469,7 @@ async function fetchLogsViaArchive(
   nftManager: string,
   tokenIdHex: string,
 ): Promise<{ ok: boolean; logs: RawLog[]; reason?: string }> {
-  if (!process.env.HYPEREVM_ARCHIVE_RPC) {
+  if (!rpcUrlFromEnv('HYPEREVM_ARCHIVE_RPC')) {
     console.error('[hyperswap/activity] source=archive SKIP — HYPEREVM_ARCHIVE_RPC env var not set');
     return { ok: false, logs: [], reason: 'archive-unconfigured' };
   }
@@ -809,7 +810,7 @@ async function GET_impl(request: Request) {
     // sqrtPriceX96 lookups actually resolve; fall back to public RPC only when
     // the archive env var is unset (the resolver will return null for old
     // blocks in that case and callers fall through to current-price math).
-    const archiveRpc = process.env.HYPEREVM_ARCHIVE_RPC || HYPEREVM_RPC;
+    const archiveRpc = rpcUrlFromEnv('HYPEREVM_ARCHIVE_RPC') || HYPEREVM_RPC;
     const histPrices = pool && allBlocks.length > 0
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({

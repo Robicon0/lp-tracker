@@ -1,3 +1,5 @@
+import { rpcUrlFromEnv } from './rpcEnv';
+
 // Sprint SUI-RPC-RELIABILITY — shared Sui JSON-RPC client with automatic
 // endpoint failover, per-call timeout, and a global concurrency semaphore.
 //
@@ -37,7 +39,10 @@ const PUBLIC_FULLNODE = 'https://fullnode.mainnet.sui.io:443';
 // public fullnode is the automatic fallback. De-duplicated so we never retry the
 // same URL twice (e.g. if SUI_RPC_URL is unset or is itself the public node).
 const SUI_ENDPOINTS: string[] = (() => {
-  const list = [process.env.SUI_RPC_URL, PUBLIC_FULLNODE].filter((u): u is string => !!u);
+  // rpcUrlFromEnv: a malformed SUI_RPC_URL (e.g. bare API key) is treated as
+  // unset, so the public fullnode fallback carries the load instead of every
+  // primary attempt throwing on URL parse.
+  const list = [rpcUrlFromEnv('SUI_RPC_URL'), PUBLIC_FULLNODE].filter((u): u is string => !!u);
   return [...new Set(list)];
 })();
 
