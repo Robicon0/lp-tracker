@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import MobileNavMenu from "./MobileNavMenu";
 
 const NAV_LINKS = [
@@ -46,6 +47,31 @@ export default function TerminalNavbar() {
 
   const { address } = useAccount();
   const { solanaAddress, suiAddress } = useWalletAuth();
+  const { watchedWallets, scanAddress } = useWatchedWallets();
+
+  // Wallet chips show EVERY wallet the pages are computing over — connected,
+  // watched (Manage Wallets), or the pasted scan address — not just connected.
+  // Previously watched/scanned wallets rendered "no wallet" here even while the
+  // dashboard/analytics below were full of their positions.
+  const CHAIN_COLOR: Record<string, string> = { evm: C.cyan, solana: C.purple, sui: C.blue };
+  const CHAIN_LABEL: Record<string, string> = { evm: "EVM", solana: "SOL", sui: "SUI" };
+  type ChipEntry = { chain: string; addr: string; kind: "connected" | "watched" | "scan" };
+  const chips: ChipEntry[] = [];
+  if (scanAddress) {
+    // Scan mode overrides everything else app-wide; the bar mirrors that.
+    chips.push({ chain: scanAddress.chain, addr: scanAddress.address, kind: "scan" });
+  } else {
+    if (address) chips.push({ chain: "evm", addr: address, kind: "connected" });
+    if (solanaAddress) chips.push({ chain: "solana", addr: solanaAddress, kind: "connected" });
+    if (suiAddress) chips.push({ chain: "sui", addr: suiAddress, kind: "connected" });
+    for (const w of watchedWallets) {
+      const dupe = chips.some((c) => c.chain === w.chain && c.addr.toLowerCase() === w.address.toLowerCase());
+      if (!dupe) chips.push({ chain: w.chain, addr: w.address, kind: "watched" });
+    }
+  }
+  const MAX_CHIPS = 4;
+  const visibleChips = chips.slice(0, MAX_CHIPS);
+  const overflowCount = chips.length - visibleChips.length;
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/"
@@ -180,16 +206,23 @@ export default function TerminalNavbar() {
           borderRight: `1px solid ${C.border}`,
         }}
       >
-        {mounted && address && (
-          <Chip color={C.cyan} chain="EVM" addr={address} />
+        {mounted && visibleChips.map((c) => (
+          <Chip
+            key={`${c.chain}:${c.addr}`}
+            color={CHAIN_COLOR[c.chain] ?? C.text}
+            chain={c.kind === "scan" ? `${CHAIN_LABEL[c.chain] ?? c.chain}·SCAN` : (CHAIN_LABEL[c.chain] ?? c.chain)}
+            addr={c.addr}
+          />
+        ))}
+        {mounted && overflowCount > 0 && (
+          <span
+            title={chips.slice(MAX_CHIPS).map((c) => `${CHAIN_LABEL[c.chain] ?? c.chain} ${c.addr}`).join("\n")}
+            style={{ fontSize: 10, color: C.textMid, letterSpacing: "0.08em", padding: "5px 6px", border: `1px solid ${C.border}`, background: C.bg2 }}
+          >
+            +{overflowCount}
+          </span>
         )}
-        {mounted && solanaAddress && (
-          <Chip color={C.purple} chain="SOL" addr={solanaAddress} />
-        )}
-        {mounted && suiAddress && (
-          <Chip color={C.blue} chain="SUI" addr={suiAddress} />
-        )}
-        {mounted && !address && !solanaAddress && !suiAddress && (
+        {mounted && chips.length === 0 && (
           <span style={{ fontSize: 10, color: C.text, letterSpacing: "0.08em" }}>
             no wallet
           </span>
