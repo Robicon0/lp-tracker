@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useEffect, useState, useRef, type CSSProperties } from "react";
+import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TerminalNavbar from "../components/TerminalNavbar";
 import AnalyticsSidebar, { type AnalyticsSection } from "../components/AnalyticsSidebar";
@@ -17,7 +18,32 @@ import { useAccount } from "wagmi";
 // (@upstash/redis) into the client bundle.
 import type { AnalyticsSnapshot } from "../lib/analyticsSnapshot";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
-import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
+import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
+
+// ── Scan-mode listener (same pattern as the dashboard's) ─────────────────────
+// Applies /analytics?address=&chain= to scanAddress so a hard refresh or a
+// direct link keeps the pasted-wallet view alive on this page too.
+// useSearchParams() must live inside <Suspense>, so this tiny component
+// isolates it (renders nothing; just runs the sync effect).
+function AnalyticsScanModeListener() {
+  const searchParams = useSearchParams();
+  const { setScanAddress } = useWatchedWallets();
+  const lastSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const addr = searchParams?.get("address") ?? null;
+    const chainParam = searchParams?.get("chain") ?? null;
+    const sig = `${addr}|${chainParam}`;
+    if (lastSigRef.current === sig) return;
+    lastSigRef.current = sig;
+    if (addr && chainParam && (chainParam === "evm" || chainParam === "solana" || chainParam === "sui")) {
+      setScanAddress({ address: addr, chain: chainParam as WatchedWalletChain });
+    }
+    // NOTE: unlike the dashboard, ABSENT params do NOT clear an active
+    // scanAddress here — plain in-app navigation to /analytics (no params)
+    // must keep the scan the user started on the dashboard.
+  }, [searchParams, setScanAddress]);
+  return null;
+}
 import {
   XAxis,
   YAxis,
@@ -487,11 +513,33 @@ export default function Analytics() {
     });
   }, [rawWalletTokens, aavePrices]);
 
-  const { address } = useAccount();
-  const { solanaAddress, suiAddress } = useWalletAuth();
-  const { watchedWallets } = useWatchedWallets();
+  const { address: connectedEvmAddress } = useAccount();
+  const { solanaAddress: connectedSolanaAddress, suiAddress: connectedSuiAddress } = useWalletAuth();
+  const { watchedWallets: persistedWatchedWallets, scanAddress } = useWatchedWallets();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // SCAN MODE (paste-an-address) parity — wallet-security Rule 3: the paste
+  // flow must produce the SAME analytics as connecting/watching that address.
+  // PositionsContext / useWalletTokens / useLendingPositions already override
+  // to the scan address internally; this page previously built its own wallet
+  // lists from connected+watched ONLY, so a scanned wallet showed positions on
+  // the dashboard but an EMPTY analytics page (no Fee Income, no LP P&L, no
+  // closed-position scans). Mirror the exact override semantics here: while
+  // scanAddress is set, the effective identity is ONLY the scanned address on
+  // its declared chain.
+  const isScanMode = scanAddress !== null;
+  const address = isScanMode
+    ? (scanAddress!.chain === "evm" ? scanAddress!.address : undefined)
+    : connectedEvmAddress;
+  const solanaAddress = isScanMode
+    ? (scanAddress!.chain === "solana" ? scanAddress!.address : null)
+    : connectedSolanaAddress;
+  const suiAddress = isScanMode
+    ? (scanAddress!.chain === "sui" ? scanAddress!.address : null)
+    : connectedSuiAddress;
+  const watchedWallets = isScanMode ? [] : persistedWatchedWallets;
+
   const hasWallet = mounted && (!!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
 
   // ── AAVE lending positions ─────────────────────────────────────────────────
@@ -1226,6 +1274,7 @@ export default function Analytics() {
   if (mounted && !hasWallet) {
     return (
       <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, display: "flex", flexDirection: "column", paddingTop: 52 }}>
+        <Suspense fallback={null}><AnalyticsScanModeListener /></Suspense>
         <TerminalNavbar />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 40 }}>
           <div
@@ -1343,6 +1392,7 @@ export default function Analytics() {
         style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG }}
       />
 
+      <Suspense fallback={null}><AnalyticsScanModeListener /></Suspense>
       <TerminalNavbar />
 
       <div style={{ display: "flex", flex: 1, minHeight: "calc(100vh - 52px)" }}>
