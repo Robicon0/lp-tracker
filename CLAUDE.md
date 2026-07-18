@@ -72,10 +72,14 @@ Budget: ~750–1,190 fresh Solana wallets/month on the free 30M CU; paid tier on
 hundreds of NEW Solana wallets/day.
 
 **Carry-overs (not blockers):**
-- **⚠️ DEPLOY BLOCKER for closed-Solana in production: `ALCHEMY_SOLANA_RPC` must be added to
-  Vercel env vars** (Settings → Environment Variables — it currently exists only in
-  `.env.local`). The engine degrades gracefully without it (returns no closed positions,
-  never errors), so production silently shows NO Solana Capital G/L until the var is set.
+- **⚠️ PRODUCTION: `ALCHEMY_SOLANA_RPC` in Vercel is set to the BARE API KEY, not the full
+  URL** (found live 2026-07-18 via browser verification: `/api/solana-closed-positions`
+  500'd with `Failed to parse URL from 7SWf…`, so Solana closed Capital G/L was missing
+  from production totals, e.g. A1 showed −$10,369.40 without Orca's −$1,818.78). **Osho
+  must edit the value to `https://solana-mainnet.g.alchemy.com/v2/<key>`** (Settings →
+  Environment Variables). Since `7784ed2` a malformed value degrades gracefully (empty,
+  uncached, loud `[rpcEnv]` server log) instead of 500ing — but the feature stays OFF
+  until the value is fixed.
 - **Closed positions are counted everywhere but not yet shown as Closed rows** — Sui
   (Cetus/Bluefin/Momentum) AND Solana (Orca, Raydium) closed positions fold into Capital G/L +
   Fee Income but have no dashboard/Closed-tab rows (queue item "UI for closed rows").
@@ -176,6 +180,21 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`7784ed2`** — RPC env-var URL guard: NEW `app/lib/rpcEnv.ts` `rpcUrlFromEnv(name)` —
+  a URL-typed RPC env var that is MALFORMED (e.g. a bare API key pasted where the full
+  https URL belongs) now behaves exactly like UNSET, so the existing graceful-degrade
+  paths cover it instead of a fetch URL-parse throw → hard 500 that silently corrupts
+  Capital G/L totals. Wired at all three URL-typed sites: `ALCHEMY_SOLANA_RPC`
+  (solanaClosedPositions — the live incident), `SUI_RPC_URL` (suiRpc → public-fullnode
+  fallback carries the load), `HYPEREVM_ARCHIVE_RPC` (hyperswap/activity ×3 →
+  archive-unconfigured). One-time loud `[rpcEnv]` console.error, never leaks the raw
+  value. Key-typed vars (HELIUS_API_KEY) interpolated into hardcoded URLs can't URL-throw
+  and are unchanged. Verified: 9/9 guard cases incl. the exact incident string; live
+  engine repro returns empty + `complete=false` (uncacheable) without throwing; suiRpc
+  with malformed primary answers from the public fullnode; tsc + build clean. No cache
+  bumps. General pattern: ANY future URL-typed RPC env var must be read via
+  `rpcUrlFromEnv`, never `process.env.X` directly into `fetch`.
 
 - **`c6e31ee`** — Sprint SPOT-RESILIENCE-V2: **positions never silently vanish from LP P&L
   totals** — per-position last-known-good (LKG) + degrade funnel (NEW architecture Rule 11).
