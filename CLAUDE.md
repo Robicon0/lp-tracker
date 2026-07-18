@@ -181,6 +181,30 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`87db23d`** — Cetus V1 events + Tenderly throttle + honest Sui index fallback (Krishna
+  DEEP/SUI investigation). (1) **Cetus V1 `AddLiquidityEvent`/`RemoveLiquidityEvent`**
+  (original pkg `0x1eabed72…`, no V2 suffix, same fields, no `current_sqrt_price`) now
+  parsed by cetus/activity AND suiClosedPositions — pre-V2 deposits/withdrawals were
+  invisible → false "No deposit events found" → positions EXCLUDED from Capital G/L
+  (or WRONG Cap G/L on a missed V1 withdrawal). V2 txs emit only V2 events (verified
+  live) so no double count; package allowlist keeps Momentum's identical names out.
+  **Cache bumps: lp-pnl-events v28, analytics-activity v20, cetus-activity v5,
+  closed_pos_sui v2.** (2) **Tenderly 403**: the public Base gateway hard-throttles
+  concurrent getLogs per IP (403 on Vercel's shared IP; serial calls instant) —
+  `evmRpcPost` backoff-retries 403/429 (serial inside the semaphore slot),
+  TENDERLY_CONCURRENCY 8→2, optional keyed `TENDERLY_NODE_RPC` env (rpcUrlFromEnv),
+  throttle errors fall through to publicnode instead of the terminal throw→500.
+  (3) **`suiRpcIndexed()`**: object-filter queries (ChangedObject/InputObject) pinned to
+  the PRIMARY endpoint; the public fullnode answers a silent `{data:[]}` for indexes it
+  doesn't serve, so unavailability now THROWS `SuiIndexUnavailableError` ("I don't
+  know") instead of masquerading as "no results". Verified LIVE on defidesh.com
+  (browser): Krishna settled excluded=0 (was 4), Cap G/L −$6,110.45 (was −$4,317.77
+  with DEEP/SUI + 3 Aerodrome missing), fees +$3,166.33 (was $2,398.40); RAKA
+  regression-clean (deposited byte-identical $27,575.35; Cap G/L −$12,125.39 vs
+  −$12,432.75 = 2.5% closed-Sui rescan daily-price tolerance). NOTE: Alchemy's Sui
+  object-filter indexes are ~1-yr shallow (returned 3 of 5 txs for the DEEP/SUI
+  position) — ChangedObject is a weak net; FromAddress reached 2025-02 complete.
+
 - **`7784ed2`** — RPC env-var URL guard: NEW `app/lib/rpcEnv.ts` `rpcUrlFromEnv(name)` —
   a URL-typed RPC env var that is MALFORMED (e.g. a bare API key pasted where the full
   https URL belongs) now behaves exactly like UNSET, so the existing graceful-degrade
@@ -757,6 +781,11 @@ investigating.
   ordering)
 
 **Cache versions (verify against code before bumping):**
+- `lp-pnl-events-v28` / `analytics-activity-v20` / `cetus-activity-v5` /
+  `closed_pos_sui_v2` (all `87db23d` — Cetus V1 Add/RemoveLiquidityEvent now parsed;
+  pre-V2 deposits/withdrawals enter cached LP-P&L / Fee Income / closed-Sui
+  reconstructions, so all four flush. closed_pos_sui v2 also rebuilds bluefin/momentum
+  entries once — parsing unchanged there, shared version prefix, immutable re-scan.)
 - `lp-pnl-events-v27` (Sprint MOMENTUM — Momentum is now an ACTIVITY_PROTOCOL (open
   positions route to `/api/momentum/activity` instead of being surfaced as unsupported
   rejections) AND its closed positions fold into Capital G/L; both change cached LP-P&L
