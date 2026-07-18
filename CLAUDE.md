@@ -181,6 +181,20 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`75d7619`** — DeFiLlama historical `searchWidth=24h`: the "1 claim pending" that never
+  resolved (Krishna DEEP/SUI fee claim 2025-07-03) was a DeFiLlama SPARSE-SERIES gap —
+  its default nearest-point search is narrower than our documented ±24h acceptance
+  window, so `{coins:{}}` came back even though a same-day point existed 6.1 h later.
+  `?searchWidth=24h` lets DeFiLlama return that point; the existing `MAX_TS_DRIFT_SEC`
+  ±24h validation still gates it (Rule 1c unchanged, never spot). Platform-level: any
+  sparse-coverage token. No cache bumps (in-process negative cache clears on deploy;
+  misses were never Redis-persisted; client nulls are 5-min TTL). Verified LIVE: Krishna's
+  pending-claims note GONE post-deploy; DEEP@2025-07-03 = $0.153162
+  (`defillama_historical_used`). **NEW KNOWN LIMITATION discovered en route: CoinGecko
+  free tier now rejects `/history` >365 days old (error 10012)** — DeFiLlama is the ONLY
+  claim-date source for >1-year-old claims, so its coverage gaps become permanent
+  pendings as positions age (see Known limitations).
+
 - **`87db23d`** — Cetus V1 events + Tenderly throttle + honest Sui index fallback (Krishna
   DEEP/SUI investigation). (1) **Cetus V1 `AddLiquidityEvent`/`RemoveLiquidityEvent`**
   (original pkg `0x1eabed72…`, no V2 suffix, same fields, no `current_sqrt_price`) now
@@ -592,6 +606,18 @@ load path.
 ---
 
 ## Known limitations
+
+**CoinGecko free-tier historical horizon is a ROLLING 365 days (found 2026-07-19).**
+`/coins/{id}/history` returns error 10012 for dates >365 days old on the public plan.
+Consequences: (1) any claim older than 1 year that isn't already warm in the Upstash
+Redis historical cache can NEVER be CG-priced — DeFiLlama historical-by-contract is
+the only remaining claim-date source, so DeFiLlama coverage gaps become permanent
+pending claims as positions age (mitigated for sparse series by `75d7619`
+searchWidth=24h; a token DeFiLlama doesn't cover at all stays pending per Rule 1a);
+(2) the Redis historical cache's value grows over time — a warmed >1-year-old price
+is irreplaceable on free infra; treat broad flushes of `price:historical:*` as
+DATA LOSS, not just a slow rebuild. A paid CG key (~$129/mo) lifts the horizon;
+deferred (budget) — revisit if >1-year-old pending claims accumulate in production.
 
 **HyperEVM has no archival `eth_call`.** Chainstack returns -32002
 "Archive Debug Trace not available on plan." Public RPC at
