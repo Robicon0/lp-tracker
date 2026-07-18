@@ -181,6 +181,19 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`e85f794`** — Analytics honors paste-a-wallet SCAN mode (wallet-security Rule 3
+  parity): the paste flow showed positions on the dashboard but an EMPTY analytics page
+  (the page built its wallet lists from connected+watched only and never read
+  `scanAddress`, so zero /api calls fired). Fixed by mirroring PositionsContext's exact
+  scan-override semantics in `app/analytics/page.tsx` (scan set ⇒ effective identity =
+  ONLY the scanned address on its chain) + a Suspense-wrapped `AnalyticsScanModeListener`
+  so `/analytics?address=&chain=` survives hard refresh (absent params do NOT clear an
+  active scan — in-app nav keeps it). Verified LIVE on defidesh.com with a clean profile
+  and ZERO watched wallets: `/analytics?address=0x15ace…2eff&chain=sui` renders full
+  analytics (Cetus USDC/SUI $948.28, Sui closed Cap G/L −$2,147.75, lending, Earning
+  Flows); pre-fix the same URL rendered the $0 empty state. Scan scope stays ONE
+  address on ONE chain by design. No cache bumps.
+
 - **`75d7619`** — DeFiLlama historical `searchWidth=24h`: the "1 claim pending" that never
   resolved (Krishna DEEP/SUI fee claim 2025-07-03) was a DeFiLlama SPARSE-SERIES gap —
   its default nearest-point search is narrower than our documented ±24h acceptance
