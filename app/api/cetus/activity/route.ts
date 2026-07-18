@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { suiRpc } from '../../../lib/suiRpc';
+import { suiRpc, suiRpcIndexed, SuiIndexUnavailableError } from '../../../lib/suiRpc';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -175,22 +175,29 @@ async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
 // degrades the position to STALE (last-known-good) instead of asserting the
 // position has no deposits. An incomplete scan must never masquerade as "no
 // on-chain history".
-async function fetchDigestsByFilter(filter: Record<string, unknown>): Promise<string[]> {
+async function fetchDigestsByFilter(filter: Record<string, unknown>, indexed = false): Promise<string[]> {
   const digests: string[] = [];
   let cursor: string | null = null;
 
+  // indexed=true routes through suiRpcIndexed (PRIMARY endpoint only): object
+  // filters like ChangedObject aren't served by the public fallback — it
+  // answers a silent `{ data: [] }` for them (verified live 2026-07-18), which
+  // an ordinary failover would present as an authoritative "no results".
+  // suiRpcIndexed THROWS SuiIndexUnavailableError instead, so the caller can
+  // say "I don't know" rather than "nothing found". FromAddress (indexed=false)
+  // is a standard index served correctly by both endpoints — failover stays.
+  const call = indexed
+    ? (c: string | null) => suiRpcIndexed('suix_queryTransactionBlocks', [{ filter }, c, 50, true])
+    : (c: string | null) => suiRpc('suix_queryTransactionBlocks', [{ filter }, c, 50, true]);
+
   do {
-    let result = await suiRpc('suix_queryTransactionBlocks', [
-      { filter }, cursor, 50, true, // descending (newest first)
-    ]) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
+    let result = await call(cursor) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
 
     if (!result) {
       // One retry before failing loud — a single transient page failure
       // shouldn't tank the whole scan, but a genuinely-unavailable page must
       // NOT silently truncate.
-      result = await suiRpc('suix_queryTransactionBlocks', [
-        { filter }, cursor, 50, true,
-      ]) as typeof result;
+      result = await call(cursor) as typeof result;
     }
     if (!result) {
       throw new Error(`cetus/activity: queryTransactionBlocks page failed (filter=${JSON.stringify(filter)}) — refusing to return a partial scan`);
@@ -222,9 +229,12 @@ async function fetchScanDigests(account: string, positionId: string | null): Pro
   // additive safety net for router-opened / received positions.
   let objDigests: string[] = [];
   try {
-    objDigests = await fetchDigestsByFilter({ ChangedObject: positionId });
+    objDigests = await fetchDigestsByFilter({ ChangedObject: positionId }, true);
   } catch (err) {
-    console.warn('[cetus/activity] ChangedObject discovery failed (non-fatal):', String(err));
+    // SuiIndexUnavailableError = the indexed primary couldn't answer — the
+    // safety net is OFF for this request ("I don't know"), never "no results".
+    const tag = err instanceof SuiIndexUnavailableError ? 'index-unavailable' : 'failed';
+    console.warn(`[cetus/activity] ChangedObject discovery ${tag} (non-fatal, FromAddress scan still authoritative for self-signed txs):`, String(err));
   }
   return [...new Set([...fromDigests, ...objDigests])];
 }
@@ -377,13 +387,22 @@ async function GET_impl(request: Request) {
           if (!everOwnedPositionIds.has(evPosId)) continue;
         }
 
-        if (evName === 'AddLiquidityV2Event') {
+        // V1 note (Krishna DEEP/SUI investigation, 2026-07-18): liquidity added or
+        // removed via the ORIGINAL Cetus CLMM entry points emits
+        // 0x1eabed72…::pool::AddLiquidityEvent / RemoveLiquidityEvent (no V2
+        // suffix) with the SAME amount_a/amount_b/position fields. A V2 tx emits
+        // ONLY the V2 event (verified live: 2rpXfLgv…), so matching both names
+        // cannot double count; the CETUS_PKGS gate above keeps Momentum's
+        // identically-named events out. Without the V1 names, a pre-V2 deposit is
+        // invisible → false "No deposit events found on-chain" → position
+        // excluded from Capital G/L.
+        if (evName === 'AddLiquidityV2Event' || evName === 'AddLiquidityEvent') {
           const a0 = BigInt((pj.amount_a as string) ?? '0');
           const a1 = BigInt((pj.amount_b as string) ?? '0');
           deposited0 += a0; deposited1 += a1;
           rawEvents.push({ type: 'deposit', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
 
-        } else if (evName === 'RemoveLiquidityV2Event') {
+        } else if (evName === 'RemoveLiquidityV2Event' || evName === 'RemoveLiquidityEvent') {
           const a0 = BigInt((pj.amount_a as string) ?? '0');
           const a1 = BigInt((pj.amount_b as string) ?? '0');
           withdrawn0 += a0; withdrawn1 += a1;

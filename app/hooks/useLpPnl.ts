@@ -480,7 +480,11 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // /api/momentum/activity instead of being surfaced as unsupported rejections)
 // AND its closed positions fold into Capital G/L via /api/sui-closed-positions.
 // Both change cached LP-P&L output, so flush v26 so every user re-resolves.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v27-";
+// v28 (Sprint CETUS-V1-EVENTS): the Cetus activity route now parses the ORIGINAL
+// V1 package's AddLiquidityEvent / RemoveLiquidityEvent (pre-V2 deposits and
+// withdrawals were invisible → false no_deposits / wrong Capital G/L). Cached
+// LP-P&L outputs for affected positions change, so flush v27.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v28-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

@@ -127,5 +127,42 @@ export async function suiRpc(method: string, params: unknown[], opts: SuiRpcOpti
   });
 }
 
+/**
+ * INDEX-DEPENDENT Sui query (e.g. suix_queryTransactionBlocks with an object
+ * filter like ChangedObject / InputObject). These filters are NOT served by
+ * every endpoint: the public fullnode returns a silent `200 { data: [] }` for
+ * object filters it doesn't index (verified live 2026-07-18 — a position with 5
+ * on-chain txs returned 0), so an ordinary failover would convert "index
+ * unavailable" into an authoritative-looking "no results". This variant runs
+ * against the PRIMARY endpoint ONLY (SUI_RPC_URL / Alchemy) and THROWS
+ * `SuiIndexUnavailableError` when the primary is unset or unreachable — the
+ * caller must treat that as "I don't know", never as "nothing found".
+ * Same pacing semaphore and per-call timeout as suiRpc.
+ */
+export class SuiIndexUnavailableError extends Error {
+  constructor(reason: string) { super(`sui-index-unavailable: ${reason}`); this.name = 'SuiIndexUnavailableError'; }
+}
+
+export async function suiRpcIndexed(method: string, params: unknown[], opts: SuiRpcOptions = {}): Promise<unknown> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const primary = SUI_ENDPOINTS[0];
+  // If SUI_RPC_URL is unset/malformed the only endpoint is the public fullnode,
+  // which does not serve object-filter indexes — that's unavailability, not data.
+  if (!primary || primary === PUBLIC_FULLNODE) {
+    throw new SuiIndexUnavailableError('no indexed primary endpoint configured (SUI_RPC_URL)');
+  }
+  return acquire(async () => {
+    // One retry on transport failure (429/5xx/timeout), then give up LOUDLY —
+    // never silently fall to an endpoint that would answer [] for everything.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const outcome = await callEndpoint(primary, method, params, timeoutMs);
+      if (outcome.ok) return outcome.result;
+      if (outcome.rpcError) throw new SuiIndexUnavailableError('primary returned RPC error');
+      if (attempt === 0) await sleep(outcome.status === 429 ? 500 : 150);
+    }
+    throw new SuiIndexUnavailableError('primary endpoint unreachable');
+  });
+}
+
 // Exposed for diagnostics / tests (never a per-token branch).
 export function _suiEndpointCount(): number { return SUI_ENDPOINTS.length; }

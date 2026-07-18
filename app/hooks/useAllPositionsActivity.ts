@@ -128,7 +128,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // analytics Fee Income, and its open positions get per-position activity entries
 // that didn't exist before. Flush v18 so Fee Income re-resolves with Momentum
 // included (parity with useLpPnl's v26 → v27).
-function cacheKey(id: string) { return `analytics-activity-v19-${id}`; }
+// v20 (Sprint CETUS-V1-EVENTS): Cetus V1 Add/RemoveLiquidityEvent now parsed —
+// re-resolve in lockstep with lp-pnl-events v27 → v28.
+function cacheKey(id: string) { return `analytics-activity-v20-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

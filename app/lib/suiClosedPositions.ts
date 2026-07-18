@@ -321,8 +321,15 @@ export function parseCloseEvent(
     //   (amount_a, amount_b, current_sqrt_price). Fees: 0x1eabed72… CollectFeeEvent
     //   (amount_a, amount_b; NO sqrt price). CollectRewardV2Event is NOT a fee
     //   claim and is excluded here (rewards are a separate, deferred path).
-    if (name === 'AddLiquidityV2Event') kind = 'deposit';
-    else if (name === 'RemoveLiquidityV2Event') kind = 'withdrawal';
+    // V1 names (no V2 suffix) come from the ORIGINAL CLMM package 0x1eabed72…
+    // (pre-V2 entry points, e.g. open_position_with_liquidity_by_fix_coin) with
+    // the same amount_a/amount_b/position fields but NO current_sqrt_price —
+    // sqrt stays null and the deposit/withdrawal rides the historical-sides
+    // fallback (Rule 1a clean, same as Momentum). A V2 tx emits ONLY the V2
+    // event (verified live), so matching both cannot double count;
+    // eventPackageMatches keeps Momentum's identical names out.
+    if (name === 'AddLiquidityV2Event' || name === 'AddLiquidityEvent') kind = 'deposit';
+    else if (name === 'RemoveLiquidityV2Event' || name === 'RemoveLiquidityEvent') kind = 'withdrawal';
     else if (name === 'CollectFeeEvent') kind = 'fee_claim';
     else return null;
     aRaw = bigintOrNull(pj.amount_a);
@@ -595,7 +602,11 @@ export async function getClosedPositionsForWallet(
 // RPC failure during the scan must not be frozen in as "no closed positions").
 const CLOSED_POS_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 // Cache VERSION key — bump this suffix to invalidate on a valuation-logic change.
-const CLOSED_POS_CACHE_VERSION = 'closed_pos_sui_v1';
+// v2 (Sprint CETUS-V1-EVENTS): Cetus V1 Add/RemoveLiquidityEvent now parsed, so a
+// cached reconstruction that missed a V1 deposit/withdrawal must re-scan. Bluefin
+// and Momentum parsing is unchanged, but the version prefix is shared — their
+// entries rebuild once from the immutable ledger (30 d cache, cheap re-scan).
+const CLOSED_POS_CACHE_VERSION = 'closed_pos_sui_v2';
 
 const _redisUrl = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _redisToken = process.env.PRICE_CACHE_KV_REST_API_TOKEN;

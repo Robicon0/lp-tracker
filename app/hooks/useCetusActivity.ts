@@ -32,7 +32,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // return the FIX-C cg-spot fallback on a CoinGecko-historical miss — closing a
 // Rule 1a leak. Flush so any spot-contaminated cached fee value re-resolves.
 function cacheKey(positionId: string) {
-  return `cetus-activity-v4-${positionId}`;
+  // v5 (Sprint CETUS-V1-EVENTS): V1 AddLiquidityEvent / RemoveLiquidityEvent now
+  // parsed — pre-V2 deposits/withdrawals enter the event stream; flush v4.
+  return `cetus-activity-v5-${positionId}`;
 }
 
 function readCache(positionId: string): CetusActivityData | null {

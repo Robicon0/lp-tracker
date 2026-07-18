@@ -74,28 +74,52 @@ export interface EvmRpcOptions { timeoutMs?: number }
 export async function evmRpcPost(url: string, body: object, opts: EvmRpcOptions = {}): Promise<EvmRpcEnvelope> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return acquire(async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        // HTTP-level failure (429 / 5xx / 4xx) — surface as an RPC-shaped error so
-        // the caller fails over instead of trying to parse a non-JSON body.
-        return { error: { code: -32000, message: `evm-rpc-http-${res.status}` } };
+    // Throttle backoff (2026-07-18 Krishna/RAKA investigation): the public
+    // Tenderly gateway hard-throttles CONCURRENT getLogs per IP (403 from
+    // Vercel's shared IP, 429/drops elsewhere) but serves serial calls
+    // instantly and recovers immediately. So an HTTP 403/429 is retried here
+    // (up to 2 backoffs) INSIDE the semaphore slot — the retry is serial by
+    // construction, which is exactly the traffic shape the gateway accepts.
+    // All other failures keep the original single-attempt fail-fast contract.
+    const delays = [1_500, 4_000];
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let out: EvmRpcEnvelope;
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          // HTTP-level failure (429 / 5xx / 4xx) — surface as an RPC-shaped error so
+          // the caller fails over instead of trying to parse a non-JSON body.
+          out = { error: { code: -32000, message: `evm-rpc-http-${res.status}` } };
+        } else {
+          out = (await res.json()) as EvmRpcEnvelope;
+        }
+      } catch (err) {
+        const isAbort = err instanceof Error && err.name === 'AbortError';
+        out = { error: { code: -32000, message: isAbort ? 'evm-rpc-timeout' : 'evm-rpc-network-error' } };
+      } finally {
+        clearTimeout(timer);
       }
-      return (await res.json()) as EvmRpcEnvelope;
-    } catch (err) {
-      const isAbort = err instanceof Error && err.name === 'AbortError';
-      return { error: { code: -32000, message: isAbort ? 'evm-rpc-timeout' : 'evm-rpc-network-error' } };
-    } finally {
-      clearTimeout(timer);
+      const msg = out.error?.message ?? '';
+      const throttled = msg === 'evm-rpc-http-403' || msg === 'evm-rpc-http-429';
+      if (!throttled || attempt >= delays.length) return out;
+      const jitter = Math.floor(Math.random() * 500);
+      await new Promise((r) => setTimeout(r, delays[attempt] + jitter));
     }
   });
+}
+
+// True when an evmRpcPost error message is an HTTP-level throttle (per-IP rate
+// limit) — transient by nature; callers should fall through to another tier
+// rather than treating it as a terminal route failure.
+export function isEvmRpcThrottle(message: string | undefined): boolean {
+  return message === 'evm-rpc-http-403' || message === 'evm-rpc-http-429';
 }
 
 // Exposed for diagnostics / tests.

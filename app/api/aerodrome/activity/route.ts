@@ -8,13 +8,19 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
-import { evmRpcPost } from '../../../lib/evmRpc';
+import { evmRpcPost, isEvmRpcThrottle } from '../../../lib/evmRpc';
+import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy used only for eth_getBlockByNumber / eth_blockNumber — free tier supports this
 const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-// Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit, fast
-const TENDERLY_RPC = 'https://base.gateway.tenderly.co';
+// Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit, fast.
+// The PUBLIC gateway hard-throttles concurrent getLogs per IP (403 on Vercel's
+// shared IP — 2026-07-18 live repro). Set TENDERLY_NODE_RPC (keyed Tenderly Node
+// URL, free tier) in env for a private quota; the public gateway stays as the
+// zero-config fallback. Read via rpcUrlFromEnv so a malformed value (bare key)
+// degrades to the public gateway instead of throwing on URL parse.
+const TENDERLY_RPC = rpcUrlFromEnv('TENDERLY_NODE_RPC') || 'https://base.gateway.tenderly.co';
 // LlamaRPC — secondary: now enforces 30k block range limit (code -32012)
 const LLAMA_RPC = 'https://base.llamarpc.com';
 // publicnode — tertiary fallback with chunked scanning; ~8s/request for historical blocks
@@ -56,7 +62,13 @@ const PUBNODE_CONCURRENCY =  5;
 // timed via evmRpcPost, so one slow chunk can't block the whole scan). This is
 // the reliable path now that Llama (521) and publicnode (403) have rotted.
 const TENDERLY_CHUNK       = 500_000;
-const TENDERLY_CONCURRENCY = 8; // actual concurrency is capped by evmRpc's global semaphore (6)
+// 2 (was 8): the public Tenderly gateway tolerates only ~1-2 concurrent getLogs
+// per IP before 403/429-throttling (2026-07-18 live measurement: serial calls
+// 0.3-0.7 s each, 15-concurrent burst = 1×429 + 14 dropped). evmRpcPost now
+// backoff-retries throttle responses, so 2 keeps chunks fast AND under the
+// limit. Rule 6: conservative parameters accommodate the most-constrained
+// endpoint. (Still additionally capped by evmRpc's global semaphore of 6.)
+const TENDERLY_CONCURRENCY = 2;
 
 // Known anchor point: tokenId 50,093,212 was minted at Base block 41,878,002 (from prod data)
 // Used to estimate the start block for a given tokenId so we scan far fewer chunks
@@ -238,7 +250,12 @@ async function fetchLogs(tokenIdHex: string, tokenId: number): Promise<RawLog[]>
   console.warn('[aerodrome/activity] LlamaRPC full-range error:', llamaCode, llamaMsg);
 
   const isRangeErr    = llamaCode === -32012 || llamaMsg.includes('ExceededMaxAllowed') || llamaMsg.includes('range');
-  const isUnreachable = llamaCode === -32603 || llamaMsg.toLowerCase().includes('unreachable');
+  // Per-IP throttles (403/429) and HTTP-level failures are transient transport
+  // states, not authoritative "no data" — fall through to the remaining tiers
+  // instead of the terminal throw (which surfaced as a route 500 → position
+  // degraded client-side even though publicnode was never tried).
+  const isUnreachable = llamaCode === -32603 || llamaMsg.toLowerCase().includes('unreachable')
+    || isEvmRpcThrottle(llamaMsg) || llamaMsg.startsWith('evm-rpc-http-') || llamaMsg === 'evm-rpc-timeout' || llamaMsg === 'evm-rpc-network-error';
 
   // Tier 3: LlamaRPC chunked
   if (isRangeErr) {
