@@ -338,6 +338,51 @@ within a few seconds, and never an endless spinner?" If not, it violates Rule 10
 
 ---
 
+## Rule 11: Positions never silently disappear from totals — degrade, don't drop
+
+A per-position load failure must NEVER silently delete that position's
+contribution from LP P&L / Fee Income / Capital G/L aggregates. A transient
+RPC hang, rate limit, or partial scan is a transport problem — the user's
+money did not change; the totals must not pretend it did.
+
+Established in Sprint SPOT-RESILIENCE-V2 (`c6e31ee`), where a hung Base
+`eth_getLogs` (no timeout on a bare fetch) surfaced as "RPC timeout after 3
+attempts" and dropped a $9,244.85 Aerodrome position from every total, and a
+partial Cetus discovery scan returned a false `no_deposits`.
+
+### The degrade funnel (useLpPnl `degradeOnFailure`)
+Every per-position failure routes through ONE funnel, in order:
+
+1. **STALE** — a per-position last-known-good cache
+   (`lp-pnl-lkg-v1-{positionId}`, written on every successful compute) serves
+   the last verified `PositionPnLData`; the position stays IN totals with its
+   live current value refreshed, marked stale in the UI (subtle grey
+   "showing last-known values … included in totals" — never a red alarm).
+2. **ESTIMATED** — no LKG yet: a value-proxy estimate (all chains) keeps the
+   position represented rather than vanishing.
+3. **EXCLUDED** — ONLY a genuinely never-loaded position with no value at all.
+
+### The rules in practice
+- Every successful per-position compute WRITES the LKG (the cache is fed by
+  the success path, so coverage is automatic after one clean load).
+- Degrade paths are FAILURE-ONLY: a clean compute must be byte-identical to
+  the pre-LKG pipeline (verify this in B7 for any change touching the funnel).
+- Server-shared snapshots (analytics snapshot v2 `perPosition`) may SEED the
+  LKG for a cold cross-device load, but snapshot writes are gated on a
+  fully-live settle — never persist a degraded state as ground truth.
+- Every chain's RPC transport must make failure FAST and recoverable
+  (invariant (l): shared client, per-call timeout, pacing, fallback —
+  `suiRpc.ts` for Sui, `evmRpc.ts` for EVM) so the funnel receives a quick
+  clean failure, not a 150 s hang.
+
+### Test
+Before shipping any change to the per-position load path, ask: "If this
+position's fetch fails transiently on the next load, does its value still
+appear in the totals (stale or estimated), with an honest indicator?" If a
+transient failure zeroes a total, it violates Rule 11.
+
+---
+
 ## Decision tree: "Is this fix platform-level?"
 
 Ask in order:

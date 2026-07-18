@@ -156,20 +156,13 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
    with correct context, so the single-representative-pool risk is mitigated — but resolving
    each Collect event's token0/token1 from its pool on-chain would remove the last residual
    of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
-7. **Sprint SPOT-RESILIENCE-V2 (optional, non-blocking)** — the fuller version of the spot
-   fix: `null`/"pending" propagation from `fetchCachedCoinGeckoPrices` through the position
-   type + `useLpPnl` + `positionPnl` + a distinct softer UI banner ("Price refreshing…"), plus
-   per-tier staleness caps (Tier B 10-min LKG / Tier C pending-not-LKG). Sprint SPOT-RESILIENCE
-   `92e779a` already resolves the bogus banner via LKG; V2 is a larger, higher-risk change —
-   **ship ONLY if a user-visible need emerges** (e.g. a genuinely-dead token showing a stale
-   price is judged confusing). Not currently planned.
-8. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
+7. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
    SUI-HISTORICAL-REDIS `776fcaa` the Sui wallet-scope routes drop from ~111 s to ~18–20 s; the
    residual floor is the **~17 s public-Sui-RPC `queryTransactionBlocks` + `multiGet` scan** (240
    digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
    cross-instance (immutable ledger) or use a faster RPC. **Address only if <10 s becomes a UX
    need** — the Fee-Income regression is already resolved at ~18–20 s.
-9. **Resumable/background closed-Solana scan (optional, build ONLY if it surfaces)** — Sprint
+8. **Resumable/background closed-Solana scan (optional, build ONLY if it surfaces)** — Sprint
    LPPNL-PERF `535453e` proved a 2,544-tx heavy wallet's isolated single scan completes in
    ~217 s, under the `maxDuration=300` budget, so no resumability was needed. A wallet heavier
    than **~3,000–3,500 txs** could still exceed 300 s single-scan on the free Alchemy tier.
@@ -184,6 +177,31 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`c6e31ee`** — Sprint SPOT-RESILIENCE-V2: **positions never silently vanish from LP P&L
+  totals** — per-position last-known-good (LKG) + degrade funnel (NEW architecture Rule 11).
+  Previously a transient per-position load failure DELETED that position's contribution from
+  every aggregate and raised a red "Couldn't load N positions" banner. **Five parts, all
+  failure-path-only** (clean compute byte-identical to pre-sprint): (1) every successful
+  compute writes `PositionPnLData` to localStorage `lp-pnl-lkg-v1-{posId}`; a new
+  `degradeOnFailure()` funnel routes EVERY failure to **STALE** (LKG hit — kept in totals,
+  live current value refreshed) → **ESTIMATED** (value-proxy, now all chains) → **EXCLUDED**
+  (only genuinely never-loaded with no value). (2) **Bug A fix** — NEW `app/lib/evmRpc.ts`
+  (per-call 12 s timeout + concurrency semaphore, EVM analogue of `suiRpc.ts`, invariant (l));
+  the Aerodrome route falls a hung full-range Tenderly `eth_getLogs` into a paced chunked
+  scan (live repro: `evm-rpc-timeout` → 13 chunks → 5 logs in 27.6 s; previously dropped
+  $9,244.85 WETH/USDC). (3) **Bug B fix** — Cetus discovery fails LOUD on a partial scan (no
+  false `no_deposits`) and unions `FromAddress` with `ChangedObject: positionId` so
+  router-opened/received deposits are found (live A2 USDC/SUI deposit $24,909.69 recovered).
+  (4) Red banner deleted → subtle grey "showing last-known values … included in totals" note.
+  (5) **Snapshot v2** — `app/lib/analyticsSnapshot.ts` + `/api/analytics-snapshot` carry
+  `perPosition` so a cold cross-device load seeds the LKG; snapshot write gated on a
+  fully-live settle. Verified: tsc + build clean; degradation canary STALE byte-identical to
+  live compute (per-position fields + aggregate totals); snapshot POST→GET byte-identical
+  with `perPosition` preserved; A1/A2 live success paths unchanged. **No cache bumps**
+  (`lp-pnl-lkg-v1` is a NEW key; degrade paths fire only on failure). Two follow-up eyeballs:
+  the DEEP/SUI-specific rescue verified structurally only (Account 3 wallet not in the repo
+  verification set — LKG covers it after one clean load), and the visual STALE indicator
+  needs a pixel eyeball on the deploy.
 - **`8d82287`** — Sprint SUI-RPC-RELIABILITY: shared paced+failover Sui RPC client — fixes
   the recurring production failure where **2–3 Sui positions per load (USDC/SUI, DEEP/SUI on
   Cetus) failed with "RPC timeout after 3 attempts" and were EXCLUDED from LP P&L totals**,
@@ -327,43 +345,10 @@ shorthand.
   byte-identical local vs prod. tsc + build clean. **No cache bumps** (fees byte-identical;
   rewards additive). **B3 (Solana pending rewards) + B4 (EVM gauge emissions) → Sprint
   POSITION-DETAIL-2.** Full B7 report in `reports/position-detail-phase-b-report.md`.
-- **`f4b58ac`** — Sprint PERFORMANCE: market_chart batch-fill + patient fetch + progressive
-  rendering. Fixes the **>2-minute load on Dashboard AND Analytics** (both accounts). Phase A
-  waterfall found three stacked causes; all three fixed:
-  **(1) Batch-fill SUI historical dailies** — every CG `/coins/{id}/history` call shares ONE
-  concurrency-1 queue with a 1100 ms gap; Sui routes need ~55–70 SUI dates and under page-load
-  burst CG 429s kept the Redis tier from warming, so every load re-paid a 60–150 s serial crawl
-  (Sui wallet-scope routes measured 168→>179 s; the Cetus PER-POSITION route >179 s was the
-  dashboard killer). NEW `fetchDailyClosesRange(cgId, from, to)` in `cgPriceHistory.ts`: ONE
-  `market_chart/range` call (span padded ≥92 d so CG returns DAILY 00:00 UTC points,
-  **byte-identical to `/history` — verified 0.0000% on 11 dates**) fills every missing date;
-  `suiPriceHistory.ts` prewarm is now tiered: in-process → parallel Redis reads → >5 missing =
-  batch call → write all needed dates to the same `price:historical:sui:{YYYYMMDD}` keys →
-  residual per-date fallback unchanged. **This is the standard pattern for any future
-  historical-price backfill need** (generic, keyed by cgId). Rule 1c: same CG daily source,
-  batched — DeFiLlama stays fallback; never spot.
-  **(2) Patient fetch, no timeout-retry storms** (`useLpPnl.ts`) — the 60/60/90 s
-  abort-and-retry pattern spawned up to 3 duplicate server executions per slow position
-  (aborting a fetch does NOT stop the lambda) and burned ~213 s before marking a healthy
-  position errored. Now ONE 150 s attempt; at most one retry, ONLY on network error / HTTP 5xx
-  — **never on timeout**; the position stays "still loading", not errored.
-  **(3) Progressive rendering** — `PositionsContext` now runs one React Query per (source,
-  address) (`useQueries`) instead of a single `Promise.all` that blanked the page until the
-  slowest route (Aerodrome ~35 s) though nine routes finish ≤4 s; rows render as each protocol
-  resolves with a subtle fixed-height "still scanning: X" chip on the dashboard.
-  `useWalletLevelFees` is progressive on first load / atomic-swap on refreshes (totals never
-  dip); `useAllPositionsActivity` merges per-fetch. **Required for correctness: in-flight dedup**
-  (by position id in useAllPositionsActivity, by URL in useWalletLevelFees) so per-wave effect
-  re-runs attach to existing fetches instead of re-firing duplicates — this is the standard
-  pattern for any hook consuming the streaming positions array.
-  Verified (B7, local prod-mode server, real env): fee targets matched (A1 Bluefin $1,817.94 /
-  Cetus $1,627.17 / Momentum $370.32; A2 $2,392.51 / $3,270.98 / $0), 0 dropped, 0 pending;
-  Capital G/L byte-consistent (A1 Sui −$7,099.16 = 2.2b + MOMENTUM exactly; A2 −$13,578.28
-  byte-identical to 2.2b). Timing: **Sui wallet-scope 111–179 s → 9–24 s** (scan-bound);
-  **Cetus per-position >179 s → 10.7 s**; warm route 12 ms; **first meaningful render ~35 s →
-  ~1–4 s**. No cache bumps (cached contents byte-identical). SPOT-RESILIENCE + closed-position
-  engine untouched. **#4 aerodrome positions route (~30 s, now a non-blocking straggler behind
-  the chip), #5 activity output caching, #6 Redis route cache → Sprint PERFORMANCE-2.**
+- _(Sprint PERFORMANCE `f4b58ac` — market_chart batch-fill (`fetchDailyClosesRange`) +
+  patient fetch + progressive rendering; >2-min load → first meaningful render ~1–4 s, Sui
+  routes 9–24 s; baselines now a platform requirement (see Methodology); #4–#6 →
+  Sprint PERFORMANCE-2 — rolled off this list; see git history.)_
 - _(Sprint SUI-HISTORICAL-REDIS `776fcaa` — cross-instance Redis tier for SUI historical
   prices; fixes the post-deploy regression where the 3 Sui protocols vanished from the
   analytics Fee Income breakdown (cold-instance ~63s serial SUI-price crawl); Sui
