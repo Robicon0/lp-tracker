@@ -8,6 +8,7 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import { evmRpcPost } from '../../../lib/evmRpc';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy used only for eth_getBlockByNumber / eth_blockNumber — free tier supports this
@@ -49,6 +50,13 @@ const PUBNODE_CHUNK = 49_000;
 // Concurrency limits per RPC — publicnode rate-limits aggressively at high concurrency
 const LLAMA_CONCURRENCY   = 10;
 const PUBNODE_CONCURRENCY =  5;
+// Sprint SPOT-RESILIENCE-V2: Tenderly has no documented block-range limit and
+// serves single-tokenId chunks in 0.3–0.7 s, so a hung full-range call falls
+// into a LARGE-chunk paced Tenderly scan (each call is small + independently
+// timed via evmRpcPost, so one slow chunk can't block the whole scan). This is
+// the reliable path now that Llama (521) and publicnode (403) have rotted.
+const TENDERLY_CHUNK       = 500_000;
+const TENDERLY_CONCURRENCY = 8; // actual concurrency is capped by evmRpc's global semaphore (6)
 
 // Known anchor point: tokenId 50,093,212 was minted at Base block 41,878,002 (from prod data)
 // Used to estimate the start block for a given tokenId so we scan far fewer chunks
@@ -111,13 +119,13 @@ interface ActivityResponse {
   totalFees1: number;
 }
 
+// Sprint SPOT-RESILIENCE-V2: every EVM RPC call now goes through the shared
+// paced + per-call-timed transport (app/lib/evmRpc.ts). A hung endpoint (the
+// reproduced Tenderly failure) aborts at 12 s and surfaces as an `{ error }`
+// envelope — identical shape to a normal RPC error — so the tier ladder in
+// fetchLogs fails over instead of blocking until the client's 150 s abort.
 async function rpcPost(url: string, body: object): Promise<unknown> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  return evmRpcPost(url, body);
 }
 
 // Scan eth_getLogs in parallel chunks with a configurable concurrency limit.
@@ -192,7 +200,8 @@ async function fetchLogs(tokenIdHex: string, tokenId: number): Promise<RawLog[]>
     toBlock: 'latest' as const,
   };
 
-  // Tier 1: Tenderly (full-range, no limits, fast)
+  // Tier 1: Tenderly (full-range, no limits, fast) — now 12 s-timed via
+  // evmRpcPost so a hang aborts fast into the chunked fallback below.
   const tenderlyAttempt = await rpcPost(TENDERLY_RPC, {
     jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
   }) as { result?: RawLog[]; error?: { message: string; code?: number } };
@@ -200,7 +209,20 @@ async function fetchLogs(tokenIdHex: string, tokenId: number): Promise<RawLog[]>
   if (!tenderlyAttempt.error) {
     return tenderlyAttempt.result ?? [];
   }
-  console.warn('[aerodrome/activity] Tenderly error:', (tenderlyAttempt.error as unknown as {code?:number}).code, tenderlyAttempt.error.message);
+  console.warn('[aerodrome/activity] Tenderly full-range error:', (tenderlyAttempt.error as unknown as {code?:number}).code, tenderlyAttempt.error.message);
+
+  // Tier 1b (Sprint SPOT-RESILIENCE-V2): Tenderly CHUNKED. The full-range call
+  // above hangs under concurrent load, but Tenderly serves small chunks in
+  // 0.3–0.7 s and each chunk is independently 12 s-timed + paced (evmRpcPost),
+  // so one slow chunk can't block the scan. This is the reliable primary path
+  // now that Llama (521) and publicnode (403) are dead; those remain below as a
+  // last-ditch and simply fail fast behind the timeout if still down.
+  try {
+    const chunked = await fetchLogsChunked(tokenIdHex, startBlock, currentBlock, TENDERLY_RPC, TENDERLY_CHUNK, TENDERLY_CONCURRENCY);
+    return chunked;
+  } catch (tenderlyChunkErr) {
+    console.warn('[aerodrome/activity] Tenderly chunked also failing, trying legacy fallbacks:', String(tenderlyChunkErr));
+  }
 
   // Tier 2: LlamaRPC full range
   const llamaAttempt = await rpcPost(LLAMA_RPC, {

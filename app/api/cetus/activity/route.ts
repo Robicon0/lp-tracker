@@ -163,25 +163,70 @@ async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
   return ids;
 }
 
-// Fetch all wallet transaction digests, paginating through all pages.
-async function fetchAllDigests(account: string): Promise<string[]> {
+// Fetch every transaction digest matching a queryTransactionBlocks filter,
+// paginating through all pages.
+//
+// Sprint SPOT-RESILIENCE-V2 (Bug B): FAIL-LOUD on a partial scan. suiRpc returns
+// `undefined` when every endpoint fails a page under load; the old code did
+// `if (!result) break`, which SILENTLY TRUNCATED the digest list — and if the
+// truncated slice held a position's deposit tx, `computePositionPnL` reported a
+// false `no_deposits` that LOOKS authoritative. Now a failed page is retried
+// once; if it still fails we THROW, so the route returns 500 → the client
+// degrades the position to STALE (last-known-good) instead of asserting the
+// position has no deposits. An incomplete scan must never masquerade as "no
+// on-chain history".
+async function fetchDigestsByFilter(filter: Record<string, unknown>): Promise<string[]> {
   const digests: string[] = [];
   let cursor: string | null = null;
 
   do {
-    const result = await suiRpc('suix_queryTransactionBlocks', [
-      { filter: { FromAddress: account } },
-      cursor,
-      50,
-      true, // descending (newest first)
+    let result = await suiRpc('suix_queryTransactionBlocks', [
+      { filter }, cursor, 50, true, // descending (newest first)
     ]) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
 
-    if (!result) break;
+    if (!result) {
+      // One retry before failing loud — a single transient page failure
+      // shouldn't tank the whole scan, but a genuinely-unavailable page must
+      // NOT silently truncate.
+      result = await suiRpc('suix_queryTransactionBlocks', [
+        { filter }, cursor, 50, true,
+      ]) as typeof result;
+    }
+    if (!result) {
+      throw new Error(`cetus/activity: queryTransactionBlocks page failed (filter=${JSON.stringify(filter)}) — refusing to return a partial scan`);
+    }
     digests.push(...result.data.map((t) => t.digest));
     cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
   } while (cursor);
 
   return digests;
+}
+
+// Discover the transaction digests relevant to a scan.
+//
+//  - Wallet scope: every tx SENT BY the account (fee/reward events across all
+//    the wallet's positions).
+//  - Per-position: additionally UNION every tx that CHANGED the position object
+//    itself (`ChangedObject: positionId`). Sprint SPOT-RESILIENCE-V2 (Bug B):
+//    the `FromAddress`-only scan misses a position opened via a router/aggregator
+//    or received by transfer (its AddLiquidity tx isn't signed by the account) →
+//    a false `no_deposits`. The object-scoped query finds that deposit tx
+//    regardless of who signed it. De-duplicated across both sources.
+async function fetchScanDigests(account: string, positionId: string | null): Promise<string[]> {
+  const fromDigests = await fetchDigestsByFilter({ FromAddress: account });
+  if (!positionId || positionId === 'all') return fromDigests;
+
+  // Per-position: also pull txs that touched this exact position object. If the
+  // object query fails transiently we DON'T fail the whole request — the
+  // FromAddress scan is still the primary source; the object query is an
+  // additive safety net for router-opened / received positions.
+  let objDigests: string[] = [];
+  try {
+    objDigests = await fetchDigestsByFilter({ ChangedObject: positionId });
+  } catch (err) {
+    console.warn('[cetus/activity] ChangedObject discovery failed (non-fatal):', String(err));
+  }
+  return [...new Set([...fromDigests, ...objDigests])];
 }
 
 interface SuiTxBlock {
@@ -243,7 +288,11 @@ async function GET_impl(request: Request) {
   const walletScope = positionId === 'all';
 
   try {
-    const allDigests = await fetchAllDigests(account);
+    // Sprint SPOT-RESILIENCE-V2 (Bug B): per-position mode also unions txs that
+    // changed the position object (router-opened / received positions), and the
+    // scan fails loud on a partial page rather than truncating to a false
+    // no_deposits. Wallet-scope is unchanged (FromAddress only).
+    const allDigests = await fetchScanDigests(account, positionId);
 
     if (allDigests.length === 0) {
       return NextResponse.json({

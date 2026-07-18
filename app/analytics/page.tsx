@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useEffect, useState, type CSSProperties } from "react";
+import { useMemo, useEffect, useState, useRef, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNavbar from "../components/TerminalNavbar";
 import AnalyticsSidebar, { type AnalyticsSection } from "../components/AnalyticsSidebar";
@@ -9,10 +9,13 @@ import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useL
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import InfoTooltip from "../components/InfoTooltip";
 import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
-import { useLpPnl } from "../hooks/useLpPnl";
+import { useLpPnl, seedLkgFromSnapshot, collectLkgEntries } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 import { useAccount } from "wagmi";
+// Type-only import — erased at compile time, never pulls the server lib
+// (@upstash/redis) into the client bundle.
+import type { AnalyticsSnapshot } from "../lib/analyticsSnapshot";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import {
@@ -616,6 +619,47 @@ export default function Analytics() {
     for (const w of watchedWallets) if (w.chain === "solana") addrs.push(w.address);
     return [...new Set(addrs)];
   }, [solanaAddress, watchedWallets]);
+
+  // ── Sprint INSTANT-LOAD: computed-aggregates snapshot (stale-while-revalidate)
+  // Canonical wallet-set string: chain-prefixed, per-chain-normalized (EVM/Sui
+  // lowercase; Solana base58 case-preserved), sorted. The server hashes this
+  // exact string, so client/server can never disagree on the key. A changed
+  // wallet set (connect/disconnect, watched add/remove) is a different snapshot.
+  const walletSetKey = useMemo(() => {
+    const parts: string[] = [];
+    if (address) parts.push(`evm:${address.toLowerCase()}`);
+    for (const w of watchedWallets) if (w.chain === "evm") parts.push(`evm:${w.address.toLowerCase()}`);
+    for (const a of suiWalletAddresses) parts.push(`sui:${a.toLowerCase()}`);
+    for (const a of solanaWalletAddresses) parts.push(`sol:${a}`);
+    return [...new Set(parts)].sort().join(",");
+  }, [address, watchedWallets, suiWalletAddresses, solanaWalletAddresses]);
+
+  // The last COMPLETE compute's rendered aggregates for this wallet set (≤24 h
+  // old — the Redis TTL enforces the staleness ceiling), or null on a first
+  // visit. Served instantly; the live pipeline always refreshes in background.
+  const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
+  const [snapshotChecked, setSnapshotChecked] = useState(false);
+  useEffect(() => {
+    if (!walletSetKey) { setSnapshot(null); setSnapshotChecked(true); return; }
+    let cancelled = false;
+    setSnapshotChecked(false);
+    (async () => {
+      try {
+        const res = await fetch(`/api/analytics-snapshot?wallets=${encodeURIComponent(walletSetKey)}`);
+        const json = res.ok ? await res.json() : { snapshot: null };
+        const snap: AnalyticsSnapshot | null = json.snapshot ?? null;
+        // Sprint SPOT-RESILIENCE-V2: seed the per-position LKG cache from the
+        // snapshot BEFORE the live pipeline runs, so on a cold device a position
+        // whose first-ever load fails still degrades to STALE (last-known-good)
+        // instead of dropping out of totals. Only fills gaps — a live compute
+        // this session always overwrites with fresher values.
+        if (!cancelled && snap?.perPosition) seedLkgFromSnapshot(snap.perPosition);
+        if (!cancelled) setSnapshot(snap);
+      } catch { if (!cancelled) setSnapshot(null); }
+      if (!cancelled) setSnapshotChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, [walletSetKey]);
   // Live SUI spot price for the closed-wallet Bluefin fee fallback. Fetched
   // once on mount via the /api/prices CoinGecko proxy (60s-cached server
   // side); defaults to 0 on failure so the fallback degrades gracefully to
@@ -632,8 +676,11 @@ export default function Analytics() {
       .catch(() => { /* graceful — leave suiPrice at 0 */ });
     return () => { cancelled = true; };
   }, []);
-  const { events: walletLevelFees } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
-  const lpPnl = useLpPnl(filteredPositions, suiWalletAddresses, solanaWalletAddresses);
+  const { events: walletLevelFees, isLoading: walletFeesLoading } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
+  // Sprint INSTANT-LOAD: the LIVE pipeline result. What the page RENDERS is the
+  // `lpPnl` selector below — snapshot values while the pipeline settles, live
+  // values once it settles cleanly (stale-while-revalidate).
+  const lpPnlLive = useLpPnl(filteredPositions, suiWalletAddresses, solanaWalletAddresses);
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -662,10 +709,13 @@ export default function Analytics() {
   }
 
   // ── Portfolio totals (FILTERED — drive the top-stat cards & headline) ──────
-  const totalLpValue = filteredPositions.reduce((s, p) => s + p.value, 0);
-  const totalLpFees  = filteredPositions.reduce((s, p) => s + p.fees, 0);
-  const totalLendingValue = filteredLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
-  const totalPortfolioValue = totalLpValue + totalLendingValue;
+  // Sprint INSTANT-LOAD: LIVE computations (renamed *Live); the page renders the
+  // same-named selectors defined after healthScore — snapshot values while the
+  // pipeline settles, these live values once it settles cleanly.
+  const totalLpValueLive = filteredPositions.reduce((s, p) => s + p.value, 0);
+  const totalLpFeesLive  = filteredPositions.reduce((s, p) => s + p.fees, 0);
+  const totalLendingValueLive = filteredLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
+  const totalPortfolioValueLive = totalLpValueLive + totalLendingValueLive;
 
   // ── Unfiltered reference totals (for the "of X total" filter banner) ───────
   // Always computed from the FULL positions/lending so the comparison numbers
@@ -679,7 +729,7 @@ export default function Analytics() {
   const rangeCutoff   = Date.now() - activeRange.ms;
 
   // ── Fee income — aggregated from on-chain fee_claim / reward_claim ─────────
-  const feeIncome = useMemo(() => {
+  const feeIncomeLive = useMemo(() => {
     interface FlatFee { ts: number; usd: number; protocol: string; chain: string; dedupeKey: string; }
     const flat: FlatFee[] = [];
     // Fee income is ALWAYS lifetime across ALL positions — built from the
@@ -878,7 +928,7 @@ export default function Analytics() {
     return { dailyLpIncome: yearlyLp / 365, dailyLendingIncome: yearlyLending / 365 };
   }, [filteredPositions, filteredLendingPositions]);
 
-  const totalDailyIncome = dailyLpIncome + dailyLendingIncome;
+  const totalDailyIncomeLive = dailyLpIncome + dailyLendingIncome;
 
   // Unfiltered daily income — reference for the filter banner.
   const allDailyIncome = useMemo(() => {
@@ -900,7 +950,7 @@ export default function Analytics() {
   }, [incomePeriod, dailyLpIncome, dailyLendingIncome]);
 
   // ── Actual APR (value-weighted) ────────────────────────────────────────────
-  const actualAPRData = useMemo(() => {
+  const actualAPRDataLive = useMemo(() => {
     const activeWithValue = filteredPositions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activeWithValue.length === 0) return { apr: 0, totalValue: 0 };
     let weightedSum = 0;
@@ -917,7 +967,7 @@ export default function Analytics() {
   }, [filteredPositions, perfMap]);
 
   // ── Portfolio health score ─────────────────────────────────────────────────
-  const healthScore = useMemo(() => {
+  const healthScoreLive = useMemo(() => {
     const activePositions = filteredPositions.filter((p) => p.value > 0 && p.status !== "Closed");
     if (activePositions.length === 0) return null;
     const inRangeCount = activePositions.filter((p) => p.status === "In Range").length;
@@ -937,11 +987,126 @@ export default function Analytics() {
     const chains = new Set(activePositions.map((p) => p.chain));
     const chainFraction = chains.size >= 3 ? 1 : chains.size === 2 ? 0.85 : 0.6;
     const chainScore = chainFraction * 20;
-    const ilPct = lpPnl.initialValue > 0 ? (lpPnl.ilUSD / lpPnl.initialValue) * 100 : 0;
+    const ilPct = lpPnlLive.initialValue > 0 ? (lpPnlLive.ilUSD / lpPnlLive.initialValue) * 100 : 0;
     const ilMagnitude = Math.abs(Math.min(0, ilPct));
     const ilScore = Math.max(0, 1 - ilMagnitude / 5) * 15;
     return Math.round(inRangeScore + feeScore + chainScore + ilScore);
-  }, [filteredPositions, perfMap, lpPnl.initialValue, lpPnl.ilUSD]);
+  }, [filteredPositions, perfMap, lpPnlLive.initialValue, lpPnlLive.ilUSD]);
+
+  // ── Sprint INSTANT-LOAD: render-source selection (stale-while-revalidate) ───
+  // While the live pipeline is still settling (or settled WITH transport errors),
+  // a ≤24h snapshot renders every aggregate instantly; once the pipeline settles
+  // CLEANLY the same-named selectors below flip to the live values in place (no
+  // flicker, no blanking — a failed refresh keeps the snapshot displayed).
+  const pipelineSettled =
+    !isLoading && !activityLoading && !walletFeesLoading &&
+    !lpPnlLive.isLoading && !lpPnlLive.suiClosedLoading && !lpPnlLive.solanaClosedLoading;
+  const liveTrustworthy = pipelineSettled && lpPnlLive.errored === 0;
+  const useSnap = !!snapshot && !liveTrustworthy;
+
+  const feeIncome = useSnap && snapshot ? snapshot.feeIncome : feeIncomeLive;
+  const lpPnl = useSnap && snapshot
+    ? {
+        ...lpPnlLive,
+        ...snapshot.lpPnl,
+        // Snapshot values are a settled compute: nothing is loading, nothing is
+        // errored. Live-only per-position detail (table rows) stays live.
+        isLoading: false, inflightCount: 0,
+        suiClosedLoading: false, solanaClosedLoading: false,
+        errored: 0, errorReasons: [] as string[],
+        excludedPositions: [],
+        stalePositions: [],
+        perPosition: lpPnlLive.perPosition,
+      }
+    : lpPnlLive;
+  const totalPortfolioValue = useSnap && snapshot ? snapshot.header.totalPortfolioValue : totalPortfolioValueLive;
+  const totalLpValue = useSnap && snapshot ? snapshot.header.totalLpValue : totalLpValueLive;
+  const totalLendingValue = useSnap && snapshot ? snapshot.header.totalLendingValue : totalLendingValueLive;
+  const totalLpFees = useSnap && snapshot ? snapshot.header.totalLpFees : totalLpFeesLive;
+  const totalDailyIncome = useSnap && snapshot ? snapshot.header.totalDailyIncome : totalDailyIncomeLive;
+  const actualAPRData = useSnap && snapshot ? snapshot.header.actualAPR : actualAPRDataLive;
+  const healthScore = useSnap && snapshot ? snapshot.header.healthScore : healthScoreLive;
+  const positionsWithFeesView = useSnap && snapshot
+    ? snapshot.header.positionsWithFees
+    : filteredPositions.filter((p) => p.fees > 0).length;
+  // Skeleton gates: a snapshot-backed render NEVER skeletons (numbers are real).
+  const headerSkel = useSnap ? false : isLoading;
+  const aprSkel = useSnap ? false : (isLoading || activityLoading);
+  const feeSkel = useSnap ? false : activityLoading;
+
+  // Status line for the LP P&L header slot (replaces the machinery counter):
+  //   snapshot shown → "updated N min ago · refreshing…"
+  //   settled clean  → "updated just now"
+  //   no snapshot + streaming → the honest one-time-scan message
+  const snapshotAgeLabel = (ts: number): string => {
+    const mins = Math.floor((Date.now() - ts) / 60_000);
+    if (mins < 2) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs} h ago`;
+  };
+
+  // Write-back: ONE debounced write per wallet-set per visit, ONLY when the full
+  // compute settled cleanly (no transport errors, wallet present, data present) —
+  // an incomplete/failed compute never becomes a snapshot. Sprint
+  // SPOT-RESILIENCE-V2: additionally require ZERO stale positions — a snapshot
+  // must capture a FULLY-LIVE compute, never one padded with last-known-good
+  // values, so the stored per-position map is all genuine fresh computes.
+  const snapshotWrittenForRef = useRef<string>("");
+  useEffect(() => {
+    if (!liveTrustworthy || !hasWallet || !walletSetKey || !snapshotChecked) return;
+    if (lpPnlLive.stalePositions.length > 0) return;
+    if (positions.length === 0 && lendingPositions.length === 0) return;
+    if (snapshotWrittenForRef.current === walletSetKey) return;
+    snapshotWrittenForRef.current = walletSetKey;
+    const adjustedNetPnl =
+      lpPnlLive.currentValue + feeIncomeLive.totalAllTime + lpPnlLive.feesUnclaimed + lpPnlLive.capitalGL - lpPnlLive.initialValue;
+    const payload: AnalyticsSnapshot = {
+      v: 2,
+      computedAt: Date.now(),
+      header: {
+        totalPortfolioValue: totalPortfolioValueLive,
+        totalLpValue: totalLpValueLive,
+        totalLendingValue: totalLendingValueLive,
+        totalLpFees: totalLpFeesLive,
+        totalDailyIncome: totalDailyIncomeLive,
+        positionsWithFees: filteredPositions.filter((p) => p.fees > 0).length,
+        actualAPR: actualAPRDataLive,
+        healthScore: healthScoreLive,
+      },
+      feeIncome: feeIncomeLive,
+      lpPnl: {
+        initialValue: lpPnlLive.initialValue,
+        currentValue: lpPnlLive.currentValue,
+        closingValue: lpPnlLive.closingValue,
+        feesCollected: lpPnlLive.feesCollected,
+        feesUnclaimed: lpPnlLive.feesUnclaimed,
+        ilUSD: lpPnlLive.ilUSD,
+        capitalGL: lpPnlLive.capitalGL,
+        netPnl: adjustedNetPnl,
+        netPnlPct: lpPnlLive.initialValue > 0 ? (adjustedNetPnl / lpPnlLive.initialValue) * 100 : 0,
+        included: lpPnlLive.included,
+        excluded: lpPnlLive.excluded,
+        pendingClaimCount: lpPnlLive.pendingClaimCount,
+        estimatedPositionCount: lpPnlLive.estimatedPositionCount,
+      },
+      // Sprint SPOT-RESILIENCE-V2: per-position last-known-good, read from the
+      // client LKG cache (written ONLY from genuine successful computes — never
+      // fallback/stale), so a cold cross-device load can seed it and degrade a
+      // failed first load to STALE. Covers open + EVM-closed positions (the ones
+      // vulnerable to an activity-route transient failure); Sui/Solana closed
+      // positions have their own immutable server-side Redis caches.
+      perPosition: collectLkgEntries(filteredPositions.map((p) => p.id)),
+    };
+    fetch("/api/analytics-snapshot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallets: walletSetKey, snapshot: payload }),
+    })
+      .then((r) => { if (r.ok) setSnapshot(payload); }) // status line → "updated just now"
+      .catch(() => { /* quiet — next visit recomputes as usual */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTrustworthy, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length]);
 
   // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {
@@ -1327,13 +1492,13 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Total Portfolio
                 </div>
-                {isLoading ? <Skel w={120} h={28} /> : (
+                {headerSkel ? <Skel w={120} h={28} /> : (
                   <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                     {fmtCompact(totalPortfolioValue)}
                   </div>
                 )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {isLoading ? <Skel w={140} h={11} /> : <>LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}</>}
+                  {headerSkel ? <Skel w={140} h={11} /> : <>LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}</>}
                 </div>
               </div>
 
@@ -1342,7 +1507,7 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Daily Income
                 </div>
-                {isLoading ? <Skel w={100} h={28} /> : (
+                {headerSkel ? <Skel w={100} h={28} /> : (
                   <div
                     style={{
                       fontSize: 28, fontWeight: 700,
@@ -1355,7 +1520,7 @@ export default function Analytics() {
                   </div>
                 )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {isLoading ? <Skel w={120} h={11} /> : (totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions")}
+                  {headerSkel ? <Skel w={120} h={11} /> : (totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions")}
                 </div>
               </div>
 
@@ -1364,13 +1529,13 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Unclaimed Fees
                 </div>
-                {isLoading ? <Skel w={100} h={28} /> : (
+                {headerSkel ? <Skel w={100} h={28} /> : (
                   <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                     {fmt$(totalLpFees)}
                   </div>
                 )}
                 <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {isLoading ? <Skel w={140} h={11} /> : `${filteredPositions.filter((p) => p.fees > 0).length} positions with fees`}
+                  {headerSkel ? <Skel w={140} h={11} /> : `${positionsWithFeesView} positions with fees`}
                 </div>
               </div>
 
@@ -1423,7 +1588,7 @@ export default function Analytics() {
                     : aprView === "weekly" ? "/week"
                     : aprView === "monthly" ? "/mo"
                     : "/year";
-                  if (isLoading || activityLoading) {
+                  if (aprSkel) {
                     return (
                       <>
                         <Skel w={100} h={28} />
@@ -1454,7 +1619,7 @@ export default function Analytics() {
                 <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
                   Health Score
                 </div>
-                {isLoading || activityLoading ? (
+                {aprSkel ? (
                   <>
                     <Skel w={80} h={28} />
                     <div style={{ marginTop: 10 }}><Skel w="100%" h={2} r={0} /></div>
@@ -1511,7 +1676,7 @@ export default function Analytics() {
                     <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
                       {c.label}
                     </div>
-                    {activityLoading ? <Skel w={100} h={28} /> : (
+                    {feeSkel ? <Skel w={100} h={28} /> : (
                       <div
                         style={{
                           fontSize: 28, fontWeight: 700,
@@ -1524,7 +1689,7 @@ export default function Analytics() {
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 6, letterSpacing: "0.06em", color: c.subUp ? C.green : C.text }}>
-                      {activityLoading ? <Skel w={90} h={11} /> : c.sub}
+                      {feeSkel ? <Skel w={90} h={11} /> : c.sub}
                     </div>
                   </div>
                 ))}
@@ -1602,7 +1767,7 @@ export default function Analytics() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: C.text, fontSize: 14 }}>
-                    {activityLoading ? "Loading on-chain fee history…" : `No fee claims in the last ${activeRange.label}`}
+                    {feeSkel ? "Loading on-chain fee history…" : `No fee claims in the last ${activeRange.label}`}
                   </div>
                 )}
 
@@ -1657,28 +1822,29 @@ export default function Analytics() {
               title="LP Profit & Loss"
               sub="Aggregated from on-chain deposit & fee events across all LP positions"
               action={
-                // Sprint LPPNL-PERF (Part A): progressive status chip instead of a
-                // block-wide "Loading" gate. While OPEN positions are still being
-                // fetched, show "computing N of M"; once those are done but a
-                // closed-position scan is still running, show a softer "scanning
-                // closed history…". Numbers below render partially throughout —
-                // this chip is informational, never a blank spinner.
+                // Sprint INSTANT-LOAD: no machinery counters, ever. Three states:
+                //   snapshot shown + refreshing  → "updated N min ago · refreshing…"
+                //   settled cleanly              → "updated N min ago" / "just now"
+                //   first visit (no snapshot)    → honest one-time-scan message
                 (() => {
-                  const total = lpPnl.included + lpPnl.excluded + lpPnl.errored + lpPnl.inflightCount;
-                  if (lpPnl.inflightCount > 0) {
+                  if (useSnap && snapshot) {
                     return (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: C.green, letterSpacing: "0.14em", textTransform: "uppercase" }}>
-                        <span className="spin-icon" style={{ width: 10, height: 10, border: `2px solid ${C.greenFaint}`, borderTopColor: C.green }} />
-                        computing {total - lpPnl.inflightCount} of {total}
+                      <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.08em" }}>
+                        updated {snapshotAgeLabel(snapshot.computedAt)} · refreshing…
                       </span>
                     );
                   }
-                  if (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading) {
-                    const chain = lpPnl.solanaClosedLoading && lpPnl.suiClosedLoading ? "Sui + Solana" : lpPnl.solanaClosedLoading ? "Solana" : "Sui";
+                  if (snapshot && liveTrustworthy) {
                     return (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
-                        <span className="spin-icon" style={{ width: 10, height: 10, border: `2px solid ${C.border}`, borderTopColor: C.text }} />
-                        scanning {chain} closed history…
+                      <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.08em" }}>
+                        updated {snapshotAgeLabel(snapshot.computedAt)}
+                      </span>
+                    );
+                  }
+                  if (!snapshot && snapshotChecked && !pipelineSettled) {
+                    return (
+                      <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.08em" }}>
+                        Scanning your wallet history — this only happens once.
                       </span>
                     );
                   }
@@ -1940,21 +2106,32 @@ export default function Analytics() {
                 </div>
               )}
 
-              {lpPnl.errored > 0 && (
+              {/* Sprint SPOT-RESILIENCE-V2: the red "Couldn't load N positions —
+                  the RPC didn't respond" banner is DELETED. It was the symptom of
+                  the architectural flaw — a transient per-position failure dropped
+                  that position from the totals, so the app had to warn the numbers
+                  were incomplete. With per-position last-known-good caching a
+                  failed load now degrades to STALE (kept in totals with last-good
+                  values), so there is no data to lose and nothing alarming to
+                  report. Instead we show a subtle, non-alarming note. */}
+              {!lpPnl.isLoading && lpPnl.stalePositions.length > 0 && (
                 <div
                   style={{
                     margin: "0 26px 18px",
-                    border: `1px solid ${C.red}33`,
-                    background: C.redFaint,
+                    border: `1px solid ${C.border}`,
+                    background: C.bg1,
                     padding: "10px 14px",
+                    fontFamily: FONT,
                   }}
                 >
-                  <div style={{ fontSize: 14, color: C.red, fontWeight: 700 }}>
-                    Couldn&apos;t load {lpPnl.errored} position{lpPnl.errored === 1 ? "" : "s"}
-                    {lpPnl.errorReasons.length > 0 && <> — {lpPnl.errorReasons.slice(0, 3).join(", ")}</>}
-                  </div>
-                  <div style={{ fontSize: 12, color: `${C.red}99`, marginTop: 2 }}>
-                    The RPC didn&apos;t respond in 30s. Totals shown are for the positions that did load.
+                  <div style={{ fontSize: 12, color: C.textMid, letterSpacing: "0.02em", lineHeight: 1.55 }}>
+                    {lpPnl.stalePositions.length} position
+                    {lpPnl.stalePositions.length === 1 ? "" : "s"} showing last-known
+                    values (couldn&apos;t refresh just now) — included in totals.
+                    {(() => {
+                      const oldest = lpPnl.stalePositions.reduce((m, s) => Math.min(m, s.computedAt), Date.now());
+                      return <> Updated {snapshotAgeLabel(oldest)}; refreshes automatically.</>;
+                    })()}
                   </div>
                 </div>
               )}
@@ -2502,12 +2679,12 @@ export default function Analytics() {
             </SectionFrame>
 
             {/* ── EARNING FLOWS (recent fee claims) ──────────────────────── */}
-            {(activityLoading || feeIncome.recent.length > 0) && (
+            {(feeSkel || feeIncome.recent.length > 0) && (
               <SectionFrame title="Earning Flows" sub="Recent on-chain fee claim events">
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   {/* Skeleton rows while activity loads and we have no
                       real fee-claim events yet. */}
-                  {activityLoading && feeIncome.recent.length === 0 && (
+                  {feeSkel && feeIncome.recent.length === 0 && (
                     Array.from({ length: 4 }).map((_, i) => (
                       <div
                         key={`flow-skel-${i}`}
@@ -2593,7 +2770,7 @@ export default function Analytics() {
             {(topPerformers.length > 0 || bottomPerformers.length > 0) && (
               <SectionFrame
                 title="Performance Rankings"
-                sub={`Ranked by actual APR from claimed fees${activityLoading ? " (loading…)" : ""}`}
+                sub={`Ranked by actual APR from claimed fees${feeSkel ? " (loading…)" : ""}`}
               >
                 <div className="ana-rankings-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
                   {/* Top */}

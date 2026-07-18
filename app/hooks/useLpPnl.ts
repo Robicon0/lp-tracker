@@ -63,10 +63,18 @@ export interface LpPnlResult {
   perPosition: Record<string, PositionPnLData>;
   // Every position that's NOT contributing to the totals — surfaced verbatim
   // in the analytics warning banner so the user knows why their totals look
-  // lower than expected. Includes: unsupported protocols (Momentum),
-  // missing-data positions (no_deposits, missing_deposit_prices), and
-  // transport-error positions after all retries failed.
+  // lower than expected. Sprint SPOT-RESILIENCE-V2: this now contains ONLY
+  // NEVER-LOADED positions (a failed load with NO last-known-good AND no live
+  // value) — the genuinely-rare case. Positions that failed but have an LKG
+  // entry degrade to STALE (below) and stay in totals; positions with a live
+  // value degrade to an estimate. So this list is near-empty in practice.
   excludedPositions: ExcludedPosition[];
+  // Sprint SPOT-RESILIENCE-V2: positions whose fresh load failed but that are
+  // still IN the totals via their last-known-good computed values (STALE). Shown
+  // as a subtle, non-alarming "showing last-known values" note with an age — NOT
+  // the red/orange excluded treatment. `computedAt` is when that value was last
+  // computed successfully (drives the "updated N min ago" label).
+  stalePositions: Array<{ id: string; pair: string; protocol: string; chain: string; computedAt: number }>;
   // Count of positions that ARE included in the totals but used the
   // HyperEVM-style fallback (current value as proxy for initial value
   // because deposit history wasn't recoverable from RPC). The analytics
@@ -87,6 +95,7 @@ const EMPTY: LpPnlResult = {
   inflightCount: 0, suiClosedLoading: false, solanaClosedLoading: false,
   perPosition: {},
   excludedPositions: [],
+  stalePositions: [],
   estimatedPositionCount: 0,
   pendingClaimCount: 0,
 };
@@ -508,6 +517,80 @@ function cacheSet(posId: string, entry: CachedEntry): void {
   }
 }
 
+// ── Per-position LAST-KNOWN-GOOD (LKG) cache ────────────────────────────────
+// Sprint SPOT-RESILIENCE-V2. The events cache above stores RAW on-chain events
+// and — critically — is NEVER written on a transport failure (timeout / network
+// error), so a position that times out has nothing to fall back to and drops out
+// of every LP P&L total. This cache stores the COMPUTED PositionPnLData (exactly
+// what computePositionPnL produced and what flows into the aggregate sums), keyed
+// by pos.id, and is read when a fresh load FAILS so the position degrades to
+// STALE (kept in totals with its last-good values) instead of being EXCLUDED.
+//
+// Contract:
+//   - Written ONLY from a genuinely-successful compute (never from a fallback /
+//     stale / errored result), so a cached value is always a real byte-identical
+//     computePositionPnL output.
+//   - No TTL on read: dropping an old LKG entry would recreate the exact
+//     data-loss bug this sprint fixes. Staleness is COMMUNICATED (the age label)
+//     rather than enforced by eviction — and the only time-sensitive field
+//     (currentValue) is refreshed from the live dashboard position on read.
+//   - localStorage only (per-browser, zero-latency); the cross-instance tier is
+//     the analytics snapshot (Part 5), which seeds this map on cold load.
+const LKG_KEY_PREFIX = "lp-pnl-lkg-v1-";
+interface LkgEntry { computedAt: number; data: PositionPnLData; }
+
+function lkgGet(posId: string): LkgEntry | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LKG_KEY_PREFIX + posId);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as LkgEntry;
+    if (!entry || typeof entry.computedAt !== "number" || !entry.data) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+function lkgSet(posId: string, data: PositionPnLData): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LKG_KEY_PREFIX + posId, JSON.stringify({ computedAt: Date.now(), data }));
+  } catch {
+    // Quota — skip; the aggregate still shows this load's live value.
+  }
+}
+
+// Seed the LKG cache from the analytics snapshot's per-position data on a cold
+// load (Part 5). Only fills GAPS — never overwrites a fresher localStorage entry
+// (a live compute this session always wins). Exported so the analytics page can
+// call it once the snapshot arrives, before the first aggregate.
+export function seedLkgFromSnapshot(perPosition: Record<string, { computedAt: number; data: PositionPnLData }>): void {
+  if (typeof window === "undefined" || !perPosition) return;
+  for (const [posId, entry] of Object.entries(perPosition)) {
+    try {
+      const existing = lkgGet(posId);
+      if (existing && existing.computedAt >= entry.computedAt) continue;
+      localStorage.setItem(LKG_KEY_PREFIX + posId, JSON.stringify(entry));
+    } catch {
+      // Quota / malformed entry — skip this one, keep going.
+    }
+  }
+}
+
+// Read every LKG entry for the given position ids — used by the analytics page
+// to build the per-position payload written into the snapshot (Part 5). Returns
+// only ids that have a cached computed value.
+export function collectLkgEntries(posIds: string[]): Record<string, LkgEntry> {
+  const out: Record<string, LkgEntry> = {};
+  if (typeof window === "undefined") return out;
+  for (const id of posIds) {
+    const e = lkgGet(id);
+    if (e) out[id] = e;
+  }
+  return out;
+}
+
 // ── Fetch one position's activity and compute P&L ───────────────────────────
 
 // Error reasons that indicate a transport failure (vs. legitimate "no data"
@@ -653,10 +736,69 @@ async function fetchEventsAttempt(
   }
 }
 
+// Sprint SPOT-RESILIENCE-V2 — single failure funnel. When a fresh load fails
+// (transport OR data), a position must DEGRADE, never silently disappear:
+//   1. STALE  — an LKG computed result exists → serve it (kept in ALL totals),
+//               refreshing the live-sourced fields (currentValue / feesUnclaimed)
+//               from the fresh dashboard position while keeping the cached
+//               historical basis (deposit / IL / claimed fees). Byte-identical to
+//               the last successful compute except for the deliberately-refreshed
+//               live fields.
+//   2. ESTIMATED (value-proxy) — no LKG but the dashboard shows a live value
+//               (pos.value > 0) → buildFallbackPnL uses current value as the
+//               deposit estimate (the pre-existing HyperEVM pattern, now extended
+//               to every chain). Kept in totals, flagged `fallback`.
+//   3. EXCLUDED (NEVER-LOADED) — no LKG and no live value → genuinely nothing to
+//               show; surfaced in the (now-rare) excluded notice.
+// Only case 3 removes a position from totals.
+function degradeOnFailure(
+  pos: AerodromePosition,
+  reason: string,
+  events?: ActivityEventForPnL[],
+): { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } } | { ok: false; reason: string } {
+  const isClosed = pos.status === "Closed";
+
+  // 1. STALE — last-known-good computed values.
+  const lkg = lkgGet(pos.id);
+  if (lkg) {
+    const data: PositionPnLData = { ...lkg.data };
+    if (!isClosed) {
+      // Refresh the live-sourced fields; keep the immutable historical basis.
+      data.currentValue = pos.value;
+      data.feesUnclaimed = pos.fees;
+      data.netPnlUSD = pos.value + data.feesCollected + pos.fees - data.initialValue;
+      data.netPnlPct = data.initialValue > 0 ? (data.netPnlUSD / data.initialValue) * 100 : 0;
+    }
+    return { ok: true, data, stale: { computedAt: lkg.computedAt } };
+  }
+
+  // 2. ESTIMATED — value-proxy fallback (all chains).
+  if (pos.value > 0) {
+    const fallback = buildFallbackPnL(pos);
+    // Preserve HyperEVM's exact prior behaviour: when the activity route DID
+    // return events (fee_claim records) but had no deposit history, pull the
+    // claimed fees out so they still land in the totals. Now chain-agnostic —
+    // any chain whose events reached us contributes its claimed fees.
+    if (events && events.length > 0) {
+      const feesFromEvents = sumFeeClaimUsd(events);
+      if (feesFromEvents > 0) {
+        fallback.feesCollected = feesFromEvents;
+        fallback.pendingClaimCount = countPendingFeeClaims(events);
+        fallback.netPnlUSD = feesFromEvents + pos.fees;
+        fallback.netPnlPct = pos.value > 0 ? ((feesFromEvents + pos.fees) / pos.value) * 100 : 0;
+      }
+    }
+    return { ok: true, data: fallback, fallback: true };
+  }
+
+  // 3. EXCLUDED — genuinely never-loaded with no live value.
+  return { ok: false, reason };
+}
+
 async function fetchAndCompute(
   pos: AerodromePosition,
 ): Promise<
-  | { ok: true; data: PositionPnLData; fallback?: true }
+  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } }
   | { ok: false; reason: string }
 > {
   const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
@@ -664,10 +806,8 @@ async function fetchAndCompute(
   const url = buildActivityUrl(pos);
   if (!url) {
     console.error(`${tag} no activity URL — protocol not wired`);
-    return { ok: false, reason: "no activity URL" };
+    return degradeOnFailure(pos, "no activity URL");
   }
-
-  const isHyperEvm = HYPEREVM_NFT_MANAGERS[pos.protocol] !== undefined;
 
   // Try cache first.
   let rawEvents: Array<Record<string, unknown>> | null = null;
@@ -675,13 +815,9 @@ async function fetchAndCompute(
   if (cached) {
     if (cached.events === null) {
       console.log(`${tag} cache hit — empty (${cached.reason ?? "no events"})`);
-      // HyperEVM fallback path on cached-empty: synthesize PnL from current
-      // value rather than silently excluding. See buildFallbackPnL header.
-      if (isHyperEvm && pos.value > 0) {
-        console.log(`${tag} HyperEVM fallback (cached empty) — using current value $${pos.value.toFixed(2)} as deposit estimate`);
-        return { ok: true, data: buildFallbackPnL(pos), fallback: true };
-      }
-      return { ok: false, reason: cached.reason ?? "no events" };
+      // Degrade rather than silently excluding — STALE (last-known-good) if we
+      // have one, else the value-proxy estimate. See degradeOnFailure.
+      return degradeOnFailure(pos, cached.reason ?? "no events");
     }
     rawEvents = cached.events;
     console.log(`${tag} cache hit — ${rawEvents.length} events`);
@@ -714,23 +850,21 @@ async function fetchAndCompute(
       // for them), so the next load always retries those fresh.
       if (result.cacheable) {
         cacheSet(pos.id, { ts: Date.now(), events: null, reason: result.reason, ttl: EMPTY_RESULT_TTL_MS });
-        // HyperEVM fallback for fresh empty result — same rationale as the
-        // cached-empty branch above.
-        if (isHyperEvm && pos.value > 0) {
-          console.log(`${tag} HyperEVM fallback (fresh empty) — using current value $${pos.value.toFixed(2)} as deposit estimate`);
-          return { ok: true, data: buildFallbackPnL(pos), fallback: true };
-        }
-        return { ok: false, reason: result.reason };
+        // Degrade (STALE / value-proxy) rather than exclude — same rationale as
+        // the cached-empty branch above, now uniform across chains.
+        return degradeOnFailure(pos, result.reason);
       }
       // Only a retryable transport failure earns the second attempt. Timeouts
-      // and definitive failures (HTTP 4xx etc.) surface immediately.
+      // and definitive failures (HTTP 4xx etc.) surface immediately — but as a
+      // DEGRADE (STALE last-known-good keeps the position in totals), never a
+      // hard exclusion.
       if (!isRetryableFailure(result.reason)) {
-        return { ok: false, reason: result.reason };
+        return degradeOnFailure(pos, result.reason);
       }
     }
     if (rawEvents === null) {
       console.error(`${tag} all ${ATTEMPT_TIMEOUTS_MS.length} attempts failed — last reason: ${lastFailure.reason}`);
-      return { ok: false, reason: lastFailure.reason };
+      return degradeOnFailure(pos, lastFailure.reason);
     }
   }
 
@@ -755,25 +889,13 @@ async function fetchAndCompute(
   });
 
   if (!result.ok) {
-    // HyperEVM fallback for compute failures (no_deposits /
-    // missing_deposit_prices). The activity route may have returned events
-    // that include fee_claim records but no deposit records — pull the
-    // claimed fees out of those events so they still land in the totals,
-    // and build a synthetic PnL using current value as the deposit estimate.
-    if (isHyperEvm && pos.value > 0) {
-      const feesFromEvents = sumFeeClaimUsd(events);
-      const fallback = buildFallbackPnL(pos);
-      fallback.feesCollected = feesFromEvents;
-      fallback.pendingClaimCount = countPendingFeeClaims(events);
-      fallback.netPnlUSD = feesFromEvents + pos.fees;
-      fallback.netPnlPct = pos.value > 0 ? ((feesFromEvents + pos.fees) / pos.value) * 100 : 0;
-      console.log(
-        `${tag} HyperEVM fallback (compute failed: ${result.reason}) — using current value $${pos.value.toFixed(2)} as deposit estimate, fees from events: $${feesFromEvents.toFixed(2)}`,
-      );
-      return { ok: true, data: fallback, fallback: true };
-    }
-    console.warn(`${tag} excluded: ${result.reason}`);
-    return { ok: false, reason: result.reason };
+    // Compute failure (no_deposits / missing_deposit_prices / …). The activity
+    // route may have returned fee_claim records but no deposit records; degrade
+    // through the funnel — STALE (last-known-good) first, else the value-proxy
+    // estimate (which pulls claimed fees out of the events we DID get). Uniform
+    // across chains now (the old HyperEVM-only gate is folded into degradeOnFailure).
+    console.warn(`${tag} degrading: ${result.reason}`);
+    return degradeOnFailure(pos, result.reason, events);
   }
 
   const d = result.data;
@@ -783,13 +905,19 @@ async function fetchAndCompute(
     `IL=$${d.ilUSD.toFixed(2)} netPnl=$${d.netPnlUSD.toFixed(2)} (${d.depositCount} deposits)`,
   );
 
+  // Persist the successful compute as this position's last-known-good so a future
+  // transient failure degrades to STALE instead of dropping it from totals. ONLY
+  // genuine successes are written — fallback/stale results never overwrite a real
+  // computed value (see degradeOnFailure).
+  lkgSet(pos.id, d);
+
   return { ok: true, data: d };
 }
 
 // ── Aggregate per-position results into totals ─────────────────────────────
 
 type PosResult =
-  | { ok: true; data: PositionPnLData; fallback?: true }
+  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } }
   | { ok: false; reason: string };
 
 interface PositionMeta {
@@ -860,6 +988,8 @@ function aggregate(
   // every present id, EXACTLY equals the aggregated total. No drift possible.
   const perPosition: Record<string, PositionPnLData> = {};
   const excludedPositions: ExcludedPosition[] = [];
+  // Sprint SPOT-RESILIENCE-V2: positions kept in totals via last-known-good.
+  const stalePositions: LpPnlResult["stalePositions"] = [];
 
   // Belt-and-braces overflow guard at the aggregation boundary. computePositionPnL
   // already rejects implausible values with `value_overflow`, but if a bad number
@@ -937,6 +1067,12 @@ function aggregate(
       perPosition[id] = d;
       pendingClaimCount += d.pendingClaimCount ?? 0;
       if (r.fallback) estimatedPositionCount += 1;
+      // STALE (last-known-good) positions are fully IN the totals; record them
+      // for the subtle "showing last-known values" note (never the excluded UI).
+      if (r.stale) {
+        const m = meta.get(id);
+        if (m) stalePositions.push({ id, pair: m.pair, protocol: m.protocol, chain: m.chain, computedAt: r.stale.computedAt });
+      }
     } else {
       const meta = positionMeta.get(id);
       if (meta) {
@@ -1011,6 +1147,7 @@ function aggregate(
     solanaClosedLoading,
     perPosition,
     excludedPositions,
+    stalePositions,
     estimatedPositionCount,
     pendingClaimCount,
   };

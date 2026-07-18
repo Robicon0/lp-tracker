@@ -849,7 +849,14 @@ if (_redisUrl && _redisToken) {
 }
 // Per-protocol sub-keys: `closed_pos_solana_v1:orca:{wallet}` (pre-existing —
 // Sprint 3-FREE entries stay byte-compatible) and `closed_pos_solana_v1:raydium:{wallet}`.
-const CLOSED_POS_EMPTY_TTL_SECONDS = 24 * 60 * 60; // empty-with-complete-scan self-heals daily
+// Sprint INSTANT-LOAD (user-approved TTL tune): 24 h → 7 d. A single-AMM wallet's
+// EMPTY other-protocol result was expiring daily, re-paying the full 40–120 s
+// wallet scan every day just to confirm "still empty" (measured: A1's expired
+// empty-Raydium key caused an 88 s solana-closed response on a fully-warm load).
+// 7 d keeps the self-heal property (a wrong empty can't freeze in forever) at a
+// weekly cost instead of daily. Non-empty stays 30 d; transient/partial-scan
+// empties still NEVER cache (the Sprint RAYDIUM refined rule is unchanged).
+const CLOSED_POS_EMPTY_TTL_SECONDS = 7 * 24 * 60 * 60;
 function closedPosKey(protocol: SolanaClmmProtocol, wallet: string): string {
   return `${CLOSED_POS_CACHE_VERSION}:${protocol}:${wallet.toLowerCase()}`;
 }
