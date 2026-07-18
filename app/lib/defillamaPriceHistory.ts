@@ -162,7 +162,17 @@ async function fetchOnce(chain: Chain, contract: string, ts: number): Promise<Fe
   if (!dlChain) return { kind: 'missing' };
   return gate(async () => {
     try {
-      const url = `${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${contract}`;
+      // searchWidth=24h (2026-07-19, Krishna DEEP/SUI pending-claim fix):
+      // DeFiLlama's DEFAULT nearest-point search is narrower than our documented
+      // ±24h acceptance window (MAX_TS_DRIFT_SEC), so a token with a sparse
+      // series returned {coins:{}} even when a same-day point existed (live
+      // repro: DEEP @ 2025-07-03 01:06 — default query empty, but a point
+      // exists 6.1 h later; CG can't rescue claims >365 d old on the free
+      // tier). Widening the SERVER-side search to 24h simply lets DeFiLlama
+      // return that nearest point; the drift validation below still rejects
+      // anything outside ±24h, so Rule 1c (same-UTC-day historical, never
+      // spot) is unchanged.
+      const url = `${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${contract}?searchWidth=24h`;
       const res = await fetch(url, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
