@@ -7,10 +7,11 @@ connection state, or cross-chain leakage.
 
 ## Core principle
 
-A wallet shows as connected only when the user has actively unlocked it in
-the current browser session. Locked wallets never auto-connect. Disconnect
-state is persistent across page refreshes until the user explicitly
-reconnects.
+A wallet connection, once explicitly confirmed by the user, persists as a
+read-only identity across sessions until the user explicitly disconnects
+(amended 2026-07-19, owner-approved — see Rule 1). Disconnect state is
+persistent until the user explicitly reconnects; an explicit disconnect is
+never overridden by silent restore.
 
 ---
 
