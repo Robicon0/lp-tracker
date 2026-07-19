@@ -181,6 +181,19 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`f64da31` + `f9c9f84`** — (1) **EVM session persistence** (owner-requested, wallet-security
+  Rule 1 AMENDED): WalletAuthContext gains `evmAddress` — live wagmi address when unlocked,
+  else the persisted last-confirmed address (`defidesh-evm-addr`) restored on load unless
+  the `defidesh_evm_disconnected` flag is set; all 13 `useAccount` consumers now read the
+  context identity (wagmi = mechanics only, same architecture Sol/Sui used). Verified: no
+  extension → chip + all 5 EVM routes fire; flag set → "no wallet". (2) **Dashboard APY
+  derived-APR fallback** (`f9c9f84`): pools absent from DefiLlama (Orca ZEC/USDC) show
+  "~X% est." from own earnings instead of N/A — same formula as detail page/analytics.
+  Also verified this session: RKHA Net P&L arithmetic EXACT (Net = Current − Deposited +
+  Fees + Unclaimed + CapG/L = −$3,713.40; the pricing-invariants Rule 4 formula text
+  differs from the implemented — flagged to Osho, code unchanged); RKHA closed-Sui
+  CapG/L −$14,355.36 (26 pos) + EVM ≈ −$1,861 = −$16,216.88 shown.
+
 - **`c96d7fa`** — Navbar wallet chips show WATCHED + SCANNED wallets, not only connected
   (the bar said "no wallet" while the pages below were full of watched-wallet positions).
   Chips mirror exactly what the pages compute over: scan mode → single `·SCAN` chip;

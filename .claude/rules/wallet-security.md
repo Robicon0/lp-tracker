@@ -14,14 +14,27 @@ reconnects.
 
 ---
 
-## Rule 1: No auto-connect on locked wallets
+## Rule 1: Session persistence is flag-gated (amended 2026-07-19, owner-approved)
 
-When a user lands on DefiDesh or refreshes the page, no wallet shall
-auto-connect unless the user has explicitly clicked Connect in the current
-session.
+A wallet connection PERSISTS across sessions until the user explicitly
+disconnects: when a user returns to DefiDesh, the last-confirmed wallet
+identity is restored automatically UNLESS the per-chain
+`defidesh_<chain>_disconnected` flag is set (the user clicked Disconnect).
+This applies to all chains (EVM, Solana, Sui) and to any future chains added.
 
-This applies to all chains (EVM, Solana, Sui) and to any future chains
-added.
+Original rule ("no auto-connect unless the user clicked Connect in the
+current session") was amended at Osho's explicit direction for UX parity:
+Solana/Sui Wallet Standard adapters already silently restored sessions, and
+EVM was the outlier because MetaMask-style extensions reveal no accounts
+while locked. EVM now restores the LAST-CONFIRMED address from localStorage
+(`defidesh-evm-addr`, written only on a confirmed connect, cleared on
+explicit disconnect) as a read-only identity — equivalent in power to a
+watched address on this read-only platform. The identity is replaced by the
+live wagmi address whenever the wallet is actually unlocked.
+
+What is STILL forbidden: restoring a wallet after an explicit disconnect
+(the flag always wins), and clearing the flag on anything other than a
+user-confirmed connect.
 
 ### Why
 Wallets that auto-connect on refresh expose user addresses without consent.
