@@ -54,7 +54,23 @@ enumerate wrapper protocols with real usage, their position-discovery mechanism
 Protocol Correctness Contract surface for each. Investigate-first; plan with
 Osho before building.
 
-**Status:** not started.
+**Status:** Phase A COMPLETE (2026-07-20) — awaiting Osho's plan approval. Findings:
+- Program: `tuna4uSQZncNeeiAMKbstuxA9CUkHH6HmC64wgmnogD` (Anchor). TunaPosition account =
+  339 bytes, owner = tuna program, **authority (user wallet) at byte offset 11**
+  (bump-first-style layout — Raydium lesson applies) → trustless discovery via
+  `getProgramAccounts(memcmp offset 11 = wallet, dataSize 339)` is viable.
+- Public API (no key): `api.defituna.com/api/v1/users/{wallet}/tuna-positions` returns
+  COMPLETE open-position data: total_a/b (LP totals), current_debt_a/b,
+  deposited_collateral_a/b, yield_a/b (uncollected), compounded_yield, leverage,
+  liquidation prices, ticks, entry_price, pnl_usd, opened_at, market → pool (underlying
+  Orca pool), plus /markets /pools /vaults /mints /oracle-prices. Live verified on user
+  `2rr3SFuM…` (6 open leveraged positions; example: total $795.13, debt $615.77 →
+  EQUITY $179.36 on $199.96 collateral). Krishna + 2 other candidates return empty
+  (no current positions).
+- The endpoint returns OPEN positions only (state params ignored) — closed-Tuna
+  Capital G/L needs Category-B tx-history reconstruction (follow-up phase).
+- KEY VALUE SEMANTICS: Tuna positions are LEVERAGED — user's real value = EQUITY
+  (total − debt), NEVER the raw LP total (would overstate by the borrowed funds).
 
 _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1bc`
 2026-07-20; see Recent fixes.)_
