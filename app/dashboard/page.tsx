@@ -267,10 +267,9 @@ export default function Dashboard() {
   // haven't landed yet (or were excluded by computePositionPnL) fall back to
   // the existing fees-only / "—" placeholders.
   const lpPnl = useLpPnl(allPositions);
-  const { address } = useAccount();
   const { connect: evmConnect, connectors } = useConnect();
   const { disconnect: evmDisconnect } = useDisconnect();
-  const { solanaAddress, suiAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress: address, setEvmAddress, solanaAddress, suiAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -1809,6 +1808,22 @@ export default function Dashboard() {
                       const pnlUsd: number | null = pnlData ? pnlData.netPnlUSD : null;
                       const pnlPct: number | null = pnlData ? pnlData.netPnlPct : null;
 
+                      // Derived-APR fallback (same formula + guards as the
+                      // position-detail page / analytics "est." APR): when the
+                      // pool has no DefiLlama APY (long-tail pools like Orca
+                      // ZEC/USDC), estimate from the position's OWN earnings —
+                      // (lifetime claimed + uncollected) / age × 365 / value.
+                      // Guarded to N/A when <24 h old or zero earnings. Works
+                      // for any pair on any chain, zero per-token config.
+                      let derivedApr: number | null = null;
+                      if (pos.apy <= 0 && !isClosed && pos.value > 0 && pnlData && pnlData.firstDepositTs > 0) {
+                        const ageDays = (Date.now() / 1000 - pnlData.firstDepositTs) / 86400;
+                        const earned = (pnlData.feesCollected ?? 0) + (pnlData.feesUnclaimed ?? 0);
+                        if (ageDays >= 1 && earned > 0) {
+                          derivedApr = ((earned / ageDays) * 365 / pos.value) * 100;
+                        }
+                      }
+
                       return (
                         <tr
                           key={pos.id}
@@ -1887,6 +1902,15 @@ export default function Dashboard() {
                                 </div>
                                 <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
                                   base
+                                </div>
+                              </>
+                            ) : derivedApr !== null ? (
+                              <>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px rgba(0,255,65,0.25)", fontVariantNumeric: "tabular-nums" }}>
+                                  ~{derivedApr.toFixed(1)}%
+                                </div>
+                                <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                                  est.
                                 </div>
                               </>
                             ) : (
