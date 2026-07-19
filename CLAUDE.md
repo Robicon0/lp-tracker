@@ -41,35 +41,23 @@ for the specific task.
 
 ## Active sprint
 
-**Sprint 4: Clickable Capital G/L breakdown.**
+**Sprint WRAPPER-PROTOCOLS (Gap 2): positions held via position-manager wrappers.**
 
-**Goal:** trust-through-transparency — make the analytics Capital G/L figure expand to a
-per-position breakdown (deposited vs withdrawn USD, open/close dates, fees, per closed
-position, per chain/protocol) so users can verify the number themselves. The Sprint 2.2b
-`SuiClosedPosition` and Sprint 3-FREE `SolanaClosedPosition` summary fields (`depositUSD` /
-`withdrawalUSD` / `feesUSD` / `capitalGL` / `sourceBreakdown`) are already shaped for exactly
-this; EVM closed positions carry the same figures via `perPosition[id]`
-(`closingValue − initialValue`). The Sprint 3-FREE B7 19-row reconciliation table
-(`reports/sprint-3-free-phase-b-report.md`) is the reference for what the breakdown should
-let a user see.
-
-**Hard constraint:** display-only sprint — NO valuation-logic changes (numbers shown must be
-byte-identical to what `aggregate()` already computes); additive; investigate-first for any
-number that looks off rather than reshaping it in the UI.
+**Goal:** LP positions managed by wrapper protocols (DefiTuna on Solana first —
+proven usage in Krishna's history; then survey Kamino vaults etc.) are INVISIBLE
+today because the position NFT/object sits in the wrapper's vault, not the user's
+wallet. Per the completeness directive (2026-07-19), a user with a wrapped
+position currently sees NOTHING — a critical missing-position class. Phase A:
+enumerate wrapper protocols with real usage, their position-discovery mechanism
+(DefiTuna has a public API: api.defituna.com/api/v1/users/{wallet}/tuna-positions
+— verified live, returns empty for wallets without positions), and the
+Protocol Correctness Contract surface for each. Investigate-first; plan with
+Osho before building.
 
 **Status:** not started.
 
-**MILESTONE (Sprint 3-FREE `d1bf447`): cross-chain Capital G/L is COMPLETE across
-EVM + Sui + Solana** — every supported chain's closed positions now reconstruct and fold into
-Capital G/L, delivered on FREE infrastructure (Alchemy free tier; the planned $49/mo Helius
-upgrade was never needed). The **Alchemy free-tier paced-scan pattern** is the documented
-template for any future chain needing tx-history reconstruction (see architecture-principles
-Rule 5 Category B): serial small batches (20 tx/HTTP call, ~120 ms gap) + exponential backoff
-on 429/−32005 + retry-until-complete (the free tier throttles under burst — a naive burst
-dropped 37% of txs — but always completes with backoff; target 100% completeness, not speed) +
-immutable Redis cache (`closed_pos_solana_v1`) so the ~25–40k-CU scan is paid ONCE per wallet.
-Budget: ~750–1,190 fresh Solana wallets/month on the free 30M CU; paid tier only at sustained
-hundreds of NEW Solana wallets/day.
+_(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1bc`
+2026-07-20; see Recent fixes.)_
 
 **Carry-overs (not blockers):**
 - **⚠️ PRODUCTION: `ALCHEMY_SOLANA_RPC` in Vercel is set to the BARE API KEY, not the full
@@ -147,8 +135,8 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
    (ZEC/USDC showed ~213.4% at ship; re-ranged since) vs the Orca app; (b) Contract
    invariant (k) — the first live non-zero Bluefin/Momentum pending reward vs the protocol
    app (code-identical to the proven Cetus path, verified structurally only).
-4. **UI for closed Sui + Solana positions** — Closed tab support (Sui + Solana closed
-   positions are retrieved for Capital G/L but not yet shown as Closed rows).
+4. _(DONE in Sprint 4 `00cd1bc` — closed Sui/Solana positions now render as Closed-tab
+   rows with close dates.)_
 5. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
@@ -180,6 +168,20 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`00cd1bc`** — **Sprint 4 SHIPPED: clickable Capital G/L breakdown + closed-rows UI**
+  (queue item 4 folded in). Analytics Capital G/L cell click-expands to a per-closed-
+  position table (pair/protocol/chain, opened/closed dates, deposited, withdrawn,
+  lifetime fees, per-position G/L) built in aggregate() from EXACTLY the per-position
+  values the total sums — footer === cell BY CONSTRUCTION (verified programmatically:
+  −$12,779.66 exact, Withdrawn−Deposited === footer to the cent). New additive
+  `LpPnlResult.closedRows`; `PositionMeta` carries openedTs/closedTs. Dashboard:
+  reconstructed CLOSED Sui/Solana positions render as greyed Closed-tab rows with close
+  dates (RAKA Closed 11 → 61), synthesized display-only (never in the source positions
+  array), P&L from the same perPosition entries; dashboard now passes Sui/Solana wallet
+  sets to useLpPnl (it previously never fetched closed reconstructions). Rows
+  non-clickable (no live object for a detail page — follow-up candidate). Display-only,
+  no valuation changes, no cache bumps.
 
 - **`f64da31` + `f9c9f84`** — (1) **EVM session persistence** (owner-requested, wallet-security
   Rule 1 AMENDED): WalletAuthContext gains `evmAddress` — live wagmi address when unlocked,
