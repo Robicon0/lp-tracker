@@ -266,10 +266,28 @@ export default function Dashboard() {
   // activity fetch + computePositionPnL() resolves; rows for positions that
   // haven't landed yet (or were excluded by computePositionPnL) fall back to
   // the existing fees-only / "—" placeholders.
-  const lpPnl = useLpPnl(allPositions);
+  const { evmAddress: address, setEvmAddress, solanaAddress, suiAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
+  const { watchedWallets, addWallet, removeWallet, updateLabel, scanAddress, setScanAddress } = useWatchedWallets();
+  // Sprint 4: pass the Sui/Solana wallet sets so this hook instance fetches
+  // CLOSED (reconstructed) positions too — required for the Closed-tab rows.
+  // Same lists analytics builds; scan mode narrows to the scanned address.
+  const dashSuiWallets = useMemo(() => {
+    if (scanAddress) return scanAddress.chain === "sui" ? [scanAddress.address.toLowerCase()] : [];
+    const addrs: string[] = [];
+    if (suiAddress) addrs.push(suiAddress);
+    for (const w of watchedWallets) if (w.chain === "sui") addrs.push(w.address);
+    return [...new Set(addrs.map((a) => a.toLowerCase()))];
+  }, [scanAddress, suiAddress, watchedWallets]);
+  const dashSolanaWallets = useMemo(() => {
+    if (scanAddress) return scanAddress.chain === "solana" ? [scanAddress.address] : [];
+    const addrs: string[] = [];
+    if (solanaAddress) addrs.push(solanaAddress);
+    for (const w of watchedWallets) if (w.chain === "solana") addrs.push(w.address);
+    return [...new Set(addrs)]; // Solana base58 is case-sensitive — never lowercase
+  }, [scanAddress, solanaAddress, watchedWallets]);
+  const lpPnl = useLpPnl(allPositions, dashSuiWallets, dashSolanaWallets);
   const { connect: evmConnect, connectors } = useConnect();
   const { disconnect: evmDisconnect } = useDisconnect();
-  const { evmAddress: address, setEvmAddress, solanaAddress, suiAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -297,7 +315,6 @@ export default function Dashboard() {
     }
   }, [adapterSuiAccount, setSuiAddress]);
 
-  const { watchedWallets, addWallet, removeWallet, updateLabel, scanAddress, setScanAddress } = useWatchedWallets();
 
   // ── SCAN MODE — driven by /dashboard?address=&chain= ──────────────────────
   // The URL → scanAddress sync happens inside <ScanModeListener /> below
@@ -390,16 +407,44 @@ export default function Dashboard() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [dataUpdatedAt]);
 
-  // Filtered + sorted positions
+  // Sprint 4 (closed rows): CLOSED Sui/Solana positions are reconstructed
+  // on-chain artifacts (object destroyed / NFT burned) — they are NEVER in
+  // allPositions, but useLpPnl already computes their P&L (lpPnl.perPosition)
+  // for the analytics totals. Surface them as DISPLAY-ONLY rows in the table:
+  // synthesized here for rendering, never added to the source positions array,
+  // so no activity hook / aggregate consumes them twice. Their per-row P&L
+  // reads lpPnl.perPosition[id] exactly like every other row.
+  const reconstructedClosedRows = useMemo(() => {
+    return lpPnl.closedRows
+      .filter((r) => r.id.startsWith("sui-closed-") || r.id.startsWith("solana-closed-"))
+      .map((r) => ({
+        id: r.id,
+        pair: r.pair,
+        protocol: r.protocol,
+        chain: r.chain,
+        value: 0,
+        apy: 0,
+        fees: 0,
+        status: "Closed" as const,
+        closedTs: r.closedTs,
+      }));
+  }, [lpPnl.closedRows]);
+
+  // Filtered + sorted positions (open + EVM closed from the live array, plus
+  // the reconstructed Sui/Solana closed display rows).
+  const displayPositions = useMemo(
+    () => [...allPositions, ...reconstructedClosedRows],
+    [allPositions, reconstructedClosedRows],
+  );
   const filtered = useMemo(() => {
-    let result = allPositions;
+    let result = displayPositions;
     if (statusFilter !== "All") result = result.filter((p) => effectiveStatus(p) === statusFilter);
     if (chainFilter !== "All") result = result.filter((p) => chainCategory(p.chain) === chainFilter);
     const STATUS_ORDER: Record<string, number> = { "In Range": 0, "Out of Range": 1, Closed: 2 };
     return [...result].sort(
       (a, b) => (STATUS_ORDER[effectiveStatus(a)] ?? 1) - (STATUS_ORDER[effectiveStatus(b)] ?? 1),
     );
-  }, [allPositions, statusFilter, chainFilter]);
+  }, [displayPositions, statusFilter, chainFilter]);
 
   const totalValue   = allPositions.reduce((s, p) => s + p.value, 0);
   const totalFees    = allPositions.reduce((s, p) => s + p.fees, 0);
@@ -1621,8 +1666,8 @@ export default function Dashboard() {
               {STATUS_FILTERS.map((s) => {
                 const count =
                   s === "All"
-                    ? allPositions.length
-                    : allPositions.filter((p) => effectiveStatus(p) === s).length;
+                    ? displayPositions.length
+                    : displayPositions.filter((p) => effectiveStatus(p) === s).length;
                 const active = statusFilter === s;
                 return (
                   <button
@@ -1787,6 +1832,12 @@ export default function Dashboard() {
                     {filtered.map((pos) => {
                       const posStatus = effectiveStatus(pos);
                       const slug = encodeURIComponent(pos.id);
+                      // Reconstructed closed Sui/Solana rows have no live
+                      // position object → no detail page; render non-clickable.
+                      const isReconstructed = pos.id.startsWith("sui-closed-") || pos.id.startsWith("solana-closed-");
+                      const closedDate = (pos as { closedTs?: number }).closedTs
+                        ? new Date((pos as { closedTs?: number }).closedTs! * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                        : null;
                       const dailyEarnings = pos.apy > 0 && pos.value > 0
                         ? (pos.value * pos.apy) / 100 / 365
                         : null;
@@ -1832,6 +1883,7 @@ export default function Dashboard() {
                           onClick={(e) => {
                             // ignore clicks on the manage button itself
                             if ((e.target as HTMLElement).closest(".manage-btn")) return;
+                            if (isReconstructed) return;
                             window.location.href = `/dashboard/position/${slug}`;
                           }}
                         >
@@ -1860,6 +1912,11 @@ export default function Dashboard() {
                                   <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
                                     {pos.protocol}
                                   </span>
+                                  {closedDate && (
+                                    <span style={{ fontSize: 10, color: C.text, opacity: 0.45 }}>
+                                      closed {closedDate}
+                                    </span>
+                                  )}
                                   {chainTok && (
                                     <span
                                       style={{
@@ -1980,7 +2037,8 @@ export default function Dashboard() {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                window.location.href = `/dashboard/position/${slug}`;
+                                if (isReconstructed) return;
+                            window.location.href = `/dashboard/position/${slug}`;
                               }}
                               style={{
                                 fontFamily: FONT,

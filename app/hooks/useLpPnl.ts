@@ -61,6 +61,9 @@ export interface LpPnlResult {
   // computePositionPnL() returned ok; pending / excluded / errored positions
   // are absent and callers should fall back to a placeholder ("—" / fees-only).
   perPosition: Record<string, PositionPnLData>;
+  // Sprint 4 — every CLOSED position as a display row (EVM + Sui + Solana),
+  // newest close first. Sums of inTotals rows' capitalGL === capitalGL above.
+  closedRows: ClosedPositionRow[];
   // Every position that's NOT contributing to the totals — surfaced verbatim
   // in the analytics warning banner so the user knows why their totals look
   // lower than expected. Sprint SPOT-RESILIENCE-V2: this now contains ONLY
@@ -93,6 +96,7 @@ const EMPTY: LpPnlResult = {
   ilUSD: 0, capitalGL: 0, netPnl: 0, netPnlPct: 0, included: 0, excluded: 0,
   errored: 0, errorReasons: [], isLoading: false,
   inflightCount: 0, suiClosedLoading: false, solanaClosedLoading: false,
+  closedRows: [],
   perPosition: {},
   excludedPositions: [],
   stalePositions: [],
@@ -924,10 +928,33 @@ type PosResult =
   | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } }
   | { ok: false; reason: string };
 
+// Sprint 4 — one display row per CLOSED position, assembled in aggregate()
+// from EXACTLY the per-position values the Capital G/L total sums
+// (perPosition[id].initialValue / closingValue / feesCollected), so the
+// breakdown can never disagree with the cell. Display-only, additive.
+export interface ClosedPositionRow {
+  id: string;
+  pair: string;
+  protocol: string;
+  chain: string;
+  openedTs?: number;   // first deposit (EVM: firstDepositTs; Sui/Solana: engine openedTs)
+  closedTs?: number;   // Sui/Solana engines only; EVM close date not tracked here
+  depositUSD: number;    // = initialValue
+  withdrawalUSD: number; // = closingValue
+  feesUSD: number;       // lifetime claimed fees (separate from Capital G/L, Rule 4)
+  capitalGL: number;     // withdrawalUSD − depositUSD
+  inTotals: boolean;     // chain ∈ CAPITAL_GL_CHAINS ⇒ counted in the Capital G/L cell
+}
+
 interface PositionMeta {
   pair: string;
   protocol: string;
   chain: string;
+  // Sprint 4 (closed rows + breakdown): lifecycle dates carried from the
+  // reconstruction engines for CLOSED Sui/Solana positions (absent for EVM,
+  // whose meta comes from the open positions array). Display-only.
+  openedTs?: number;
+  closedTs?: number;
 }
 
 // `isTransportError` and `ERROR_REASONS` are defined above (next to
@@ -964,6 +991,7 @@ function aggregate(
   const meta = externalClosedMeta.size ? new Map([...positionMeta, ...externalClosedMeta]) : positionMeta;
   let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let capitalGL = 0;
+  const closedRows: ClosedPositionRow[] = [];
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
   let pendingClaimCount = 0;
   // Chains whose closed-position withdrawal events we trust on-chain.
@@ -1062,10 +1090,24 @@ function aggregate(
         // position that passed the eligibility filter, so meta should
         // always be present here; defensive `?.` keeps us safe if a
         // future code path ever bypasses metadata.
-        const chain = meta.get(id)?.chain;
+        const m = meta.get(id);
+        const chain = m?.chain;
         if (chain && CAPITAL_GL_CHAINS.has(chain)) {
           capitalGL += d.closingValue - d.initialValue;
         }
+        closedRows.push({
+          id,
+          pair: m?.pair ?? id,
+          protocol: m?.protocol ?? "",
+          chain: chain ?? "",
+          openedTs: m?.openedTs ?? (d.firstDepositTs > 0 ? d.firstDepositTs : undefined),
+          closedTs: m?.closedTs,
+          depositUSD: d.initialValue,
+          withdrawalUSD: d.closingValue,
+          feesUSD: d.feesCollected,
+          capitalGL: d.closingValue - d.initialValue,
+          inTotals: !!(chain && CAPITAL_GL_CHAINS.has(chain)),
+        });
       }
       included += 1;
       perPosition[id] = d;
@@ -1150,6 +1192,8 @@ function aggregate(
     suiClosedLoading,
     solanaClosedLoading,
     perPosition,
+    // Newest close first; rows without a close date (EVM) sort by open date.
+    closedRows: closedRows.sort((a, b) => (b.closedTs ?? b.openedTs ?? 0) - (a.closedTs ?? a.openedTs ?? 0)),
     excludedPositions,
     stalePositions,
     estimatedPositionCount,
@@ -1171,6 +1215,8 @@ interface SuiClosedPositionDTO {
   positionId: string;
   protocol: "cetus" | "bluefin" | "momentum";
   pair: string;
+  openedTs?: number;
+  closedTs?: number;
   events: ActivityEventForPnL[];
 }
 
@@ -1189,6 +1235,8 @@ interface SolanaClosedPositionDTO {
   positionId: string;
   protocol: "orca" | "raydium";
   pair: string;
+  openedTs?: number;
+  closedTs?: number;
   events: ActivityEventForPnL[];
 }
 const SOLANA_CLOSED_PROTOCOL_LABEL: Record<SolanaClosedPositionDTO["protocol"], string> = {
@@ -1262,7 +1310,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             if (!pnl.ok) continue;
             const id = `sui-closed-${sp.protocol}-${sp.positionId}`;
             newMap.set(id, pnl);
-            newMeta.set(id, { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui" });
+            newMeta.set(id, { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui", openedTs: sp.openedTs, closedTs: sp.closedTs });
           }
         } catch { /* graceful — a Sui address that fails contributes nothing */ }
       }));
@@ -1308,7 +1356,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             if (!pnl.ok) continue;
             const id = `solana-closed-${sp.protocol}-${sp.positionId}`;
             newMap.set(id, pnl);
-            newMeta.set(id, { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana" });
+            newMeta.set(id, { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana", openedTs: sp.openedTs, closedTs: sp.closedTs });
           }
         } catch { /* graceful — a Solana address that fails contributes nothing */ }
       }));

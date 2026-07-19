@@ -684,6 +684,8 @@ export default function Analytics() {
   // old — the Redis TTL enforces the staleness ceiling), or null on a first
   // visit. Served instantly; the live pipeline always refreshes in background.
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
+  // Sprint 4 — Capital G/L cell expands to the per-closed-position breakdown.
+  const [showCapGlBreakdown, setShowCapGlBreakdown] = useState(false);
   const [snapshotChecked, setSnapshotChecked] = useState(false);
   useEffect(() => {
     if (!walletSetKey) { setSnapshot(null); setSnapshotChecked(true); return; }
@@ -1063,6 +1065,9 @@ export default function Analytics() {
         excludedPositions: [],
         stalePositions: [],
         perPosition: lpPnlLive.perPosition,
+        // Sprint 4: breakdown rows are live-only detail (snapshots don't store
+        // them) — same contract as perPosition above.
+        closedRows: lpPnlLive.closedRows,
       }
     : lpPnlLive;
   const totalPortfolioValue = useSnap && snapshot ? snapshot.header.totalPortfolioValue : totalPortfolioValueLive;
@@ -1985,8 +1990,9 @@ export default function Analytics() {
                     val: fmt$Signed(lpPnl.capitalGL),
                     color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright,
                     sub: "closed positions, EVM + Sui + Solana (Orca, Raydium)",
-                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.), Sui (Cetus, Bluefin, Momentum), and Solana (Orca, Raydium) — all reconstructed from on-chain events and valued at historical prices.",
+                    tooltip: "Realized gain or loss from closed LP positions — difference between exit value and deposit value. EVM chains (HyperEVM, Base, Arbitrum, etc.), Sui (Cetus, Bluefin, Momentum), and Solana (Orca, Raydium) — all reconstructed from on-chain events and valued at historical prices. Click to see every closed position behind this number.",
                     pendingClosed: true,
+                    expandable: true,
                   },
                   {
                     label: "Imperm. Loss",
@@ -2002,19 +2008,27 @@ export default function Analytics() {
                     sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
                     pendingClosed: true,
                   },
-                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean }>);
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; expandable?: boolean }>);
                 })().map((c, i, arr) => (
                   <div
                     key={c.label}
+                    onClick={c.expandable ? () => setShowCapGlBreakdown((v) => !v) : undefined}
                     style={{
                       padding: "16px 20px",
                       borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
                       position: "relative",
+                      cursor: c.expandable ? "pointer" : undefined,
+                      background: c.expandable && showCapGlBreakdown ? "rgba(255,255,255,0.02)" : undefined,
                     }}
                   >
                     <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center" }}>
                       {c.label}
                       {c.tooltip && <InfoTooltip text={c.tooltip} />}
+                      {c.expandable && (
+                        <span style={{ marginLeft: 6, fontSize: 9, color: C.green, opacity: 0.8 }}>
+                          {showCapGlBreakdown ? "▴" : "▾"}
+                        </span>
+                      )}
                     </div>
                     {/* Sprint LPPNL-PERF (Part A): PROGRESSIVE render. A cell
                         skeletons ONLY when nothing has computed yet (included===0
@@ -2061,6 +2075,90 @@ export default function Analytics() {
                   </div>
                 ))}
               </div>
+              {/* Sprint 4 — Capital G/L per-position breakdown. Rows come from
+                  lpPnl.closedRows, which aggregate() builds from EXACTLY the
+                  per-position values the Capital G/L total sums — the footer
+                  total below is Σ rows and matches the cell by construction.
+                  Display-only: no valuation logic here. */}
+              {showCapGlBreakdown && (
+                <div style={{ borderTop: `1px solid ${C.border}`, background: "rgba(255,255,255,0.012)" }}>
+                  <div style={{ padding: "10px 20px 4px", fontSize: 10, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                    // Capital G/L breakdown · {lpPnl.closedRows.length} closed position{lpPnl.closedRows.length === 1 ? "" : "s"}
+                    <span style={{ marginLeft: 10, opacity: 0.6, textTransform: "none", letterSpacing: "0.02em" }}>
+                      Capital G/L = withdrawn − deposited (fees shown separately, not in G/L)
+                    </span>
+                  </div>
+                  <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT }}>
+                      <thead>
+                        <tr>
+                          {["POSITION", "OPENED", "CLOSED", "DEPOSITED", "WITHDRAWN", "FEES (LIFETIME)", "CAPITAL G/L"].map((h, hi) => (
+                            <th key={h} style={{ position: "sticky", top: 0, background: C.bg1, textAlign: hi < 3 ? "left" : "right", padding: "8px 20px", fontSize: 10, fontWeight: 400, color: C.text, letterSpacing: "0.12em", borderBottom: `1px solid ${C.border}` }}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lpPnl.closedRows.map((r) => (
+                          <tr key={r.id}>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
+                              <span style={{ color: C.textBright, fontWeight: 600 }}>{r.pair}</span>
+                              <span style={{ marginLeft: 8, fontSize: 10, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                                {r.protocol} · {r.chain}
+                              </span>
+                            </td>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 11.5, color: C.text }}>
+                              {r.openedTs ? new Date(r.openedTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                            </td>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 11.5, color: C.text }}>
+                              {r.closedTs ? new Date(r.closedTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                            </td>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$(r.depositUSD)}
+                            </td>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$(r.withdrawalUSD)}
+                            </td>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", color: C.green, fontVariantNumeric: "tabular-nums" }}>
+                              +{fmt$(r.feesUSD)}
+                            </td>
+                            <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", fontWeight: 700, color: r.capitalGL > 0 ? C.green : r.capitalGL < 0 ? C.red : C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$Signed(r.capitalGL)}
+                            </td>
+                          </tr>
+                        ))}
+                        {lpPnl.closedRows.length === 0 && (
+                          <tr>
+                            <td colSpan={7} style={{ padding: "14px 20px", fontSize: 12, color: C.text, opacity: 0.6 }}>
+                              {(lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading) ? "scanning closed positions…" : "No closed positions found."}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                      {lpPnl.closedRows.length > 0 && (
+                        <tfoot>
+                          <tr>
+                            <td colSpan={3} style={{ padding: "10px 20px", fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase" }}>Total</td>
+                            <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$(lpPnl.closedRows.reduce((t, r) => t + r.depositUSD, 0))}
+                            </td>
+                            <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$(lpPnl.closedRows.reduce((t, r) => t + r.withdrawalUSD, 0))}
+                            </td>
+                            <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.green, fontVariantNumeric: "tabular-nums" }}>
+                              +{fmt$(lpPnl.closedRows.reduce((t, r) => t + r.feesUSD, 0))}
+                            </td>
+                            <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 13.5, fontWeight: 700, color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright, fontVariantNumeric: "tabular-nums" }}>
+                              {fmt$Signed(lpPnl.closedRows.filter((r) => r.inTotals).reduce((t, r) => t + r.capitalGL, 0))}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </div>
+              )}
               <style
                 dangerouslySetInnerHTML={{
                   __html:
