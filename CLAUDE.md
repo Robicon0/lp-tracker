@@ -54,7 +54,11 @@ enumerate wrapper protocols with real usage, their position-discovery mechanism
 Protocol Correctness Contract surface for each. Investigate-first; plan with
 Osho before building.
 
-**Status:** Phase A COMPLETE (2026-07-20) — awaiting Osho's plan approval. Findings:
+**Status:** Phase 1 SHIPPED (`4c450a1`, 2026-07-20) — DefiTuna OPEN positions live
+(hybrid API+on-chain-verify, EQUITY semantics, selfReportedPnl mechanism in useLpPnl).
+Phase 2 queued: closed-Tuna reconstruction (Capital G/L via tuna program tx history,
+Category B) + survey of other wrappers (Kamino vaults, etc.). Detail page for wrapper
+positions not yet built (rows non-clickable). Phase A findings (kept for Phase 2):
 - Program: `tuna4uSQZncNeeiAMKbstuxA9CUkHH6HmC64wgmnogD` (Anchor). TunaPosition account =
   339 bytes, owner = tuna program, **authority (user wallet) at byte offset 11**
   (bump-first-style layout — Raydium lesson applies) → trustless discovery via
@@ -184,6 +188,17 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`4c450a1`** — **Sprint WRAPPER-PROTOCOLS Phase 1: DefiTuna (Solana).** Wrapper-held
+  leveraged Orca LP positions (NFT in Tuna's vault — invisible to the wallet census) now
+  visible platform-wide. Hybrid source: DefiTuna public API primary + per-position
+  ON-CHAIN verification (owner=tuna program, authority @ byte 11). EQUITY semantics
+  (value = total − debt; fees = pending yield; tick-based range). NEW generic mechanism:
+  `AerodromePosition.selfReportedPnl` → `useLpPnl.buildSelfReportedPnL` (netPnl = equity
+  + yield − collateral, no activity route, no excluded-banner noise) — next wrapper
+  protocol reuses it untouched. Verified on third-party wallet `2rr3SFuM…` (6 live
+  positions, equity−collateral matches Tuna's own pnl; browser: allocation DefiTuna
+  96%/$515, analytics Deposited $561.20/Net −$23.87, zero exclusions). No cache bumps.
 
 - **`00cd1bc`** — **Sprint 4 SHIPPED: clickable Capital G/L breakdown + closed-rows UI**
   (queue item 4 folded in). Analytics Capital G/L cell click-expands to a per-closed-
