@@ -46,7 +46,7 @@ const FEATURES: string[] = [
   "Filter positions by chain, protocol, and status",
   "Sort by value, APY, or fees",
   "Individual position detail pages",
-  "Real-time on-chain data — Aerodrome, Uniswap V3, Velodrome, Orca, Raydium, Cetus, Bluefin, HyperSwap, KittenSwap, PRJX, PancakeSwap",
+  "Real-time on-chain data — Aerodrome, Uniswap V3, Velodrome, Orca, Raydium, DefiTuna, Cetus, Bluefin, HyperSwap, KittenSwap, PRJX, PancakeSwap",
   "Performance charts and impermanent-loss tracking",
   "Multi-wallet support — EVM, Solana, Sui (connect + watched addresses)",
   "Lending & borrowing tracking — AAVE V3, Suilend, Kamino, Jupiter Lend, AlphaFi, HyperLend, HypurrFi, Dolomite",
@@ -153,7 +153,7 @@ export default function About() {
             {" "}helps liquidity providers monitor their positions across decentralized exchanges
             like{" "}
             <strong style={{ color: C.textBright, fontWeight: 600 }}>
-              Uniswap, Aerodrome, Velodrome, Orca, Raydium, Cetus, Bluefin
+              Uniswap, Aerodrome, Velodrome, Orca, Raydium, DefiTuna, Cetus, Bluefin
             </strong>
             , and{" "}
             <strong style={{ color: C.textBright, fontWeight: 600 }}>HyperSwap</strong>.

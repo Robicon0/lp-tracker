@@ -9,6 +9,7 @@ import { fetchUniswapV3Positions } from "../lib/uniswap";
 import { fetchVelodromePositions } from "../lib/velodrome";
 import { fetchRaydiumPositions } from "../lib/raydium";
 import { fetchOrcaPositions } from "../lib/orca";
+import { fetchDefiTunaPositions } from "../lib/defituna";
 import { fetchCetusPositions } from "../lib/cetus";
 import { fetchBluefinPositions } from "../lib/bluefin";
 import { fetchMomentumPositions } from "../lib/momentum";
@@ -130,6 +131,7 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     sources.push(
       { label: "Raydium", address: a, fetcher: fetchRaydiumPositions },
       { label: "Orca", address: a, fetcher: fetchOrcaPositions },
+      { label: "DefiTuna", address: a, fetcher: fetchDefiTunaPositions },
     );
   }
   for (const a of suiAddresses) {

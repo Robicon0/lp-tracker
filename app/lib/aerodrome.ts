@@ -7,6 +7,14 @@ export interface AerodromePosition {
   apy: number;
   fees: number;
   status: 'In Range' | 'Out of Range' | 'Closed';
+  // Wrapper protocols (DefiTuna etc., Sprint WRAPPER-PROTOCOLS): the managing
+  // protocol's own API reports the position's P&L basis directly — the user's
+  // deposited collateral (USD) and open date. When present, useLpPnl builds
+  // this position's PositionPnLData from these self-reported figures instead
+  // of fetching an activity route (none exists — the wrapper holds the
+  // underlying LP position in its vault). `value` on such positions is EQUITY
+  // (total − debt), never the raw LP total; `fees` is pending yield.
+  selfReportedPnl?: { initialValueUSD: number; openedTs?: number };
   // Optional enriched fields present on CLMM positions
   amount0?: number;
   amount1?: number;

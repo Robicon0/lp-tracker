@@ -187,6 +187,48 @@ function countPendingFeeClaims(events: ActivityEventForPnL[]): number {
   return n;
 }
 
+// Wrapper-protocol positions (DefiTuna etc.) carry a SELF-REPORTED P&L basis
+// from the managing protocol's own API (pos.selfReportedPnl): the user's
+// deposited collateral (initial) + open date. pos.value is already EQUITY
+// (total − debt) and pos.fees is pending yield, so:
+//   netPnl = equity + pending yield − deposited collateral.
+// Synthesized fresh on every recompute (equity is live); no activity route
+// exists for these — the wrapper holds the underlying LP position.
+function buildSelfReportedPnL(pos: AerodromePosition): PositionPnLData {
+  const value = pos.value;
+  const initial = pos.selfReportedPnl?.initialValueUSD ?? value;
+  const unclaimed = pos.fees;
+  const isClosed = pos.status === "Closed";
+  const net = value + unclaimed - initial;
+  return {
+    initialValue: initial,
+    currentValue: value,
+    closingValue: isClosed ? value : 0,
+    feesCollected: 0,
+    feesUnclaimed: unclaimed,
+    netPnlUSD: net,
+    netPnlPct: initial > 0 ? (net / initial) * 100 : 0,
+    ilPct: 0,
+    ilUSD: 0,
+    hodlValue: value,
+    feesOffsetIL: true,
+    entryPrice0: pos.price0 ?? 0,
+    entryPrice1: pos.price1 ?? 0,
+    currentPrice0: pos.price0 ?? 0,
+    currentPrice1: pos.price1 ?? 0,
+    depositCount: 1,
+    firstDepositTs: pos.selfReportedPnl?.openedTs ?? 0,
+    isClosed,
+    totalAmount0: 0,
+    totalAmount1: 0,
+    entryRatio: 0,
+    currentRatio: 0,
+    priceRatioR: 0,
+    ilAvailable: false,
+    depositTxHashes: [],
+  };
+}
+
 function buildFallbackPnL(pos: AerodromePosition): PositionPnLData {
   const value = pos.value;
   const unclaimed = pos.fees;
@@ -1389,6 +1431,16 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     const eligible = positions.filter((p) => {
       const isClosed = p.status === "Closed";
 
+      // Wrapper protocols: self-reported basis → eligible without an
+      // activity route (results synthesized below, never fetched).
+      if (p.selfReportedPnl) {
+        if (!isClosed && p.value <= 0) return false;
+        if (seen.has(p.id)) return false;
+        seen.add(p.id);
+        meta.set(p.id, { pair: p.pair, protocol: p.protocol, chain: p.chain });
+        return true;
+      }
+
       if (!ACTIVITY_PROTOCOLS.has(p.protocol)) {
         // Surface unsupported protocols (Momentum, etc.) ONLY if the
         // position is active — closed/zero-value rejected ones aren't
@@ -1452,9 +1504,18 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       return;
     }
 
+    // Self-reported (wrapper-protocol) positions: (re)build their PnL from
+    // the live position object on EVERY run — equity/yield move with the
+    // market and there is nothing to fetch.
+    for (const p of eligible) {
+      if (p.selfReportedPnl) {
+        resultsRef.current.set(p.id, { ok: true, data: buildSelfReportedPnL(p) });
+      }
+    }
+
     // Find positions we haven't fetched or started fetching yet.
     const toFetch = eligible.filter(
-      (p) => !resultsRef.current.has(p.id) && !inflightRef.current.has(p.id),
+      (p) => !p.selfReportedPnl && !resultsRef.current.has(p.id) && !inflightRef.current.has(p.id),
     );
 
     if (toFetch.length === 0) {

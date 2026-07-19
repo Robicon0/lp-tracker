@@ -1834,7 +1834,7 @@ export default function Dashboard() {
                       const slug = encodeURIComponent(pos.id);
                       // Reconstructed closed Sui/Solana rows have no live
                       // position object → no detail page; render non-clickable.
-                      const isReconstructed = pos.id.startsWith("sui-closed-") || pos.id.startsWith("solana-closed-");
+                      const isReconstructed = pos.id.startsWith("sui-closed-") || pos.id.startsWith("solana-closed-") || pos.id.startsWith("tuna-");
                       const closedDate = (pos as { closedTs?: number }).closedTs
                         ? new Date((pos as { closedTs?: number }).closedTs! * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                         : null;
