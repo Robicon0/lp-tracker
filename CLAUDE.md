@@ -181,6 +181,12 @@ _(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`c96d7fa`** — Navbar wallet chips show WATCHED + SCANNED wallets, not only connected
+  (the bar said "no wallet" while the pages below were full of watched-wallet positions).
+  Chips mirror exactly what the pages compute over: scan mode → single `·SCAN` chip;
+  otherwise connected + watched deduped, capped at 4 + "+N" overflow (hover lists rest).
+  Verified LIVE: Krishna watched set shows all three chips; scan URL shows SUI·SCAN.
+
 - **`e85f794`** — Analytics honors paste-a-wallet SCAN mode (wallet-security Rule 3
   parity): the paste flow showed positions on the dashboard but an EMPTY analytics page
   (the page built its wallet lists from connected+watched only and never read
