@@ -13,7 +13,6 @@ import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
 import { useLpPnl, seedLkgFromSnapshot, collectLkgEntries } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
-import { useAccount } from "wagmi";
 // Type-only import — erased at compile time, never pulls the server lib
 // (@upstash/redis) into the client bundle.
 import type { AnalyticsSnapshot } from "../lib/analyticsSnapshot";
@@ -513,8 +512,7 @@ export default function Analytics() {
     });
   }, [rawWalletTokens, aavePrices]);
 
-  const { address: connectedEvmAddress } = useAccount();
-  const { solanaAddress: connectedSolanaAddress, suiAddress: connectedSuiAddress } = useWalletAuth();
+  const { evmAddress: connectedEvmAddress, solanaAddress: connectedSolanaAddress, suiAddress: connectedSuiAddress } = useWalletAuth();
   const { watchedWallets: persistedWatchedWallets, scanAddress } = useWatchedWallets();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);

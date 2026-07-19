@@ -27,7 +27,10 @@ const EVM_WALLET_DISPLAY: {
 ];
 
 export default function Navbar() {
-  const { address, isConnected } = useAccount();
+  // wagmi = connect/disconnect MECHANICS only. Display identity comes from
+  // WalletAuthContext.evmAddress (live wagmi when unlocked, else the persisted
+  // last-confirmed address — EVM session persistence, parity with Solana/Sui).
+  useAccount(); // keeps wagmi state subscribed; identity read via context below
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
 
@@ -53,7 +56,9 @@ export default function Navbar() {
   const { mutate: disconnectSui } = useDisconnectWallet();
 
   // Our source of truth — only set after explicit user-initiated connect.
-  const { solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress, setEvmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const address = evmAddress;
+  const isConnected = !!evmAddress;
 
   const [showEvmModal, setShowEvmModal] = useState(false);
   const [showSolanaModal, setShowSolanaModal] = useState(false);
@@ -218,6 +223,7 @@ export default function Navbar() {
 
   const handleEvmDisconnect = () => {
     setDisconnected("evm");
+    setEvmAddress(null); // clears the persisted identity too (setter removes the key)
     disconnect();
   };
 

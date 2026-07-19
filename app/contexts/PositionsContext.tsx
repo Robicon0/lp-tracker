@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { useQueries, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { useAccount } from "wagmi";
 import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
 import { useWatchedWallets } from "./WatchedWalletsContext";
@@ -52,11 +51,10 @@ interface SourceQuery {
 }
 
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
-  const { address } = useAccount();
-  // Use addresses from WalletAuthContext — the only source of truth for explicit
-  // user connections. Adapter state (useWallet, useCurrentAccount) is not used
-  // here because those can reflect locked/silent-reconnect state.
-  const { solanaAddress, suiAddress } = useWalletAuth();
+  // Use addresses from WalletAuthContext — the only source of truth for wallet
+  // identity across ALL chains (EVM included since 2026-07-19: evmAddress is
+  // live wagmi when unlocked, else the persisted last-confirmed identity).
+  const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets, scanAddress } = useWatchedWallets();
   const queryClient = useQueryClient();
 

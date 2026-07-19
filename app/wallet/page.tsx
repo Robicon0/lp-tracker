@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import Navbar from "../Navbar";
 
@@ -87,8 +86,8 @@ interface SuiBalances {
 }
 
 export default function WalletPage() {
-  const { address, isConnected } = useAccount();
-  const { solanaAddress, suiAddress } = useWalletAuth();
+  const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
+  const isConnected = !!address;
 
   const [chainBalances, setChainBalances] = useState<ChainBalances[]>([]);
   const [solanaBalances, setSolanaBalances] = useState<SolanaBalances | null>(null);

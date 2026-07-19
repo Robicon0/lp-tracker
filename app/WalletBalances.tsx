@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAccount } from "wagmi";
+import { useWalletAuth } from "./contexts/WalletAuthContext";
 
 interface TokenBalance {
   name: string;
@@ -14,7 +14,8 @@ const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const ALCHEMY_URL = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 export default function WalletBalances() {
-  const { address, isConnected } = useAccount();
+  const { evmAddress: address } = useWalletAuth();
+  const isConnected = !!address;
   const [ethBalance, setEthBalance] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [loading, setLoading] = useState(false);

@@ -10,6 +10,7 @@ import { PositionsProvider } from "./contexts/PositionsContext";
 import { WalletAuthProvider } from "./contexts/WalletAuthContext";
 import { WatchedWalletsProvider } from "./contexts/WatchedWalletsContext";
 import { isDisconnected, clearDisconnected } from "./lib/walletDisconnectFlag";
+import { useWalletAuth } from "./contexts/WalletAuthContext";
 
 const queryClient = new QueryClient();
 // Empty array: WalletProvider auto-detects any Solana Wallet Standard-compliant
@@ -66,6 +67,37 @@ function EvmConnectionWatcher() {
   return null;
 }
 
+// EVM identity sync (2026-07-19, owner-requested EVM session persistence —
+// parity with Solana/Sui). Keeps WalletAuthContext.evmAddress as the single
+// EVM identity every page reads:
+//   1. On mount, if the user did NOT explicitly disconnect, restore the
+//      last-confirmed address from localStorage — so a locked MetaMask (which
+//      reveals no accounts until unlocked) still yields the read-only view the
+//      user had last session, exactly like Solana/Sui wallets do.
+//   2. Whenever wagmi reports a live address (unlocked + authorized), it wins
+//      and is persisted as the new last-confirmed identity.
+//   3. A wagmi DISCONNECTED report does NOT clear the identity (that's the
+//      locked-wallet-on-load case); only the explicit Disconnect handlers call
+//      setEvmAddress(null), which also removes the persisted key.
+function EvmAddressSync() {
+  const { address } = useAccount();
+  const { setEvmAddress } = useWalletAuth();
+  useEffect(() => {
+    if (!isDisconnected("evm")) {
+      try {
+        const saved = localStorage.getItem("defidesh-evm-addr");
+        if (saved) setEvmAddress(saved);
+      } catch {}
+    }
+    // Restore once on mount; live wagmi state is handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (address) setEvmAddress(address);
+  }, [address, setEvmAddress]);
+  return null;
+}
+
 function SolanaConnectionWatcher() {
   const { connected } = useWallet();
   useClearOnConfirmedConnect("solana", connected);
@@ -94,6 +126,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             <QueryClientProvider client={queryClient}>
               <EvmDisconnectGate />
               <EvmConnectionWatcher />
+              <EvmAddressSync />
               <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
                 <SuiWalletProvider autoConnect={suiAutoConnect}>
                   <SuiConnectionWatcher />

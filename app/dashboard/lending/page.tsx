@@ -4,7 +4,6 @@ import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNav from "../../components/TerminalNav";
 import AnimatedCount from "../../components/AnimatedCount";
-import { useAccount } from "wagmi";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../../contexts/WatchedWalletsContext";
 import { useWalletTokens, type TokenItem } from "../../hooks/useWalletTokens";
@@ -151,8 +150,7 @@ const SCANLINE =
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function LendingPage() {
-  const { address } = useAccount();
-  const { solanaAddress, suiAddress } = useWalletAuth();
+  const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets, scanAddress } = useWatchedWallets();
   // hasWallet must mirror the active fetch set inside
   // useWalletTokens + useLendingPositions — wagmi adapter address,

@@ -45,8 +45,9 @@ export default function HeroWalletConnect() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // EVM
-  const { address, isConnected } = useAccount();
+  // EVM — wagmi for connect/disconnect mechanics; display identity from
+  // WalletAuthContext.evmAddress (persisted last-confirmed, parity with Sol/Sui).
+  useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const [showEvmModal, setShowEvmModal] = useState(false);
@@ -71,7 +72,9 @@ export default function HeroWalletConnect() {
   const [showSuiModal, setShowSuiModal] = useState(false);
   const awaitingSuiConnect = useRef(false);
 
-  const { solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress, setEvmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const address = evmAddress;
+  const isConnected = !!evmAddress;
 
   useEffect(() => {
     if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
@@ -96,6 +99,7 @@ export default function HeroWalletConnect() {
 
   const handleEvmDisconnect = () => {
     setDisconnected("evm");
+    setEvmAddress(null); // clears the persisted identity too
     disconnect();
   };
 

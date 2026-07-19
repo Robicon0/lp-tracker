@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type CSSProperties } from "react";
-import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import MobileNavMenu from "./MobileNavMenu";
@@ -45,8 +44,7 @@ export default function TerminalNavbar() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const { address } = useAccount();
-  const { solanaAddress, suiAddress } = useWalletAuth();
+  const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets, scanAddress } = useWatchedWallets();
 
   // Wallet chips show EVERY wallet the pages are computing over — connected,

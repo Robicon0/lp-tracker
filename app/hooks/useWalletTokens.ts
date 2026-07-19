@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { useAccount } from "wagmi";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import { getTokenLogo } from "../lib/tokenLogos";
@@ -168,8 +167,7 @@ export interface WalletTokensData {
 }
 
 export function useWalletTokens(): WalletTokensData {
-  const { address } = useAccount();
-  const { solanaAddress, suiAddress } = useWalletAuth();
+  const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets, scanAddress } = useWatchedWallets();
 
   // SCAN MODE: ignore connected + watched and fetch ONLY the scan address.
