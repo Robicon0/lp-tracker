@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Any file ENDING in .env — the .env* glob above only matches names that START
+# with .env, so a pulled secrets dump like `prod.env` (which is what
+# `vercel env pull <file> --cwd <dir>` writes into the repo root) was NOT
+# ignored and would be swept up by `git add -A`.
+*.env
 # Templates — committed so contributors can see what env vars to set
 !.env.local.example
 !.env.example

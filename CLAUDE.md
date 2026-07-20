@@ -80,14 +80,30 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 2026-07-20; see Recent fixes.)_
 
 **Carry-overs (not blockers):**
-- **⚠️ PRODUCTION: `ALCHEMY_SOLANA_RPC` in Vercel is set to the BARE API KEY, not the full
-  URL** (found live 2026-07-18 via browser verification: `/api/solana-closed-positions`
-  500'd with `Failed to parse URL from 7SWf…`, so Solana closed Capital G/L was missing
-  from production totals, e.g. A1 showed −$10,369.40 without Orca's −$1,818.78). **Osho
-  must edit the value to `https://solana-mainnet.g.alchemy.com/v2/<key>`** (Settings →
-  Environment Variables). Since `7784ed2` a malformed value degrades gracefully (empty,
-  uncached, loud `[rpcEnv]` server log) instead of 500ing — but the feature stays OFF
-  until the value is fixed.
+- **✅ RESOLVED 2026-07-21: `ALCHEMY_SOLANA_RPC` corrected in Vercel (production +
+  preview).** The var had been set to the BARE API KEY since 2026-07-06 (found live
+  2026-07-18: `/api/solana-closed-positions` 500'd with `Failed to parse URL from 7SWf…`,
+  so Solana closed Capital G/L was missing from production totals). Fixed via
+  `vercel env update ALCHEMY_SOLANA_RPC {production,preview}` to the full
+  `https://solana-mainnet.g.alchemy.com/v2/<key>` form, then `35941fa` was redeployed
+  (`dpl_FKW7d7QF…`) so the new value took effect. **Note the var is `type: sensitive`, so
+  its value is write-only — unreadable via dashboard, `vercel env pull`, or the REST API
+  with `?decrypt=true`. Format can never be confirmed by reading it; only by re-setting or
+  by behaviour.** VERIFIED by forcing a genuine cold scan: deleted the Redis key
+  `closed_pos_solana_v1:orca:{A1}` (backed up first) and re-requested → **93.5 s** live
+  Alchemy scan (vs ~0.6 s warm), returning 20 Orca positions, Capital G/L −$1,729.23,
+  fees $1,899.34, 0 pending, 0 spot-valued events (Rule 1a clean); the fresh scan
+  reproduced the cached Capital G/L **to the cent** and the position-id set exactly. Cache
+  repopulated automatically (30 d TTL). A warm cache hit is NOT proof the RPC works — the
+  Upstash DB is shared across Production/Preview/Development, so a dev-written entry can
+  mask a broken production RPC; only a forced cold scan proves it.
+  **FIGURE SUPERSEDED: A1's Orca closed Capital G/L is −$1,729.23, not the −$1,818.78 this
+  file previously recorded** (and A1's −$10,369.40 wallet total was the pre-fix figure with
+  Orca missing entirely — not re-measured this session, treat as stale). −$1,729.23 is
+  confirmed twice independently (warm cache + the 93.5 s cold rescan, identical to the
+  cent). The −$1,818.78 was a one-off browser reading from the 2026-07-18 investigation
+  that was never re-verified; the ~4.9% delta is ordinary DeFiLlama daily-close
+  granularity across scan dates, not a regression.
 - **Closed positions are counted everywhere but not yet shown as Closed rows** — Sui
   (Cetus/Bluefin/Momentum) AND Solana (Orca, Raydium) closed positions fold into Capital G/L +
   Fee Income but have no dashboard/Closed-tab rows (queue item "UI for closed rows").
@@ -628,9 +644,15 @@ and folds Capital G/L + fees into `useLpPnl`/`useWalletLevelFees` (Redis-cached
 `closed_pos_solana_v1:{orca|raydium}:{wallet}`). Sprint RAYDIUM also fixed a
 SILENT PLATFORM-WIDE bug: Raydium OPEN positions returned `[]` for every user
 (bump-first account layout broke the memcmp lookup — now direct PDA derivation).
-Remaining gap: Closed-row UI (queue item 4, shared with Sui). ⚠️ Production
-requires `ALCHEMY_SOLANA_RPC` in Vercel env vars — without it the engine degrades
-gracefully to "no Solana closed positions" (no errors, silently incomplete).
+Remaining gap: Closed-row UI (queue item 4, shared with Sui). Production requires
+`ALCHEMY_SOLANA_RPC` in Vercel env vars — without it (or with a MALFORMED value) the
+engine degrades gracefully to "no Solana closed positions" (no errors, silently
+incomplete). **✅ Confirmed correct and live in production 2026-07-21** (see the
+resolved carry-over above for the value-format incident and the cold-scan proof).
+Because the degrade is silent and the var is `type: sensitive` (unreadable), the ONLY
+way to verify this path is a forced cold scan — delete the wallet's
+`closed_pos_solana_v1:{protocol}:{wallet}` Redis key and confirm the request takes
+40–120 s rather than returning fast-and-empty.
 
 **Suilend APY not showing.** Reserve interest rate fields need parsing.
 AlphaFi and Dolomite APY now working from on-chain data.
