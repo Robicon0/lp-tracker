@@ -130,8 +130,16 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 ## Sprint queue
 
 In order. One active at a time. Each sprint must ship before the next begins.
-_(Sprint 4 — clickable Capital G/L breakdown — is the ACTIVE sprint above.)_
+_(Sprint WRAPPER-PROTOCOLS — DefiTuna wrapper positions — is the ACTIVE sprint above;
+Phase 1 shipped `4c450a1`, Phase 2 queued below.)_
 
+1. **Sprint WRAPPER-PROTOCOLS Phase 2** — the deferred wrapper work: (a) closed-Tuna Capital G/L
+   via tx-history reconstruction against the tuna program (Category B, same pattern as
+   Orca/Raydium closed positions — Tuna's API returns OPEN positions only); (b) survey other
+   wrapper protocols with real usage (Kamino vaults, etc.) and integrate via the same
+   `selfReportedPnl` mechanism; (c) a position-detail page for wrapper positions (Tuna rows are
+   currently non-clickable — no live position object). Reuses `app/api/defituna/route.ts`'s
+   hybrid API+on-chain-verify pattern.
 1. **Sprint POSITION-DETAIL-2** — the deferred pending-reward paths from Sprint POSITION-DETAIL
    (`82d4954`): **B3** Solana pending rewards (Orca whirlpool `rewardInfos` offsets already
    documented in orca/route.ts comments; Raydium equivalent) so Orca/Raydium detail pages show
@@ -299,174 +307,27 @@ shorthand.
   bumps. General pattern: ANY future URL-typed RPC env var must be read via
   `rpcUrlFromEnv`, never `process.env.X` directly into `fetch`.
 
-- **`c6e31ee`** — Sprint SPOT-RESILIENCE-V2: **positions never silently vanish from LP P&L
-  totals** — per-position last-known-good (LKG) + degrade funnel (NEW architecture Rule 11).
-  Previously a transient per-position load failure DELETED that position's contribution from
-  every aggregate and raised a red "Couldn't load N positions" banner. **Five parts, all
-  failure-path-only** (clean compute byte-identical to pre-sprint): (1) every successful
-  compute writes `PositionPnLData` to localStorage `lp-pnl-lkg-v1-{posId}`; a new
-  `degradeOnFailure()` funnel routes EVERY failure to **STALE** (LKG hit — kept in totals,
-  live current value refreshed) → **ESTIMATED** (value-proxy, now all chains) → **EXCLUDED**
-  (only genuinely never-loaded with no value). (2) **Bug A fix** — NEW `app/lib/evmRpc.ts`
-  (per-call 12 s timeout + concurrency semaphore, EVM analogue of `suiRpc.ts`, invariant (l));
-  the Aerodrome route falls a hung full-range Tenderly `eth_getLogs` into a paced chunked
-  scan (live repro: `evm-rpc-timeout` → 13 chunks → 5 logs in 27.6 s; previously dropped
-  $9,244.85 WETH/USDC). (3) **Bug B fix** — Cetus discovery fails LOUD on a partial scan (no
-  false `no_deposits`) and unions `FromAddress` with `ChangedObject: positionId` so
-  router-opened/received deposits are found (live A2 USDC/SUI deposit $24,909.69 recovered).
-  (4) Red banner deleted → subtle grey "showing last-known values … included in totals" note.
-  (5) **Snapshot v2** — `app/lib/analyticsSnapshot.ts` + `/api/analytics-snapshot` carry
-  `perPosition` so a cold cross-device load seeds the LKG; snapshot write gated on a
-  fully-live settle. Verified: tsc + build clean; degradation canary STALE byte-identical to
-  live compute (per-position fields + aggregate totals); snapshot POST→GET byte-identical
-  with `perPosition` preserved; A1/A2 live success paths unchanged. **No cache bumps**
-  (`lp-pnl-lkg-v1` is a NEW key; degrade paths fire only on failure). Two follow-up eyeballs:
-  the DEEP/SUI-specific rescue verified structurally only (Account 3 wallet not in the repo
-  verification set — LKG covers it after one clean load), and the visual STALE indicator
-  needs a pixel eyeball on the deploy.
-- **`8d82287`** — Sprint SUI-RPC-RELIABILITY: shared paced+failover Sui RPC client — fixes
-  the recurring production failure where **2–3 Sui positions per load (USDC/SUI, DEEP/SUI on
-  Cetus) failed with "RPC timeout after 3 attempts" and were EXCLUDED from LP P&L totals**,
-  making Capital G/L / Fees / Net P&L incomplete. **Root cause (measured):** every Sui call
-  site had its own bare `fetch(SUI_RPC)` — no timeout, no retry, no fallback, no pacing — and
-  a full 3-account analytics load fires 100+ concurrent Sui calls; the endpoint's per-IP rate
-  limit 429s under that burst (public fullnode 55% dropped at 150 concurrent; Alchemy 38%;
-  both clean ≤40). On Vercel's shared datacenter IP the limit bites far sooner than locally
-  (why it reproduced only in prod). Drops were NOT token-specific — whichever calls landed in
-  the 429'd slice. **Fix (pure transport):** NEW `app/lib/suiRpc.ts` — ordered endpoints
-  (`SUI_RPC_URL`/Alchemy primary → public fullnode fallback, automatic failover on
-  timeout/429/5xx), 12 s per-call AbortController timeout, global concurrency semaphore of 8
-  (mirrors `withCgPacing`); **12 call sites swapped** (cetus/bluefin/momentum route+activity,
-  sui/balances, suiPoolContext, suiClosedPositions, tokenResolver, lending suilend+alphafi —
-  no raw Sui endpoint remains); `suiPoolContext` batched to ONE `sui_multiGetObjects` + NEW
-  Redis namespace `sui_pool_ctx_v1` (90 d, immutable pool coinType/decimals survive cold
-  starts). Verified (B7): burst 150 concurrent through the shared client = **150/150 ZERO
-  drops** (bare baseline 38–55% dropped); A1 Cetus USDC/SUI loads at $13,010.54 (the exact
-  pair that dropped); closed-Sui reconstruction **byte-deterministic** through the new client
-  (two fresh scans identical — 30 positions / 130 events / $0.00 delta; the −$7,478 vs the
-  −$7,099 PERFORMANCE-era baseline is wallet drift, not code); DEEP + BTC (non-pinned)
-  resolve decimals from on-chain metadata with zero hardcode; warm pool-context 26 ms; tsc +
-  build clean. **No cache bumps** (transport + a new Redis namespace only). Contract extended:
-  invariant (l) — all chain RPC reads use a reliable endpoint with automatic fallback +
-  pacing + timeout, never a single flaky public node hit concurrently.
-- **`535453e`** — Sprint LPPNL-PERF: kill the 5-min analytics LP P&L **"calculating…"
-  spinner** for first-time wallets + make closed-Solana **Capital G/L always complete**. TWO
-  independent bugs, no pricing/reconstruction-math changes (A1 Orca byte-identical
-  19/$1,760.01/−$1,818.78). **Bug 1 (spinner):** the LP P&L block skeletoned EVERY cell while
-  `lpPnl.isLoading` (= per-position `inflight>0`, minutes for a heavy wallet at 2/endpoint
-  throttle) — the "no partial totals reveal" all-or-nothing gate PERFORMANCE fixed for the
-  positions TABLE but never for the LP P&L AGGREGATE (numbers were already computed
-  progressively). **Part A:** a cell skeletons ONLY while `included===0 && isLoading` (first
-  ~2 s); then every cell shows its live partial value; header chip "computing N of M" → softer
-  "scanning {Sui/Solana} closed history…"; Capital G/L / Net P&L show "scanning closed
-  positions…" then finalize. `useLpPnl` exposes `inflightCount`/`sui`/`solanaClosedLoading`
-  (additive). **Part C:** the closed-scan effects had NO client timeout → added a 305 s budget
-  + per-chain status badge (never silently-pending). **Bug 2 (never completes):**
-  `/api/solana-closed-positions` is unbounded, had NO `maxDuration` (died at Vercel default →
-  504 → never cached → re-scan every load) AND was fetched TWICE concurrently
-  (useLpPnl + useWalletLevelFees) with no dedup. **B1:** `maxDuration=300` on both closed
-  routes + `vercel.json` `functions` glob `app/api/**/*:300`. **B2:** module-level in-flight
-  dedup (wallet / protocol+wallet). **B3:** solana-closed route wrapped in
-  `withActivityRouteCache` (URL-keyed dedup). **B4:** heavy 2,544-tx wallet ISOLATED single
-  scan = **216.9 s < 300 s** (complete, cached) — the Phase A 19-min figure was contention +
-  the double-scan, so NO resumable/background refactor needed (queued follow-up only if a
-  >3,000-tx wallet surfaces). Verified (B7): first numbers ~2 s (was minutes); heavy 8ZSjKbkF
-  215.0 s cold + WARM 707 ms (no 504-loop); dedup proven (route log 1 miss + 1 dedup, ~50% CU
-  saved); A1 byte-identical, A2 + EVM/Sui untouched; tsc + build clean. **No cache-version
-  bumps** (render-gating / dedup / timeouts / route-config only — no stored contents change).
-- **`d7c6c81`** — Sprint RAYDIUM: Raydium closed-position Capital G/L + **fix for a SILENT
-  PLATFORM-WIDE Raydium open-position failure**. Solana now has BOTH protocols (Orca +
-  Raydium) at full parity; label → "EVM + Sui + Solana (Orca, Raydium)". **The bug:**
-  Raydium's Anchor accounts are BUMP-FIRST (`bump: u8` at byte [8]; every field one byte
-  later than raydium/route.ts assumed), so the `getProgramAccounts` memcmp at offset 8 could
-  NEVER match — **every Raydium user worldwide saw zero Raydium positions**, invisible
-  because no verification wallet ever held one (empty-in/empty-out looks correct). Fixed via
-  direct PDA derivation (`["position", nftMint]` + batched gMA + account-disc check —
-  layout-independent) + all PersonalPositionState/PoolState offsets corrected (pool decimals
-  previously decoded as 138); v2/Token-2022 discriminators added to raydium/activity (modern
-  positions' events were invisible too). **Closed positions:** `solanaClosedPositions.ts`
-  `raydium` branch — ONE shared wallet scan serves both protocols (zero extra RPC); discovery
-  via the variant-independent mint↔PDA trick; **EXACT principal/fee/reward separation via
-  `DecreaseLiquidityEvent` program-data logs** (Raydium bundles fees into decrease_liquidity;
-  the event log separates them more precisely than Orca's inference) with vault-direction
-  fallback; retry-until-complete gMA (a silently-dropped batch hid a pool in Phase A);
-  `rewardAmountsRaw[3]` carried on the position shape so POSITION-DETAIL-2 reads reward
-  emissions without re-scanning. Redis sub-key `closed_pos_solana_v1:raydium:{wallet}`
-  (`:orca:` byte-compatible). **Cache-contract refinement (user-approved):** EMPTY results
-  cached ONLY after a provably-100%-complete scan, 24 h TTL (30 d non-empty; transient
-  failures still never cached) — single-AMM wallets no longer re-pay the scan every load.
-  Verified (B7, all third-party wallets — Osho holds no Raydium): open fix proven live on
-  both NFT eras ([] → SOL/PUMP In Range $5,545.53; decimals 9/6 not 138); census wallets
-  reproduce Phase A to the cent on overlapping positions (94/$1,341.52, 38/$2.32 incl.
-  overnight bot accrual); **BLIND wallet generalization** 2,544/2,544 txs (967 throttles
-  absorbed), 38 closed CARD/USDC, $6,907.87 fees / +$14,039.63 capGL, 47-event lifecycles;
-  **NO REGRESSION — A1 Orca byte-identical** (19 / $1,760.01 / −$1,818.78, 3 ground-truth
-  PDAs exact); 0 pending, 0 spot across all 170 Raydium + 19 Orca; no cache bumps (no Raydium
-  localStorage entries could exist — the route returned [] for everyone); tsc + build clean.
-  **Contract lesson: verify against third-party on-chain wallets whenever Osho holds no
-  position of that type** — structural bugs (byte offsets, discriminators) hide until real
-  foreign data hits them.
-- **`d1bf447`** — Sprint 3-FREE: Solana (Orca) closed-position Capital G/L on FREE Alchemy
-  infra. **MILESTONE: cross-chain Capital G/L COMPLETE across EVM + Sui + Solana** — the
-  planned $49/mo Helius upgrade was never needed. NEW `app/lib/solanaClosedPositions.ts`
-  (mirrors `suiClosedPositions.ts`): paced `ALCHEMY_SOLANA_RPC` wallet-history scan (serial
-  20-tx batches + exponential backoff + retry-until-complete — Helius free could NOT complete
-  this; Alchemy free throttles but finishes 100%), Orca Whirlpool Anchor-discriminator parse,
-  **vault-transfer-matched** reconstruction, closed = ever-opened − currently-owned (live
-  `getNftMints` — handles re-ranging), historical-only valuation (stable $1 →
-  DeFiLlama-by-mint → CG-historical-by-resolver-cgId → pending; **never spot**, Rule 1a),
-  Capital G/L = withdrawal − deposit (Rule 4), reuses `computePositionPnL` (no per-chain
-  branches), Redis `closed_pos_solana_v1:orca:{wallet}` (30 d, immutable contract,
-  empty-never-cached). NEW `/api/solana-closed-positions`; `useLpPnl` "Solana" in
-  `CAPITAL_GL_CHAINS` + `solanaClosedRef`; `useWalletLevelFees` folds closed-Orca fee claims
-  into Fee Income (txHash+amount dedup); label → "EVM + Sui + Solana (Orca)". **Bundled mint
-  cleanup (invariant i):** wrong ZEC + invalid placeholder ORCA entries deleted from
-  orca/route.ts + solana/balances; verified ZEC `A7bdiYdS…` pinned in `tokenConstants.ts`
-  (dec 8, `omnibridge-bridged-zcash-solana`). **Two engine bugs found in B7 and fixed
-  architecturally:** (1) the position's account index VARIES by instruction (collect_fees
-  idx 2; liquidity instrs idx 3 — extra authority account) → identify by ever-opened-set
-  match, never a fixed index; (2) 14 deposits used a non-standard Orca liquidity-add
-  discriminator (`effb097c…` ≠ sha256 of any known name) → unclassified instrs are inferred
-  from vault-transfer DIRECTION (all-in = deposit, all-out = withdrawal), no opaque hex
-  hardcodes. Verified (B7): 19 closed positions, fees **$1,760.01**, Capital G/L
-  **−$1,818.78**; 3 ground-truth PDAs reconcile to ≤$0.09 (ZEC/USDC `FDhkNvkf` $657.84 Δ$0.00);
-  630/630 txs, 0 dropped; **0 pending, 0 spot**; `computePositionPnL` 19/19 byte-identical;
-  warm route 0.23 s; A2 unchanged (no Solana); tsc + build clean. **No localStorage cache
-  bumps** (closed positions never in the dashboard array; orca/balances outputs
-  byte-identical — removed entries were invalid keys that could never match). ~$610
-  sheet-vs-chain gap = ZEC valuation basis (chain authoritative); 19-row table in
-  `reports/sprint-3-free-phase-b-report.md`. **⚠️ `ALCHEMY_SOLANA_RPC` must be added to
-  Vercel env vars.** Raydium closed positions → queue.
-- **`82d4954`** — Sprint POSITION-DETAIL: Sui pending REWARD emissions + Estimated-APR
-  fallback (position-detail page only). **Bug 1** — the Uncollected panel didn't match the
-  protocol's own claimable UI: the Sui routes computed pending TRADING FEES only; pending
-  REWARD EMISSIONS were never read (Cetus USDC/SUI `0x63301cc4` showed $64.39 vs the Cetus
-  app's $71.42 — the gap WAS the rewards). **Fix (Cetus/Bluefin/Momentum):** compute
-  per-rewarder pending amounts from data the routes ALREADY fetch — pool rewarder state
-  (`reward_coin_type` + `reward_growth_global`) + the position's per-rewarder checkpoint
-  (`reward_growth_inside_last` + `coins_owed*`) + the tick nodes' `reward_growths_outside[]`
-  — same Q64 growth math + underflow guard as fees, **zero extra Sui RPC** (all fields ride
-  objects already fetched; shapes verified LIVE on-chain, never docs). New
-  `app/lib/suiRewardMeta.ts` resolves each reward coin type (invariant (i), never hardcoded)
-  and prices it at CURRENT SPOT via the SPOT-RESILIENCE tiered helper (invariant (j) — Rule 2
-  current-value domain, so Rule 1a claim valuation is UNTOUCHED). Exposed as optional
-  `pendingRewards[]` + `rewardsUsd` on the position type — **SEPARATE from `fees0/fees1`** so
-  analytics aggregation over `fees` is byte-identical. Detail-page Uncollected panel adds
-  reward rows + folds them into the total (matches "Claimable Yield"). **Bug 2** — Estimated
-  APR showed N/A for long-tail pools (ZEC/USDC absent from Orca's pool list; Momentum
-  hardcodes `apy 0`). **Fix (`position/[id]/page.tsx`, frontend-only):** when `pos.apy <= 0`,
-  derive APR from the position's own observables `(lifetime claimed + uncollected incl.
-  rewards) / age × 365 / value`, labeled "derived from position earnings"; guarded to
-  "— / too early to estimate" when <24 h or zero earnings; pool-APY path unchanged when a real
-  number exists. Any pool, any chain, zero per-token config. Verified (B7, local prod-mode +
-  same-minute on-chain recompute): **Cetus total $81.10 vs on-chain claimable $81.09** (reward
-  amounts byte-identical); A2 Cetus rewards $17.17; Bluefin/Momentum zero-accrual paths clean
-  (**non-zero path verified STRUCTURALLY — code-identical to the proven Cetus path; must be
-  eyeballed vs the protocol app the first time a live non-zero Bluefin/Momentum reward
-  exists**); ZEC/USDC N/A → ~213.4% derived; SOL/USDC +97.3% unchanged; A2 Cetus `fees 149.51`
-  byte-identical local vs prod. tsc + build clean. **No cache bumps** (fees byte-identical;
-  rewards additive). **B3 (Solana pending rewards) + B4 (EVM gauge emissions) → Sprint
-  POSITION-DETAIL-2.** Full B7 report in `reports/position-detail-phase-b-report.md`.
+- _(Sprint SPOT-RESILIENCE-V2 `c6e31ee` — per-position last-known-good (LKG) + degrade funnel
+  (STALE→ESTIMATED→EXCLUDED) so a transient per-position failure never deletes a position from
+  LP P&L totals; NEW `app/lib/evmRpc.ts`; architecture Rule 11 — rolled off this list; see git
+  history + memory.)_
+- _(Sprint SUI-RPC-RELIABILITY `8d82287` — shared paced+failover Sui RPC client
+  (`app/lib/suiRpc.ts`, 12 s timeout + semaphore 8) fixes the "N Sui positions failed — RPC
+  timeout" dropped-position bug; Contract invariant (l) — rolled off this list; see git
+  history + memory.)_
+- _(Sprint LPPNL-PERF `535453e` — killed the 5-min analytics "calculating…" spinner
+  (progressive aggregate render, architecture Rule 10) + closed-Solana Cap G/L always
+  complete (`maxDuration=300` + in-flight dedup) — rolled off this list; see git history +
+  memory.)_
+- _(Sprint RAYDIUM `d7c6c81` — Raydium closed-position Cap G/L + fix for a SILENT
+  platform-wide open-position failure (bump-first layout broke the memcmp lookup); Solana now
+  Orca+Raydium full parity — rolled off this list; see git history + memory.)_
+- _(Sprint 3-FREE `d1bf447` — MILESTONE: cross-chain Capital G/L COMPLETE (EVM+Sui+Solana) on
+  FREE Alchemy; Solana (Orca) closed-position reconstruction via paced-scan pattern — rolled
+  off this list; see git history + memory.)_
+- _(Sprint POSITION-DETAIL `82d4954` — Sui pending REWARD emissions on the detail page +
+  derived-APR fallback for long-tail pools; B3 Solana rewards / B4 EVM gauge → POSITION-DETAIL-2
+  — rolled off this list; see git history + memory.)_
 - _(Sprint PERFORMANCE `f4b58ac` — market_chart batch-fill (`fetchDailyClosesRange`) +
   patient fetch + progressive rendering; >2-min load → first meaningful render ~1–4 s, Sui
   routes 9–24 s; baselines now a platform requirement (see Methodology); #4–#6 →

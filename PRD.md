@@ -1,6 +1,47 @@
-# LP Tracker — Product Requirements Document
+# LP Tracker (DefiDesh) — Product Requirements Document
 
-_Last updated: 2026-03-15_
+_Last updated: 2026-07-21_
+
+> **Naming:** the product is now **DefiDesh** (defidesh.com). "LP Tracker" persists in
+> this historical doc and the GitHub repo name only.
+
+---
+
+## Current status (2026-07) — read this first
+
+The phase specs below (Features 0–9, Phases 1–6) are the ORIGINAL 2026-03 build records
+and are all **shipped or superseded**. Since then the product moved well beyond them; the
+authoritative live state, active sprint, and roadmap now live in **`CLAUDE.md`** (updated
+every session) and Claude's memory files, not here. Snapshot of what exists today:
+
+**Vision:** the world's best LP tracker — accurate real-time data for any wallet on any
+chain, at scale, globally. Standing bar (owner directive, 2026-07-19): **no LP position is
+ever missing** for any wallet on any supported chain; correct details on the dashboard flow
+automatically to analytics; connect = watch = paste produce identical results.
+
+**Shipped since this doc was last written:**
+- **Full analytics suite** — Fee Income by protocol/chain, LP P&L (deposited / current /
+  fees / **Capital G/L** / IL / Net P&L), performance, exposure. Capital G/L is
+  **clickable** → per-closed-position breakdown (Sprint 4, `00cd1bc`).
+- **Cross-chain Capital G/L COMPLETE** across EVM + Sui + Solana — closed positions
+  reconstructed from on-chain history (destroyed Sui objects / burned Solana NFTs / EVM
+  closed NFTs) and shown as **Closed rows** on the dashboard.
+- **10th integration: DefiTuna** (Solana wrapper protocol over Orca) — leveraged positions
+  held in a vault, now visible with EQUITY (total − debt) semantics (Sprint
+  WRAPPER-PROTOCOLS Phase 1, `4c450a1`). This is the current active sprint (Phase 2 queued:
+  closed-Tuna history, other wrappers like Kamino vaults, wrapper detail page).
+- **Reliability + parity hardening** — shared per-chain RPC clients (failover + pacing +
+  timeout), per-position last-known-good so transient failures never drop positions from
+  totals, RPC env-var guards, honest "index unavailable" fallbacks.
+- **EVM session persistence** — connected EVM wallet reconnects across sessions like
+  Solana/Sui (wallet-security Rule 1 amended, owner-approved, `f64da31`).
+
+**Infra:** Next.js App Router on Vercel Pro; Neon Postgres; Upstash Redis (historical-price
++ closed-position + spot-LKG caches); Alchemy/Helius/Chainstack RPC; CoinGecko + DeFiLlama
+pricing. Free-tier throughout (no paid Helius/CG needed yet).
+
+**Standing rules** (canonical, in `.claude/rules/`): pricing-invariants, architecture-
+principles, cache-versioning, wallet-security, commit-protocol, instrumentation.
 
 ---
 
