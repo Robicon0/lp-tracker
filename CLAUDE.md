@@ -56,25 +56,79 @@ Osho before building.
 
 **Status:** Phase 1 SHIPPED (`4c450a1`, 2026-07-20) — DefiTuna OPEN positions live
 (hybrid API+on-chain-verify, EQUITY semantics, selfReportedPnl mechanism in useLpPnl).
-Phase 2 queued: closed-Tuna reconstruction (Capital G/L via tuna program tx history,
-Category B) + survey of other wrappers (Kamino vaults, etc.). Detail page for wrapper
-positions not yet built (rows non-clickable). Phase A findings (kept for Phase 2):
-- Program: `tuna4uSQZncNeeiAMKbstuxA9CUkHH6HmC64wgmnogD` (Anchor). TunaPosition account =
-  339 bytes, owner = tuna program, **authority (user wallet) at byte offset 11**
-  (bump-first-style layout — Raydium lesson applies) → trustless discovery via
-  `getProgramAccounts(memcmp offset 11 = wallet, dataSize 339)` is viable.
+Phase 2 **Phase A investigation COMPLETE** and **Part 1 SHIPPED** (`4a25c69`, 2026-07-21 —
+wrapper detail page). Parts 2–4 queued below. Full investigation artifact:
+`reports/wrapper-protocols-phase2-report.md`.
+
+**⚠️ SCOPE FINDING (Phase A, 2026-07-21): Phase 1 covers ~1 of 6 DefiTuna surfaces.**
+The program's on-chain Anchor IDL (see below) exposes THREE user position classes across
+TWO AMM backends:
+
+| Position class | Backends | Status |
+|---|---|---|
+| `TunaLpPosition` | **Orca** ✅ / **Fusion** ❌ | Orca open positions only |
+| `TunaSpotPosition` | Orca / Fusion / Jupiter — all ❌ | **entirely invisible** |
+| `LendingPosition` | `open_lending_position` / `deposit` / `withdraw` ❌ | **entirely invisible** |
+
+A full `*_fusion` instruction set runs parallel to every `*_orca` one, so **a user with
+DefiTuna positions on Fusion sees NOTHING today** — the same bug class Phase 1 existed to
+fix, one layer down. By the completeness directive this outranks closed-position work
+(fully-invisible beats historically-incomplete), hence the Part 2 / Part 3 ordering.
+
+Phase A findings (kept for Parts 2–4):
+- Program: `tuna4uSQZncNeeiAMKbstuxA9CUkHH6HmC64wgmnogD` (Anchor). Account type is
+  `TunaLpPosition` = 339 bytes, owner = tuna program, **authority (user wallet) at byte
+  offset 11** — CONFIRMED against the IDL (8 disc + `version:u16` + `bump:[u8;1]`; fields
+  sum to exactly 339). Trustless discovery via `getProgramAccounts(memcmp offset 11 =
+  wallet)` verified working. **Drop the `dataSize: 339` filter** previously recommended
+  here: `version` is the FIRST field, so the layout is explicitly versioned and a future
+  `version: 2` may resize. Phase 1's `verifyOnChain` already filters on owner+authority
+  only and is safe.
+- **⚠️ `getProgramAccounts` is NOT available on the free Alchemy tier** (429s regardless of
+  backoff). It must route through Helius. The closed-position scan engine currently runs on
+  `ALCHEMY_SOLANA_RPC` — Part 3 must account for this split.
+- **The Anchor IDL is PUBLISHED ON-CHAIN** at `EooDyoDKbettJ6dvuuikga95ZLxKa2FifjrCicVm8HmP`
+  (Anchor convention: `createWithSeed(findProgramAddress([], program), "anchor:idl",
+  program)`); 15,936 bytes, zlib-decompresses to JSON: 66 instructions, 10 account types,
+  18 types, full error table. Removes essentially all layout guesswork from Parts 2–4.
+- `TunaPositionState` enum = **`Normal | Liquidated | ClosedByLimitOrder`**, and the IDL has
+  four `liquidate_tuna_lp_position_*` instructions. A LIQUIDATED position has fundamentally
+  different economics (collateral can be wiped, liquidation fee taken) — treating one as an
+  ordinary close reports a silently far-too-favourable Capital G/L. Also
+  `rebalance_tuna_lp_position_*`: an auto-rebalance must NOT be read as a close.
+- Live instruction vocabulary (200-signature scan of `2rr3SFuM…`, 55 tuna txs):
+  `OpenAndIncreaseTunaLpPositionOrca` ×17, `DecreaseTunaLpPositionOrca` ×12,
+  **`CloseTunaLpPositionOrca` ×12**, `IncreaseTunaLpPositionOrca` ×7,
+  **`RepayTunaLpPositionDebt` ×3** (a SEPARATE instruction, sometimes in a different tx from
+  the close), `SetTunaLpPositionFlags` ×3, `SetTunaLpPositionLimitOrders` ×2. Anchor
+  instruction names appear in PLAINTEXT logs — no discriminator matching needed.
+- 117 `Program data:` Anchor events observed, but the IDL publishes **`events: []`** and the
+  sample discriminator `e1ca49af932ba096` matched none of 27 guessed names. Event decoding
+  is NOT yet possible; Part 3 should use the proven Orca approach (inner SPL transfers
+  matched against pool vault addresses) and treat events as an optional precision upgrade.
 - Public API (no key): `api.defituna.com/api/v1/users/{wallet}/tuna-positions` returns
   COMPLETE open-position data: total_a/b (LP totals), current_debt_a/b,
   deposited_collateral_a/b, yield_a/b (uncollected), compounded_yield, leverage,
   liquidation prices, ticks, entry_price, pnl_usd, opened_at, market → pool (underlying
-  Orca pool), plus /markets /pools /vaults /mints /oracle-prices. Live verified on user
-  `2rr3SFuM…` (6 open leveraged positions; example: total $795.13, debt $615.77 →
-  EQUITY $179.36 on $199.96 collateral). Krishna + 2 other candidates return empty
-  (no current positions).
-- The endpoint returns OPEN positions only (state params ignored) — closed-Tuna
-  Capital G/L needs Category-B tx-history reconstruction (follow-up phase).
+  Orca pool, incl. `price` + per-mint `decimals`), plus /markets /pools /vaults /mints
+  /oracle-prices.
+- **The endpoint returns OPEN positions only.** `?state=closed` / `?status=closed` return
+  HTTP 200 with an IDENTICAL item set — the param is SILENTLY IGNORED, not honoured-and-
+  empty. (A response md5 diff is just live prices moving in the `markets`/`mints` blocks;
+  a field-by-field item diff is zero.) Do not re-conclude "this wallet has no closed
+  positions" from a 200. The item schema DOES carry `state`, `closed_at`, `pnl_usd`,
+  `initial_debt_a/b`, `leftovers_a/b` — DefiTuna tracks closed state internally and simply
+  won't serve it, so **asking them for a history endpoint is a free option worth taking
+  before building Part 3**.
+- Closed positions are **Category B** (CONFIRMED): `getProgramAccounts(authority=wallet)`
+  returns exactly the API's open set (7 = 7, identical addresses, zero extras) despite 12
+  `CloseTunaLpPositionOrca` in that wallet's history → accounts are rent-reclaimed on close.
 - KEY VALUE SEMANTICS: Tuna positions are LEVERAGED — user's real value = EQUITY
-  (total − debt), NEVER the raw LP total (would overstate by the borrowed funds).
+  (total − debt), NEVER the raw LP total (would overstate by the borrowed funds). For a
+  CLOSED leveraged position both Rule 4 terms change: deposit = COLLATERAL (not LP total),
+  withdrawal = NET of debt repayment, plus `leftovers_a/b` residuals. **Accrued borrowing
+  interest has no slot in Rule 4's `withdrawal − deposit` — this needs an explicit
+  pricing-invariants decision from Osho and BLOCKS correct Part 3 numbers.**
 
 _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1bc`
 2026-07-20; see Recent fixes.)_
@@ -149,14 +203,57 @@ In order. One active at a time. Each sprint must ship before the next begins.
 _(Sprint WRAPPER-PROTOCOLS — DefiTuna wrapper positions — is the ACTIVE sprint above;
 Phase 1 shipped `4c450a1`, Phase 2 queued below.)_
 
-1. **Sprint WRAPPER-PROTOCOLS Phase 2** — the deferred wrapper work: (a) closed-Tuna Capital G/L
-   via tx-history reconstruction against the tuna program (Category B, same pattern as
-   Orca/Raydium closed positions — Tuna's API returns OPEN positions only); (b) survey other
-   wrapper protocols with real usage (Kamino vaults, etc.) and integrate via the same
-   `selfReportedPnl` mechanism; (c) a position-detail page for wrapper positions (Tuna rows are
-   currently non-clickable — no live position object). Reuses `app/api/defituna/route.ts`'s
-   hybrid API+on-chain-verify pattern.
-1. **Sprint POSITION-DETAIL-2** — the deferred pending-reward paths from Sprint POSITION-DETAIL
+0. _(DONE — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1**: wrapper position-detail page,
+   SHIPPED `4a25c69` 2026-07-21. See Recent fixes.)_
+1. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 2 — DefiTuna FUSION LP support.** DefiTuna runs a
+   full `*_fusion` instruction set parallel to `*_orca` (`open_and_increase_/increase_/
+   decrease_/close_tuna_lp_position_fusion`, `FusionPool` account type). Phase 1 handles ONLY
+   the Orca backend, so **a user with Fusion-backed Tuna positions sees NOTHING** — a
+   fully-invisible open-position class, which by the completeness directive outranks the
+   historical closed-position work below. Should be Small–Medium: identical EQUITY semantics,
+   identical API shape (the same `/users/{w}/tuna-positions` endpoint returns them; `market →
+   pool` carries `provider`), identical on-chain verification — the delta is the FusionPool
+   decoder + whatever pool fields differ from Whirlpool. **Confirm real usage first** (Phase A
+   only ever observed Orca-backed positions on the live test wallet); if no Fusion usage
+   surfaces, demote below Part 3.
+2. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 3 — CLOSED Tuna positions (Capital G/L).**
+   Category B tx-history reconstruction against the tuna program, same canonical pattern as
+   `solanaClosedPositions.ts`. Complexity **LARGE** — see the Phase A findings in the active
+   sprint block for the full instruction vocabulary, the IDL location, and the traps.
+   **BLOCKED on a pricing-invariants decision:** how does accrued borrowing interest enter
+   P&L? Rule 4's `withdrawal − deposit` has no slot for it. **Free option before building:
+   ask DefiTuna whether a closed/history endpoint exists or is planned** — their data model
+   already carries `closed_at` and `pnl_usd`, and a "yes" removes most of this part's cost.
+   Sequence: (a) equity-aware lifecycle from `close`/`decrease`/`repay` via vault-transfer
+   matching; (b) the `Liquidated` / `ClosedByLimitOrder` close paths (different economics —
+   NOT ordinary closes) and rebalance-vs-close disambiguation; (c) Anchor event decoding as
+   an optional precision upgrade (IDL publishes no event schemas today).
+3. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 4 — Kamino Liquidity.** Highest-TVL non-Tuna
+   wrapper on Solana. **A DIFFERENT wrapper shape from DefiTuna, and cheaper:** Kamino issues
+   a fungible `shareMint` held in the USER'S OWN WALLET (not an NFT in a vault), so discovery
+   is `user's SPL balances ∩ live shareMints` — trustless by construction, no protocol API
+   needed, and DefiDesh ALREADY reads wallet token balances (Token Holdings page).
+   `api.kamino.finance/strategies` → 5,608 strategies (515 `status=LIVE`), each
+   `{address, shareMint, tokenAMint, tokenBMint, type, status}`; `/kvaults/vaults` returns
+   vault on-chain state. NO per-user endpoint exists (4 patterns 404). The work is VALUATION:
+   `shares × sharePrice`, share price from the strategy's on-chain holdings ÷ shares
+   outstanding. Complexity MEDIUM. NOTE: `app/api/lending/kamino/route.ts` is Kamino **Lend**
+   (obligations) — a different product, no reusable code; and Kamino's API is currently the
+   top production runtime error (`Altcoins:reserves` 500s), so this needs Rule 11
+   degrade-don't-drop treatment.
+4. **Position-detail page is broken in SCAN mode for EVERY protocol** (found 2026-07-21
+   during Phase 2 Part 1 verification; PRE-EXISTING, not caused by that change). Clicking any
+   position row while in paste-a-wallet scan mode navigates to `/dashboard/position/{id}` and
+   renders **"Position not found"** with the navbar showing "no wallet". Cause: row clicks use
+   `window.location.href` (a FULL page navigation), which discards the in-memory `scanAddress`;
+   the detail page then builds its identity from connected+watched only and finds nothing.
+   Verified on BOTH a Raydium row and a DefiTuna row in the same session — it is universal,
+   not wrapper-specific. Same class as the analytics scan-mode gap fixed in `e85f794`; the fix
+   is the same shape: a Suspense-wrapped scan-mode listener on the detail page + carrying
+   `?address=&chain=` through the row-click URL so it survives the hard load. SMALL, and
+   user-visible immediately after a paste — a pasted wallet can see positions but cannot open
+   any of them.
+5. **Sprint POSITION-DETAIL-2** — the deferred pending-reward paths from Sprint POSITION-DETAIL
    (`82d4954`): **B3** Solana pending rewards (Orca whirlpool `rewardInfos` offsets already
    documented in orca/route.ts comments; Raydium equivalent) so Orca/Raydium detail pages show
    reward emissions like the Sui ones now do; **B4** EVM gauge emissions (Aerodrome/Velodrome
@@ -167,38 +264,38 @@ Phase 1 shipped `4c450a1`, Phase 2 queued below.)_
    carries `rewardAmountsRaw[3]` (exact per-slot emission totals from
    `DecreaseLiquidityEvent`) — read it, don't re-scan; reward MINTS come from
    PoolState.reward_infos.
-2. **Sprint PERFORMANCE-2 (hardening candidates)** — the deferred Phase A items:
+6. **Sprint PERFORMANCE-2 (hardening candidates)** — the deferred Phase A items:
    **#4** Redis-cache the Aerodrome positions route's ever-owned tokenId scan +
    closed-position reconstruction (~30 s, the remaining first-load straggler — non-blocking
    behind the "still scanning" chip); **#5** Redis-cache CLOSED positions' activity route
    outputs (immutable — extend the Sprint 1.14 deposit-cache pattern beyond HyperEVM);
    **#6** move `withActivityRouteCache` success results to Redis (5-min TTL, errors never
    cached) so route outputs are shared across instances/users.
-3. **Orca APR-fallback + reward-eyeball verification** — the deferred numeric eyeballs:
+7. **Orca APR-fallback + reward-eyeball verification** — the deferred numeric eyeballs:
    (a) the Sprint POSITION-DETAIL derived-APR fallback on the new open Orca positions
    (ZEC/USDC showed ~213.4% at ship; re-ranged since) vs the Orca app; (b) Contract
    invariant (k) — the first live non-zero Bluefin/Momentum pending reward vs the protocol
    app (code-identical to the proven Cetus path, verified structurally only).
-4. _(DONE in Sprint 4 `00cd1bc` — closed Sui/Solana positions now render as Closed-tab
+8. _(DONE in Sprint 4 `00cd1bc` — closed Sui/Solana positions now render as Closed-tab
    rows with close dates.)_
-5. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
+9. **tokenResolver coverage + cleanup** — migrate Tier 2 (uniswap/v3,
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
-6. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
+10. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
    TOKEN-RESOLUTION per-event pool-context pattern to the EVM wallet-scope fee scans
    (aerodrome/velodrome/uniswap). EVM is NOT currently broken — its fallback addresses are
    correct and Sprint 2.1b (`5b8f6b7`) routes closed positions through per-position scans
    with correct context, so the single-representative-pool risk is mitigated — but resolving
    each Collect event's token0/token1 from its pool on-chain would remove the last residual
    of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
-7. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
+11. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
    SUI-HISTORICAL-REDIS `776fcaa` the Sui wallet-scope routes drop from ~111 s to ~18–20 s; the
    residual floor is the **~17 s public-Sui-RPC `queryTransactionBlocks` + `multiGet` scan** (240
    digests / wallet). A future sprint could cache the wallet's parsed tx-history / event set
    cross-instance (immutable ledger) or use a faster RPC. **Address only if <10 s becomes a UX
    need** — the Fee-Income regression is already resolved at ~18–20 s.
-8. **Resumable/background closed-Solana scan (optional, build ONLY if it surfaces)** — Sprint
+12. **Resumable/background closed-Solana scan (optional, build ONLY if it surfaces)** — Sprint
    LPPNL-PERF `535453e` proved a 2,544-tx heavy wallet's isolated single scan completes in
    ~217 s, under the `maxDuration=300` budget, so no resumability was needed. A wallet heavier
    than **~3,000–3,500 txs** could still exceed 300 s single-scan on the free Alchemy tier.
@@ -212,6 +309,30 @@ Phase 1 shipped `4c450a1`, Phase 2 queued below.)_
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`4a25c69`** — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1: leverage & liquidation on the
+  wrapper detail page.** A leveraged LP user's most important number — distance to
+  liquidation — was invisible product-wide; Phase 1 already FETCHED it and threw it away
+  (route mapped positions down to the generic shape; `entry_price` /
+  `liquidation_price_lower/upper` were never even parsed into `TunaItem`). NEW additive
+  `AerodromePosition.wrapperMeta` (leverage, entry/current price, both liquidation prices,
+  debt, collateral, gross total, pending yield, state) + a "Leverage & Liquidation" detail
+  panel: equity vs debt vs gross LP value (labelled "NOT your value"), leverage on
+  collateral, and distance-to-nearest-liquidation (red <10%). A `0.0` liquidation bound
+  means that side CANNOT liquidate → renders **"n/a", never "$0.00"** (which would read as
+  infinitely safe). `isReconstructed` drops `tuna-` (rows now clickable; sui-closed-/
+  solana-closed- keep theirs). **NO calculation logic changed** — pass-through only, nothing
+  in the P&L pipeline reads `wrapperMeta`, panel gated on `{wm && …}`. TWO LATENT DISPLAY
+  BUGS fixed en route (exposed by the page becoming reachable): heading read "Token0 /
+  Token1", and the price range read **$31,700,353,983 → $33,205,832,149** — `tickToUSD` fell
+  back to EVM decimals (18/6) on a 9/6 Solana pair; the API returns `decimals` in the same
+  `mints` block as the symbols and Phase 1 read one but dropped the other. Now $31.70 →
+  $33.21, verified against the pool's own price (`tick_current −25545` → `1.0001^t × 10³ =
+  77.7410` vs `pool.price 77.74147`). Verified live (Playwright, clean profile, third-party
+  wallet `2rr3SFuM…`): equity $198.71 / debt $596.47 / gross $795.17 (exact) / 4.00× /
+  16.7% from liquidation; detail headline === panel equity on 3/3 positions; Orca control
+  (RAKA/A1 ZEC/USDC) unchanged, no panel, TOTAL VALUE === row exactly. Report:
+  `reports/wrapper-protocols-phase2-part1-report.md`. No cache bumps.
 
 - **`4c450a1`** — **Sprint WRAPPER-PROTOCOLS Phase 1: DefiTuna (Solana).** Wrapper-held
   leveraged Orca LP positions (NFT in Tuna's vault — invisible to the wallet census) now
