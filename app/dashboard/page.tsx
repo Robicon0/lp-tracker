@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, Suspense, type CSSProperties } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSProperties } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import TerminalNavbar from "../components/TerminalNavbar";
@@ -325,6 +325,19 @@ export default function Dashboard() {
   const router = useRouter();
   const pathname = usePathname();
   const isScanMode = scanAddress !== null;
+
+  // Position-row navigation is a FULL page load (window.location.href), which
+  // discards the in-memory scanAddress — so in scan mode the detail page used
+  // to load with no wallet at all and render "Position not found" for EVERY
+  // protocol. Carry the scan identity in the URL exactly the way the dashboard
+  // and analytics pages already accept it (?address=&chain=), so the detail
+  // page's own listener can restore it on mount. Outside scan mode the href is
+  // byte-identical to before.
+  const positionHref = useCallback((slug: string) => {
+    const base = `/dashboard/position/${slug}`;
+    if (!scanAddress) return base;
+    return `${base}?address=${encodeURIComponent(scanAddress.address)}&chain=${encodeURIComponent(scanAddress.chain)}`;
+  }, [scanAddress]);
   const hasWallet = mounted && (isScanMode || !!(address || solanaAddress || suiAddress) || watchedWallets.length > 0);
 
   // ── Zerion hybrid fallback — basic data for protocols we don't deep-
@@ -1887,7 +1900,7 @@ export default function Dashboard() {
                             // ignore clicks on the manage button itself
                             if ((e.target as HTMLElement).closest(".manage-btn")) return;
                             if (isReconstructed) return;
-                            window.location.href = `/dashboard/position/${slug}`;
+                            window.location.href = positionHref(slug);
                           }}
                         >
                           {/* Position cell */}
@@ -2041,7 +2054,7 @@ export default function Dashboard() {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 if (isReconstructed) return;
-                            window.location.href = `/dashboard/position/${slug}`;
+                            window.location.href = positionHref(slug);
                               }}
                               style={{
                                 fontFamily: FONT,

@@ -1,10 +1,11 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo, type CSSProperties } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useState, useEffect, useMemo, useRef, Suspense, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNavbar from "../../../components/TerminalNavbar";
 import { usePositions } from "../../../contexts/PositionsContext";
+import { useWatchedWallets, type WatchedWalletChain } from "../../../contexts/WatchedWalletsContext";
 import type { AerodromePosition } from "../../../lib/aerodrome";
 import { getTokenLogo, TOKEN_COLORS } from "../../../lib/tokenLogos";
 import {
@@ -22,6 +23,37 @@ import { useCetusActivity } from "../../../hooks/useCetusActivity";
 import { computePositionPnL } from "../../../lib/positionPnl";
 import { computePositionProjection } from "../../../lib/positionProjections";
 import InfoTooltip from "../../../components/InfoTooltip";
+
+// ── Scan-mode URL sync ───────────────────────────────────────────────────────
+// Row clicks on the dashboard navigate with window.location.href — a FULL page
+// load, which discards the in-memory scanAddress. Without this, a user who
+// pasted a wallet could see positions but opening ANY of them (every protocol,
+// not just wrappers) rendered "Position not found" with the navbar reading
+// "no wallet". Same class of gap as the analytics one fixed in e85f794, and
+// the same remedy: restore the scan identity from ?address=&chain=.
+//
+// Semantics deliberately match AnalyticsScanModeListener, NOT the dashboard's:
+// ABSENT params must NOT clear an active scan. Only the dashboard (which owns
+// the scan banner and its [X] dismiss) may clear it.
+//
+// Isolated in its own component + <Suspense> because useSearchParams() opts the
+// subtree into client-side rendering (Next.js 16 requirement).
+function PositionScanModeListener() {
+  const searchParams = useSearchParams();
+  const { setScanAddress } = useWatchedWallets();
+  const lastSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const addr = searchParams?.get("address") ?? null;
+    const chainParam = searchParams?.get("chain") ?? null;
+    const sig = `${addr}|${chainParam}`;
+    if (lastSigRef.current === sig) return;
+    lastSigRef.current = sig;
+    if (addr && chainParam && (chainParam === "evm" || chainParam === "solana" || chainParam === "sui")) {
+      setScanAddress({ address: addr, chain: chainParam as WatchedWalletChain });
+    }
+  }, [searchParams, setScanAddress]);
+  return null;
+}
 
 // ── Terminal palette (matches position.html exactly) ─────────────────────────
 const C = {
@@ -227,6 +259,16 @@ export default function PositionDetail() {
   const rawId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
   const posId = decodeURIComponent(rawId);
   const pos   = positions.find((p) => p.id === posId) ?? null;
+
+  // "Back to dashboard" must preserve an active scan. The DASHBOARD's own
+  // listener CLEARS scanAddress when ?address=&chain= are absent (it owns the
+  // scan banner and its [X] dismiss), so a bare /dashboard href would drop the
+  // user's pasted wallet and land them on an empty dashboard. Outside scan
+  // mode this is the empty string and the hrefs are unchanged.
+  const { scanAddress } = useWatchedWallets();
+  const backHref = scanAddress
+    ? `/dashboard?address=${encodeURIComponent(scanAddress.address)}&chain=${encodeURIComponent(scanAddress.chain)}`
+    : "/dashboard";
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const posStatus  = pos ? effectiveStatus(pos) : "Closed";
@@ -508,6 +550,7 @@ export default function PositionDetail() {
   if (isLoading && !pos) {
     return (
       <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
+        <Suspense fallback={null}><PositionScanModeListener /></Suspense>
         <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
           <div style={{
@@ -526,6 +569,11 @@ export default function PositionDetail() {
   if (!pos) {
     return (
       <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
+        {/* Mounted HERE too, and this one is load-bearing: in scan mode the
+            page renders "not found" on first paint (positions are empty until
+            the scan identity is restored), so the listener must run from
+            inside this branch or the page would never recover. */}
+        <Suspense fallback={null}><PositionScanModeListener /></Suspense>
         <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
           <h2 style={{ fontSize: 28, fontWeight: 700, color: C.textWhite, marginBottom: 12, letterSpacing: "-0.01em" }}>
@@ -534,7 +582,7 @@ export default function PositionDetail() {
           <p style={{ color: C.text, marginBottom: 24, fontSize: 15 }}>
             This position could not be located. It may have been closed or the data hasn&apos;t loaded yet.
           </p>
-          <Link href="/dashboard" style={{
+          <Link href={backHref} style={{
             border: `1px solid ${C.greenDim}`, background: C.greenFaint, color: C.green,
             padding: "10px 18px", textDecoration: "none", fontSize: 14,
             fontFamily: FONT, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600,
@@ -669,6 +717,7 @@ export default function PositionDetail() {
       // Clear the now-fixed TerminalNavbar (52px tall).
       paddingTop: 52,
     }}>
+      <Suspense fallback={null}><PositionScanModeListener /></Suspense>
       <style>{`
         @keyframes _spin   { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
         @keyframes _pulse  { 0%,100%{opacity:1} 50%{opacity:0.3} }
@@ -695,7 +744,7 @@ export default function PositionDetail() {
           borderBottom: `1px solid ${C.border}`,
           display: "flex", alignItems: "center", gap: 14,
         }}>
-          <Link href="/dashboard" style={{
+          <Link href={backHref} style={{
             fontSize: 14, color: C.text, textDecoration: "none",
             letterSpacing: "0.08em", textTransform: "uppercase",
             transition: "color 0.15s",
@@ -1848,7 +1897,7 @@ export default function PositionDetail() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <Link href="/dashboard"
+            <Link href={backHref}
               className="btn-neutral"
               style={{
                 fontFamily: FONT, fontSize: 14, fontWeight: 600,
