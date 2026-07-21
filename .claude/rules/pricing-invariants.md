@@ -281,6 +281,29 @@ Capital G/L is COMPLETE across EVM + Sui + Solana (Orca) as of Sprint 3-FREE
 (`d1bf447`); the UI label reads "closed positions, EVM + Sui + Solana (Orca)".
 Raydium closed positions are queued (no user impact yet).
 
+### Rule 4a: Leveraged/borrowed position interest handling
+
+For any wrapper protocol involving borrowed capital (leverage), accrued
+interest on the debt is **NEVER** folded into Capital G/L or the core
+deposit/withdrawal profit calculation. Rule 4 (`withdrawal − deposit`) remains
+untouched for **all** protocols, including leveraged ones.
+
+Instead, interest cost is surfaced as a **separate, clearly-labeled line item**
+alongside the position (e.g. "Interest accrued: -$X.XX"), sourced from the
+protocol's own tracked debt data where available. This keeps the core P&L
+formula consistent platform-wide while still giving users full visibility into
+leverage costs.
+
+This rule applies to DefiTuna and any future leveraged/lending-backed wrapper
+protocol.
+
+Rationale: Rule 4's `withdrawal − deposit` has no slot for accrued borrowing
+interest — for a leveraged CLOSED position both terms already change (deposit =
+COLLATERAL not LP total, withdrawal = NET of debt repayment plus `leftovers`),
+and forcing interest into either term would silently distort Capital G/L and
+break the one formula every chain shares. A separate line item preserves the
+invariant and is honest to the user about what the leverage cost.
+
 ---
 
 ## Rule 5: Position display
