@@ -450,6 +450,26 @@ export default function PositionDetail() {
     : pos?.protocol === 'Velodrome' ? velodromeActivityError
     : null;
   const isActivityProtocol = ['Aerodrome', 'Bluefin', 'Orca', 'Raydium', 'Uniswap V3', 'Velodrome', 'PancakeSwap V3', 'Cetus', 'Momentum'].includes(pos?.protocol ?? '') || isHyperEVM;
+
+  // ── Wrapper-protocol display metadata (Sprint WRAPPER-PROTOCOLS Phase 2 Part 1)
+  // Present ONLY on wrapper-held positions (DefiTuna today). Every consumer is
+  // display-only: no P&L, valuation, or aggregate reads any of this, so a
+  // non-wrapper position is byte-identical to before this block existed.
+  const wm = pos?.wrapperMeta ?? null;
+  // Distance from the current price to the NEAREST applicable liquidation
+  // price, as a percentage. Presentational only. A 0 bound means "this side
+  // cannot liquidate" (verified live on DefiTuna) and is excluded, never
+  // treated as a $0 liquidation price.
+  const liqDistancePct = (() => {
+    if (!wm?.currentPrice || wm.currentPrice <= 0) return null;
+    const bounds = [wm.liquidationLower, wm.liquidationUpper]
+      .filter((b): b is number => typeof b === 'number' && b > 0);
+    if (bounds.length === 0) return null;
+    const nearest = bounds.reduce((best, b) =>
+      Math.abs(b - wm.currentPrice!) < Math.abs(best - wm.currentPrice!) ? b : best);
+    return Math.abs((nearest - wm.currentPrice) / wm.currentPrice) * 100;
+  })();
+  const liqDanger = liqDistancePct != null && liqDistancePct < 10;
   const activityPending = isActivityProtocol && !activity && !activityError;
 
   // Build fee accumulation chart from on-chain activity fee_claim events.
@@ -892,6 +912,103 @@ export default function PositionDetail() {
             )}
           </div>
         </div>
+
+        {/* ── LEVERAGE & LIQUIDATION (wrapper protocols) ────────────────── */}
+        {/* Display-only. Every figure is passed through from the wrapper's own
+            API via wrapperMeta; the only arithmetic here is the liquidation
+            DISTANCE percentage, which is presentational and feeds nothing. The
+            headline equity reads `pos.value` — the exact number the dashboard
+            row renders — so list and detail views cannot disagree. */}
+        {wm && (
+          <Section
+            icon="[⚠]"
+            title="Leverage & Liquidation"
+            sub={`Position managed by ${wm.protocolName} — you own the equity, not the gross LP value`}
+          >
+            <div style={{ margin: "0 40px" }}>
+              {/* What you own / owe */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", border: `1px solid ${C.border}` }}>
+                {[
+                  { label: "Your Equity", val: fmt$(pos.value), color: C.green,
+                    sub: "what you own (total − debt)" },
+                  { label: "Borrowed (Debt)", val: wm.debtUSD != null ? fmt$(wm.debtUSD) : "—", color: C.red,
+                    sub: "current, incl. accrued interest" },
+                  { label: "Gross LP Value", val: wm.totalUSD != null ? fmt$(wm.totalUSD) : "—", color: C.textBright,
+                    sub: "equity + debt — NOT your value" },
+                  { label: "Leverage", val: wm.leverage != null ? `${wm.leverage.toFixed(2)}×` : "—", color: C.amber,
+                    sub: wm.collateralUSD != null ? `on ${fmt$(wm.collateralUSD)} collateral` : "—" },
+                ].map((c, i, arr) => (
+                  <div key={c.label} style={{
+                    padding: "20px 24px",
+                    borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                  }}>
+                    <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.1em", marginBottom: 8, textTransform: "uppercase" }}>{c.label}</div>
+                    <div style={{ fontSize: 22, color: c.color, fontWeight: 700, marginBottom: 6 }}>{c.val}</div>
+                    <div style={{ fontSize: 11, color: C.text, opacity: 0.55 }}>{c.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Liquidation proximity — the number that matters most here */}
+              <div style={{ marginTop: 18, border: `1px solid ${liqDanger ? C.red : C.border}`, background: liqDanger ? C.redFaint : "transparent" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))" }}>
+                  {[
+                    { label: "Entry Price", val: wm.entryPrice != null ? fmtPrice(wm.entryPrice) : "—" },
+                    { label: "Current Price", val: wm.currentPrice != null ? fmtPrice(wm.currentPrice) : "—" },
+                    { label: "Liq. Price (lower)", val: wm.liquidationLower ? fmtPrice(wm.liquidationLower) : "n/a" },
+                    { label: "Liq. Price (upper)", val: wm.liquidationUpper ? fmtPrice(wm.liquidationUpper) : "n/a" },
+                  ].map((c, i, arr) => (
+                    <div key={c.label} style={{
+                      padding: "18px 24px",
+                      borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
+                    }}>
+                      <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.1em", marginBottom: 8, textTransform: "uppercase" }}>{c.label}</div>
+                      <div style={{ fontSize: 17, color: C.textBright, fontWeight: 600 }}>{c.val}</div>
+                    </div>
+                  ))}
+                </div>
+                {liqDistancePct != null && (
+                  <div style={{
+                    padding: "14px 24px",
+                    borderTop: `1px solid ${liqDanger ? C.red : C.border}`,
+                    fontSize: 14,
+                    color: liqDanger ? C.red : C.textBright,
+                    fontWeight: 600,
+                  }}>
+                    {liqDanger ? "⚠ " : ""}
+                    Price is {liqDistancePct.toFixed(1)}% away from the nearest liquidation price
+                    {liqDanger ? " — position at risk" : ""}
+                  </div>
+                )}
+                {wm.liquidationLower === 0 && wm.liquidationUpper === 0 && (
+                  <div style={{ padding: "14px 24px", borderTop: `1px solid ${C.border}`, fontSize: 13, color: C.text, opacity: 0.6 }}>
+                    {wm.protocolName} reports no liquidation price for this position.
+                  </div>
+                )}
+              </div>
+
+              {/* Pending yield + non-normal state */}
+              <div style={{ marginTop: 18, display: "flex", gap: 28, flexWrap: "wrap", fontSize: 14 }}>
+                <span style={{ color: C.text }}>
+                  Uncollected yield:{" "}
+                  <span style={{ color: C.green, fontWeight: 600 }}>
+                    {wm.pendingYieldUSD != null ? fmt$(wm.pendingYieldUSD) : "—"}
+                  </span>
+                </span>
+                {wm.state && wm.state.toLowerCase() !== "open" && wm.state.toLowerCase() !== "normal" && (
+                  <span style={{ color: C.amber, fontWeight: 600 }}>State: {wm.state}</span>
+                )}
+              </div>
+
+              <p style={{ marginTop: 18, fontSize: 12.5, color: C.text, opacity: 0.55, lineHeight: 1.55 }}>
+                Figures are reported by {wm.protocolName} and verified on-chain (the position account&apos;s
+                owner and authority). Per-position transaction history is not yet available for
+                wrapper-held positions — the LP position lives in {wm.protocolName}&apos;s vault rather
+                than your wallet.
+              </p>
+            </div>
+          </Section>
+        )}
 
         {/* ── CURRENT LIQUIDITY ────────────────────────────────────────── */}
         {hasAmounts && (

@@ -15,6 +15,27 @@ export interface AerodromePosition {
   // underlying LP position in its vault). `value` on such positions is EQUITY
   // (total − debt), never the raw LP total; `fees` is pending yield.
   selfReportedPnl?: { initialValueUSD: number; openedTs?: number };
+  // Wrapper-protocol DISPLAY metadata (Sprint WRAPPER-PROTOCOLS Phase 2 Part 1).
+  // Purely presentational — every figure here is passed through verbatim from
+  // the managing protocol's API and NOTHING in the P&L pipeline reads it.
+  // `value`/`fees`/`selfReportedPnl` remain the sole valuation inputs, so a
+  // wrapper position's totals are identical with or without this field.
+  // Prices (entry/liquidation/current) are quoted in token B per token A, the
+  // convention the wrapper's own UI uses. `liquidationLower`/`liquidationUpper`
+  // are 0 when that side cannot liquidate — render as "n/a", never as "$0.00".
+  wrapperMeta?: {
+    protocolName: string;        // e.g. "DefiTuna" — for labelling the panel
+    leverage?: number;           // e.g. 3.91 → "3.91×"
+    entryPrice?: number;
+    currentPrice?: number;       // pool price at fetch time (same units as entry)
+    liquidationLower?: number;   // 0 ⇒ not applicable
+    liquidationUpper?: number;   // 0 ⇒ not applicable
+    debtUSD?: number;            // current debt incl. accrued interest
+    collateralUSD?: number;      // user-deposited collateral
+    totalUSD?: number;           // gross LP value (equity + debt)
+    pendingYieldUSD?: number;    // uncollected yield
+    state?: string;              // Normal | Liquidated | ClosedByLimitOrder
+  };
   // Optional enriched fields present on CLMM positions
   amount0?: number;
   amount1?: number;

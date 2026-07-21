@@ -1834,7 +1834,10 @@ export default function Dashboard() {
                       const slug = encodeURIComponent(pos.id);
                       // Reconstructed closed Sui/Solana rows have no live
                       // position object → no detail page; render non-clickable.
-                      const isReconstructed = pos.id.startsWith("sui-closed-") || pos.id.startsWith("solana-closed-") || pos.id.startsWith("tuna-");
+                      // Wrapper positions (tuna-…) DO have a live object and,
+                      // since Phase 2 Part 1, a detail page that renders their
+                      // leverage/debt/liquidation data — so they are clickable.
+                      const isReconstructed = pos.id.startsWith("sui-closed-") || pos.id.startsWith("solana-closed-");
                       const closedDate = (pos as { closedTs?: number }).closedTs
                         ? new Date((pos as { closedTs?: number }).closedTs! * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                         : null;

@@ -55,12 +55,22 @@ interface TunaItem {
   total_b: TunaUsd;
   pnl_usd?: { amount: string; usd?: number };
   opened_at?: string;
+  // Display-only fields (Phase 2 Part 1). Verified live on the API: plain
+  // numbers quoted in token B per token A — the same units as pool.price.
+  // liquidation_price_lower/upper are 0.0 when that side cannot liquidate
+  // (observed uniformly on borrow-A positions), NOT a real $0 liquidation.
+  entry_price?: number;
+  liquidation_price_lower?: number;
+  liquidation_price_upper?: number;
 }
 interface TunaMint { address: string; symbol: string; decimals?: number }
 // markets[addr].pool is an EMBEDDED pool object (verified live): carries the
 // pool's mint_a/mint_b and tick_current_index — exact pair identity and true
 // range status per position, no extra fetch.
-interface TunaMarket { pool?: { address: string; mint_a: string; mint_b: string; tick_current_index: number } }
+// `price` is the pool's current price (token B per token A) — the same units as
+// the position's entry_price / liquidation_price_*, so the detail page can show
+// liquidation distance without deriving anything.
+interface TunaMarket { pool?: { address: string; mint_a: string; mint_b: string; tick_current_index: number; price?: string | number } }
 
 // Base58 decode (no external dep in routes) — standard alphabet.
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -149,6 +159,12 @@ export async function GET(request: Request) {
 
   const mints = payload.mints ?? {};
   const symbolOf = (mint: string | undefined) => (mint && mints[mint]?.symbol) || '?';
+  // Decimals come back in the same `mints` block the symbols do. Phase 1 read
+  // only the symbol and dropped these, so the detail page fell back to the EVM
+  // default (18/6) and rendered a nonsense multi-billion-dollar tick range for
+  // Solana pairs. Passing the API's own decimals through is display-only — no
+  // valuation path reads them.
+  const decimalsOf = (mint: string | undefined) => (mint && mints[mint]?.decimals);
 
   const positions = items.map((it) => {
     const totalUsd = (it.total_a?.usd ?? 0) + (it.total_b?.usd ?? 0);
@@ -178,12 +194,38 @@ export async function GET(request: Request) {
       tickLower: it.tick_lower_index,
       tickUpper: it.tick_upper_index,
       liquidity: it.liquidity,
+      // Token identity + decimals, already in the API payload (see decimalsOf).
+      // Display-only: fixes the detail page's "Token0 / Token1" heading and its
+      // tick→price range, which without real decimals defaulted to 18/6.
+      token0Symbol: symA,
+      token1Symbol: symB,
+      token0Decimals: decimalsOf(pool?.mint_a),
+      token1Decimals: decimalsOf(pool?.mint_b),
       // Wrapper self-reported P&L basis (see useLpPnl.buildSelfReportedPnL):
       selfReportedPnl: { initialValueUSD: collateralUsd, openedTs },
       // Display extras (leverage shown on the row's sub-line in future UI work)
       leverage: it.leverage,
       debtUSD: debtUsd,
       totalUSD: totalUsd,
+      // DISPLAY-ONLY wrapper metadata (Phase 2 Part 1). Every figure is the
+      // SAME value already computed above or passed through verbatim from the
+      // API — no new arithmetic, and nothing here feeds the P&L pipeline.
+      // `equity` is deliberately NOT duplicated here: the detail page reads
+      // `value` (the identical number the dashboard row renders), so list and
+      // detail views cannot drift.
+      wrapperMeta: {
+        protocolName: 'DefiTuna',
+        leverage: it.leverage,
+        entryPrice: it.entry_price,
+        currentPrice: pool?.price !== undefined ? Number(pool.price) : undefined,
+        liquidationLower: it.liquidation_price_lower,
+        liquidationUpper: it.liquidation_price_upper,
+        debtUSD: debtUsd,
+        collateralUSD: collateralUsd,
+        totalUSD: totalUsd,
+        pendingYieldUSD: yieldUsd,
+        state: it.state,
+      },
     };
   });
 
