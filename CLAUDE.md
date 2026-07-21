@@ -24,6 +24,10 @@ branch `main`. Local dev: `~/lp-tracker-fresh`. Twitter: `@defidesh`.
 - EVM (Base, Arbitrum, Optimism, Ethereum, Polygon, HyperEVM): Aerodrome,
   Uniswap V3, Velodrome, HyperSwap, KittenSwap, ProjectX
 - Solana: Orca + Raydium (both full: open positions, closed-position Capital G/L, lifetime fees)
+- Solana wrappers: **DefiTuna** (leveraged LP held in the protocol's vault — OPEN positions
+  across BOTH AMM backends, Orca and Fusion, with EQUITY semantics + leverage/debt/
+  liquidation detail page. Closed-position Capital G/L NOT yet built — sprint queue item 1.
+  DefiTuna's separate LENDING product is not integrated — queue item 2.)
 - Sui: Bluefin, Cetus, Momentum (full: dashboard, activity, P&L, closed-position Capital G/L)
 - Lending/borrowing: AAVE V3, Dolomite, Kamino, Jupiter Lend, Suilend,
   AlphaFi, HyperLend, Hypurr, HypurrFi
@@ -56,26 +60,53 @@ Osho before building.
 
 **Status:** Phase 1 SHIPPED (`4c450a1`, 2026-07-20) — DefiTuna OPEN positions live
 (hybrid API+on-chain-verify, EQUITY semantics, selfReportedPnl mechanism in useLpPnl).
-Phase 2 **Phase A investigation COMPLETE** and **Part 1 SHIPPED** (`4a25c69`, 2026-07-21 —
-wrapper detail page). Parts 2–4 queued below. Full investigation artifact:
-`reports/wrapper-protocols-phase2-report.md`.
+Phase 2 **Phase A investigation COMPLETE**, **Part 1 SHIPPED** (`4a25c69`, 2026-07-21 —
+wrapper detail page), **Part 2 CLOSED with NO code required** (2026-07-21 — Fusion already
+works; see below). **Part 3 is the next DefiTuna work**, blocked on the interest-accounting
+decision. Investigation artifacts: `reports/wrapper-protocols-phase2-report.md` and
+`reports/wrapper-protocols-phase2-part2-fusion-report.md`.
 
-**⚠️ SCOPE FINDING (Phase A, 2026-07-21): Phase 1 covers ~1 of 6 DefiTuna surfaces.**
-The program's on-chain Anchor IDL (see below) exposes THREE user position classes across
-TWO AMM backends:
+**DefiTuna position-class coverage (census 2026-07-21, on-chain, all three classes).**
+Counts are *funded/live* positions (liquidity>0 for LP, deposits>0 for lending) — raw
+account counts overstate badly (1,116 LP accounts → only 556 live; 17,512 lending accounts
+→ only 7,602 funded), so always filter before quoting a number.
 
-| Position class | Backends | Status |
-|---|---|---|
-| `TunaLpPosition` | **Orca** ✅ / **Fusion** ❌ | Orca open positions only |
-| `TunaSpotPosition` | Orca / Fusion / Jupiter — all ❌ | **entirely invisible** |
-| `LendingPosition` | `open_lending_position` / `deposit` / `withdraw` ❌ | **entirely invisible** |
+| Position class | Backends | Funded | Wallets | Status |
+|---|---|---:|---:|---|
+| `TunaLpPosition` | **Orca ✅ + Fusion ✅** | 556 | 318 | **fully covered, both backends** |
+| `LendingPosition` | n/a (lending) | **7,602** | **5,640** | **invisible — new backlog item** |
+| `TunaSpotPosition` | Orca/Fusion/Jupiter | — | **9** | invisible — **NOT worth building** |
 
-A full `*_fusion` instruction set runs parallel to every `*_orca` one, so **a user with
-DefiTuna positions on Fusion sees NOTHING today** — the same bug class Phase 1 existed to
-fix, one layer down. By the completeness directive this outranks closed-position work
-(fully-invisible beats historically-incomplete), hence the Part 2 / Part 3 ordering.
+**⚠️ SUPERSEDED: the earlier "Phase 1 covers ~1 of 6 DefiTuna surfaces" claim was WRONG.**
+It assumed Fusion needed separate support. It does not — see the Part 2 finding below. LP is
+fully covered across both AMM backends; the real remaining gap is LENDING, not Fusion.
 
-Phase A findings (kept for Parts 2–4):
+**PART 2 FINDING (2026-07-21): Fusion LP already works — it shipped free with Phase 1.**
+Fusion usage is real and substantial (168 live positions / **107 wallets** / 30.3% of live
+Tuna LP positions; 72 of 107 markets; **$601k = 50.6% of DefiTuna's borrowed capital**), but
+requires ZERO new code: Fusion positions are the **same `TunaLpPosition` account type, same
+discriminator `4cc5a133e80f89dc`, same 339 bytes, same `authority @ 11`**, and are returned
+by the **same `/users/{w}/tuna-positions` endpoint**. `market → pool → provider`
+(`"orca"|"fusion"`) is the only distinguisher. `FusionPool` vs `Whirlpool` differs in the
+IDL but **DefiDesh never reads the AMM pool account** — Phase 1 consumes the API's embedded
+`market.pool` object (mints, `tick_current_index`, `price`, per-mint `decimals`), which the
+API normalises across both backends. That Phase 1 design decision is what made Fusion free.
+VERIFIED live on the UNMODIFIED route: mixed wallet `6NcbT9g7xDTa…` → **19/19 positions
+(12 fusion + 7 orca), equity exact to the cent vs the API's own total−debt, range status
+correct on every one, 0 on-chain verification failures**; pure-Fusion wallet
+`upgMGFHGxJ58…` → all 7 render. Part 1's detail panel populates fully for Fusion too
+(decimals correct 9/6 and 6/6). Liquidation bounds: **every** leveraged position on **both**
+backends reports exactly one non-zero bound (0% both-zero); both-zero occurs only at 1.00×
+unleveraged, where "n/a" is correct. NOTE: sampled Fusion leveraged positions liquidate on
+the **LOWER** bound (Orca sample was UPPER) — Part 1 picks the nearest non-zero bound and
+handles both, now confirmed live in both directions.
+
+**Regression wallets for DefiTuna (third-party, use for any future Tuna work):**
+`6NcbT9g7xDTaBpAVJGjfQK4jW81KxBA5zH3nPdQVu9od` (19 positions, mixed fusion+orca — best
+single regression wallet) · `upgMGFHGxJ58kBxpiEhLzV5AJ9SkZiGx3hxAxc7TZfn` (7, 100% Fusion)
+· `2rr3SFuM8YNFcn9RUvqGNPki8rxaXjHDscQuy7wNJTpn` (7, all Orca — the Phase 1 / Part 1 wallet).
+
+Phase A findings (kept for Part 3 / Part 4):
 - Program: `tuna4uSQZncNeeiAMKbstuxA9CUkHH6HmC64wgmnogD` (Anchor). Account type is
   `TunaLpPosition` = 339 bytes, owner = tuna program, **authority (user wallet) at byte
   offset 11** — CONFIRMED against the IDL (8 disc + `version:u16` + `bump:[u8;1]`; fields
@@ -200,23 +231,22 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 ## Sprint queue
 
 In order. One active at a time. Each sprint must ship before the next begins.
-_(Sprint WRAPPER-PROTOCOLS — DefiTuna wrapper positions — is the ACTIVE sprint above;
-Phase 1 shipped `4c450a1`, Phase 2 queued below.)_
+_(Sprint WRAPPER-PROTOCOLS — DefiTuna wrapper positions — is the ACTIVE sprint above.
+Phase 1 shipped `4c450a1`; Phase 2 Part 1 shipped `4a25c69`; Phase 2 Part 2 CLOSED with no
+code required. **Part 3 (closed Tuna) is the next DefiTuna work** — but it is BLOCKED on the
+accrued-interest pricing-invariants decision, so if that decision is not yet made, item 4
+(scan-mode detail navigation, SMALL and user-visible) is the better thing to pick up.)_
 
 0. _(DONE — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1**: wrapper position-detail page,
    SHIPPED `4a25c69` 2026-07-21. See Recent fixes.)_
-1. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 2 — DefiTuna FUSION LP support.** DefiTuna runs a
-   full `*_fusion` instruction set parallel to `*_orca` (`open_and_increase_/increase_/
-   decrease_/close_tuna_lp_position_fusion`, `FusionPool` account type). Phase 1 handles ONLY
-   the Orca backend, so **a user with Fusion-backed Tuna positions sees NOTHING** — a
-   fully-invisible open-position class, which by the completeness directive outranks the
-   historical closed-position work below. Should be Small–Medium: identical EQUITY semantics,
-   identical API shape (the same `/users/{w}/tuna-positions` endpoint returns them; `market →
-   pool` carries `provider`), identical on-chain verification — the delta is the FusionPool
-   decoder + whatever pool fields differ from Whirlpool. **Confirm real usage first** (Phase A
-   only ever observed Orca-backed positions on the live test wallet); if no Fusion usage
-   surfaces, demote below Part 3.
-2. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 3 — CLOSED Tuna positions (Capital G/L).**
+0b. _(CLOSED — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 2** (Fusion LP): **NO CODE REQUIRED.**
+   Investigate-first paid off — Fusion usage is real (107 wallets, 30.3% of live Tuna LP
+   positions, 50.6% of borrowed capital) but the existing Phase 1 route already serves it
+   correctly, verified 19/19 exact on a mixed wallet. See the Part 2 finding in the active
+   sprint block + `reports/wrapper-protocols-phase2-part2-fusion-report.md`. Remaining
+   optional follow-up: a browser eyeball of one Fusion position on the deployed site.)_
+1. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 3 — CLOSED Tuna positions (Capital G/L).**
+   **← NEXT UP for DefiTuna work.**
    Category B tx-history reconstruction against the tuna program, same canonical pattern as
    `solanaClosedPositions.ts`. Complexity **LARGE** — see the Phase A findings in the active
    sprint block for the full instruction vocabulary, the IDL location, and the traps.
@@ -228,6 +258,32 @@ Phase 1 shipped `4c450a1`, Phase 2 queued below.)_
    matching; (b) the `Liquidated` / `ClosedByLimitOrder` close paths (different economics —
    NOT ordinary closes) and rebalance-vs-close disambiguation; (c) Anchor event decoding as
    an optional precision upgrade (IDL publishes no event schemas today).
+2. **DefiTuna LENDING (`LendingPosition`) — a LENDING-pattern integration, NOT an LP one.**
+   Discovered during the Part 2 census (2026-07-21): **7,602 funded lending positions across
+   5,640 distinct wallets — 17.7× more active wallets than DefiTuna LP (318)**, across 35
+   deposit mints. Entirely invisible in DefiDesh today; the single largest missing DefiTuna
+   position class by user count.
+   **Scope it like AAVE / Suilend / Kamino Lend, NOT like the wrapper LP work.** Different
+   economics: a lending deposit earns interest and has no range, no impermanent loss, no
+   fees-vs-principal split, and no leverage/liquidation surface. It must NOT enter the LP
+   positions array, must NOT use the `selfReportedPnl` wrapper mechanism, and must NOT be
+   folded into LP P&L or Capital G/L — it belongs in the existing lending pipeline and the
+   `/dashboard/lending` surface (architecture Rule 4: a new protocol works everywhere, but
+   "everywhere" for a lending product is the lending surfaces).
+   Discovery is trivial and already proven in the census:
+   `getProgramAccounts(tuna4u…, memcmp{offset:0, bytes:<LendingPosition disc
+   2ffffc2314f59df3>})` then decode the 155-byte layout — `authority @ 11`, `mint @ 43`,
+   `deposited_funds @ 75` (u64), `deposited_shares @ 83` (u64), `vault @ 91`. **Filter
+   `deposited_funds > 0`** — 9,910 of the 17,512 accounts are zero-balance leftovers (57%),
+   so an unfiltered count roughly triples the real number. Needs Helius (free Alchemy 429s on
+   `getProgramAccounts`). Vault/APY metadata is available from `/vaults` (141 entries) on the
+   same public API used by the LP route.
+   **Confirm DefiDesh-user demand before building.** The 5,640 figure is DefiTuna's ENTIRE
+   user base, not DefiDesh's — it establishes the class matters at scale, not that a current
+   DefiDesh user holds one. Complexity MEDIUM.
+   _(Not built: `TunaSpotPosition` — the census found **11 accounts / 9 wallets**
+   protocol-wide. Deliberately dropped from the queue; revisit only if a real user reports
+   one.)_
 3. **Sprint WRAPPER-PROTOCOLS Phase 2 Part 4 — Kamino Liquidity.** Highest-TVL non-Tuna
    wrapper on Solana. **A DIFFERENT wrapper shape from DefiTuna, and cheaper:** Kamino issues
    a fungible `shareMint` held in the USER'S OWN WALLET (not an NFT in a vault), so discovery
