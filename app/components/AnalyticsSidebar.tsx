@@ -3,21 +3,21 @@
 import type { CSSProperties } from "react";
 
 const C = {
-  bg:        "#050505",
-  bg1:       "#060606",
-  bg2:       "#0d0d0d",
-  bg4:       "#171717",
-  border:    "#1c1c1c",
-  borderHi:  "#262626",
-  text:      "#a8a8a8",
-  textMid:   "#b4b4b4",
-  green:     "#00ff41",
-  greenDim:  "#00b82a",
-  greenFaint:"rgba(0,255,65,0.06)",
-  cyan:      "#00d4ff",
-  purple:    "#9945ff",
-  blue:      "#3d9fff",
-  amber:     "#ffaa00",
+  bg:        "var(--bg)",
+  bg1:       "var(--bg)",
+  bg2:       "var(--surface)",
+  bg4:       "var(--surface-2)",
+  border:    "var(--line)",
+  borderHi:  "var(--line-strong)",
+  text:      "var(--fg-muted)",
+  textMid:   "var(--fg-muted)",
+  green:     "var(--accent)",
+  greenDim:  "var(--accent-hover)",
+  greenFaint:"color-mix(in srgb, var(--accent) 6%, transparent)",
+  cyan:      "var(--info)",
+  purple:    "var(--chain-solana)",
+  blue:      "var(--info)",
+  amber:     "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
@@ -41,11 +41,11 @@ const CHAIN_LIST: { name: string; color: string }[] = [
   { name: "Ethereum", color: C.cyan },
   { name: "Base",     color: C.blue },
   { name: "Arbitrum", color: C.green },
-  { name: "Optimism", color: "#ff0420" },
+  { name: "Optimism", color: "var(--chain-optimism)" },
   { name: "Polygon",  color: C.purple },
   { name: "Solana",   color: C.purple },
   { name: "Sui",      color: C.blue },
-  { name: "HyperEVM", color: "#00d4aa" },
+  { name: "HyperEVM", color: "var(--pos)" },
   { name: "BNB Chain",color: C.amber },
 ];
 
@@ -168,7 +168,7 @@ export default function AnalyticsSidebar({
               style={active ? itemActive : itemBase}
               onMouseEnter={(e) => {
                 if (!active) {
-                  e.currentTarget.style.color = "#e8e8e8";
+                  e.currentTarget.style.color = "var(--fg)";
                   e.currentTarget.style.background = C.bg2;
                 }
               }}
@@ -197,7 +197,7 @@ export default function AnalyticsSidebar({
             type="button"
             onClick={onClearFilters}
             style={{ ...itemBase, color: C.amber, fontWeight: 700 }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,170,0,0.08)"; }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--warn) 8%, transparent)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
           >
             <span style={{ ...iconStyle, color: C.amber }}>✕</span>
@@ -233,7 +233,7 @@ export default function AnalyticsSidebar({
               onClick={() => onProtocolToggle(p)}
               style={selected ? { ...itemActive } : { ...itemBase }}
               onMouseEnter={(e) => {
-                if (!selected) { e.currentTarget.style.color = "#e8e8e8"; e.currentTarget.style.background = C.bg2; }
+                if (!selected) { e.currentTarget.style.color = "var(--fg)"; e.currentTarget.style.background = C.bg2; }
               }}
               onMouseLeave={(e) => {
                 if (!selected) { e.currentTarget.style.color = C.textMid; e.currentTarget.style.background = "transparent"; }
@@ -283,7 +283,7 @@ export default function AnalyticsSidebar({
               onClick={() => onChainToggle(ch.name)}
               style={selected ? { ...itemActive } : { ...itemBase }}
               onMouseEnter={(e) => {
-                if (!selected) { e.currentTarget.style.color = "#e8e8e8"; e.currentTarget.style.background = C.bg2; }
+                if (!selected) { e.currentTarget.style.color = "var(--fg)"; e.currentTarget.style.background = C.bg2; }
               }}
               onMouseLeave={(e) => {
                 if (!selected) { e.currentTarget.style.color = C.textMid; e.currentTarget.style.background = "transparent"; }

@@ -10,7 +10,7 @@ export default function BlinkingCursor() {
   }, []);
   return (
     <span
-      style={{ color: "#00ff41", opacity: on ? 1 : 0, marginLeft: 4, transition: "opacity 0.05s" }}
+      style={{ color: "var(--accent)", opacity: on ? 1 : 0, marginLeft: 4, transition: "opacity 0.05s" }}
     >
       ▊
     </span>

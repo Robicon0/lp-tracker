@@ -46,32 +46,32 @@ export function getTokenLogo(symbol: string): string | null {
 
 // ── Token color map ────────────────────────────────────────────────────────────
 export const TOKEN_COLORS: Record<string, string> = {
-  ETH:      "#627EEA",
-  WETH:     "#627EEA",
-  USDC:     "#2775CA",
-  "USDC.e": "#2775CA",
-  USDbC:    "#2775CA",
+  ETH:      "var(--chain-ethereum)",
+  WETH:     "var(--chain-ethereum)",
+  USDC:     "var(--chain-usdc)",
+  "USDC.e": "var(--chain-usdc)",
+  USDbC:    "var(--chain-usdc)",
   USDT:     "#26A17B",
-  BTC:      "#F7931A",
-  WBTC:     "#F7931A",
-  cbBTC:    "#F7931A",
-  tBTC:     "#F7931A",
-  SOL:      "#9945FF",
-  WSOL:     "#9945FF",
+  BTC:      "var(--chain-bitcoin)",
+  WBTC:     "var(--chain-bitcoin)",
+  cbBTC:    "var(--chain-bitcoin)",
+  tBTC:     "var(--chain-bitcoin)",
+  SOL:      "var(--chain-solana)",
+  WSOL:     "var(--chain-solana)",
   SUI:      "#6FBCF0",
-  HYPE:     "#00D4AA",
-  WHYPE:    "#00D4AA",
+  HYPE:     "var(--pos)",
+  WHYPE:    "var(--pos)",
   DAI:      "#F5AC37",
-  BNB:      "#F0B90B",
-  WBNB:     "#F0B90B",
-  MATIC:    "#8247E5",
-  POL:      "#8247E5",
-  AVAX:     "#E84142",
+  BNB:      "var(--chain-bnb)",
+  WBNB:     "var(--chain-bnb)",
+  MATIC:    "var(--chain-polygon)",
+  POL:      "var(--chain-polygon)",
+  AVAX:     "var(--chain-avalanche)",
   ARB:      "#2D9CDB",
-  OP:       "#FF0420",
+  OP:       "var(--chain-optimism)",
   USDS:     "#26A17B",
 };
 
 export function getTokenColor(symbol: string): string {
-  return TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
+  return TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "var(--fg-subtle)";
 }

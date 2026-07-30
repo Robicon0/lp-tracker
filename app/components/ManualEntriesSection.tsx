@@ -7,19 +7,19 @@ import type { ManualEntry } from "../hooks/useManualEntries";
 // Palette mirrors the analytics page so the section blends with the
 // excluded-positions warning that sits directly above it.
 const C = {
-  bg:        "#000000",
-  bg1:       "#060606",
-  border:    "#1c1c1c",
-  borderHi:  "#262626",
-  text:      "#a8a8a8",
-  textMid:   "#b4b4b4",
-  textBright:"#e8e8e8",
-  green:     "#00ff41",
-  greenDim:  "#00b82a",
-  greenFaint:"rgba(0,255,65,0.06)",
+  bg:        "var(--bg)",
+  bg1:       "var(--bg)",
+  border:    "var(--line)",
+  borderHi:  "var(--line-strong)",
+  text:      "var(--fg-muted)",
+  textMid:   "var(--fg-muted)",
+  textBright:"var(--fg)",
+  green:     "var(--accent)",
+  greenDim:  "var(--accent-hover)",
+  greenFaint:"color-mix(in srgb, var(--accent) 6%, transparent)",
   red:       "#ff4757",
   redFaint:  "rgba(255,71,87,0.06)",
-  amber:     "#ffaa00",
+  amber:     "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
@@ -57,7 +57,7 @@ function fmt$Signed(n: number, dp = 2): string {
 }
 
 const inputBaseStyle: CSSProperties = {
-  background: "#000",
+  background: "var(--bg)",
   border: `1px solid ${C.borderHi}`,
   color: C.textBright,
   fontFamily: FONT,
@@ -143,14 +143,14 @@ function ManualEntryCard({
         </div>
         <span style={{
           fontSize: 10, padding: "2px 7px",
-          border: `1px solid ${C.borderHi}`, background: "#0a0a0a",
+          border: `1px solid ${C.borderHi}`, background: "var(--surface)",
           color: C.textMid, letterSpacing: "0.08em",
         }}>
           {np.excluded.protocol}
         </span>
         <span style={{
           fontSize: 10, padding: "2px 7px",
-          border: `1px solid ${C.borderHi}`, background: "#0a0a0a",
+          border: `1px solid ${C.borderHi}`, background: "var(--surface)",
           color: C.textMid, letterSpacing: "0.08em",
         }}>
           {np.excluded.chain}
@@ -433,7 +433,7 @@ export default function ManualEntriesSection({
         .me-input::-webkit-outer-spin-button,
         .me-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         .me-input { -moz-appearance: textfield; }
-        .me-save-btn:hover  { background: rgba(0,255,65,0.08); }
+        .me-save-btn:hover  { background: color-mix(in srgb, var(--accent) 8%, transparent); }
         .me-edit-btn:hover  { border-color: ${C.text}; color: ${C.textBright}; }
         @media (max-width: 768px) {
           .me-grid  { grid-template-columns: 1fr !important; }

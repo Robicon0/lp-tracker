@@ -1,31 +1,40 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
+@import "./tokens.css";
 
-:root {
-  --background: #000000;
-  --foreground: #e8e8e8;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #000000;
-    --foreground: #e8e8e8;
-  }
-}
-
+/* Global base. Every colour below resolves through the semantic token tier in
+   tokens.css, so a theme swap is a single data-theme attribute change on
+   <html> — no re-render, no rebuild, no per-page overrides. */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme transition.
+   Applied ONLY while the `theme-switching` class is on <html> (the toggle adds
+   it for 220ms, then removes it). A permanent `body *` transition repaints
+   every node in the tree on any colour-adjacent change and produced visible
+   ghosting on the dense dashboard pages — this scopes the cost to the single
+   moment it actually buys something. */
+html.theme-switching,
+html.theme-switching body,
+html.theme-switching body * {
+  transition: background-color var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease) !important;
+}
+html.theme-switching * {
+  /* Never animate anything but colour during a swap. */
+  transition-property: background-color, border-color, color !important;
+}
+
+::selection { background: var(--accent); color: var(--accent-fg); }
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Hide the FloatingFeedback round launcher globally — the rotated
@@ -118,7 +127,7 @@ button[aria-label="Share feedback"] {
   .ddp-body { grid-template-columns: 1fr !important; }
   .ddp-positions {
     border-right: none !important;
-    border-bottom: 1px solid #1f1f1f;
+    border-bottom: 1px solid var(--line);
   }
 
   /* FIX 4 — Hide the P&L column from the positions table on mobile;
@@ -133,7 +142,7 @@ button[aria-label="Share feedback"] {
   .ddp-cashflow { grid-template-columns: 1fr 1fr !important; }
   .ddp-cashflow > .ddp-cashflow-cell:nth-child(1),
   .ddp-cashflow > .ddp-cashflow-cell:nth-child(2) {
-    border-bottom: 1px solid #1f1f1f;
+    border-bottom: 1px solid var(--line);
   }
   .ddp-cashflow > .ddp-cashflow-cell:nth-child(2) {
     border-right: none !important;
@@ -205,7 +214,7 @@ button[aria-label="Share feedback"] {
     position: relative;
     z-index: 2;
     touch-action: manipulation;
-    -webkit-tap-highlight-color: rgba(0, 255, 65, 0.18);
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
   /* POSITION DETAIL — Performance Metrics D/W/M/Y toggle next to the
@@ -217,7 +226,7 @@ button[aria-label="Share feedback"] {
     padding: 6px 9px !important;
     min-height: 30px;
     touch-action: manipulation;
-    -webkit-tap-highlight-color: rgba(0, 255, 65, 0.18);
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
   /* ─── POSITION DETAIL PAGE — mobile layout ──────────────────────────
@@ -247,7 +256,7 @@ button[aria-label="Share feedback"] {
   }
   .pd-tokens > div:first-child {
     border-right: none !important;
-    border-bottom: 1px solid #1c1c1c;
+    border-bottom: 1px solid var(--line);
   }
 
   /* (2) Performance Metrics top row — 3 cols → 2 cols. The 6 cells
@@ -262,7 +271,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .pd-perf-top > div:nth-child(-n+4) {
-    border-bottom: 1px solid #1c1c1c !important;
+    border-bottom: 1px solid var(--line) !important;
   }
 
   /* (3) Actual {Period} Income + Fee Income Rate — 2 cols → 1 col so
@@ -273,7 +282,7 @@ button[aria-label="Share feedback"] {
   }
   .pd-perf-bottom > div:first-child {
     border-right: none !important;
-    border-bottom: 1px solid #1c1c1c;
+    border-bottom: 1px solid var(--line);
   }
 
   /* (4) Fee Claims History — hide the TX HASH column entirely (URL
@@ -304,7 +313,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .pd-yield-grid > div:nth-child(-n+2) {
-    border-bottom: 1px solid #1c1c1c !important;
+    border-bottom: 1px solid var(--line) !important;
   }
 
   /* (7) On-Chain P&L 5-stat row — 5 cols → 2 cols (5th item wraps to
@@ -317,7 +326,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .pd-pnl-stats > div:nth-child(-n+4) {
-    border-bottom: 1px solid #1c1c1c !important;
+    border-bottom: 1px solid var(--line) !important;
   }
 
   /* (7b) Net P&L summary panel — Net P&L / HODL Value / Fees vs IL
@@ -336,7 +345,7 @@ button[aria-label="Share feedback"] {
   }
   .pd-pnl-summary > div + div {
     padding-top: 16px !important;
-    border-top: 1px solid #1c1c1c;
+    border-top: 1px solid var(--line);
   }
 
   /* (8) Pool Statistics — 3 cols → 2 cols, third wraps below. */
@@ -347,7 +356,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .pd-pool-stats > div:nth-child(-n+2) {
-    border-bottom: 1px solid #1c1c1c !important;
+    border-bottom: 1px solid var(--line) !important;
   }
 
   /* DASHBOARD — Zerion fallback rows. Desktop renders the row as a
@@ -380,7 +389,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .dash-summary-row > div:nth-child(-n+2) {
-    border-bottom: 1px solid #1c1c1c;
+    border-bottom: 1px solid var(--line);
   }
 
   /* ANALYTICS — top stats strip (Total Portfolio / Daily Income /
@@ -395,7 +404,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .ana-top-stats > div:nth-child(-n+4) {
-    border-bottom: 1px solid #1c1c1c;
+    border-bottom: 1px solid var(--line);
   }
   .ana-top-stats > div:nth-child(5) {
     grid-column: 1 / -1;
@@ -410,7 +419,7 @@ button[aria-label="Share feedback"] {
     border-right: none !important;
   }
   .ana-fee-sub > div:nth-child(-n+2) {
-    border-bottom: 1px solid #1c1c1c;
+    border-bottom: 1px solid var(--line);
   }
 
   /* ANALYTICS — LP P&L 6 stat cards collapse to 2×3 (2 cols × 3 rows). */
@@ -446,5 +455,13 @@ button[aria-label="Share feedback"] {
     white-space: nowrap !important;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+/* Motion accessibility: the animated hero paths are decorative. Users who
+   ask the OS to reduce motion get the static rendering. */
+@media (prefers-reduced-motion: reduce) {
+  [data-hero-fx] svg path {
+    animation: none !important;
   }
 }

@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Shell } from "./home/Shell";
 
-const PROTOCOL_COUNT = 7;
-const CHAIN_COUNT = 3;
+// NOTE: the strip deliberately carries NO protocol/chain counts. It used to lead
+// with "7 PROTOCOLS | 3 CHAINS", which (a) duplicated the metrics band and the
+// protocol grid immediately above and below it, and (b) drifted out of sync with
+// them — the band reports 8 chains from app/page.tsx's CHAIN_COUNT while this
+// file's hardcoded copy still said 3. If a count belongs on the page it belongs
+// in TrustBand, where it is derived rather than hardcoded.
 
 // Symbol displayed in the ticker → CoinGecko ID used for live price lookup.
 // IMPORTANT: this component fetches LIVE prices from /api/prices on mount and
@@ -51,7 +56,27 @@ function formatChange(chg: number): string {
   return `${sign}${chg.toFixed(2)}%`;
 }
 
-export default function PriceTickerStrip() {
+/**
+ * `railed` (Home v2) puts the ENTIRE strip on the page rail — border, surface
+ * fill, and content all stop at `--maxw` / `--gutter` via <Shell> — so the strip
+ * reads as a component in the same column as the metrics band above and the
+ * protocol grid below.
+ *
+ * Do NOT full-bleed the border/background while railing only the content: the
+ * band's top rule then runs several hundred px past the metrics band's own
+ * (railed) bottom rule, so the two read as one line that overshoots and stops
+ * mid-air, and the surface fill leaves a tall empty bar on each side of the
+ * content.
+ *
+ * The railed strip carries `border-b` only, not `border-y`: it sits flush under
+ * the metrics band, whose cells already draw a railed `border-bottom`. A top
+ * border would stack two 1px rules into a heavy 2px seam. If this strip is ever
+ * moved somewhere without a ruled section above it, restore the top border.
+ *
+ * Legacy home (`railed` omitted) keeps the original edge-to-edge
+ * `px-4 sm:px-12` treatment, which its own un-railed sections align to.
+ */
+export default function PriceTickerStrip({ railed = false }: { railed?: boolean } = {}) {
   const [prices, setPrices] = useState<PriceMap>({});
   const [paused, setPaused] = useState(false);
 
@@ -111,6 +136,54 @@ export default function PriceTickerStrip() {
   // of copy 3 produces zero misalignment.
   const tripled = [...items, ...items, ...items];
 
+  const row = (
+    <>
+      {/* Leading label. `pr-*` only, no left padding — it is the first cell, so
+          its text starts on the strip's own inline padding, which is what puts
+          it on the same vertical line as the labels in the metrics band. */}
+      <div className="pts-live flex items-center gap-2 pr-6 sm:pr-8 border-r border-[var(--line)] whitespace-nowrap">
+        <span className="inline-block w-[5px] h-[5px] bg-[var(--accent)] animate-pulse" />
+        <span className="text-[var(--info)] uppercase tracking-[0.12em] text-[14px]">
+          LIVE Prices
+        </span>
+      </div>
+      {/* pl-8 lives on the outer container, NOT the animated div, so the
+          inner tripled list is perfectly symmetric. */}
+      <div
+        className="pts-scroll flex-1 overflow-hidden flex items-center pl-8"
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+      >
+        <div
+          className="flex whitespace-nowrap"
+          style={{
+            width: "max-content",
+            animation: "defidesh-ticker 50s linear infinite",
+            animationPlayState: paused ? "paused" : "running",
+          }}
+        >
+          {tripled.map((t, i) => (
+            <div
+              key={i}
+              className="text-[14px] flex gap-2 items-center"
+              style={{ marginRight: 40 }}
+            >
+              <span className="text-[var(--fg-subtle)]">{t.sym}</span>
+              <span className="text-[var(--fg)] tabular-nums">${t.price}</span>
+              {t.chg !== null && (
+                <span
+                  className={`tabular-nums ${t.up ? "text-[var(--accent)]" : "text-[var(--neg)]"}`}
+                >
+                  {t.chg}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <>
       <style
@@ -119,60 +192,30 @@ export default function PriceTickerStrip() {
             "@keyframes defidesh-ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-33.3333%); } }",
         }}
       />
-      <div className="border-b border-[#1f1f1f] px-4 sm:px-12 flex items-stretch h-12 overflow-hidden">
-        <div className="pts-static flex items-center gap-2.5 pr-6 sm:pr-8 border-r border-[#1f1f1f] whitespace-nowrap">
-          <span className="text-[#00ff41] font-bold text-[16px] tabular-nums">
-            {PROTOCOL_COUNT}
-          </span>
-          <span className="text-[#888] uppercase tracking-[0.12em] text-[14px]">Protocols</span>
-        </div>
-        <div className="pts-static flex items-center gap-2.5 px-6 sm:px-8 border-r border-[#1f1f1f] whitespace-nowrap">
-          <span className="text-[#00ff41] font-bold text-[16px] tabular-nums">
-            {CHAIN_COUNT}
-          </span>
-          <span className="text-[#888] uppercase tracking-[0.12em] text-[14px]">Chains</span>
-        </div>
-        <div className="pts-live flex items-center gap-2 px-8 border-r border-[#1f1f1f] whitespace-nowrap">
-          <span className="inline-block w-[5px] h-[5px] bg-[#00ff41] animate-pulse" />
-          <span className="text-[#00e5ff] uppercase tracking-[0.12em] text-[14px]">
-            LIVE Prices
-          </span>
-        </div>
-        {/* pl-8 lives on the outer container, NOT the animated div, so the
-            inner tripled list is perfectly symmetric. */}
-        <div
-          className="pts-scroll flex-1 overflow-hidden flex items-center pl-8"
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
-        >
+      {railed ? (
+        <Shell>
           <div
-            className="flex whitespace-nowrap"
+            className="border-b border-[var(--line)] h-12 overflow-hidden flex items-stretch"
             style={{
-              width: "max-content",
-              animation: "defidesh-ticker 50s linear infinite",
-              animationPlayState: paused ? "paused" : "running",
+              background: "var(--surface)",
+              // Matches the metrics cells' inline padding above, so the leading
+              // label starts on the same vertical line as "TVL INDEXED" rather
+              // than 24px to its left. `overflow-hidden` clips at the padding
+              // box, so the scrolling prices still terminate at the strip edge.
+              paddingInline: "var(--space-2xl)",
             }}
           >
-            {tripled.map((t, i) => (
-              <div
-                key={i}
-                className="text-[14px] flex gap-2 items-center"
-                style={{ marginRight: 40 }}
-              >
-                <span className="text-[#888]">{t.sym}</span>
-                <span className="text-[#e8e8e8] tabular-nums">${t.price}</span>
-                {t.chg !== null && (
-                  <span
-                    className={`tabular-nums ${t.up ? "text-[#00ff41]" : "text-[#ff3366]"}`}
-                  >
-                    {t.chg}
-                  </span>
-                )}
-              </div>
-            ))}
+            {row}
           </div>
+        </Shell>
+      ) : (
+        <div
+          className="border-y border-[var(--line)] px-4 sm:px-12 flex items-stretch h-12 overflow-hidden"
+          style={{ background: "var(--surface)" }}
+        >
+          {row}
         </div>
-      </div>
+      )}
     </>
   );
 }

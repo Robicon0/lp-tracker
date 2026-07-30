@@ -54,7 +54,7 @@ export default function WatchedPage() {
   }
 
   return (
-    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[var(--surface)] text-white min-h-screen">
       <Navbar />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-8">
@@ -94,7 +94,7 @@ export default function WatchedPage() {
                             if (e.key === "Escape") setEditingKey(null);
                           }}
                           placeholder="Nickname"
-                          className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded px-2 py-1 text-base focus:outline-none focus:border-emerald-400"
+                          className="bg-[var(--accent-surface)] border border-emerald-800/50 text-white rounded px-2 py-1 text-base focus:outline-none focus:border-emerald-400"
                         />
                         <button
                           onClick={() => commitEdit(w.address, w.chain)}
@@ -145,12 +145,12 @@ export default function WatchedPage() {
                 onChange={(e) => { setAddInput(e.target.value); setAddError(""); }}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 placeholder="Paste wallet address"
-                className="flex-1 bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400"
+                className="flex-1 bg-[var(--accent-surface)] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400"
               />
               <select
                 value={addChain}
                 onChange={(e) => { setAddChain(e.target.value as WatchedWalletChain); setAddError(""); }}
-                className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400 shrink-0"
+                className="bg-[var(--accent-surface)] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400 shrink-0"
               >
                 <option value="evm">EVM</option>
                 <option value="solana">Solana</option>
@@ -163,7 +163,7 @@ export default function WatchedPage() {
               value={addLabel}
               onChange={(e) => setAddLabel(e.target.value)}
               placeholder="Nickname (optional)"
-              className="bg-[#0a1f17] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400"
+              className="bg-[var(--accent-surface)] border border-emerald-800/50 text-white rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400"
             />
             {addError && <p className="text-red-400 text-sm">{addError}</p>}
             <button

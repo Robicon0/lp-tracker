@@ -32,7 +32,7 @@ function TokenCircle({ symbol, size = 32, overlap = false }: { symbol: string; s
   const color = getTokenColor(symbol);
   const baseStyle: React.CSSProperties = {
     width: size, height: size, borderRadius: "50%",
-    border: "2px solid #0a0f0d", flexShrink: 0,
+    border: "2px solid var(--surface)", flexShrink: 0,
     ...(overlap ? { marginLeft: -size * 0.3 } : {}),
   };
   if (logoUrl && !imgError) {
@@ -316,7 +316,7 @@ export default function PositionDetail() {
 
   if (!mounted || isLoading) {
     return (
-      <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
+      <div className="px-4 pt-24 pb-8 bg-[var(--surface)] text-white min-h-screen">
         <Navbar />
         <div className="w-full max-w-7xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-base mb-6 inline-block">
@@ -332,7 +332,7 @@ export default function PositionDetail() {
 
   if (!pos) {
     return (
-      <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
+      <div className="px-4 pt-24 pb-8 bg-[var(--surface)] text-white min-h-screen">
         <Navbar />
         <div className="w-full max-w-7xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-base mb-6 inline-block">
@@ -422,7 +422,7 @@ export default function PositionDetail() {
   const totalLifetimeFeesUSD = totalClaimedUSD + pos.fees;
 
   return (
-    <div className="px-4 pt-24 pb-8 bg-[#0a0f0d] text-white min-h-screen">
+    <div className="px-4 pt-24 pb-8 bg-[var(--surface)] text-white min-h-screen">
       <Navbar />
       <div className="w-full max-w-7xl mx-auto">
         <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-base mb-6 inline-block">
@@ -456,14 +456,14 @@ export default function PositionDetail() {
 
         {/* Row 1: Top Stats — 4 cards */}
         <div className="grid grid-cols-4 gap-[2px] mb-4 bg-emerald-500/20 rounded-xl overflow-hidden">
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
+          <div className="bg-gradient-to-br from-[var(--accent-surface)] to-[var(--accent-surface)] p-4">
             <p className="text-sm font-semibold text-emerald-300 mb-1">Position Value</p>
             <p className="text-2xl font-extrabold text-white">
               ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
 
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
+          <div className="bg-gradient-to-br from-[var(--accent-surface)] to-[var(--accent-surface)] p-4">
             <p className="text-sm font-semibold text-emerald-300 mb-1">Realized APR</p>
             {activityLoading ? (
               <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
@@ -502,7 +502,7 @@ export default function PositionDetail() {
             )}
           </div>
 
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
+          <div className="bg-gradient-to-br from-[var(--accent-surface)] to-[var(--accent-surface)] p-4">
             <p className="text-sm font-semibold text-emerald-300 mb-1">Total Fees Earned</p>
             {activityLoading && isActivityProtocol ? (
               <div className="h-7 mt-1 bg-emerald-900/40 rounded animate-pulse w-3/4" />
@@ -520,7 +520,7 @@ export default function PositionDetail() {
             )}
           </div>
 
-          <div className="bg-gradient-to-br from-[#064e3b] to-[#0a2e1a] p-4">
+          <div className="bg-gradient-to-br from-[var(--accent-surface)] to-[var(--accent-surface)] p-4">
             <p className="text-sm font-semibold text-emerald-300 mb-1">IL</p>
             {ilData ? (
               <>
@@ -541,7 +541,7 @@ export default function PositionDetail() {
         <div className={`grid gap-[2px] mb-1.5 bg-emerald-500/20 rounded-xl overflow-hidden items-start ${isActivityProtocol ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {/* Assets: Current vs Invested */}
           {isActivityProtocol && (
-            <div className="bg-[#0a2e1a]/60 p-4">
+            <div className="bg-[var(--accent-surface)]/60 p-4">
               <h2 className="text-base font-extrabold text-emerald-300 mb-3">Assets</h2>
 
               {activityLoading && (
@@ -620,7 +620,7 @@ export default function PositionDetail() {
           )}
 
           {/* Position Details */}
-          <div className="bg-[#0a2e1a]/60 p-4">
+          <div className="bg-[var(--accent-surface)]/60 p-4">
             <h2 className="text-base font-extrabold text-emerald-300 mb-3">Position Details</h2>
             <div className="space-y-0">
               <div className="flex justify-between py-2 border-b border-emerald-500/10">
@@ -681,7 +681,7 @@ export default function PositionDetail() {
         {(ilData || hasFeeBreakdown) && (
           <div className={`grid gap-[2px] mb-1.5 bg-emerald-500/20 rounded-xl overflow-hidden items-start ${ilData && hasFeeBreakdown ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {ilData && (
-              <div className="bg-[#0a2e1a]/60 p-4">
+              <div className="bg-[var(--accent-surface)]/60 p-4">
                 <h2 className="text-base font-extrabold text-emerald-300 mb-3">IL Breakdown</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between py-2 border-b border-emerald-500/10">
@@ -722,7 +722,7 @@ export default function PositionDetail() {
             )}
 
             {hasFeeBreakdown && (
-              <div className="bg-[#0a2e1a]/60 p-4">
+              <div className="bg-[var(--accent-surface)]/60 p-4">
                 <h2 className="text-base font-extrabold text-emerald-300 mb-3">Unclaimed Fees</h2>
                 <div className="space-y-0">
                   <div className="flex justify-between items-center py-2 border-b border-emerald-500/10">
@@ -750,7 +750,7 @@ export default function PositionDetail() {
             non-EVM legacy section below stays untouched for Solana/Sui this phase. */}
         {isEvmActivityProtocol && (() => {
           const cardWrap = (body: React.ReactNode) => (
-            <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">
+            <div className="bg-[var(--accent-surface)]/60 p-4 mb-1.5 rounded-xl">
               <h2 className="text-base font-extrabold text-emerald-300 mb-3">On-Chain P&amp;L &amp; Impermanent Loss</h2>
               {body}
             </div>
@@ -950,7 +950,7 @@ export default function PositionDetail() {
           }
 
           return (
-            <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">
+            <div className="bg-[var(--accent-surface)]/60 p-4 mb-1.5 rounded-xl">
               <h2 className="text-base font-extrabold text-emerald-300 mb-3">Impermanent Loss</h2>
               {body}
             </div>
@@ -959,7 +959,7 @@ export default function PositionDetail() {
 
         {/* Row 3b: Pool Statistics — shown when pool TVL/volume data is available */}
         {(pos.poolTvl != null || pos.pool24hVolume != null) && (
-          <div className="bg-[#0a2e1a]/60 p-4 mb-1.5 rounded-xl">
+          <div className="bg-[var(--accent-surface)]/60 p-4 mb-1.5 rounded-xl">
             <h2 className="text-base font-extrabold text-emerald-300 mb-3">Pool Statistics</h2>
             <div className="grid grid-cols-3 gap-1">
               {pos.poolTvl != null && (
@@ -1013,7 +1013,7 @@ export default function PositionDetail() {
             value: s.value,
           }));
           return (
-            <div className="bg-[#0a2e1a]/60 p-4 mb-3">
+            <div className="bg-[var(--accent-surface)]/60 p-4 mb-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
                 <h2 className="text-base font-extrabold text-emerald-300">Position P&amp;L</h2>
                 <div className="flex gap-1">
@@ -1033,31 +1033,31 @@ export default function PositionDetail() {
                 </div>
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
-                <div className="bg-[#0a1a12] rounded p-2">
+                <div className="bg-[var(--accent-surface)] rounded p-2">
                   <p className="text-[12px] text-gray-300">Initial Value</p>
                   <p className="text-base font-bold text-white">
                     ${initial.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
-                <div className="bg-[#0a1a12] rounded p-2">
+                <div className="bg-[var(--accent-surface)] rounded p-2">
                   <p className="text-[12px] text-gray-300">Current Value</p>
                   <p className="text-base font-bold text-white">
                     ${current.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
-                <div className="bg-[#0a1a12] rounded p-2">
+                <div className="bg-[var(--accent-surface)] rounded p-2">
                   <p className="text-[12px] text-gray-300">Total Fees Claimed</p>
                   <p className="text-base font-bold text-emerald-300">
                     ${claimed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
-                <div className="bg-[#0a1a12] rounded p-2">
+                <div className="bg-[var(--accent-surface)] rounded p-2">
                   <p className="text-[12px] text-gray-300">Net P&amp;L</p>
                   <p className={`text-base font-bold ${netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {netPnl >= 0 ? "+" : ""}${netPnl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
-                <div className="bg-[#0a1a12] rounded p-2">
+                <div className="bg-[var(--accent-surface)] rounded p-2">
                   <p className="text-[12px] text-gray-300">P&amp;L %</p>
                   <p className={`text-base font-bold ${netPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {netPnlPct >= 0 ? "+" : ""}{netPnlPct.toFixed(2)}%
@@ -1073,14 +1073,14 @@ export default function PositionDetail() {
                   <AreaChart data={chart}>
                     <defs>
                       <linearGradient id={`posPnlGrad-${pos.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                        <stop offset="5%" stopColor="var(--pos)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="var(--pos)" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#0f2e1f" />
-                    <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="label" tick={{ fill: "var(--fg-subtle)", fontSize: 12 }} axisLine={false} tickLine={false} />
                     <YAxis
-                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      tick={{ fill: "var(--fg-subtle)", fontSize: 12 }}
                       tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
                       axisLine={false}
                       tickLine={false}
@@ -1088,11 +1088,11 @@ export default function PositionDetail() {
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#0a1f17",
+                        backgroundColor: "var(--accent-surface)",
                         border: "1px solid rgba(16,185,129,0.2)",
                         borderRadius: "8px",
                         padding: "8px 12px",
-                        color: "#FFFFFF",
+                        color: "var(--fg)",
                         fontSize: "12px",
                       }}
                       formatter={(v: number | undefined) => [
@@ -1104,11 +1104,11 @@ export default function PositionDetail() {
                     <Area
                       type="monotone"
                       dataKey="value"
-                      stroke="#10b981"
+                      stroke="var(--pos)"
                       strokeWidth={2}
                       fill={`url(#posPnlGrad-${pos.id})`}
                       dot={false}
-                      activeDot={{ r: 4, fill: "#10b981" }}
+                      activeDot={{ r: 4, fill: "var(--pos)" }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -1123,7 +1123,7 @@ export default function PositionDetail() {
 
         {/* Row 4: Actual Performance — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 p-4 mb-3">
+          <div className="bg-[var(--accent-surface)]/60 p-4 mb-3">
             <h2 className="text-base font-extrabold text-emerald-300 mb-3">Actual Performance</h2>
             <p className="text-sm text-gray-300/60 mb-4">Based on actual claimed fees · not pool APY estimate</p>
 
@@ -1248,7 +1248,7 @@ export default function PositionDetail() {
 
         {/* Row 4b: Fee Claims Log — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 p-4 mb-3">
+          <div className="bg-[var(--accent-surface)]/60 p-4 mb-3">
             <h2 className="text-base font-extrabold text-yellow-400 mb-1">📋 FEE CLAIMS LOG</h2>
             <p className="text-sm text-gray-300/60 mb-4">Collected fees only · deposits and withdrawals shown in Activity History below</p>
 
@@ -1366,7 +1366,7 @@ export default function PositionDetail() {
 
         {/* Row 5: Activity History — full width */}
         {isActivityProtocol && (
-          <div className="bg-[#0a2e1a]/60 p-4 mb-6">
+          <div className="bg-[var(--accent-surface)]/60 p-4 mb-6">
             <h2 className="text-base font-extrabold text-emerald-300 mb-3">Activity History</h2>
 
             {activityLoading && (

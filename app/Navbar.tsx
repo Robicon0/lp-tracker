@@ -286,7 +286,7 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0a0f0d]/90 backdrop-blur-sm border-b border-emerald-400/15">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--surface)]/90 backdrop-blur-sm border-b border-emerald-400/15">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
@@ -323,7 +323,7 @@ export default function Navbar() {
               {/* Solana Wallet */}
               {mounted && solanaAddress ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-[#0a1f17] border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-base font-mono whitespace-nowrap">
+                  <span className="bg-[var(--accent-surface)] border border-purple-700 text-purple-400 px-3 py-1.5 rounded-lg text-base font-mono whitespace-nowrap">
                     ◎ {truncateAddress(solanaAddress)}
                   </span>
                   <button onClick={handleSolanaDisconnect} className="text-emerald-300/70 hover:text-red-400 text-base transition-colors">✕</button>
@@ -342,7 +342,7 @@ export default function Navbar() {
               {/* Sui Wallet */}
               {mounted && suiAddress ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-[#0a1f17] border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-base font-mono whitespace-nowrap">
+                  <span className="bg-[var(--accent-surface)] border border-cyan-700 text-cyan-400 px-3 py-1.5 rounded-lg text-base font-mono whitespace-nowrap">
                     ◈ {truncateAddress(suiAddress)}
                   </span>
                   <button onClick={handleSuiDisconnect} className="text-emerald-300/70 hover:text-red-400 text-base transition-colors">✕</button>
@@ -432,7 +432,7 @@ export default function Navbar() {
       {showEvmModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowEvmModal(false)} />
-          <div className="relative bg-[#0a1f17] border border-emerald-400/20 rounded-2xl p-6 w-full max-w-sm mx-4">
+          <div className="relative bg-[var(--accent-surface)] border border-emerald-400/20 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">Connect EVM Wallet</h2>
               <button onClick={() => setShowEvmModal(false)} className="text-emerald-300/70 hover:text-white">✕</button>
@@ -465,7 +465,7 @@ export default function Navbar() {
       {showSolanaModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowSolanaModal(false)} />
-          <div className="relative bg-[#0a1f17] border border-purple-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
+          <div className="relative bg-[var(--accent-surface)] border border-purple-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">Connect Solana Wallet</h2>
               <button onClick={() => setShowSolanaModal(false)} className="text-emerald-300/70 hover:text-white">✕</button>
@@ -501,7 +501,7 @@ export default function Navbar() {
       {showSuiModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowSuiModal(false)} />
-          <div className="relative bg-[#0a1f17] border border-cyan-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
+          <div className="relative bg-[var(--accent-surface)] border border-cyan-700/50 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">Connect Sui Wallet</h2>
               <button onClick={() => setShowSuiModal(false)} className="text-emerald-300/70 hover:text-white">✕</button>

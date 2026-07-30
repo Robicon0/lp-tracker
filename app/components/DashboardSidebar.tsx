@@ -10,20 +10,20 @@ import type { AerodromePosition } from "../lib/aerodrome";
 import type { WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 
 const C = {
-  bg:        "#050505",
-  bg1:       "#090909",
-  bg2:       "#0d0d0d",
-  bg4:       "#171717",
-  border:    "#1c1c1c",
-  borderHi:  "#262626",
-  text:      "#a0a0a0",
-  textMid:   "#aaaaaa",
-  green:     "#00ff41",
-  greenDim:  "#00b82a",
-  greenFaint:"rgba(0,255,65,0.06)",
-  cyan:      "#00d4ff",
-  purple:    "#9945ff",
-  blue:      "#3d9fff",
+  bg:        "var(--bg)",
+  bg1:       "var(--surface)",
+  bg2:       "var(--surface)",
+  bg4:       "var(--surface-2)",
+  border:    "var(--line)",
+  borderHi:  "var(--line-strong)",
+  text:      "var(--fg-muted)",
+  textMid:   "var(--fg-muted)",
+  green:     "var(--accent)",
+  greenDim:  "var(--accent-hover)",
+  greenFaint:"color-mix(in srgb, var(--accent) 6%, transparent)",
+  cyan:      "var(--info)",
+  purple:    "var(--chain-solana)",
+  blue:      "var(--info)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
@@ -138,7 +138,7 @@ export default function DashboardSidebar({
     color: C.green,
     background: C.greenFaint,
     borderLeftColor: C.green,
-    textShadow: "0 0 12px rgba(0,255,65,0.4)",
+    textShadow: "0 0 12px color-mix(in srgb, var(--accent) 40%, transparent)",
   };
 
   const iconStyle: CSSProperties = {

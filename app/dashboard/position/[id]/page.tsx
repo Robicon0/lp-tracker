@@ -57,34 +57,34 @@ function PositionScanModeListener() {
 
 // ── Terminal palette (matches position.html exactly) ─────────────────────────
 const C = {
-  bg:         "#050505",
-  bg1:        "#090909",
-  bg2:        "#0d0d0d",
-  bg3:        "#121212",
-  bg4:        "#171717",
-  border:     "#1c1c1c",
-  borderHi:   "#262626",
-  text:       "#a0a0a0",
+  bg:         "var(--bg)",
+  bg1:        "var(--surface)",
+  bg2:        "var(--surface)",
+  bg3:        "var(--surface)",
+  bg4:        "var(--surface-2)",
+  border:     "var(--line)",
+  borderHi:   "var(--line-strong)",
+  text:       "var(--fg-muted)",
   textMid:    "#b0b0b0",
-  textBright: "#e0e0e0",
-  textWhite:  "#f0f0f0",
-  green:      "#00ff41",
-  greenDim:   "#00992a",
-  greenFaint: "rgba(0,255,65,0.06)",
-  greenGlow:  "rgba(0,255,65,0.18)",
-  cyan:       "#00d4ff",
-  cyanFaint:  "rgba(0,212,255,0.07)",
-  red:        "#ff3355",
-  redFaint:   "rgba(255,51,85,0.07)",
-  amber:      "#ffaa00",
-  purple:     "#9945ff",
-  blue:       "#3d9fff",
+  textBright: "var(--fg)",
+  textWhite:  "var(--fg)",
+  green:      "var(--accent)",
+  greenDim:   "var(--accent-hover)",
+  greenFaint: "color-mix(in srgb, var(--accent) 6%, transparent)",
+  greenGlow:  "color-mix(in srgb, var(--accent) 18%, transparent)",
+  cyan:       "var(--info)",
+  cyanFaint:  "color-mix(in srgb, var(--info) 7%, transparent)",
+  red:        "var(--neg)",
+  redFaint:   "color-mix(in srgb, var(--neg) 7%, transparent)",
+  amber:      "var(--warn)",
+  purple:     "var(--chain-solana)",
+  blue:       "var(--info)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.012) 3px, rgba(0,0,0,0.012) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
 
 // ── Token logo circle ─────────────────────────────────────────────────────────
 function TokenCircle({
@@ -215,9 +215,9 @@ function getCurrentPrice(pos: AerodromePosition): number | null {
 
 function chainColor(chain: string): string {
   const map: Record<string, string> = {
-    Base: C.blue, Ethereum: C.cyan, Arbitrum: C.green, Optimism: "#ff0420",
-    Polygon: C.purple, Avalanche: "#e84142", Solana: C.purple, Sui: C.blue,
-    HyperEVM: "#00d4aa", "BNB Chain": C.amber,
+    Base: C.blue, Ethereum: C.cyan, Arbitrum: C.green, Optimism: "var(--chain-optimism)",
+    Polygon: C.purple, Avalanche: "var(--chain-avalanche)", Solana: C.purple, Sui: C.blue,
+    HyperEVM: "var(--pos)", "BNB Chain": C.amber,
   };
   return map[chain] ?? C.green;
 }
@@ -723,9 +723,9 @@ export default function PositionDetail() {
         @keyframes _pulse  { 0%,100%{opacity:1} 50%{opacity:0.3} }
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         @keyframes _scan   { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
-        .pos-row:hover td { background: rgba(255,255,255,0.012); }
+        .pos-row:hover td { background: var(--surface-hover); }
         .btn-neutral:hover { border-color: ${C.text} !important; color: ${C.textBright} !important; background: ${C.bg2} !important; }
-        .btn-primary:hover { background: rgba(0,255,65,0.12) !important; box-shadow: 0 0 14px rgba(0,255,65,0.18); }
+        .btn-primary:hover { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 18%, transparent); }
         .tx-link:hover { opacity: 0.7; }
       `}</style>
 
@@ -809,7 +809,7 @@ export default function PositionDetail() {
                     }`,
                     background: isClosed ? C.bg2
                       : posStatus === "In Range" ? C.greenFaint
-                      : "rgba(255,170,0,0.06)",
+                      : "color-mix(in srgb, var(--warn) 6%, transparent)",
                     color: isClosed ? C.text
                       : posStatus === "In Range" ? C.green
                       : C.amber,
@@ -906,7 +906,7 @@ export default function PositionDetail() {
             <div style={{
               fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em",
               color: totalUncollectedUSD > 0 ? C.green : C.text,
-              textShadow: totalUncollectedUSD > 0 ? "0 0 20px rgba(0,255,65,0.25)" : "none",
+              textShadow: totalUncollectedUSD > 0 ? "0 0 20px color-mix(in srgb, var(--accent) 25%, transparent)" : "none",
               fontVariantNumeric: "tabular-nums",
             }}>
               {fmt$(totalUncollectedUSD)}
@@ -926,7 +926,7 @@ export default function PositionDetail() {
             <div style={{
               fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em",
               color: hasApr || derivedApr != null ? C.cyan : C.text,
-              textShadow: hasApr || derivedApr != null ? "0 0 16px rgba(0,212,255,0.2)" : "none",
+              textShadow: hasApr || derivedApr != null ? "0 0 16px color-mix(in srgb, var(--info) 20%, transparent)" : "none",
               fontVariantNumeric: "tabular-nums",
             }}>
               {hasApr ? `+${pos.apy.toFixed(1)}%` : derivedApr != null ? `~${derivedApr.toFixed(1)}%` : "—"}
@@ -1124,7 +1124,7 @@ export default function PositionDetail() {
                 })()}
                 <span style={{
                   fontSize: 17, fontWeight: 700, color: C.green,
-                  textShadow: "0 0 12px rgba(0,255,65,0.2)",
+                  textShadow: "0 0 12px color-mix(in srgb, var(--accent) 20%, transparent)",
                   fontVariantNumeric: "tabular-nums",
                 }}>
                   {fmt$(pos.value)}
@@ -1245,7 +1245,7 @@ export default function PositionDetail() {
                 </span>
                 <span style={{
                   fontSize: 17, fontWeight: 700, color: C.green,
-                  textShadow: "0 0 12px rgba(0,255,65,0.2)",
+                  textShadow: "0 0 12px color-mix(in srgb, var(--accent) 20%, transparent)",
                   fontVariantNumeric: "tabular-nums",
                 }}>
                   {fmt$(totalUncollectedUSD)}
@@ -1287,9 +1287,9 @@ export default function PositionDetail() {
                                 cursor: "pointer",
                                 letterSpacing: "0.1em",
                                 textTransform: "uppercase",
-                                border: active ? "1px solid #00ff41" : "none",
+                                border: active ? "1px solid var(--accent)" : "none",
                                 background: "transparent",
-                                color: active ? "#00ff41" : C.text,
+                                color: active ? "var(--accent)" : C.text,
                                 marginLeft: 2,
                               }}
                               aria-pressed={active}
@@ -1321,7 +1321,7 @@ export default function PositionDetail() {
                   <div style={{
                     fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em",
                     color: c.color,
-                    textShadow: c.color === C.green ? "0 0 14px rgba(0,255,65,0.2)" : "none",
+                    textShadow: c.color === C.green ? "0 0 14px color-mix(in srgb, var(--accent) 20%, transparent)" : "none",
                     fontVariantNumeric: "tabular-nums",
                   }}>
                     {c.val}
@@ -1339,7 +1339,7 @@ export default function PositionDetail() {
                 <div style={labelStyle}>{INCOME_LABEL[aprView]}</div>
                 <div style={{
                   fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: C.green,
-                  textShadow: "0 0 14px rgba(0,255,65,0.2)", fontVariantNumeric: "tabular-nums",
+                  textShadow: "0 0 14px color-mix(in srgb, var(--accent) 20%, transparent)", fontVariantNumeric: "tabular-nums",
                 }}>
                   {activityLoading ? "…" : actualDailyIncome != null
                     ? <>{fmt$(actualDailyIncome * INCOME_MULTIPLIER[aprView])}<span style={{ fontSize: 16, color: C.text, fontWeight: 400, marginLeft: 6, letterSpacing: 0 }}>{INCOME_SUFFIX[aprView]}</span></>
@@ -1420,7 +1420,7 @@ export default function PositionDetail() {
                             <stop offset="100%" stopColor={C.green} stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="4 8" stroke="rgba(255,255,255,0.025)" vertical={false} />
+                        <CartesianGrid strokeDasharray="4 8" stroke="var(--surface-hover)" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 12, fontFamily: FONT }} axisLine={false} tickLine={false} />
                         <YAxis
                           tick={{ fill: C.text, fontSize: 12, fontFamily: FONT }}
@@ -1559,7 +1559,7 @@ export default function PositionDetail() {
                 padding: "4px 12px", fontWeight: 600,
                 display: "inline-flex", alignItems: "center", gap: 6,
                 border: `1px solid ${isClosed ? C.borderHi : posStatus === "In Range" ? C.greenDim : C.amber}`,
-                background: isClosed ? C.bg2 : posStatus === "In Range" ? C.greenFaint : "rgba(255,170,0,0.06)",
+                background: isClosed ? C.bg2 : posStatus === "In Range" ? C.greenFaint : "color-mix(in srgb, var(--warn) 6%, transparent)",
                 color: isClosed ? C.text : posStatus === "In Range" ? C.green : C.amber,
               }}>
                 {!isClosed && posStatus === "In Range" && (
@@ -1592,7 +1592,7 @@ export default function PositionDetail() {
                     <div style={{
                       fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em",
                       color: isClosed ? C.text : posStatus === "In Range" ? C.green : C.amber,
-                      textShadow: !isClosed && posStatus === "In Range" ? "0 0 12px rgba(0,255,65,0.3)" : "none",
+                      textShadow: !isClosed && posStatus === "In Range" ? "0 0 12px color-mix(in srgb, var(--accent) 30%, transparent)" : "none",
                     }}>
                       {curPriceUSD != null ? fmtPrice(curPriceUSD) : "—"}
                     </div>
@@ -1615,7 +1615,7 @@ export default function PositionDetail() {
                     position: "absolute", top: 14, left: 0, height: 8,
                     width: `${rangeBarPct}%`,
                     background: `linear-gradient(90deg, ${C.greenDim}, ${C.green})`,
-                    boxShadow: "0 0 8px rgba(0,255,65,0.4)",
+                    boxShadow: "0 0 8px color-mix(in srgb, var(--accent) 40%, transparent)",
                     transition: "width 1.2s cubic-bezier(0.22,1,0.36,1)",
                   }} />
                   {curPriceUSD != null && !isClosed && (
@@ -1625,7 +1625,7 @@ export default function PositionDetail() {
                       <div style={{
                         position: "absolute", top: 8, left: 0, width: 6, height: 20,
                         background: C.amber,
-                        boxShadow: "0 0 12px rgba(255,170,0,0.85)",
+                        boxShadow: "0 0 12px color-mix(in srgb, var(--warn) 85%, transparent)",
                         animation: "_pulse 1.4s infinite",
                         zIndex: 3,
                       }} />
@@ -1635,7 +1635,7 @@ export default function PositionDetail() {
                       <div style={{
                         position: "absolute", top: 8, right: 0, width: 6, height: 20,
                         background: C.amber,
-                        boxShadow: "0 0 12px rgba(255,170,0,0.85)",
+                        boxShadow: "0 0 12px color-mix(in srgb, var(--warn) 85%, transparent)",
                         animation: "_pulse 1.4s infinite",
                         zIndex: 3,
                       }} />
@@ -1645,7 +1645,7 @@ export default function PositionDetail() {
                       <div style={{
                         position: "absolute", top: 8, width: 2, height: 20,
                         left: `calc(${rangeBarPct}% - 1px)`,
-                        background: C.green, boxShadow: "0 0 8px rgba(0,255,65,0.8)", zIndex: 3,
+                        background: C.green, boxShadow: "0 0 8px color-mix(in srgb, var(--accent) 80%, transparent)", zIndex: 3,
                       }} />
                     )
                   )}
@@ -1701,7 +1701,7 @@ export default function PositionDetail() {
                     <>
                       <div style={{
                         fontSize: 30, fontWeight: 700, color: C.green,
-                        textShadow: "0 0 14px rgba(0,255,65,0.2)", letterSpacing: "-0.02em",
+                        textShadow: "0 0 14px color-mix(in srgb, var(--accent) 20%, transparent)", letterSpacing: "-0.02em",
                         fontVariantNumeric: "tabular-nums",
                       }}>
                         +{(pos.apy / div).toFixed(div >= 52 ? 3 : 2)}%
@@ -1714,7 +1714,7 @@ export default function PositionDetail() {
                     <>
                       <div style={{
                         fontSize: 30, fontWeight: 700, color: C.green,
-                        textShadow: "0 0 14px rgba(0,255,65,0.2)", letterSpacing: "-0.02em",
+                        textShadow: "0 0 14px color-mix(in srgb, var(--accent) 20%, transparent)", letterSpacing: "-0.02em",
                         fontVariantNumeric: "tabular-nums",
                       }}>
                         +{(projection.actualApr / div).toFixed(div >= 52 ? 3 : 2)}%
@@ -1771,7 +1771,7 @@ export default function PositionDetail() {
                         <div style={{
                           fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em",
                           color: c.color,
-                          textShadow: c.color === C.green ? "0 0 14px rgba(0,255,65,0.2)" : "none",
+                          textShadow: c.color === C.green ? "0 0 14px color-mix(in srgb, var(--accent) 20%, transparent)" : "none",
                           fontVariantNumeric: "tabular-nums",
                         }}>
                           {c.val}
@@ -1782,7 +1782,7 @@ export default function PositionDetail() {
                   </div>
                   {/* Summary panel */}
                   <div className="pd-pnl-summary" style={{
-                    background: "linear-gradient(135deg, rgba(0,255,65,0.04), rgba(0,255,65,0.01))",
+                    background: "linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, transparent), color-mix(in srgb, var(--accent) 1%, transparent))",
                     padding: "24px 28px",
                     display: "grid", gridTemplateColumns: "2fr 1fr 1fr",
                     gap: 32,
@@ -1803,7 +1803,7 @@ export default function PositionDetail() {
                           fontSize: 36, fontWeight: 700,
                           color: pnlPositive ? C.green : C.red,
                           letterSpacing: "-0.03em",
-                          textShadow: pnlPositive ? "0 0 20px rgba(0,255,65,0.3)" : "0 0 20px rgba(255,51,85,0.3)",
+                          textShadow: pnlPositive ? "0 0 20px color-mix(in srgb, var(--accent) 30%, transparent)" : "0 0 20px color-mix(in srgb, var(--neg) 30%, transparent)",
                           fontVariantNumeric: "tabular-nums",
                         }}>
                           {pnlPositive ? "+" : "−"}{fmt$(Math.abs(pnl.netPnlUSD))}

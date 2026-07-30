@@ -1,9 +1,10 @@
 import Providers from "./providers";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono, Space_Grotesk, Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import FloatingFeedback from "./components/FloatingFeedback";
 import FeedbackTab from "./components/FeedbackTab";
 import WalletRestoreEffect from "./components/WalletRestoreEffect";
+import ThemeScript from "./components/theme/ThemeScript";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -20,6 +21,24 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
+});
+
+// Display + body faces for the redesigned home page. The ui-ux-pro-max design
+// system recommends the Space Grotesk / Inter / JetBrains Mono triad for DeFi
+// and fintech surfaces: Space Grotesk carries display headlines, Inter carries
+// prose, JetBrains Mono stays reserved for data, labels, and terminal chrome.
+// Declaring them here is additive — nothing renders differently until a
+// component opts in via var(--font-space-grotesk) / var(--font-inter).
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+});
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata = {
@@ -60,9 +79,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Pre-paint theme resolution — must stay the first thing in <head>. */}
+        <ThemeScript />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${inter.variable} antialiased`}
         suppressHydrationWarning={true}
       >
         <Providers>

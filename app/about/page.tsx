@@ -2,40 +2,40 @@ import TerminalNavbar from "../components/TerminalNavbar";
 import type { CSSProperties } from "react";
 
 const C = {
-  bg:        "#050505",
-  bg1:       "#090909",
-  bg2:       "#0d0d0d",
-  border:    "#1c1c1c",
-  borderHi:  "#262626",
-  borderGlow:"#2e2e2e",
-  text:      "#a8a8a8",
-  textMid:   "#b4b4b4",
-  textBright:"#e8e8e8",
-  textWhite: "#f5f5f5",
-  green:     "#00ff41",
-  greenDim:  "#00b82a",
-  greenFaint:"rgba(0,255,65,0.06)",
-  greenGlow: "rgba(0,255,65,0.18)",
-  cyan:      "#00d4ff",
-  amber:     "#ffaa00",
+  bg:        "var(--bg)",
+  bg1:       "var(--surface)",
+  bg2:       "var(--surface)",
+  border:    "var(--line)",
+  borderHi:  "var(--line-strong)",
+  borderGlow:"var(--line-strong)",
+  text:      "var(--fg-muted)",
+  textMid:   "var(--fg-muted)",
+  textBright:"var(--fg)",
+  textWhite: "var(--fg)",
+  green:     "var(--accent)",
+  greenDim:  "var(--accent-hover)",
+  greenFaint:"color-mix(in srgb, var(--accent) 6%, transparent)",
+  greenGlow: "color-mix(in srgb, var(--accent) 18%, transparent)",
+  cyan:      "var(--info)",
+  amber:     "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.015) 3px, rgba(0,0,0,0.015) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
 
 const CHAINS: { name: string; color: string; live: boolean }[] = [
-  { name: "Ethereum",  color: "#627eea", live: true  },
-  { name: "Base",      color: "#0052ff", live: true  },
+  { name: "Ethereum",  color: "var(--chain-ethereum)", live: true  },
+  { name: "Base",      color: "var(--chain-base)", live: true  },
   { name: "Arbitrum",  color: "#28a0f0", live: true  },
-  { name: "Optimism",  color: "#ff0420", live: true  },
-  { name: "Polygon",   color: "#8247e5", live: true  },
-  { name: "Solana",    color: "#9945ff", live: true  },
-  { name: "Sui",       color: "#3d9fff", live: true  },
-  { name: "HyperEVM",  color: "#00d4aa", live: true  },
-  { name: "BNB Chain", color: "#f0b90b", live: true  },
-  { name: "Avalanche", color: "#e84142", live: false },
+  { name: "Optimism",  color: "var(--chain-optimism)", live: true  },
+  { name: "Polygon",   color: "var(--chain-polygon)", live: true  },
+  { name: "Solana",    color: "var(--chain-solana)", live: true  },
+  { name: "Sui",       color: "var(--info)", live: true  },
+  { name: "HyperEVM",  color: "var(--pos)", live: true  },
+  { name: "BNB Chain", color: "var(--chain-bnb)", live: true  },
+  { name: "Avalanche", color: "var(--chain-avalanche)", live: false },
 ];
 
 // All features below are live. SOON tags removed per spec — real-time
@@ -112,7 +112,7 @@ export default function About() {
         .ab-chip { transition: all 0.15s; }
         .ab-chip:hover { border-color: ${C.greenDim} !important; background: ${C.greenFaint} !important; color: ${C.green} !important; }
         .ab-tech { transition: all 0.15s; }
-        .ab-tech:hover { color: ${C.cyan} !important; border-color: rgba(0,212,255,0.45) !important; background: rgba(0,212,255,0.05) !important; }
+        .ab-tech:hover { color: ${C.cyan} !important; border-color: color-mix(in srgb, var(--info) 45%, transparent) !important; background: color-mix(in srgb, var(--info) 5%, transparent) !important; }
       `}</style>
 
       {/* Scanline overlay */}
@@ -194,7 +194,7 @@ export default function About() {
                     fontSize: 11, padding: "1px 7px",
                     border: `1px solid ${C.amber}66`,
                     color: C.amber,
-                    background: "rgba(255,170,0,0.05)",
+                    background: "color-mix(in srgb, var(--warn) 5%, transparent)",
                     letterSpacing: "0.1em",
                   }}>
                     SOON
@@ -261,7 +261,7 @@ export default function About() {
         <div style={{ ...cardStyle, animationDelay: "0.3s" }}>
           <div aria-hidden style={cardTopAccent} />
           <div style={{
-            fontSize: 12, color: "#3a3a3a", letterSpacing: "0.1em",
+            fontSize: 12, color: "var(--line-strong)", letterSpacing: "0.1em",
             textTransform: "uppercase", marginBottom: 14,
           }}>
             // SECURITY · TRUST &amp; TRANSPARENCY
@@ -273,7 +273,7 @@ export default function About() {
             Your funds are always safe.
           </h2>
           <p style={{
-            fontSize: 14, color: "#555", marginBottom: 22, maxWidth: 620,
+            fontSize: 14, color: "var(--fg-subtle)", marginBottom: 22, maxWidth: 620,
           }}>
             DefiDesh is a read-only portfolio tracker. We never have access to your funds.
           </p>
@@ -299,16 +299,16 @@ export default function About() {
               <div
                 key={card.title}
                 style={{
-                  background: "#0a0a0a",
-                  border: "0.5px solid #1a1a1a",
+                  background: "var(--surface)",
+                  border: "0.5px solid var(--surface-2)",
                   borderRadius: 4,
                   padding: 14,
                 }}
               >
-                <div style={{ fontSize: 12, color: "#00ff41", marginBottom: 6 }}>
+                <div style={{ fontSize: 12, color: "var(--accent)", marginBottom: 6 }}>
                   {card.title}
                 </div>
-                <div style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>
+                <div style={{ fontSize: 11, color: "var(--fg-subtle)", lineHeight: 1.6 }}>
                   {card.desc}
                 </div>
               </div>

@@ -33,17 +33,17 @@ export default function FeedbackTab() {
         alignItems: "center",
         gap: 7,
         padding: "8px 16px",
-        border: `1px solid ${hover ? "#00cc33" : "#262626"}`,
+        border: `1px solid ${hover ? "var(--accent-hover)" : "var(--line-strong)"}`,
         borderBottom: "none",
-        background: hover ? "rgba(0,255,65,0.06)" : "#0a0a0a",
-        color: hover ? "#00ff41" : "#888",
+        background: hover ? "color-mix(in srgb, var(--accent) 6%, transparent)" : "var(--surface)",
+        color: hover ? "var(--accent)" : "var(--fg-subtle)",
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 9,
         fontWeight: 600,
         letterSpacing: "0.18em",
         textTransform: "uppercase",
         cursor: "pointer",
-        boxShadow: hover ? "0 0 16px rgba(0,255,65,0.1)" : "none",
+        boxShadow: hover ? "0 0 16px color-mix(in srgb, var(--accent) 10%, transparent)" : "none",
         transition: "all 0.2s",
       }}
     >
@@ -51,7 +51,7 @@ export default function FeedbackTab() {
         style={{
           width: 5,
           height: 5,
-          background: "#00ff41",
+          background: "var(--accent)",
           flexShrink: 0,
           animation: "pulse 2s infinite",
         }}

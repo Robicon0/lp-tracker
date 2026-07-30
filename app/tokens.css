@@ -1,0 +1,297 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   DefiDesh Design Tokens — single source of truth for every colour,
+   spacing step, radius, and motion curve in the product.
+
+   THREE-TIER ARCHITECTURE (design-system skill, token-architecture.md):
+
+     1. PRIMITIVE  — raw ramps. Never referenced by a component.
+     2. SEMANTIC   — role-based (--bg, --fg, --line, --accent). This is the
+                     ONLY tier components are allowed to touch. Swapping
+                     light/dark rebinds this tier and nothing else.
+     3. COMPONENT  — a handful of composed values (rings, glows) that would
+                     otherwise be re-derived at a dozen call sites.
+
+   WHY THIS EXISTS: before this file, 808 raw hex literals were spread across
+   13 pages. That made "use the same theme everywhere" unenforceable and light
+   mode literally impossible — you cannot re-bind a hex that is baked into a
+   style prop. Raw hex in components is the ui-ux-pro-max Priority-6
+   anti-pattern for exactly this reason.
+
+   RULE FOR ALL FUTURE WORK: components reference var(--semantic-name).
+   A raw hex in a .tsx file is a bug, with ONE deliberate exception —
+   third-party CHAIN AND TOKEN BRAND colours (Solana purple, Ethereum
+   periwinkle, Bitcoin orange…). Those are external identity, not our theme;
+   they are pinned below and stay constant across modes on purpose.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── TIER 1: PRIMITIVES ─────────────────────────────────────────────── */
+:root {
+  /* Neutral ramp — slightly blue-cool. A pure-grey ramp reads cheap next to
+     saturated financial data; a few degrees of blue makes the greens and reds
+     sit on top of it rather than fight it. */
+  --n-0:   #ffffff;
+  --n-50:  #f7f9fb;
+  --n-100: #eef2f6;
+  --n-200: #e2e8f0;
+  --n-300: #cbd5e1;
+  --n-400: #94a3b8;
+  --n-500: #64748b;
+  --n-600: #475569;
+  --n-700: #313a45;
+  --n-800: #232a33;
+  --n-850: #1a2028;
+  --n-900: #151a21;
+  --n-950: #10141a;
+  --n-1000:#0a0c10;
+
+  /* Brand green. --brand-500 IS the DefiDesh terminal green, unchanged.
+     --brand-700 is its light-mode counterpart: #00ff41 on white is 1.4:1 and
+     unreadable, so light mode needs a genuinely darker green, not a tint. */
+  --brand-300: #7dffab;
+  --brand-400: #33ff70;
+  --brand-500: #00ff41;
+  --brand-600: #00c734;
+  --brand-700: #007a38;
+  --brand-800: #045c2c;
+
+  /* Data-state ramps. Deliberately NOT the brand green: when brand and
+     "profit" are the same colour, a green chip is ambiguous — is it on-brand
+     chrome or is it up 4%? Positive is a cooler, tighter green. */
+  --pos-dark:  #2be08a;
+  --pos-light: #067647;
+  --neg-dark:  #ff5470;
+  --neg-light: #c81e3c;
+  --warn-dark: #ffb020;
+  --warn-light:#a45b00;
+  --info-dark: #35d6ff;
+  --info-light:#0369a1;
+}
+
+/* ─── TIER 2: SEMANTIC — DARK (default) ──────────────────────────────────
+   Dark is the default mode, not light. The design system flags "Light mode
+   default" as an anti-pattern for trading/analytics surfaces: these are
+   long-session, high-density tools, usually used against dark IDEs and
+   exchange UIs.
+   Base is #0A0C10, never #000000 — pure black smears on OLED and collapses
+   every elevation onto one plane, which is what made the old page read flat.
+   ─────────────────────────────────────────────────────────────────────── */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:            var(--n-1000);
+  --surface:       var(--n-950);
+  --surface-2:     var(--n-900);
+  --surface-hover: var(--n-850);
+  --overlay:       rgba(10, 12, 16, 0.72);
+
+  --fg:        #e6eaf0;  /* 15.1:1 on --bg */
+  --fg-muted:  #9ba6b4;  /*  7.6:1 */
+  --fg-subtle: #7b8694;  /*  5.4:1 — clears AA with headroom */
+  --fg-faint:  #3a4552;  /* decorative only: rules, watermark numerals */
+  --fg-invert: var(--n-1000);
+
+  --line:        var(--n-800);
+  --line-strong: var(--n-700);
+
+  --accent:         var(--brand-500);
+  --accent-hover:   var(--brand-400);
+  --accent-fg:      var(--n-1000);            /* text ON an accent fill */
+  --accent-surface: rgba(0, 255, 65, 0.08);   /* accent-tinted panel */
+  --accent-line:    rgba(0, 255, 65, 0.32);
+  --accent-glow:    rgba(0, 255, 65, 0.30);
+
+  --pos:  var(--pos-dark);
+  --neg:  var(--neg-dark);
+  --warn: var(--warn-dark);
+  --info: var(--info-dark);
+  --pos-surface: rgba(43, 224, 138, 0.10);
+  --neg-surface: rgba(255, 84, 112, 0.10);
+
+  /* Scanline wash — MUST stay translucent; an opaque value paints solid bands. */
+  --scanline: rgba(255, 255, 255, 0.022);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+/* ─── TIER 2: SEMANTIC — LIGHT ────────────────────────────────────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:            var(--n-0);
+  --surface:       var(--n-50);
+  --surface-2:     var(--n-100);
+  --surface-hover: var(--n-100);
+  --overlay:       rgba(255, 255, 255, 0.78);
+
+  --fg:        #0f172a;  /* 17.4:1 on white */
+  --fg-muted:  #475569;  /*  7.5:1 */
+  --fg-subtle: #64748b;  /*  4.8:1 — AA body minimum */
+  --fg-faint:  #cbd5e1;
+  --fg-invert: var(--n-0);
+
+  --line:        var(--n-200);
+  --line-strong: var(--n-300);
+
+  --accent:         var(--brand-700);   /* 5.1:1 on white */
+  --accent-hover:   var(--brand-800);
+  --accent-fg:      var(--n-0);
+  --accent-surface: rgba(0, 122, 56, 0.07);
+  --accent-line:    rgba(0, 122, 56, 0.28);
+  --accent-glow:    rgba(0, 122, 56, 0.18);
+
+  --pos:  var(--pos-light);
+  --neg:  var(--neg-light);
+  --warn: var(--warn-light);
+  --info: var(--info-light);
+  --pos-surface: rgba(6, 118, 71, 0.08);
+  --neg-surface: rgba(200, 30, 60, 0.08);
+
+  --scanline: rgba(15, 23, 42, 0.022);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 48px rgba(15, 23, 42, 0.12);
+}
+
+/* System preference wins until the user makes an explicit choice. The
+   ThemeScript in app/layout.tsx stamps data-theme before first paint, so this
+   block only covers the no-JS / pre-hydration case. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg: var(--n-0);
+    --surface: var(--n-50);
+    --surface-2: var(--n-100);
+    --surface-hover: var(--n-100);
+    --overlay: rgba(255, 255, 255, 0.78);
+    --fg: #0f172a;
+    --fg-muted: #475569;
+    --fg-subtle: #64748b;
+    --fg-faint: var(--n-300);
+    --fg-invert: var(--n-0);
+    --line: var(--n-200);
+    --line-strong: var(--n-300);
+    --accent: var(--brand-700);
+    --accent-hover: var(--brand-800);
+    --accent-fg: var(--n-0);
+    --accent-surface: rgba(0, 122, 56, 0.07);
+    --accent-line: rgba(0, 122, 56, 0.28);
+    --accent-glow: rgba(0, 122, 56, 0.18);
+    --pos: var(--pos-light);
+    --neg: var(--neg-light);
+    --warn: var(--warn-light);
+    --info: var(--info-light);
+    --pos-surface: rgba(6, 118, 71, 0.08);
+    --neg-surface: rgba(200, 30, 60, 0.08);
+    --scanline: rgba(15, 23, 42, 0.022);
+  }
+}
+
+/* ─── CHAIN & TOKEN BRAND (mode-invariant by design) ─────────────────── */
+:root {
+  --chain-solana:   #9945ff;
+  --chain-ethereum: #627eea;
+  --chain-bitcoin:  #f7931a;
+  --chain-bnb:      #f0b90b;
+  --chain-base:     #0052ff;
+  --chain-usdc:     #2775ca;
+  --chain-avalanche:#e84142;
+  --chain-optimism: #ff0420;
+  --chain-polygon:  #8247e5;
+  --chain-sui:      #4da2ff;
+  --chain-arbitrum: #6366f1;
+}
+
+/* ─── SPACING / RADIUS / MOTION ──────────────────────────────────────────
+   Density 8/10 (dashboard) from the design system: an 8px base step, not the
+   16px marketing step. The old page burned 96–120px between sections, which
+   on a 900px-tall laptop viewport meant a whole screen of nothing between two
+   pieces of information. Sections now breathe at 40–64px.
+   ─────────────────────────────────────────────────────────────────────── */
+:root {
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+  --space-4xl: 40px;
+  --space-5xl: 64px;
+
+  --gutter: clamp(16px, 3.2vw, 40px); /* one horizontal page gutter, always */
+  /* One content ceiling, always — but it BREATHES on wide monitors instead of
+     hard-stopping at 1440. On a 2560px QHD display a fixed 1440 rail left 560px
+     of dead margin per side, which on a data-dense page reads as an unfinished
+     layout rather than as generous whitespace. The clamp keeps 1440 as the
+     floor (so 1440-class laptops are unchanged), grows with the viewport, and
+     stops at 1760 — past that, hero copy and the 4-up grids start losing their
+     comfortable measure. */
+  --maxw: clamp(1440px, 88vw, 1760px);
+  --nav-h: 56px;
+
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 8px;
+
+  /* expo.out — one easing curve for the whole product. */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-micro: 120ms;
+  --t-fast: 180ms;
+  --t-base: 260ms;
+}
+
+/* ─── TIER 3: TAILWIND BRIDGE ────────────────────────────────────────────
+   Exposes the semantic tier as Tailwind v4 utilities (bg-surface, text-fg-
+   muted, border-line…) so markup can use classes instead of style props.
+   `inline` keeps the var() reference live, which is what makes a theme swap
+   instant rather than requiring a rebuild.
+   ─────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-invert: var(--fg-invert);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-surface: var(--accent-surface);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --color-warn: var(--warn);
+  --color-info: var(--info);
+
+  /* shadcn aliases — same tokens under the names shadcn primitives expect,
+     so `npx shadcn add <x>` drops in already themed, in both modes. */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-fg);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--fg-muted);
+  --color-destructive: var(--neg);
+  --color-destructive-foreground: var(--fg-invert);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+}

@@ -44,7 +44,7 @@ export default function ProtocolScroll({
         }}
       />
       <div
-        className="protocol-scroll-container overflow-hidden border border-[#1f1f1f] bg-[#1f1f1f]"
+        className="protocol-scroll-container overflow-hidden border border-[var(--line)] bg-[var(--line)]"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
       >
@@ -60,29 +60,32 @@ export default function ProtocolScroll({
             <div
               key={`${p.name}-${i}`}
               data-copy={i < protocols.length ? "original" : "duplicate"}
-              className="protocol-scroll-card bg-black p-5 hover:bg-[#040404] transition-colors flex flex-col gap-2.5 flex-shrink-0"
-              style={{ width: 240 }}
+              className="protocol-scroll-card p-5 transition-colors flex flex-col gap-2.5 flex-shrink-0"
+              style={{
+                width: 240,
+                background: "var(--surface)",
+              }}
             >
-              <div className="text-[12px] text-[#00ff41] tracking-[0.1em]">
+              <div className="text-[12px] text-[var(--accent)] tracking-[0.1em]">
                 [{p.type.toUpperCase()}]
               </div>
               <div>
-                <div className="text-[16px] font-bold text-[#e8e8e8]">{p.name}</div>
-                <div className="text-[12px] text-[#888] uppercase tracking-[0.1em] mt-0.5">
+                <div className="text-[16px] font-bold text-[var(--fg)]">{p.name}</div>
+                <div className="text-[12px] text-[var(--fg-subtle)] uppercase tracking-[0.1em] mt-0.5">
                   {p.chain}
                 </div>
               </div>
               <div className="flex flex-col gap-1.5 mt-1">
                 <div className="flex justify-between items-baseline text-[12px]">
-                  <span className="text-[#888] tracking-[0.06em]">TVL</span>
-                  <span className="text-[#00ff41] font-bold tabular-nums">
+                  <span className="text-[var(--fg-subtle)] tracking-[0.06em]">TVL</span>
+                  <span className="text-[var(--accent)] font-bold tabular-nums">
                     {fmtBig(p.tvl)}
                   </span>
                 </div>
                 <div className="flex justify-between items-baseline text-[12px]">
-                  <span className="text-[#888] tracking-[0.06em]">VOL 24H</span>
+                  <span className="text-[var(--fg-subtle)] tracking-[0.06em]">VOL 24H</span>
                   <span
-                    className={`font-bold tabular-nums ${p.isDex ? "text-[#00ff41]" : "text-[#888]"}`}
+                    className={`font-bold tabular-nums ${p.isDex ? "text-[var(--accent)]" : "text-[var(--fg-subtle)]"}`}
                   >
                     {p.isDex ? fmtBig(p.volume24h) : "n/a"}
                   </span>

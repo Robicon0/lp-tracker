@@ -50,12 +50,12 @@ function TokenIcon({
 }) {
   const [err, setErr] = useState(false);
   const src = (!err && (logo || getTokenLogo(symbol))) || null;
-  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#262626";
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "var(--line-strong)";
   const base: CSSProperties = {
     width: size,
     height: size,
     flexShrink: 0,
-    border: "1px solid #262626",
+    border: "1px solid var(--line-strong)",
   };
   if (src) {
     // eslint-disable-next-line @next/next/no-img-element
@@ -73,7 +73,7 @@ function TokenIcon({
       style={{
         ...base,
         background: color,
-        color: "#fff",
+        color: "var(--fg)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -144,9 +144,9 @@ function buildPositions(tokens: TokenItem[], liveRates: AaveV3RatesMap): Lending
   });
 }
 
-const PAGE_BG = "#050505";
+const PAGE_BG = "var(--bg)";
 const SCANLINE =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.012) 3px, rgba(0,0,0,0.012) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function LendingPage() {
@@ -215,7 +215,7 @@ export default function LendingPage() {
       className="min-h-screen"
       style={{
         background: PAGE_BG,
-        color: "#a0a0a0",
+        color: "var(--fg-muted)",
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 15,
         lineHeight: 1.5,
@@ -241,7 +241,7 @@ export default function LendingPage() {
         {/* Back link */}
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-2 mb-5 text-[#a0a0a0] hover:text-[#00ff41] transition-colors no-underline"
+          className="inline-flex items-center gap-2 mb-5 text-[var(--fg-muted)] hover:text-[var(--accent)] transition-colors no-underline"
           style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}
         >
           ← Back to Dashboard
@@ -254,36 +254,36 @@ export default function LendingPage() {
             fontSize: 11,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
-            color: "#a0a0a0",
+            color: "var(--fg-muted)",
             opacity: 0.6,
           }}
         >
-          <span className="text-[#00ff41]" style={{ opacity: 1 }}>// lending</span> · borrowing positions across protocols
+          <span className="text-[var(--accent)]" style={{ opacity: 1 }}>// lending</span> · borrowing positions across protocols
         </div>
         <h1
           className="font-bold mb-1.5"
-          style={{ fontSize: 32, color: "#f0f0f0", letterSpacing: "-0.02em" }}
+          style={{ fontSize: 32, color: "var(--fg)", letterSpacing: "-0.02em" }}
         >
           Lending &amp; Borrowing Positions
         </h1>
-        <p className="mb-6" style={{ fontSize: 14, color: "#a0a0a0", opacity: 0.6 }}>
+        <p className="mb-6" style={{ fontSize: 14, color: "var(--fg-muted)", opacity: 0.6 }}>
           Track your lending and borrowing across DeFi protocols
         </p>
 
         {/* Empty / loading states */}
         {!hasWallet && (
           <div className="text-center py-16">
-            <p style={{ fontSize: 15, color: "#a0a0a0", marginBottom: 20 }}>
+            <p style={{ fontSize: 15, color: "var(--fg-muted)", marginBottom: 20 }}>
               Connect a wallet to see your lending positions.
             </p>
             <Link
               href="/dashboard"
-              className="inline-block border border-[#00992a] text-[#00ff41] px-5 py-2.5 no-underline hover:bg-[rgba(0,255,65,0.08)] transition-colors"
+              className="inline-block border border-[var(--accent-hover)] text-[var(--accent)] px-5 py-2.5 no-underline hover:bg-[color-mix(in srgb, var(--accent) 8%, transparent)] transition-colors"
               style={{
                 fontSize: 14,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
-                background: "rgba(0,255,65,0.06)",
+                background: "color-mix(in srgb, var(--accent) 6%, transparent)",
               }}
             >
               ▸ Go to Dashboard
@@ -292,13 +292,13 @@ export default function LendingPage() {
         )}
 
         {hasWallet && combinedLoading && !hasAnyPositions && (
-          <div className="text-center py-16" style={{ color: "#a0a0a0" }}>
+          <div className="text-center py-16" style={{ color: "var(--fg-muted)" }}>
             <div
               className="mx-auto mb-4"
               style={{
                 width: 24,
                 height: 24,
-                border: "2px solid #00ff41",
+                border: "2px solid var(--accent)",
                 borderTopColor: "transparent",
                 animation: "spin 1s linear infinite",
               }}
@@ -309,7 +309,7 @@ export default function LendingPage() {
             </span>
             {loadingTimeout && (
               <p
-                style={{ fontSize: 14, color: "#ffaa00", marginTop: 12, letterSpacing: "0.04em" }}
+                style={{ fontSize: 14, color: "var(--warn)", marginTop: 12, letterSpacing: "0.04em" }}
               >
                 Taking longer than expected. Token prices may be temporarily unavailable.
               </p>
@@ -319,10 +319,10 @@ export default function LendingPage() {
 
         {hasWallet && !combinedLoading && !hasAnyPositions && (
           <div className="text-center py-16">
-            <p style={{ fontSize: 16, color: "#a0a0a0" }}>
+            <p style={{ fontSize: 16, color: "var(--fg-muted)" }}>
               No lending positions detected.
             </p>
-            <p style={{ fontSize: 12, color: "#444", marginTop: 6, letterSpacing: "0.05em" }}>
+            <p style={{ fontSize: 12, color: "var(--fg-subtle)", marginTop: 6, letterSpacing: "0.05em" }}>
               Supported: AAVE V3 (EVM), Dolomite, Jupiter Lend, Kamino, Suilend, AlphaFi, HyperLend, HypurrFi.
             </p>
           </div>
@@ -351,8 +351,8 @@ export default function LendingPage() {
 
             {/* Footer notes */}
             <div
-              className="mt-6 px-5 py-4 border border-[#1c1c1c]"
-              style={{ background: "#090909", lineHeight: 1.8, color: "#a0a0a0", opacity: 0.75 }}
+              className="mt-6 px-5 py-4 border border-[var(--line)]"
+              style={{ background: "var(--surface)", lineHeight: 1.8, color: "var(--fg-muted)", opacity: 0.75 }}
             >
               {[
                 ["⚠", "Health Factor below 1.0 means your position can be liquidated."],
@@ -364,7 +364,7 @@ export default function LendingPage() {
                 ],
               ].map(([mark, text], i) => (
                 <div key={i} className="flex gap-2 items-start" style={{ fontSize: 12 }}>
-                  <span style={{ color: "#ffaa00", flexShrink: 0 }}>{mark}</span>
+                  <span style={{ color: "var(--warn)", flexShrink: 0 }}>{mark}</span>
                   <span>{text}</span>
                 </div>
               ))}
@@ -414,19 +414,19 @@ function TopStats({
   ];
   return (
     <div
-      className="grid grid-cols-2 md:grid-cols-4 mb-8 border border-[#1c1c1c]"
-      style={{ background: "#090909" }}
+      className="grid grid-cols-2 md:grid-cols-4 mb-8 border border-[var(--line)]"
+      style={{ background: "var(--surface)" }}
     >
       {stats.map((s, i) => (
         <div
           key={s.label}
-          className={`p-5 relative ${i < stats.length - 1 ? "md:border-r border-[#1c1c1c]" : ""} ${i % 2 === 0 ? "border-r border-[#1c1c1c] md:border-r" : ""} ${i < 2 ? "border-b md:border-b-0 border-[#1c1c1c]" : ""}`}
+          className={`p-5 relative ${i < stats.length - 1 ? "md:border-r border-[var(--line)]" : ""} ${i % 2 === 0 ? "border-r border-[var(--line)] md:border-r" : ""} ${i < 2 ? "border-b md:border-b-0 border-[var(--line)]" : ""}`}
         >
           <div
             className="absolute top-0 left-0 right-0 h-px"
             style={{
               background:
-                "linear-gradient(90deg, transparent, #262626, transparent)",
+                "linear-gradient(90deg, transparent, var(--line-strong), transparent)",
             }}
           />
           <div
@@ -435,7 +435,7 @@ function TopStats({
               fontSize: 10,
               letterSpacing: "0.18em",
               textTransform: "uppercase",
-              color: "#a0a0a0",
+              color: "var(--fg-muted)",
               opacity: 0.6,
             }}
           >
@@ -446,13 +446,13 @@ function TopStats({
             style={{
               fontSize: 30,
               letterSpacing: "-0.02em",
-              color: "#00ff41",
-              textShadow: "0 0 22px rgba(0,255,65,0.22)",
+              color: "var(--accent)",
+              textShadow: "0 0 22px color-mix(in srgb, var(--accent) 22%, transparent)",
             }}
           >
             {s.value}
           </div>
-          <div className="mt-1.5" style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.5 }}>
+          <div className="mt-1.5" style={{ fontSize: 11, color: "var(--fg-muted)", opacity: 0.5 }}>
             {s.sub}
           </div>
         </div>
@@ -472,21 +472,21 @@ function MetricCell({
   tone?: "bright" | "green" | "dim" | "zero" | "red";
 }) {
   const colorMap: Record<string, string> = {
-    bright: "#e0e0e0",
-    green: "#00ff41",
-    dim: "#aaaaaa",
+    bright: "var(--fg)",
+    green: "var(--accent)",
+    dim: "var(--fg-muted)",
     zero: "rgba(122,122,122,0.6)",
-    red: "#ff3355",
+    red: "var(--neg)",
   };
   return (
-    <div className="px-5 py-4 border-r border-b border-[#1c1c1c]">
+    <div className="px-5 py-4 border-r border-b border-[var(--line)]">
       <div
         className="mb-1.5"
         style={{
           fontSize: 10,
           letterSpacing: "0.18em",
           textTransform: "uppercase",
-          color: "#a0a0a0",
+          color: "var(--fg-muted)",
           opacity: 0.55,
         }}
       >
@@ -507,8 +507,8 @@ function ProtocolCard({ pos, liveRates }: { pos: LendingPosition; liveRates: Aav
   const manageUrl = AAVE_URL[pos.chain] ?? AAVE_URL.Ethereum;
   return (
     <div
-      className="border border-[#1c1c1c] mb-6"
-      style={{ background: "#090909", animation: "lend-fade-up 0.5s ease both" }}
+      className="border border-[var(--line)] mb-6"
+      style={{ background: "var(--surface)", animation: "lend-fade-up 0.5s ease both" }}
     >
       <CardHeader
         sym="A"
@@ -584,8 +584,8 @@ function ExternalProtocolCard({ pos }: { pos: ExternalLendingPosition }) {
   const netApy = hasApy ? pos.supplyApy! - pos.borrowApy : 0;
   return (
     <div
-      className="border border-[#1c1c1c] mb-6"
-      style={{ background: "#090909", animation: "lend-fade-up 0.5s ease both" }}
+      className="border border-[var(--line)] mb-6"
+      style={{ background: "var(--surface)", animation: "lend-fade-up 0.5s ease both" }}
     >
       <CardHeader
         sym={pos.protocol.charAt(0)}
@@ -652,16 +652,16 @@ function CardHeader({
   rightLabel: string;
 }) {
   return (
-    <div className="flex items-center justify-between px-6 py-5 border-b border-[#1c1c1c] gap-3 flex-wrap">
+    <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--line)] gap-3 flex-wrap">
       <div className="flex items-center gap-3.5">
         <div
           className="flex items-center justify-center"
           style={{
             width: 36,
             height: 36,
-            border: "1px solid #262626",
-            background: "#0d0d0d",
-            color: "#00ff41",
+            border: "1px solid var(--line-strong)",
+            background: "var(--surface)",
+            color: "var(--accent)",
             fontSize: 14,
             fontWeight: 700,
           }}
@@ -671,7 +671,7 @@ function CardHeader({
         <div>
           <div
             className="font-bold"
-            style={{ fontSize: 17, color: "#f0f0f0", letterSpacing: "0.02em" }}
+            style={{ fontSize: 17, color: "var(--fg)", letterSpacing: "0.02em" }}
           >
             {name}
           </div>
@@ -679,11 +679,11 @@ function CardHeader({
             className="inline-flex items-center mt-1.5 px-2"
             style={{
               fontSize: 10,
-              color: "#00ff41",
+              color: "var(--accent)",
               letterSpacing: "0.14em",
               textTransform: "uppercase",
-              border: "1px solid #00992a",
-              background: "rgba(0,255,65,0.06)",
+              border: "1px solid var(--accent-hover)",
+              background: "color-mix(in srgb, var(--accent) 6%, transparent)",
               padding: "2px 8px",
               fontWeight: 600,
             }}
@@ -697,9 +697,9 @@ function CardHeader({
           className="font-bold tabular-nums"
           style={{
             fontSize: 28,
-            color: "#00ff41",
+            color: "var(--accent)",
             letterSpacing: "-0.02em",
-            textShadow: "0 0 18px rgba(0,255,65,0.2)",
+            textShadow: "0 0 18px color-mix(in srgb, var(--accent) 20%, transparent)",
           }}
         >
           {rightValue}
@@ -708,7 +708,7 @@ function CardHeader({
           className="mt-0.5"
           style={{
             fontSize: 10,
-            color: "#a0a0a0",
+            color: "var(--fg-muted)",
             letterSpacing: "0.18em",
             textTransform: "uppercase",
             opacity: 0.5,
@@ -753,14 +753,14 @@ function AssetsBlock({
   children: React.ReactNode;
 }) {
   return (
-    <div className="px-6 py-4 border-t border-[#1c1c1c]" style={{ background: "#0d0d0d" }}>
+    <div className="px-6 py-4 border-t border-[var(--line)]" style={{ background: "var(--surface)" }}>
       <div
         className="mb-3 flex items-center gap-1.5"
         style={{
           fontSize: 10,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
-          color: tone === "green" ? "#00ff41" : "#ff3355",
+          color: tone === "green" ? "var(--accent)" : "var(--neg)",
         }}
       >
         {label}
@@ -788,17 +788,17 @@ function AssetRow({
   amount: string;
 }) {
   return (
-    <div className="flex items-center gap-3.5 py-2.5 border-b border-[#1c1c1c] last:border-b-0">
+    <div className="flex items-center gap-3.5 py-2.5 border-b border-[var(--line)] last:border-b-0">
       <TokenIcon symbol={symbol} logo={logo} size={26} />
       <div>
-        <div className="font-bold" style={{ fontSize: 14, color: "#e0e0e0" }}>
+        <div className="font-bold" style={{ fontSize: 14, color: "var(--fg)" }}>
           {symbol}
         </div>
         <div
           className="mt-0.5"
           style={{
             fontSize: 11,
-            color: apyTone === "red" ? "#ff3355" : "#a0a0a0",
+            color: apyTone === "red" ? "var(--neg)" : "var(--fg-muted)",
             letterSpacing: "0.06em",
             textTransform: "uppercase",
           }}
@@ -810,13 +810,13 @@ function AssetRow({
       <div className="text-right">
         <div
           className="font-bold tabular-nums"
-          style={{ fontSize: 15, color: valueTone === "red" ? "#ff3355" : "#f0f0f0" }}
+          style={{ fontSize: 15, color: valueTone === "red" ? "var(--neg)" : "var(--fg)" }}
         >
           {value}
         </div>
         <div
           className="mt-0.5"
-          style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.55 }}
+          style={{ fontSize: 11, color: "var(--fg-muted)", opacity: 0.55 }}
         >
           {amount}
         </div>
@@ -831,22 +831,22 @@ function ManageButton({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="block w-full text-center border-t border-[#1c1c1c] no-underline transition-all"
+      className="block w-full text-center border-t border-[var(--line)] no-underline transition-all"
       style={{
         padding: 14,
-        background: "rgba(0,255,65,0.06)",
-        color: "#00ff41",
+        background: "color-mix(in srgb, var(--accent) 6%, transparent)",
+        color: "var(--accent)",
         fontSize: 14,
         fontWeight: 600,
         letterSpacing: "0.14em",
         textTransform: "uppercase",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "rgba(0,255,65,0.12)";
-        e.currentTarget.style.boxShadow = "inset 0 0 24px rgba(0,255,65,0.08)";
+        e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 12%, transparent)";
+        e.currentTarget.style.boxShadow = "inset 0 0 24px color-mix(in srgb, var(--accent) 8%, transparent)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = "rgba(0,255,65,0.06)";
+        e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 6%, transparent)";
         e.currentTarget.style.boxShadow = "none";
       }}
     >

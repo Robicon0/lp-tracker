@@ -145,7 +145,7 @@ export default function WalletPage() {
   }, [suiAddress]);
 
   return (
-    <div className="p-8 pt-24 bg-[#0a0f0d] text-white min-h-screen">
+    <div className="p-8 pt-24 bg-[var(--surface)] text-white min-h-screen">
       <Navbar />
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl font-bold">Wallet Balances</h1>

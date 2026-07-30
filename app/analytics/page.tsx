@@ -58,34 +58,34 @@ import {
 
 // ── Terminal palette (matches analytics.html exactly) ─────────────────────────
 const C = {
-  bg:         "#000000",
-  bg1:        "#060606",
-  bg2:        "#0a0a0a",
+  bg:         "var(--bg)",
+  bg1:        "var(--bg)",
+  bg2:        "var(--surface)",
   bg3:        "#101010",
   bg4:        "#161616",
-  border:     "#1c1c1c",
-  borderHi:   "#262626",
-  text:       "#a8a8a8",
+  border:     "var(--line)",
+  borderHi:   "var(--line-strong)",
+  text:       "var(--fg-muted)",
   textMid:    "#d0d0d0",
-  textBright: "#ffffff",
-  textWhite:  "#ffffff",
-  green:      "#00ff41",
-  greenDim:   "#00cc33",
-  greenFaint: "rgba(0,255,65,0.06)",
-  greenGlow:  "rgba(0,255,65,0.18)",
-  cyan:       "#00d4ff",
-  cyanFaint:  "rgba(0,212,255,0.07)",
-  red:        "#ff3355",
-  redFaint:   "rgba(255,51,85,0.07)",
-  amber:      "#ffaa00",
-  purple:     "#9945ff",
-  blue:       "#3d9fff",
+  textBright: "var(--fg)",
+  textWhite:  "var(--fg)",
+  green:      "var(--accent)",
+  greenDim:   "var(--accent-hover)",
+  greenFaint: "color-mix(in srgb, var(--accent) 6%, transparent)",
+  greenGlow:  "color-mix(in srgb, var(--accent) 18%, transparent)",
+  cyan:       "var(--info)",
+  cyanFaint:  "color-mix(in srgb, var(--info) 7%, transparent)",
+  red:        "var(--neg)",
+  redFaint:   "color-mix(in srgb, var(--neg) 7%, transparent)",
+  amber:      "var(--warn)",
+  purple:     "var(--chain-solana)",
+  blue:       "var(--info)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 2px, var(--scanline) 2px, var(--scanline) 4px)";
 
 const PROTOCOL_COLORS: Record<string, string> = {
   Aerodrome:      C.green,
@@ -101,7 +101,7 @@ const PROTOCOL_COLORS: Record<string, string> = {
   ProjectX:       C.purple,
   PRJX:           C.purple,
   PancakeSwap:    C.amber,
-  Dolomite:       "#6366f1",
+  Dolomite:       "var(--chain-arbitrum)",
   "Jupiter Lend": C.purple,
   AlphaFi:        "#14b8a6",
   Suilend:        C.cyan,
@@ -115,16 +115,16 @@ const CHAIN_COLORS: Record<string, string> = {
   Base:        C.blue,
   Ethereum:    C.cyan,
   Arbitrum:    C.green,
-  Optimism:    "#ff0420",
+  Optimism:    "var(--chain-optimism)",
   Polygon:     C.purple,
-  Avalanche:   "#e84142",
+  Avalanche:   "var(--chain-avalanche)",
   Solana:      C.purple,
   Sui:         C.blue,
-  HyperEVM:    "#00d4aa",
+  HyperEVM:    "var(--pos)",
   "BNB Chain": C.amber,
 };
 
-const PIE_COLORS = [C.green, C.cyan, C.blue, C.amber, C.purple, C.red, "#14b8a6", "#ec4899", "#6366f1", "#84cc16"];
+const PIE_COLORS = [C.green, C.cyan, C.blue, C.amber, C.purple, C.red, "#14b8a6", "#ec4899", "var(--chain-arbitrum)", "#84cc16"];
 
 const TIME_RANGES = [
   { key: "1D",   ms: 1   * 24 * 3_600_000, label: "24h",     xFmt: (d: Date) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
@@ -462,9 +462,9 @@ function RangePill({
         cursor: "pointer",
         // Inline-only active state — never CSS classes. `border` shorthand
         // covers all 4 sides so no gap is possible.
-        border: active ? "1px solid #00ff41" : "none",
+        border: active ? "1px solid var(--accent)" : "none",
         background: "transparent",
-        color: active ? "#00ff41" : C.text,
+        color: active ? "var(--accent)" : C.text,
       }}
     >
       {k}
@@ -486,10 +486,10 @@ function Skel({ w = 80, h = 20, r = 3, style }: { w?: number | string; h?: numbe
         width: w,
         height: h,
         borderRadius: r,
-        background: "rgba(255,255,255,0.04)",
+        background: "var(--surface-hover)",
         animation: "lp-pnl-shimmer 1.4s linear infinite",
         backgroundImage:
-          "linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.02) 100%)",
+          "linear-gradient(90deg, var(--surface-hover) 0%, var(--surface-hover) 50%, var(--surface-hover) 100%)",
         backgroundSize: "200% 100%",
         ...style,
       }}
@@ -1330,7 +1330,7 @@ export default function Analytics() {
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         @keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
-        .a-row:hover td { background: rgba(255,255,255,0.012); }
+        .a-row:hover td { background: var(--surface-hover); }
         /* Toggle styling is now 100% inline on every button (RangePill,
            aprView D/W/M/Y, incomePeriod D/M/Y, chainPeriod 1D/7D/30D). No
            .ct-tab CSS rules — eliminates the inline-vs-CSS specificity
@@ -1385,7 +1385,7 @@ export default function Analytics() {
           .ana-rankings-grid { grid-template-columns: 1fr !important; }
           .ana-rankings-top {
             border-right: none !important;
-            border-bottom: 1px solid #1c1c1c;
+            border-bottom: 1px solid var(--line);
           }
         }
       `}</style>
@@ -1489,7 +1489,7 @@ export default function Analytics() {
                   margin: "0 0 20px",
                   padding: "12px 18px",
                   border: `1px solid ${C.amber}44`,
-                  background: "rgba(255,170,0,0.05)",
+                  background: "color-mix(in srgb, var(--warn) 5%, transparent)",
                   fontFamily: FONT,
                 }}
               >
@@ -1566,7 +1566,7 @@ export default function Analytics() {
                       fontSize: 28, fontWeight: 700,
                       color: totalDailyIncome > 0 ? C.green : C.text,
                       fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                      textShadow: totalDailyIncome > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                      textShadow: totalDailyIncome > 0 ? "0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
                     }}
                   >
                     {totalDailyIncome > 0 ? `+${fmt$(totalDailyIncome)}` : "$0.00"}
@@ -1615,9 +1615,9 @@ export default function Analytics() {
                             textTransform: "uppercase",
                             // Inline-only active state — border shorthand
                             // covers all 4 sides so no gap is possible.
-                            border: active ? "1px solid #00ff41" : "none",
+                            border: active ? "1px solid var(--accent)" : "none",
                             background: "transparent",
-                            color: active ? "#00ff41" : C.text,
+                            color: active ? "var(--accent)" : C.text,
                           }}
                         >
                           {v === "daily" ? "D" : v === "weekly" ? "W" : v === "monthly" ? "M" : "Y"}
@@ -1655,7 +1655,7 @@ export default function Analytics() {
                         fontSize: 28, fontWeight: 700,
                         color: apr > 0 ? C.green : C.text,
                         fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                        textShadow: apr > 0 ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                        textShadow: apr > 0 ? "0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
                       }}>
                         {apr > 0 ? `${displayRate.toFixed(displayRate < 1 ? 3 : 1)}%` : "--"}
                       </div>
@@ -1735,7 +1735,7 @@ export default function Analytics() {
                           fontSize: 28, fontWeight: 700,
                           color: c.green ? C.green : C.textBright,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                          textShadow: c.green ? "0 0 18px rgba(0,255,65,0.22)" : "none",
+                          textShadow: c.green ? "0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
                         }}
                       >
                         {c.val}
@@ -1791,7 +1791,7 @@ export default function Analytics() {
                             <stop offset="100%" stopColor={C.green} stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="4 8" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                        <CartesianGrid strokeDasharray="4 8" stroke="var(--surface-hover)" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: C.text, fontSize: 11, fontFamily: FONT }} axisLine={false} tickLine={false} />
                         <YAxis
                           tick={{ fill: C.text, fontSize: 11, fontFamily: FONT }}
@@ -2018,7 +2018,7 @@ export default function Analytics() {
                       borderRight: i === arr.length - 1 ? "none" : `1px solid ${C.border}`,
                       position: "relative",
                       cursor: c.expandable ? "pointer" : undefined,
-                      background: c.expandable && showCapGlBreakdown ? "rgba(255,255,255,0.02)" : undefined,
+                      background: c.expandable && showCapGlBreakdown ? "var(--surface-hover)" : undefined,
                     }}
                   >
                     <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center" }}>
@@ -2044,11 +2044,11 @@ export default function Analytics() {
                         aria-label="Loading"
                         style={{
                           width: 100, height: 26,
-                          background: "rgba(255,255,255,0.04)",
+                          background: "var(--surface-hover)",
                           borderRadius: 3,
                           animation: "lp-pnl-shimmer 1.4s linear infinite",
                           backgroundImage:
-                            "linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.02) 100%)",
+                            "linear-gradient(90deg, var(--surface-hover) 0%, var(--surface-hover) 50%, var(--surface-hover) 100%)",
                           backgroundSize: "200% 100%",
                         }}
                       />
@@ -2058,7 +2058,7 @@ export default function Analytics() {
                           fontSize: 21, fontWeight: 700,
                           color: c.color,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                          textShadow: c.color === C.green ? "0 0 12px rgba(0,255,65,0.22)" : "none",
+                          textShadow: c.color === C.green ? "0 0 12px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
                           opacity: (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading)) ? 0.6 : 1,
                         }}
                       >
@@ -2081,7 +2081,7 @@ export default function Analytics() {
                   total below is Σ rows and matches the cell by construction.
                   Display-only: no valuation logic here. */}
               {showCapGlBreakdown && (
-                <div style={{ borderTop: `1px solid ${C.border}`, background: "rgba(255,255,255,0.012)" }}>
+                <div style={{ borderTop: `1px solid ${C.border}`, background: "var(--surface-hover)" }}>
                   <div style={{ padding: "10px 20px 4px", fontSize: 10, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                     // Capital G/L breakdown · {lpPnl.closedRows.length} closed position{lpPnl.closedRows.length === 1 ? "" : "s"}
                     <span style={{ marginLeft: 10, opacity: 0.6, textTransform: "none", letterSpacing: "0.02em" }}>
@@ -2174,8 +2174,8 @@ export default function Analytics() {
                 <div
                   style={{
                     margin: "0 26px 18px",
-                    border: "1px solid rgba(255,170,0,0.25)",
-                    background: "rgba(255,170,0,0.04)",
+                    border: "1px solid color-mix(in srgb, var(--warn) 25%, transparent)",
+                    background: "color-mix(in srgb, var(--warn) 4%, transparent)",
                     padding: "12px 16px",
                     fontFamily: FONT,
                   }}
@@ -2183,7 +2183,7 @@ export default function Analytics() {
                   <div
                     style={{
                       fontSize: 12,
-                      color: "#ffaa00",
+                      color: "var(--warn)",
                       letterSpacing: "0.04em",
                       marginBottom: 8,
                     }}
@@ -2198,12 +2198,12 @@ export default function Analytics() {
                         key={`${ep.id}-${ep.reason}`}
                         style={{
                           fontSize: 11,
-                          color: "rgba(255,170,0,0.85)",
+                          color: "color-mix(in srgb, var(--warn) 85%, transparent)",
                           letterSpacing: "0.02em",
                           lineHeight: 1.55,
                         }}
                       >
-                        <span style={{ color: "#ffaa00", fontWeight: 600 }}>
+                        <span style={{ color: "var(--warn)", fontWeight: 600 }}>
                           {ep.pair}
                         </span>
                         <span style={{ opacity: 0.7 }}>
@@ -2309,9 +2309,9 @@ export default function Analytics() {
                             textTransform: "uppercase",
                             // Inline-only active state — border shorthand
                             // covers all 4 sides so no gap is possible.
-                            border: active ? "1px solid #00ff41" : "none",
+                            border: active ? "1px solid var(--accent)" : "none",
                             background: "transparent",
-                            color: active ? "#00ff41" : C.text,
+                            color: active ? "var(--accent)" : C.text,
                           }}
                         >
                           {k}
@@ -2425,9 +2425,9 @@ export default function Analytics() {
                             textTransform: "uppercase",
                             // Inline-only active state — border shorthand
                             // covers all 4 sides so no gap is possible.
-                            border: active ? "1px solid #00ff41" : "none",
+                            border: active ? "1px solid var(--accent)" : "none",
                             background: "transparent",
-                            color: active ? "#00ff41" : C.text,
+                            color: active ? "var(--accent)" : C.text,
                           }}
                         >
                           {k}
@@ -2955,7 +2955,7 @@ export default function Analytics() {
                             style={{
                               fontSize: 17, fontWeight: 700, color: C.green,
                               fontVariantNumeric: "tabular-nums",
-                              textShadow: "0 0 10px rgba(0,255,65,0.25)",
+                              textShadow: "0 0 10px color-mix(in srgb, var(--accent) 25%, transparent)",
                             }}
                           >
                             {p.displayAPR.toFixed(1)}%

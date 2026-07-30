@@ -2,28 +2,28 @@ import TerminalNavbar from "../components/TerminalNavbar";
 import type { CSSProperties } from "react";
 
 const C = {
-  bg:        "#050505",
-  bg1:       "#090909",
-  bg2:       "#0d0d0d",
-  border:    "#1c1c1c",
-  borderHi:  "#262626",
-  borderGlow:"#2e2e2e",
-  text:      "#a8a8a8",
-  textMid:   "#b4b4b4",
-  textBright:"#e8e8e8",
-  textWhite: "#f5f5f5",
-  green:     "#00ff41",
-  greenDim:  "#00b82a",
-  greenFaint:"rgba(0,255,65,0.06)",
-  greenGlow: "rgba(0,255,65,0.18)",
-  cyan:      "#00d4ff",
-  amber:     "#ffaa00",
+  bg:        "var(--bg)",
+  bg1:       "var(--surface)",
+  bg2:       "var(--surface)",
+  border:    "var(--line)",
+  borderHi:  "var(--line-strong)",
+  borderGlow:"var(--line-strong)",
+  text:      "var(--fg-muted)",
+  textMid:   "var(--fg-muted)",
+  textBright:"var(--fg)",
+  textWhite: "var(--fg)",
+  green:     "var(--accent)",
+  greenDim:  "var(--accent-hover)",
+  greenFaint:"color-mix(in srgb, var(--accent) 6%, transparent)",
+  greenGlow: "color-mix(in srgb, var(--accent) 18%, transparent)",
+  cyan:      "var(--info)",
+  amber:     "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.015) 3px, rgba(0,0,0,0.015) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
 
 const cardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
@@ -60,7 +60,7 @@ function H2({ children }: { children: React.ReactNode }) {
 function SectionEyebrow({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      fontSize: 11, color: "#3a3a3a", letterSpacing: "0.18em",
+      fontSize: 11, color: "var(--line-strong)", letterSpacing: "0.18em",
       textTransform: "uppercase", marginBottom: 14,
     }}>
       {"// "}<span style={{ color: C.green }}>{children}</span>
@@ -404,7 +404,7 @@ export default function Docs() {
             {CONCEPTS.map((c) => (
               <div key={c.name} style={{
                 border: `1px solid ${C.borderHi}`,
-                background: "#0a0a0a",
+                background: "var(--surface)",
                 padding: "18px 20px",
                 borderRadius: 4,
                 position: "relative",

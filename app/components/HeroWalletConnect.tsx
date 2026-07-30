@@ -174,7 +174,7 @@ export default function HeroWalletConnect() {
     <div className="space-y-4">
       {/* CONNECT WALLET */}
       <div>
-        <div className="text-[12px] text-[#888] tracking-[0.12em] uppercase mb-2.5">
+        <div className="text-[12px] text-[var(--fg-subtle)] tracking-[0.12em] uppercase mb-2.5">
           {"// connect wallet"}
         </div>
         <div
@@ -188,7 +188,7 @@ export default function HeroWalletConnect() {
           }}
         >
           <ChainButton
-            chainColor="#00e5ff"
+            chainColor="var(--info)"
             label="EVM"
             sublabel="MetaMask / WC"
             connected={evmActive}
@@ -197,7 +197,7 @@ export default function HeroWalletConnect() {
             onDisconnect={handleEvmDisconnect}
           />
           <ChainButton
-            chainColor="#9945ff"
+            chainColor="var(--chain-solana)"
             label="SOLANA"
             sublabel="Phantom"
             connected={solActive}
@@ -206,7 +206,7 @@ export default function HeroWalletConnect() {
             onDisconnect={handleSolanaDisconnect}
           />
           <ChainButton
-            chainColor="#4da2ff"
+            chainColor="var(--chain-sui)"
             label="SUI"
             sublabel="Slush / Suiet"
             connected={suiActive}
@@ -219,15 +219,15 @@ export default function HeroWalletConnect() {
 
       {/* OR PASTE ANY ADDRESS */}
       <div>
-        <div className="text-[12px] text-[#888] tracking-[0.12em] uppercase mb-2.5">
+        <div className="text-[12px] text-[var(--fg-subtle)] tracking-[0.12em] uppercase mb-2.5">
           {"// or paste any address"}
         </div>
         <form
           onSubmit={handleScan}
-          className="flex border border-[#2e2e2e] max-w-[480px] focus-within:border-[#00ff41]/60 transition-colors"
+          className="flex border border-[var(--line-strong)] max-w-[480px] focus-within:border-[var(--accent)]/60 transition-colors"
         >
           <span
-            className="bg-[#111] text-[#00ff41] px-3.5 py-2.5 text-[15px] border-r border-[#2e2e2e] select-none flex-shrink-0"
+            className="bg-[var(--surface)] text-[var(--accent)] px-3.5 py-2.5 text-[15px] border-r border-[var(--line-strong)] select-none flex-shrink-0"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             {">_"}
@@ -239,12 +239,12 @@ export default function HeroWalletConnect() {
             spellCheck={false}
             autoComplete="off"
             placeholder="0x... or sol1... or 0x(sui)..."
-            className="flex-1 bg-[#0a0a0a] text-[#e8e8e8] px-3.5 py-2.5 text-[15px] outline-none placeholder:text-[#888] min-w-0"
+            className="flex-1 bg-[var(--surface)] text-[var(--fg)] px-3.5 py-2.5 text-[15px] outline-none placeholder:text-[var(--fg-subtle)] min-w-0"
             style={{ fontFamily: "var(--font-jetbrains-mono)", letterSpacing: "0.04em" }}
           />
           <button
             type="submit"
-            className="bg-[#111] text-[#888] hover:text-[#00ff41] hover:bg-[rgba(0,255,65,0.06)] border-l border-[#2e2e2e] px-4 py-2.5 text-[14px] tracking-[0.08em] uppercase transition-colors whitespace-nowrap"
+            className="bg-[var(--surface)] text-[var(--fg-subtle)] hover:text-[var(--accent)] hover:bg-[color-mix(in srgb, var(--accent) 6%, transparent)] border-l border-[var(--line-strong)] px-4 py-2.5 text-[14px] tracking-[0.08em] uppercase transition-colors whitespace-nowrap"
           >
             SCAN
           </button>
@@ -254,7 +254,7 @@ export default function HeroWalletConnect() {
             style={{
               marginTop: 8,
               fontSize: 12,
-              color: "#ff3355",
+              color: "var(--neg)",
               letterSpacing: "0.04em",
             }}
           >
@@ -273,7 +273,7 @@ export default function HeroWalletConnect() {
                 <button
                   key={meta.id}
                   onClick={() => handleEvmConnect(meta.id)}
-                  className="w-full border border-[#2e2e2e] hover:border-[#00e5ff] hover:bg-[rgba(0,229,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
+                  className="w-full border border-[var(--line-strong)] hover:border-[var(--info)] hover:bg-[color-mix(in srgb, var(--info) 5%, transparent)] px-4 py-3 text-left text-base text-[var(--fg)] tracking-wider transition-colors"
                 >
                   ▸ {meta.name}
                 </button>
@@ -290,7 +290,7 @@ export default function HeroWalletConnect() {
         return (
           <TerminalModal title="CONNECT_SOLANA_WALLET" onClose={() => setShowSolanaModal(false)}>
             {filtered.length === 0 ? (
-              <p className="text-sm text-[#888] leading-relaxed">
+              <p className="text-sm text-[var(--fg-subtle)] leading-relaxed">
                 No Solana wallet detected. Install Phantom, Backpack, or Solflare.
               </p>
             ) : (
@@ -299,7 +299,7 @@ export default function HeroWalletConnect() {
                   <button
                     key={w.adapter.name}
                     onClick={() => handleSolanaConnect(w.adapter.name)}
-                    className="w-full border border-[#2e2e2e] hover:border-[#9945ff] hover:bg-[rgba(153,69,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
+                    className="w-full border border-[var(--line-strong)] hover:border-[var(--chain-solana)] hover:bg-[rgba(153,69,255,0.05)] px-4 py-3 text-left text-base text-[var(--fg)] tracking-wider transition-colors"
                   >
                     ▸ {w.adapter.name}
                   </button>
@@ -317,7 +317,7 @@ export default function HeroWalletConnect() {
         return (
           <TerminalModal title="CONNECT_SUI_WALLET" onClose={() => setShowSuiModal(false)}>
             {filtered.length === 0 ? (
-              <p className="text-sm text-[#888] leading-relaxed">
+              <p className="text-sm text-[var(--fg-subtle)] leading-relaxed">
                 No Sui wallet detected. Install Sui Wallet, Slush, Backpack, or Martian.
               </p>
             ) : (
@@ -326,7 +326,7 @@ export default function HeroWalletConnect() {
                   <button
                     key={w.name}
                     onClick={() => handleSuiConnect(w)}
-                    className="w-full border border-[#2e2e2e] hover:border-[#4da2ff] hover:bg-[rgba(77,162,255,0.05)] px-4 py-3 text-left text-base text-[#e8e8e8] tracking-wider transition-colors"
+                    className="w-full border border-[var(--line-strong)] hover:border-[var(--chain-sui)] hover:bg-[rgba(77,162,255,0.05)] px-4 py-3 text-left text-base text-[var(--fg)] tracking-wider transition-colors"
                   >
                     ▸ {w.name}
                   </button>
@@ -341,9 +341,9 @@ export default function HeroWalletConnect() {
 }
 
 const GLOW: Record<string, string> = {
-  "#00e5ff": "0 0 12px rgba(0,229,255,0.18)",
-  "#9945ff": "0 0 12px rgba(153,69,255,0.18)",
-  "#4da2ff": "0 0 12px rgba(77,162,255,0.18)",
+  "var(--info)": "0 0 12px color-mix(in srgb, var(--info) 18%, transparent)",
+  "var(--chain-solana)": "0 0 12px rgba(153,69,255,0.18)",
+  "var(--chain-sui)": "0 0 12px rgba(77,162,255,0.18)",
 };
 
 function ChainButton({
@@ -366,10 +366,10 @@ function ChainButton({
   const [hover, setHover] = useState(false);
 
   const baseStyle: CSSProperties = {
-    background: hover ? "#161616" : "#111",
-    border: `1px solid ${connected ? "#00ff41" : hover ? chainColor : "#2e2e2e"}`,
-    boxShadow: hover && !connected ? GLOW[chainColor] : connected ? "0 0 12px rgba(0,255,65,0.15)" : "none",
-    color: "#c8c8c8",
+    background: hover ? "#161616" : "var(--surface)",
+    border: `1px solid ${connected ? "var(--accent)" : hover ? chainColor : "var(--line-strong)"}`,
+    boxShadow: hover && !connected ? GLOW[chainColor] : connected ? "0 0 12px color-mix(in srgb, var(--accent) 15%, transparent)" : "none",
+    color: "var(--fg-muted)",
     padding: "10px 14px",
     fontSize: 14,
     fontWeight: 700,
@@ -395,12 +395,12 @@ function ChainButton({
         onMouseLeave={() => setHover(false)}
         style={baseStyle}
       >
-        <span style={{ color: "#00ff41", fontSize: 14 }}>✓</span>
+        <span style={{ color: "var(--accent)", fontSize: 14 }}>✓</span>
         <span>{label}</span>
         <span
           style={{
             fontSize: 11,
-            color: "#888",
+            color: "var(--fg-subtle)",
             fontWeight: 400,
             letterSpacing: "0.04em",
           }}
@@ -424,7 +424,7 @@ function ChainButton({
         aria-hidden
       />
       <span>{label}</span>
-      <span style={{ fontSize: 11, color: "#888", fontWeight: 400, letterSpacing: "0.06em" }}>
+      <span style={{ fontSize: 11, color: "var(--fg-subtle)", fontWeight: 400, letterSpacing: "0.06em" }}>
         {sublabel}
       </span>
     </button>
@@ -445,13 +445,13 @@ function TerminalModal({
       className="fixed inset-0 z-[100] flex items-center justify-center px-4"
       style={{ fontFamily: "var(--font-jetbrains-mono)" }}
     >
-      <div className="absolute inset-0 bg-black/85 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-black border border-[#00ff41] w-full max-w-sm">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-[#00ff41]">
-          <span className="text-[#00ff41] text-[14px] tracking-widest font-bold">{title}</span>
+      <div className="absolute inset-0 backdrop-blur-sm" style={{ background: "var(--overlay)" }} onClick={onClose} />
+      <div className="relative border border-[var(--accent)] w-full max-w-sm" style={{ background: "var(--surface)" }}>
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--accent)]">
+          <span className="text-[var(--accent)] text-[14px] tracking-widest font-bold">{title}</span>
           <button
             onClick={onClose}
-            className="text-[#00ff41]/80 hover:text-[#00ff41] text-sm tracking-widest"
+            className="text-[var(--accent)]/80 hover:text-[var(--accent)] text-sm tracking-widest"
           >
             [X]
           </button>

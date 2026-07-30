@@ -1,0 +1,688 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+
+const TOKEN_IMAGES: Record<string, string> = {
+  ETH: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png',
+  BTC: 'https://assets.coingecko.com/coins/images/1/small/bitcoin.png',
+  USDC: 'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  USDT: 'https://assets.coingecko.com/coins/images/325/small/Tether.png',
+  SOL: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
+  SUI: 'https://assets.coingecko.com/coins/images/26375/small/sui_asset.jpeg',
+  HYPE: 'https://assets.coingecko.com/coins/images/37880/small/hyperliquid.jpg',
+};
+
+const COINGECKO_IDS: Record<string, string> = {
+  ETH: 'ethereum',
+  BTC: 'bitcoin',
+  SOL: 'solana',
+  SUI: 'sui',
+  HYPE: 'hyperliquid',
+  USDC: 'usd-coin',
+  USDT: 'tether',
+};
+
+const IL_PAIRS = [
+  { n: 'ETH/USDC', t0: 'ETH', t1: 'USDC', p0: 2500, p1: 1 },
+  { n: 'BTC/USDC', t0: 'BTC', t1: 'USDC', p0: 97000, p1: 1 },
+  { n: 'SOL/USDC', t0: 'SOL', t1: 'USDC', p0: 180, p1: 1 },
+  { n: 'SUI/USDC', t0: 'SUI', t1: 'USDC', p0: 3.2, p1: 1 },
+  { n: 'HYPE/USDC', t0: 'HYPE', t1: 'USDC', p0: 25, p1: 1 },
+];
+
+const HG_PRESETS = [
+  { v: 'BTC', p: 97000, d: 1000, l: -5, u: 5 },
+  { v: 'ETH', p: 2500, d: 1000, l: -5, u: 5 },
+  { v: 'SOL', p: 180, d: 1000, l: -5, u: 5 },
+  { v: 'SUI', p: 3.2, d: 1000, l: -5, u: 5 },
+  { v: 'HYPE', p: 25, d: 1000, l: -5, u: 5 },
+];
+
+function fmt(n: number, d = 4): string {
+  if (n == null || isNaN(n)) return '0.0000';
+  if (Math.abs(n) >= 1000) return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  if (Math.abs(n) < 0.0001 && d <= 4) return '0.0000';
+  return n.toFixed(d);
+}
+
+function fmtHG(n: number, d = 2): string {
+  if (n == null || isNaN(n)) return '0.00';
+  if (Math.abs(n) >= 1000) return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  if (Math.abs(n) < 0.01 && d <= 2) return '0.00';
+  return n.toFixed(d);
+}
+
+function fmtT(n: number): string {
+  if (Math.abs(n) < 0.000001 && n !== 0) return n.toExponential(4);
+  if (Math.abs(n) < 1) return n.toFixed(6);
+  return fmt(n, 4);
+}
+
+function TokenIcon({ symbol, size = 22 }: { symbol: string; size?: number }) {
+  const s = (symbol || '?').toUpperCase();
+  const imgUrl = TOKEN_IMAGES[s];
+  const [imgError, setImgError] = useState(false);
+  return (
+    <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden', background: 'linear-gradient(135deg,var(--chain-arbitrum),#8b5cf6)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      {imgUrl && !imgError ? (
+        <img src={imgUrl} alt={s} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={() => setImgError(true)} />
+      ) : (
+        <span style={{ fontSize: size * 0.4, fontWeight: 700, color: 'var(--fg)' }}>{s[0]}</span>
+      )}
+    </div>
+  );
+}
+
+function calcIL(il: any) {
+  const cr = il.p0 / il.p1, fr = il.f0 / il.f1;
+  const lp = cr * (1 + il.lb / 100), up = cr * (1 + il.ub / 100);
+  const inR = fr >= lp && fr <= up;
+  const spa = Math.sqrt(lp), spb = Math.sqrt(up), sp0 = Math.sqrt(cr), sp1 = Math.sqrt(fr);
+  const t0pL = Math.max(0, 1 / sp0 - 1 / spb), t1pL = Math.max(0, sp0 - spa);
+  const vpL = t0pL * cr + t1pL, L = vpL > 0 ? il.inv / vpL : 0;
+  const it0 = L * t0pL, it1 = L * t1pL;
+  const hv0 = it0 * il.f0, hv1 = it1 * il.f1, hodl = hv0 + hv1;
+  let ft0, ft1;
+  if (fr <= lp) { ft0 = L * (1 / spa - 1 / spb); ft1 = 0; }
+  else if (fr >= up) { ft0 = 0; ft1 = L * (spb - spa); }
+  else { ft0 = L * (1 / sp1 - 1 / spb); ft1 = L * (sp1 - spa); }
+  const apr = il.dy * 365, yPct = il.dy * il.days;
+  const fv0 = ft0 * il.f0, fv1 = ft1 * il.f1, lpT = fv0 + fv1;
+  const yE = il.inv * (yPct / 100), lpWY = lpT + yE;
+  const ilD = lpT - hodl, ilP = hodl > 0 ? (ilD / hodl) * 100 : 0;
+  const dYD = (apr / 100 / 365) * il.inv, dtc = dYD > 0 ? Math.abs(ilD) / dYD : 99999;
+  const hPct = (hodl - il.inv) / il.inv * 100, lpPct = (lpWY - il.inv) / il.inv * 100;
+  return { lp, up, cr, fr, inR, it0, it1, hv0, hv1, hodl, ft0, ft1, fv0, fv1, lpT, lpWY, yE, ilD, ilP, apr, yPct, dtc, hPct, lpPct };
+}
+
+function calcHG(hg: any) {
+  if (hg.pr <= 0 || hg.dep <= 0) return null;
+  const lp = hg.pr * (1 + hg.lb / 100), up = hg.pr * (1 + hg.ub / 100);
+  if (lp <= 0 || up <= 0 || lp >= up) return null;
+  const sqP = Math.sqrt(hg.pr), spa = Math.sqrt(lp), spb = Math.sqrt(up);
+  const ePL = 1 / sqP - 1 / spb, uPL = sqP - spa;
+  const vPL = ePL * hg.pr + uPL, L = hg.dep / vPL;
+  const cE = L * ePL, cU = L * uPL, cEV = cE * hg.pr;
+  const eAtL = L * (1 / spa - 1 / spb), lpPnlL = eAtL * lp - hg.dep;
+  const hSz = -lpPnlL / (hg.pr - lp), hVal = hSz * hg.pr;
+  const lo = [1, 2, 3, 5, 10].map(lv => {
+    const mR = hVal / lv;
+    const liqP = hg.pr * (1 + 0.95 / lv);
+    const liqPct = (liqP - hg.pr) / hg.pr * 100;
+    const tC = hg.dep + mR;
+    // FIXED: Stop loss = price where total capital loss hits 2%
+    const maxLoss = tC * 0.02;
+    const slP = hg.pr + (maxLoss / hSz);
+    const slPct = (slP - hg.pr) / hg.pr * 100;
+    const buf = (liqP - slP) / (liqP - hg.pr) * 100;
+    return { lv, mR, liqP, liqPct, slP, slPct, buf, tC, capEff: hg.dep / tC * 100, maxLoss };
+  });
+  const calcOut = (nP: number) => {
+    const nSqP = Math.sqrt(nP);
+    let lpV;
+    if (nP <= lp) lpV = L * (1 / spa - 1 / spb) * nP;
+    else if (nP >= up) lpV = L * (spb - spa);
+    else lpV = L * (1 / nSqP - 1 / spb) * nP + L * (nSqP - spa);
+    const lpPnl = lpV - hg.dep, hPnl = hSz * (hg.pr - nP);
+    return { pr: nP, lpPnl, hPnl, net: lpPnl + hPnl, netPct: (lpPnl + hPnl) / hg.dep * 100 };
+  };
+  return { lp, up, cE, cU, cEV, hSz, hVal, lo, calcOut };
+}
+
+async function fetchTokenPrice(symbol: string): Promise<number | null> {
+  const s = symbol.toUpperCase();
+  const knownId = COINGECKO_IDS[s];
+  try {
+    if (knownId) {
+      const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${knownId}&vs_currencies=usd`);
+      const d = await r.json();
+      return d[knownId]?.usd || null;
+    } else {
+      const r = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(symbol)}`);
+      const d = await r.json();
+      if (d?.coins?.[0]) {
+        const id = d.coins[0].id;
+        const r2 = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`);
+        const d2 = await r2.json();
+        return d2[id]?.usd || null;
+      }
+    }
+  } catch { }
+  return null;
+}
+
+export default function LPCalculatorPage() {
+  const [tab, setTab] = useState<'il' | 'hg'>('il');
+  const [il, setIL] = useState({
+    t0: 'ETH', t1: 'USDC', p0: 2500, p1: 1, f0: 2375, f1: 1,
+    inv: 1000, lb: -5, ub: 5, dy: 0.30, days: 7, pair: 'ETH/USDC'
+  });
+  const [hg, setHG] = useState({
+    dep: 1000, pr: 2500, vs: 'ETH', ss: 'USDC',
+    lb: -5, ub: 5, lev: 2, fr: 10, ly: 120
+  });
+
+  // Custom token state for IL
+  const [ilCustom, setILCustom] = useState(false);
+  const [ilCustomT0, setILCustomT0] = useState('');
+  const [ilCustomT1, setILCustomT1] = useState('');
+  const [ilFetchingPrice, setILFetchingPrice] = useState(false);
+
+  // Custom token state for HG
+  const [hgCustom, setHGCustom] = useState(false);
+  const [hgFetchingPrice, setHGFetchingPrice] = useState(false);
+
+  // Fetch live prices on load
+  useEffect(() => {
+    const ids = 'ethereum,bitcoin,solana,sui,hyperliquid';
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`)
+      .then(r => r.json())
+      .then(data => {
+        if (data?.ethereum?.usd) {
+          const p = data.ethereum.usd;
+          setIL(prev => ({ ...prev, p0: p, f0: +(p * 0.95).toFixed(2) }));
+          setHG(prev => ({ ...prev, pr: p }));
+        }
+      }).catch(() => { });
+  }, []);
+
+  // Fetch custom IL token prices
+  const handleILCustomTokenChange = async (t0: string, t1: string) => {
+    setILCustomT0(t0);
+    setILCustomT1(t1);
+    if (t0.length >= 2) {
+      setILFetchingPrice(true);
+      const p0 = await fetchTokenPrice(t0);
+      if (p0) setIL(prev => ({ ...prev, t0: t0.toUpperCase(), p0, f0: +(p0 * 0.95).toFixed(2) }));
+      else setIL(prev => ({ ...prev, t0: t0.toUpperCase() }));
+      setILFetchingPrice(false);
+    }
+    if (t1.length >= 2) {
+      const p1 = await fetchTokenPrice(t1);
+      if (p1) setIL(prev => ({ ...prev, t1: t1.toUpperCase(), p1, f1: p1 }));
+      else setIL(prev => ({ ...prev, t1: t1.toUpperCase() }));
+    }
+  };
+
+  // Fetch custom HG token price
+  const handleHGCustomToken = async (symbol: string) => {
+    setHG(prev => ({ ...prev, vs: symbol.toUpperCase() }));
+    if (symbol.length >= 2) {
+      setHGFetchingPrice(true);
+      const p = await fetchTokenPrice(symbol);
+      if (p) setHG(prev => ({ ...prev, pr: p }));
+      setHGFetchingPrice(false);
+    }
+  };
+
+  const ilC = calcIL(il);
+  const hgC = calcHG(hg);
+  const hgLD = hgC?.lo.find(l => l.lv === hg.lev);
+
+  const card = "bg-white/5 border border-white/10 rounded-2xl p-5 mb-4";
+  const inp = "bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-sm w-full outline-none focus:border-indigo-500/50";
+  const lbl = "text-white/50 text-xs font-medium uppercase mb-1.5 flex items-center gap-1.5";
+  const btn = "px-3 py-2 rounded-xl border border-white/10 bg-white/5 text-white/60 text-xs cursor-pointer hover:bg-white/10 hover:text-white transition-all flex items-center gap-1.5";
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0f] text-white">
+      <div className="max-w-5xl mx-auto px-6 py-10">
+
+        {/* Header */}
+        <div className="text-center mb-9">
+          <h1 className="text-4xl font-bold mb-2">LP Calculator</h1>
+          <p className="text-white/40 text-sm">Impermanent Loss & Hedging Analytics</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex bg-white/3 border border-white/8 rounded-2xl p-1 mb-7">
+          <button onClick={() => setTab('il')} className={`flex-1 py-3.5 rounded-xl text-sm font-semibold transition-all ${tab === 'il' ? 'bg-indigo-500/20 text-white shadow-lg' : 'text-white/50 hover:text-white/80'}`}>
+            📉 Impermanent Loss Calculator
+          </button>
+          <button onClick={() => setTab('hg')} className={`flex-1 py-3.5 rounded-xl text-sm font-semibold transition-all ${tab === 'hg' ? 'bg-indigo-500/20 text-white shadow-lg' : 'text-white/50 hover:text-white/80'}`}>
+            🛡️ Hedging Calculator
+          </button>
+        </div>
+
+        {/* ==================== IL TAB ==================== */}
+        {tab === 'il' && (
+          <div>
+            {/* Strategy Cards */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className={card}>
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-white/50 text-xs">Strategy A: Withdraw & HODL</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-semibold ${ilC.hPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>{ilC.hPct >= 0 ? '+' : ''}{fmt(ilC.hPct, 3)}%</span>
+                    <span className="text-lg font-bold font-mono">${fmt(ilC.hodl, 2)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <TokenIcon symbol={il.t0} /><span className="text-sm">{il.t0}</span>
+                  <span className="ml-auto font-mono text-sm">{fmtT(ilC.it0)}</span>
+                  <span className="text-white/40 text-xs">(${fmt(ilC.hv0, 2)})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <TokenIcon symbol={il.t1} /><span className="text-sm">{il.t1}</span>
+                  <span className="ml-auto font-mono text-sm">{fmtT(ilC.it1)}</span>
+                  <span className="text-white/40 text-xs">(${fmt(ilC.hv1, 2)})</span>
+                </div>
+              </div>
+              <div className="bg-green-400/8 border border-green-400/30 rounded-2xl p-5 mb-4">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-xs px-2 py-1 rounded-md bg-green-400/15 border border-green-400/30 text-green-400 font-semibold">Strategy B: Keep Liquidity</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-semibold ${ilC.lpPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>{ilC.lpPct >= 0 ? '+' : ''}{fmt(ilC.lpPct, 3)}%</span>
+                    <span className="text-lg font-bold font-mono">${fmt(ilC.lpWY, 2)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <TokenIcon symbol={il.t0} /><span className="text-sm">{il.t0}</span>
+                  <span className="ml-auto font-mono text-sm">{fmtT(ilC.ft0)}</span>
+                  <span className="text-white/40 text-xs">(${fmt(ilC.fv0, 2)})</span>
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <TokenIcon symbol={il.t1} /><span className="text-sm">{il.t1}</span>
+                  <span className="ml-auto font-mono text-sm">{fmtT(ilC.ft1)}</span>
+                  <span className="text-white/40 text-xs">(${fmt(ilC.fv1, 2)})</span>
+                </div>
+                <div className="border-t border-white/10 pt-2.5">
+                  <div className="flex justify-between text-xs mb-1"><span className="text-white/50">LP Yield ({il.days}d)</span><span className="text-green-400 font-semibold">{fmt(ilC.yPct, 2)}% (${fmt(ilC.yE)})</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-white/50">Impermanent Loss</span><span className="text-red-400 font-semibold">{fmt(ilC.ilP)}% -${fmt(Math.abs(ilC.ilD))}</span></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Pair Selector */}
+            <div className={`${card} py-3.5 px-4`}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-white/50 text-xs font-semibold uppercase">Pair</span>
+                {IL_PAIRS.map(p => (
+                  <button key={p.n} onClick={async () => {
+                    setILCustom(false);
+                    const price = await fetchTokenPrice(p.t0);
+                    const p0 = price || p.p0;
+                    setIL(prev => ({ ...prev, pair: p.n, t0: p.t0, t1: p.t1, p0, p1: p.p1, f0: +(p0 * 0.95).toFixed(2), f1: p.p1 }));
+                  }} className={`${btn} ${il.pair === p.n && !ilCustom ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300' : ''}`}>
+                    <TokenIcon symbol={p.t0} size={16} /><TokenIcon symbol={p.t1} size={16} /><span className="ml-1">{p.n}</span>
+                  </button>
+                ))}
+                {/* Custom Button */}
+                <button onClick={() => { setILCustom(true); setIL(prev => ({ ...prev, pair: 'Custom' })); }} className={`${btn} ${ilCustom ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300' : ''}`}>
+                  ✦ Custom
+                </button>
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="text-white/50 text-xs">Investment</span>
+                  <input type="number" value={il.inv} onChange={e => setIL(prev => ({ ...prev, inv: parseFloat(e.target.value) || 0 }))} className={inp} style={{ width: 100 }} />
+                  {[1000, 5000, 10000].map(v => <button key={v} onClick={() => setIL(prev => ({ ...prev, inv: v }))} className={btn}>${v >= 1000 ? v / 1000 + 'k' : v}</button>)}
+                </div>
+              </div>
+
+              {/* Custom Token Inputs */}
+              {ilCustom && (
+                <div className="mt-4 grid grid-cols-2 gap-3 pt-4 border-t border-white/10">
+                  <div>
+                    <label className={lbl}>Token 0 Symbol</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="e.g. ETH, SOL, BTC"
+                        value={ilCustomT0}
+                        onChange={e => handleILCustomTokenChange(e.target.value, ilCustomT1)}
+                        className={inp}
+                        style={{ textTransform: 'uppercase' }}
+                      />
+                      {ilFetchingPrice && <span className="absolute right-3 top-2.5 text-xs text-yellow-400">fetching...</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={lbl}>Token 1 Symbol</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. USDC, BTC, ETH"
+                      value={ilCustomT1}
+                      onChange={e => handleILCustomTokenChange(ilCustomT0, e.target.value)}
+                      className={inp}
+                      style={{ textTransform: 'uppercase' }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Prices */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className={card}>
+                <h3 className="text-sm font-semibold mb-3">Current Price</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className={lbl}><TokenIcon symbol={il.t0} size={14} />{il.t0}</label><input type="number" value={il.p0} onChange={e => setIL(prev => ({ ...prev, p0: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                  <div><label className={lbl}><TokenIcon symbol={il.t1} size={14} />{il.t1}</label><input type="number" value={il.p1} onChange={e => setIL(prev => ({ ...prev, p1: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                </div>
+              </div>
+              <div className={card}>
+                <h3 className="text-sm font-semibold mb-3">Future Price</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className={lbl}><TokenIcon symbol={il.t0} size={14} />{il.t0}</label><input type="number" value={il.f0} onChange={e => setIL(prev => ({ ...prev, f0: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                  <div><label className={lbl}><TokenIcon symbol={il.t1} size={14} />{il.t1}</label><input type="number" value={il.f1} onChange={e => setIL(prev => ({ ...prev, f1: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Range */}
+            <div className={card}>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-semibold">Liquidity Range</h3>
+                <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${ilC.inR ? 'bg-green-400/15 border border-green-400/30 text-green-400' : 'bg-red-400/15 border border-red-400/30 text-red-400'}`}>{ilC.inR ? 'In Range' : 'Out of Range'}</span>
+              </div>
+              <div className="flex justify-between text-xs mb-3">
+                <span className="text-purple-400">${fmt(ilC.lp)}</span>
+                <span className="text-white/60">Current: ${fmt(ilC.cr)} | <span className="text-yellow-400">Future: ${fmt(ilC.fr)}</span></span>
+                <span className="text-purple-400">${fmt(ilC.up)}</span>
+              </div>
+              <div className="grid grid-cols-4 gap-3 mb-3">
+                <div><label className={lbl}>Lower %</label><input type="number" step="0.1" value={il.lb} onChange={e => setIL(prev => ({ ...prev, lb: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                <div><label className={lbl}>Lower Price</label><input type="number" value={+(ilC.lp).toFixed(2)} onChange={e => { const p = parseFloat(e.target.value); if (p > 0) setIL(prev => ({ ...prev, lb: ((p - prev.p0) / prev.p0) * 100 })); }} className={inp} /></div>
+                <div><label className={lbl}>Upper %</label><input type="number" step="0.1" value={il.ub} onChange={e => setIL(prev => ({ ...prev, ub: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                <div><label className={lbl}>Upper Price</label><input type="number" value={+(ilC.up).toFixed(2)} onChange={e => { const p = parseFloat(e.target.value); if (p > 0) setIL(prev => ({ ...prev, ub: ((p - prev.p0) / prev.p0) * 100 })); }} className={inp} /></div>
+              </div>
+              <div className="flex gap-2">
+                {[5, 10, 20, 50].map(r => <button key={r} onClick={() => setIL(prev => ({ ...prev, lb: -r, ub: r }))} className={btn}>±{r}%</button>)}
+                <span className="ml-auto text-white/40 text-xs self-center">{fmt(il.ub - il.lb)}% width</span>
+              </div>
+            </div>
+
+            {/* Days & Yield */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className={card}>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-semibold">Days Active</h3>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setIL(prev => ({ ...prev, days: Math.max(1, prev.days - 1) }))} className={btn}>−</button>
+                    <input type="number" value={il.days} onChange={e => setIL(prev => ({ ...prev, days: parseInt(e.target.value) || 1 }))} className={inp} style={{ width: 60, textAlign: 'center' }} />
+                    <button onClick={() => setIL(prev => ({ ...prev, days: prev.days + 1 }))} className={btn}>+</button>
+                  </div>
+                </div>
+                <div className={`p-3 rounded-xl text-xs ${ilC.dtc <= il.days ? 'bg-green-400/10 border border-green-400/30 text-green-400' : 'bg-yellow-400/10 border border-yellow-400/30 text-yellow-400'}`}>
+                  {ilC.dtc <= il.days ? `✅ Position covers IL after ${fmt(ilC.dtc, 1)} days` : `Position needs ≥${fmt(ilC.dtc, 1)}d to cover IL`}
+                </div>
+                <div className="flex gap-1.5 mt-3">
+                  {[{ d: 1, l: '1d' }, { d: 7, l: '1w' }, { d: 14, l: '2w' }, { d: 30, l: '1m' }, { d: 90, l: '3m' }, { d: 365, l: '1y' }].map(x => (
+                    <button key={x.d} onClick={() => setIL(prev => ({ ...prev, days: x.d }))} className={`${btn} flex-1 justify-center`}>{x.l}</button>
+                  ))}
+                </div>
+              </div>
+              <div className={card}>
+                <h3 className="text-sm font-semibold mb-3">LP Yield</h3>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div><label className={lbl}>Daily Yield (%)</label><input type="number" step="0.01" value={il.dy} onChange={e => setIL(prev => ({ ...prev, dy: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                  <div><label className={lbl}>Yearly APR (%)</label><input type="number" value={(il.dy * 365).toFixed(1)} readOnly className={inp} style={{ background: 'rgba(0,0,0,0.2)' }} /></div>
+                </div>
+                <div className="flex gap-1.5 mb-3">
+                  {[0.1, 0.2, 0.3, 0.5, 1.0].map(y => <button key={y} onClick={() => setIL(prev => ({ ...prev, dy: y }))} className={`${btn} flex-1 justify-center`}>{y}%</button>)}
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-green-400/10 rounded-lg text-xs">
+                  <span className="text-white/60">{il.days}d yield:</span>
+                  <span className="text-green-400 font-semibold">{fmt(ilC.yPct, 2)}% (${fmt(ilC.yE)})</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { l: 'Investment', v: `$${fmt(il.inv, 2)}`, c: 'text-white' },
+                { l: 'HODL Value', v: `$${fmt(ilC.hodl, 2)}`, c: ilC.hPct >= 0 ? 'text-green-400' : 'text-red-400' },
+                { l: 'LP + Yield', v: `$${fmt(ilC.lpWY, 2)}`, c: ilC.lpPct >= 0 ? 'text-green-400' : 'text-red-400' },
+                { l: 'IL', v: `${fmt(ilC.ilP)}%`, c: 'text-red-400' },
+              ].map(s => (
+                <div key={s.l} className={card + ' text-center py-3.5'}>
+                  <div className="text-white/50 text-xs uppercase mb-1.5">{s.l}</div>
+                  <div className={`text-base font-bold font-mono ${s.c}`}>{s.v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ==================== HG TAB ==================== */}
+        {tab === 'hg' && hgC && hgLD && (
+          <div>
+            {/* Presets */}
+            <div className="flex gap-2 flex-wrap mb-4">
+              {HG_PRESETS.map(p => (
+                <button key={p.v} onClick={async () => {
+                  setHGCustom(false);
+                  const price = await fetchTokenPrice(p.v);
+                  setHG(prev => ({ ...prev, vs: p.v, ss: 'USDC', pr: price || p.p, dep: p.d, lb: p.l, ub: p.u }));
+                }} className={`${btn} ${hg.vs === p.v && !hgCustom ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300' : ''}`}>
+                  <TokenIcon symbol={p.v} size={16} /><TokenIcon symbol="USDC" size={16} /><span className="ml-1">{p.v}/USDC</span>
+                </button>
+              ))}
+              {/* Custom Button */}
+              <button onClick={() => setHGCustom(true)} className={`${btn} ${hgCustom ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300' : ''}`}>
+                ✦ Custom
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* LP Position */}
+              <div className={card}>
+                <h3 className="text-sm font-semibold mb-4">LP Position</h3>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div>
+                    <label className={lbl}>Base Token</label>
+                    <input type="text" value={hg.vs} onChange={e => handleHGCustomToken(e.target.value)} className={inp} />
+                    {hgFetchingPrice && <span className="text-xs text-yellow-400 mt-1">fetching price...</span>}
+                  </div>
+                  <div><label className={lbl}>Quote Token</label><input type="text" value={hg.ss} onChange={e => setHG(prev => ({ ...prev, ss: e.target.value.toUpperCase() }))} className={inp} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div><label className={lbl}><TokenIcon symbol={hg.vs} size={14} />{hg.vs} Price</label><input type="number" value={hg.pr} onChange={e => setHG(prev => ({ ...prev, pr: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                  <div><label className={lbl}>Position Value</label><input type="number" value={hg.dep} onChange={e => setHG(prev => ({ ...prev, dep: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                </div>
+                <div className="flex justify-between text-xs mb-3">
+                  <span className="text-yellow-400">${fmtHG(hgC.lp)}</span>
+                  <span className="text-white/50">${fmtHG(hg.pr)}</span>
+                  <span className="text-green-400">${fmtHG(hgC.up)}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div><label className={lbl}>Lower %</label><input type="number" step="0.1" value={hg.lb} onChange={e => setHG(prev => ({ ...prev, lb: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                  <div><label className={lbl}>Upper %</label><input type="number" step="0.1" value={hg.ub} onChange={e => setHG(prev => ({ ...prev, ub: parseFloat(e.target.value) || 0 }))} className={inp} /></div>
+                </div>
+                <div className="flex gap-2">
+                  {[5, 10, 20, 50].map(r => <button key={r} onClick={() => setHG(prev => ({ ...prev, lb: -r, ub: r }))} className={btn}>±{r}%</button>)}
+                </div>
+              </div>
+
+              {/* Hedge Position */}
+              <div className={card}>
+                <h3 className="text-sm font-semibold mb-4">Hedge Position</h3>
+                <div className="bg-black/30 rounded-xl p-4 mb-4 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center text-lg">📉</div>
+                    <div>
+                      <div className="text-red-400 font-semibold">Short {hg.vs}</div>
+                      <div className="text-white/50 text-sm font-mono">{fmt(hgC.hSz, 4)} {hg.vs}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xl font-bold font-mono">${fmtHG(hgC.hVal)}</div>
+                    <div className="text-white/40 text-xs">Notional</div>
+                  </div>
+                </div>
+                <div className="mb-4">
+                  <label className={lbl}>Leverage</label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 5, 10].map(lv => (
+                      <button key={lv} onClick={() => setHG(prev => ({ ...prev, lev: lv }))} className={`flex-1 py-3 rounded-xl border text-sm font-semibold transition-all ${hg.lev === lv ? 'bg-indigo-500/20 border-indigo-500/50 text-white' : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'}`}>{lv}x</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 mb-3 flex justify-between items-center">
+                  <span className="text-purple-400 font-medium">Margin Required</span>
+                  <span className="text-lg font-bold font-mono">${fmtHG(hgLD.mR)}</span>
+                </div>
+                <div className="bg-red-400/10 border border-red-400/20 rounded-xl p-4 mb-3">
+                  <div className="text-red-400 font-semibold mb-2">⚠️ Liquidation Price</div>
+                  <span className="text-2xl font-bold font-mono">${fmtHG(hgLD.liqP)}</span>
+                  <span className="text-red-400 ml-2 font-semibold">(+{fmt(hgLD.liqPct, 1)}%)</span>
+                </div>
+                <div className="bg-yellow-400/10 border border-yellow-400/20 rounded-xl p-4">
+                  <div className="text-yellow-400 font-semibold mb-2">🛑 Stop Loss</div>
+                  <span className="text-2xl font-bold font-mono">${fmtHG(hgLD.slP)}</span>
+                  <span className="text-yellow-400 ml-2 font-semibold">(+{fmt(hgLD.slPct, 1)}%)</span>
+                  <div className="flex justify-between text-xs mt-2">
+                    <span className="text-white/50">Loss at stop</span>
+                    <span className="text-red-400 font-semibold">-${fmtHG(hgLD.maxLoss)} (2% of capital)</span>
+                  </div>
+                  <div className="flex justify-between text-xs mt-1">
+                    <span className="text-white/50">Buffer to liq</span>
+                    <span className="text-green-400 font-semibold">+{fmt(hgLD.buf, 1)}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Position Breakdown */}
+            <div className="bg-yellow-400/8 border border-yellow-400/30 rounded-2xl p-5 mb-4">
+              <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">📊 Your Position Breakdown</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-2"><TokenIcon symbol={hg.vs} size={24} /><span className="text-white/60 text-sm">{hg.vs}</span></div>
+                  <div className="text-yellow-400 text-xl font-bold font-mono">{fmtT(hgC.cE)}</div>
+                  <div className="text-white/40 text-xs font-mono">${fmtHG(hgC.cEV)}</div>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-2"><TokenIcon symbol={hg.ss} size={24} /><span className="text-white/60 text-sm">{hg.ss}</span></div>
+                  <div className="text-xl font-bold font-mono">{fmtT(hgC.cU)}</div>
+                  <div className="text-white/40 text-xs font-mono">${fmtHG(hgC.cU)}</div>
+                </div>
+              </div>
+              {[
+                { l: `Current ${hg.vs} Value`, v: `$${fmtHG(hgC.cEV)}` },
+                { l: 'Optimal Hedge Size', v: `$${fmtHG(hgC.hVal)}` },
+                { l: 'Total Capital Required', v: `$${fmtHG(hgLD.tC)}`, c: 'text-green-400' },
+                { l: 'Capital Efficiency', v: `${fmt(hgLD.capEff, 1)}%` },
+              ].map(r => (
+                <div key={r.l} className="flex justify-between items-center py-3 border-b border-white/5 last:border-0">
+                  <span className="text-white/60 text-sm">{r.l}</span>
+                  <span className={`font-mono font-semibold ${r.c || ''}`}>{r.v}</span>
+                </div>
+              ))}
+              <div className="bg-yellow-400/10 border border-yellow-400/20 rounded-xl p-4 mt-4 text-xs text-white/70 leading-relaxed">
+                💡 <strong>How it works:</strong> Your LP holds <span className="text-yellow-400">{fmtT(hgC.cE)} {hg.vs}</span> worth <span className="text-green-400">${fmtHG(hgC.cEV)}</span>. Open a <span className="text-red-400">{fmt(hgC.hSz, 4)} {hg.vs} short</span> (${fmtHG(hgC.hVal)} notional). At <span className="text-yellow-400">{hg.lev}x leverage</span>, requires <span className="text-green-400">${fmtHG(hgLD.mR)}</span> margin. When {hg.vs} drops to lower range (${fmtHG(hgC.lp)}), short profit offsets LP losses for ~<span className="text-green-400">$0 net P&L</span>.
+              </div>
+            </div>
+
+            {/* Capital & Yield */}
+            <div className={card}>
+              <h3 className="text-sm font-semibold mb-4">Capital & Yield</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className={lbl}>Funding Rate APR (%)</label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input type="number" value={hg.fr} onChange={e => setHG(prev => ({ ...prev, fr: parseFloat(e.target.value) || 0 }))} className={inp} style={{ width: 80 }} />
+                    {[-10, 0, 10, 20, 50].map(f => <button key={f} onClick={() => setHG(prev => ({ ...prev, fr: f }))} className={btn}>{f > 0 ? '+' : ''}{f}%</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className={lbl}>LP Yield APR (%)</label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input type="number" value={hg.ly} onChange={e => setHG(prev => ({ ...prev, ly: parseFloat(e.target.value) || 0 }))} className={inp} style={{ width: 80 }} />
+                    {[5, 10, 20, 50, 100, 120].map(y => <button key={y} onClick={() => setHG(prev => ({ ...prev, ly: y }))} className={btn}>{y}%</button>)}
+                  </div>
+                </div>
+              </div>
+              {(() => {
+                const dLP = (hg.dep * hg.ly / 100) / 365;
+                const dFC = (hgC.hVal * hg.fr / 100) / 365;
+                const netD = dLP - dFC;
+                const netY = netD * 365;
+                const netAPR = netY / hgLD.tC * 100;
+                return (
+                  <div>
+                    <div className="bg-black/20 rounded-xl p-4 mb-4">
+                      {[
+                        { l: 'LP Position', v: `$${fmtHG(hg.dep)}`, c: 'text-purple-400' },
+                        { l: 'Hedge Margin', v: `$${fmtHG(hgLD.mR)}`, c: 'text-yellow-400' },
+                        { l: 'Total Capital', v: `$${fmtHG(hgLD.tC)}`, c: 'text-green-400', big: true },
+                        { l: 'Capital Efficiency', v: `${fmt(hgLD.capEff, 1)}%`, c: 'text-white' },
+                      ].map(r => (
+                        <div key={r.l} className="flex justify-between items-center py-2.5 border-b border-white/5 last:border-0">
+                          <span className="text-white/60 text-sm">{r.l}</span>
+                          <span className={`font-mono font-semibold ${r.big ? 'text-base' : ''} ${r.c}`}>{r.v}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bg-black/20 rounded-xl p-4 mb-4">
+                      {[
+                        { l: 'LP Yield (daily)', v: `+$${fmtHG(dLP)}`, c: 'text-green-400' },
+                        { l: 'Funding Cost (daily)', v: `${hg.fr > 0 ? '-' : '+'}$${fmtHG(Math.abs(dFC))}`, c: hg.fr > 0 ? 'text-red-400' : 'text-green-400' },
+                        { l: 'Net Daily Yield', v: `${netD >= 0 ? '+' : ''}$${fmtHG(netD)}`, c: netD >= 0 ? 'text-green-400' : 'text-red-400', big: true },
+                        { l: 'Net APR on Total Capital', v: `${netAPR >= 0 ? '+' : ''}${fmt(netAPR, 1)}%`, c: netAPR >= 0 ? 'text-green-400' : 'text-red-400', big: true },
+                      ].map(r => (
+                        <div key={r.l} className="flex justify-between items-center py-2.5 border-b border-white/5 last:border-0">
+                          <span className="text-white/60 text-sm">{r.l}</span>
+                          <span className={`font-mono font-semibold ${r.big ? 'text-base' : ''} ${r.c}`}>{r.v}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-green-400/10 border border-green-400/20 rounded-xl p-5 text-center">
+                        <div className="text-white/50 text-xs uppercase tracking-wider mb-2">Monthly Yield</div>
+                        <div className={`text-2xl font-bold font-mono ${netY / 12 >= 0 ? 'text-green-400' : 'text-red-400'}`}>{netY / 12 >= 0 ? '+' : ''}${fmtHG(netY / 12)}</div>
+                      </div>
+                      <div className="bg-blue-400/10 border border-blue-400/20 rounded-xl p-5 text-center">
+                        <div className="text-white/50 text-xs uppercase tracking-wider mb-2">Yearly Yield</div>
+                        <div className={`text-2xl font-bold font-mono ${netY >= 0 ? 'text-green-400' : 'text-red-400'}`}>{netY >= 0 ? '+' : ''}${fmtHG(netY)}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Scenarios */}
+            <div className={card}>
+              <h3 className="text-sm font-semibold mb-4">Outcome Scenarios</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      {['Scenario', 'Price', 'LP P&L', 'Hedge P&L', 'Net P&L', 'Net %'].map(h => (
+                        <th key={h} className="py-3 px-2 text-left text-white/50 text-xs uppercase font-semibold last:text-right">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { l: `${hg.vs} -30%`, pc: -30 }, { l: `${hg.vs} -15%`, pc: -15 },
+                      { l: `Lower (${fmt(hg.lb, 1)}%)`, pc: hg.lb, w: true }, { l: 'No Change', pc: 0 },
+                      { l: `Stop (+${fmt(hgLD.slPct, 1)}%)`, pc: hgLD.slPct, d: true },
+                      { l: `Upper (+${fmt(hg.ub, 1)}%)`, pc: hg.ub, w: true },
+                      { l: `${hg.vs} +15%`, pc: 15 }, { l: `${hg.vs} +30%`, pc: 30 },
+                    ].map(sc => {
+                      const o = hgC.calcOut(hg.pr * (1 + sc.pc / 100));
+                      return (
+                        <tr key={sc.l} className={`border-b border-white/5 ${(sc as any).w ? 'bg-yellow-400/8' : (sc as any).d ? 'bg-red-400/8' : ''}`}>
+                          <td className="py-3 px-2 font-medium" style={{ color: (sc as any).w ? '#fbbf24' : (sc as any).d ? '#f87171' : 'var(--fg)' }}>{sc.l}</td>
+                          <td className="py-3 px-2 font-mono">${fmtHG(o.pr)}</td>
+                          <td className={`py-3 px-2 font-mono ${o.lpPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{o.lpPnl >= 0 ? '+' : ''}${fmtHG(o.lpPnl)}</td>
+                          <td className={`py-3 px-2 font-mono ${o.hPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{o.hPnl >= 0 ? '+' : ''}${fmtHG(o.hPnl)}</td>
+                          <td className={`py-3 px-2 font-mono font-semibold ${o.net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{o.net >= 0 ? '+' : ''}${fmtHG(o.net)}</td>
+                          <td className={`py-3 px-2 font-mono text-right ${o.netPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>{o.netPct >= 0 ? '+' : ''}{fmt(o.netPct, 1)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="text-center mt-10 text-white/30 text-xs">Built for DeFi · Concentrated Liquidity Analytics</div>
+      </div>
+    </div>
+  );
+}

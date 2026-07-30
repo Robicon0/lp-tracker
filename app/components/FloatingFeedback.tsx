@@ -17,25 +17,25 @@ const FORMSPREE_URL = "https://formspree.io/f/mzdyjybw";
 
 // Terminal palette (matches dashboard.html exactly)
 const C = {
-  bg:        "#050505",
-  bg1:       "#090909",
-  bg2:       "#0d0d0d",
-  bg3:       "#121212",
-  bg4:       "#171717",
-  border:    "#1c1c1c",
-  borderHi:  "#262626",
-  borderGlow:"#2e2e2e",
-  text:      "#a8a8a8",
-  textMid:   "#b4b4b4",
-  textBright:"#e8e8e8",
-  textWhite: "#f5f5f5",
-  green:     "#00ff41",
+  bg:        "var(--bg)",
+  bg1:       "var(--surface)",
+  bg2:       "var(--surface)",
+  bg3:       "var(--surface)",
+  bg4:       "var(--surface-2)",
+  border:    "var(--line)",
+  borderHi:  "var(--line-strong)",
+  borderGlow:"var(--line-strong)",
+  text:      "var(--fg-muted)",
+  textMid:   "var(--fg-muted)",
+  textBright:"var(--fg)",
+  textWhite: "var(--fg)",
+  green:     "var(--accent)",
   green2:    "#00e535",
-  greenDim:  "#00b82a",
-  greenFaint:"rgba(0,255,65,0.06)",
-  greenGlow: "rgba(0,255,65,0.18)",
-  red:       "#ff3355",
-  amber:     "#ffaa00",
+  greenDim:  "var(--accent-hover)",
+  greenFaint:"color-mix(in srgb, var(--accent) 6%, transparent)",
+  greenGlow: "color-mix(in srgb, var(--accent) 18%, transparent)",
+  red:       "var(--neg)",
+  amber:     "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
@@ -118,7 +118,7 @@ export default function FloatingFeedback() {
     maxHeight: "calc(100vh - 32px)",
     background: C.bg,
     border: `1px solid ${C.greenDim}`,
-    boxShadow: `0 0 0 1px rgba(0,255,65,0.08), 0 0 64px rgba(0,255,65,0.18), 0 24px 80px rgba(0,0,0,0.7)`,
+    boxShadow: `0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent), 0 0 64px color-mix(in srgb, var(--accent) 18%, transparent), 0 24px 80px rgba(0,0,0,0.7)`,
     position: "relative",
     color: C.text,
     fontFamily: FONT,
@@ -140,13 +140,13 @@ export default function FloatingFeedback() {
         @keyframes _fbFade { from{opacity:0} to{opacity:1} }
         @keyframes _fbUp   { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         @keyframes _fbPulse{ 0%,100%{opacity:1} 50%{opacity:0.25} }
-        .fb-fab-hover:hover { background: rgba(0,255,65,0.12) !important; box-shadow: 0 0 26px rgba(0,255,65,0.32) !important; transform: translateY(-2px); }
+        .fb-fab-hover:hover { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; box-shadow: 0 0 26px color-mix(in srgb, var(--accent) 32%, transparent) !important; transform: translateY(-2px); }
         .fb-rate-hover:hover { color: ${C.textBright} !important; border-color: ${C.borderGlow} !important; background: ${C.bg3} !important; }
         .fb-cat-hover:hover { color: ${C.textBright} !important; border-color: ${C.borderGlow} !important; }
-        .fb-submit-hover:hover:not(:disabled) { background: ${C.green2} !important; box-shadow: 0 0 28px rgba(0,255,65,0.35); letter-spacing: 0.2em; }
+        .fb-submit-hover:hover:not(:disabled) { background: ${C.green2} !important; box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 35%, transparent); letter-spacing: 0.2em; }
         .fb-cancel-hover:hover { color: ${C.textBright} !important; border-color: ${C.borderGlow} !important; }
-        .fb-close-hover:hover { color: ${C.red} !important; border-color: rgba(255,51,85,0.4) !important; background: rgba(255,51,85,0.06) !important; }
-        .fb-textarea-wrap:focus-within { border-color: ${C.greenDim} !important; box-shadow: 0 0 0 1px rgba(0,255,65,0.12); }
+        .fb-close-hover:hover { color: ${C.red} !important; border-color: color-mix(in srgb, var(--neg) 40%, transparent) !important; background: color-mix(in srgb, var(--neg) 6%, transparent) !important; }
+        .fb-textarea-wrap:focus-within { border-color: ${C.greenDim} !important; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent); }
       `}</style>
 
       {/* ── Floating launcher (terminal fab) ───────────────────────────── */}
@@ -171,7 +171,7 @@ export default function FloatingFeedback() {
           color: C.green,
           cursor: "pointer",
           transition: "all 0.2s",
-          boxShadow: "0 0 18px rgba(0,255,65,0.16)",
+          boxShadow: "0 0 18px color-mix(in srgb, var(--accent) 16%, transparent)",
         }}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -198,8 +198,8 @@ export default function FloatingFeedback() {
             }}>
               {/* 3 colored dots */}
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ width: 8, height: 8, background: "rgba(255,51,85,0.5)", border: "1px solid rgba(255,51,85,0.5)" }} />
-                <span style={{ width: 8, height: 8, background: "rgba(255,170,0,0.5)", border: "1px solid rgba(255,170,0,0.5)" }} />
+                <span style={{ width: 8, height: 8, background: "color-mix(in srgb, var(--neg) 50%, transparent)", border: "1px solid color-mix(in srgb, var(--neg) 50%, transparent)" }} />
+                <span style={{ width: 8, height: 8, background: "color-mix(in srgb, var(--warn) 50%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 50%, transparent)" }} />
                 <span style={{ width: 8, height: 8, background: C.green, border: `1px solid ${C.green}`, boxShadow: `0 0 6px ${C.greenGlow}` }} />
               </div>
               <div style={{ fontSize: 12, color: C.text, letterSpacing: "0.1em", flex: 1, textAlign: "center" }}>
@@ -237,7 +237,7 @@ export default function FloatingFeedback() {
                     border: `1px solid ${C.green}`, background: C.greenFaint,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     color: C.green, fontSize: 28, fontWeight: 700,
-                    boxShadow: "0 0 26px rgba(0,255,65,0.28)",
+                    boxShadow: "0 0 26px color-mix(in srgb, var(--accent) 28%, transparent)",
                   }}>
                     ✓
                   </div>
@@ -305,7 +305,7 @@ export default function FloatingFeedback() {
                               cursor: "pointer",
                               transition: "all 0.12s",
                               display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-                              boxShadow: active ? "inset 0 0 12px rgba(0,255,65,0.1), 0 0 12px rgba(0,255,65,0.15)" : "none",
+                              boxShadow: active ? "inset 0 0 12px color-mix(in srgb, var(--accent) 10%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 15%, transparent)" : "none",
                             }}
                           >
                             <span>{n}</span>
@@ -349,7 +349,7 @@ export default function FloatingFeedback() {
                               transition: "all 0.15s",
                               textAlign: "left",
                               display: "flex", alignItems: "center", gap: 8,
-                              boxShadow: active ? "0 0 10px rgba(0,255,65,0.1)" : "none",
+                              boxShadow: active ? "0 0 10px color-mix(in srgb, var(--accent) 10%, transparent)" : "none",
                             }}
                           >
                             <span style={{
@@ -435,7 +435,7 @@ export default function FloatingFeedback() {
                         cursor: canSubmit ? "pointer" : "not-allowed",
                         transition: "all 0.15s",
                         background: canSubmit ? C.green : C.bg3,
-                        color: canSubmit ? "#000" : C.text,
+                        color: canSubmit ? "var(--bg)" : C.text,
                         border: "none",
                         opacity: canSubmit ? 1 : 0.4,
                         display: "flex", alignItems: "center", justifyContent: "center", gap: 10,

@@ -20,8 +20,8 @@ interface Props {
  * Visual contract (locked — see CLAUDE.md):
  *   - Panel anchors ABOVE the icon (`bottom: calc(100% + 10px)`) so it never
  *     overlaps the data row below the label.
- *   - Solid dark background (#0a0a0a) — opaque, no bleed-through.
- *   - 0.5px faint emerald border (#00ff8844), 4px radius.
+ *   - Solid dark background (var(--surface)) — opaque, no bleed-through.
+ *   - 0.5px faint emerald border (var(--pos-surface)), 4px radius.
  *   - 12px 14px padding, max-width 280px, JetBrains Mono 11px / 1.6 line-height.
  *   - z-index 9999 sits above every dashboard surface (TerminalNavbar is 10000
  *     but the tooltip never renders that high in the DOM).
@@ -62,9 +62,9 @@ export default function InfoTooltip({ text, maxWidth = 280 }: Props) {
           width: 14,
           height: 14,
           borderRadius: "50%",
-          border: "1px solid rgba(0,255,65,0.35)",
-          background: "rgba(0,255,65,0.06)",
-          color: "#00ff41",
+          border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
+          background: "color-mix(in srgb, var(--accent) 6%, transparent)",
+          color: "var(--accent)",
           fontSize: 9,
           fontWeight: 700,
           fontFamily: FONT,
@@ -89,12 +89,12 @@ export default function InfoTooltip({ text, maxWidth = 280 }: Props) {
             minWidth: 200,
             // Opaque solid background — no transparency. Content behind the
             // tooltip must never bleed through (the previous semi-transparent
-            // #0a1f17 read as foggy when the tooltip overlapped data rows).
-            background: "#0a0a0a",
-            border: "0.5px solid #00ff8844",
+            // var(--accent-surface) read as foggy when the tooltip overlapped data rows).
+            background: "var(--surface)",
+            border: "0.5px solid var(--pos-surface)",
             borderRadius: 4,
             padding: "12px 14px",
-            color: "#aaaaaa",
+            color: "var(--fg-muted)",
             fontSize: 11,
             fontFamily: FONT,
             lineHeight: 1.6,
@@ -123,7 +123,7 @@ export default function InfoTooltip({ text, maxWidth = 280 }: Props) {
               height: 0,
               borderLeft: "6px solid transparent",
               borderRight: "6px solid transparent",
-              borderTop: "6px solid #00ff8844",
+              borderTop: "6px solid var(--pos-surface)",
             }}
           />
         </span>

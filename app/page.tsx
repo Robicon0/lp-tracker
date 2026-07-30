@@ -6,6 +6,25 @@ import BlinkingCursor from "./components/BlinkingCursor";
 import ProtocolScroll, { type ProtocolScrollItem } from "./components/ProtocolScroll";
 import MobileNavMenu from "./components/MobileNavMenu";
 import ShipNotifications from "./components/ShipNotifications";
+import HeroBackgroundFx from "./components/HeroBackgroundFx";
+import HomeV2 from "./components/home/HomeV2";
+import type { TrustStat } from "./components/home/TrustBand";
+
+/**
+ * Hero motion layer is OFF unless `NEXT_PUBLIC_HERO_FX=1`. That var lives in
+ * `.env.local` only — it is deliberately NOT set in Vercel, so production
+ * renders exactly the hero it renders today.
+ */
+const HERO_FX_ENABLED = process.env.NEXT_PUBLIC_HERO_FX === "1";
+
+/**
+ * Full home-page redesign, gated the same way. `NEXT_PUBLIC_HOME_V2=1` in
+ * .env.local swaps in components/home/HomeV2; unset (which is what Vercel
+ * sees) renders the untouched v1 markup below.
+ */
+const HOME_V2_ENABLED = process.env.NEXT_PUBLIC_HOME_V2 === "1";
+
+const CHAIN_COUNT = 8; // Ethereum, Base, Arbitrum, Optimism, Polygon, HyperEVM, Solana, Sui
 
 const PROTOCOL_DEFS: {
   name: string;
@@ -160,7 +179,7 @@ async function fetchProtocolStats(): Promise<Map<string, Stat>> {
 }
 
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 2px, var(--scanline) 2px, var(--scanline) 4px)";
 
 export default async function Home() {
   const stats = await fetchProtocolStats();
@@ -176,12 +195,49 @@ export default async function Home() {
     };
   });
 
+  if (HOME_V2_ENABLED) {
+    // Proof-band figures, derived from the DeFiLlama data already fetched
+    // above — no hardcoded marketing numbers on a page whose pitch is accuracy.
+    const tvlIndexed = protocolItems.reduce((sum, p) => sum + (p.tvl ?? 0), 0);
+    const vol24h = protocolItems.reduce((sum, p) => sum + (p.volume24h ?? 0), 0);
+    const trustStats: TrustStat[] = [
+      {
+        label: "TVL Indexed",
+        value: tvlIndexed / 1e9,
+        prefix: "$",
+        suffix: "B",
+        decimals: 2,
+        note: "Live across every supported protocol, via DeFiLlama.",
+      },
+      {
+        label: "24h Volume",
+        value: vol24h / 1e9,
+        prefix: "$",
+        suffix: "B",
+        decimals: 2,
+        note: "Traded through the DEXs whose positions we reconstruct.",
+      },
+      {
+        label: "Chains",
+        value: CHAIN_COUNT,
+        note: "EVM, Solana, and Sui — one wallet view, no chain switching.",
+      },
+      {
+        label: "Signatures Required",
+        value: 0,
+        note: "Read-only by construction. No approvals, no key access, ever.",
+      },
+    ];
+
+    return <HomeV2 protocols={protocolItems} trustStats={trustStats} />;
+  }
+
   return (
     <div
       className="min-h-screen bg-black"
       style={{
         fontFamily: "var(--font-jetbrains-mono), 'Courier New', monospace",
-        color: "#c8c8c8",
+        color: "var(--fg-muted)",
         fontSize: 16,
         lineHeight: 1.6,
       }}
@@ -199,36 +255,36 @@ export default async function Home() {
 
       {/* NAV */}
       <nav
-        className="sticky top-0 z-[10000] flex items-center justify-between h-[52px] px-4 sm:px-12 border-b border-[#1f1f1f]"
-        style={{ background: "#000", backdropFilter: "blur(4px)" }}
+        className="sticky top-0 z-[10000] flex items-center justify-between h-[52px] px-4 sm:px-12 border-b border-[var(--line)]"
+        style={{ background: "var(--bg)", backdropFilter: "blur(4px)" }}
       >
         <Link href="/" className="text-[20px] font-bold tracking-[0.14em] uppercase">
-          <span className="text-[#00ff41]">DEFI</span>
-          <span className="text-[#888]">/</span>
-          <span className="text-[#e8e8e8]">DESH</span>
+          <span className="text-[var(--accent)]">DEFI</span>
+          <span className="text-[var(--fg-subtle)]">/</span>
+          <span className="text-[var(--fg)]">DESH</span>
         </Link>
         <div className="hidden md:flex gap-8">
           <Link
             href="/"
-            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[var(--fg-subtle)] hover:text-[var(--fg)] uppercase tracking-[0.12em] transition-colors"
           >
             Home
           </Link>
           <Link
             href="/dashboard"
-            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[var(--fg-subtle)] hover:text-[var(--fg)] uppercase tracking-[0.12em] transition-colors"
           >
             Dashboard
           </Link>
           <Link
             href="/analytics"
-            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[var(--fg-subtle)] hover:text-[var(--fg)] uppercase tracking-[0.12em] transition-colors"
           >
             Analytics
           </Link>
           <Link
             href="/about"
-            className="text-[15px] text-[#888] hover:text-[#e8e8e8] uppercase tracking-[0.12em] transition-colors"
+            className="text-[15px] text-[var(--fg-subtle)] hover:text-[var(--fg)] uppercase tracking-[0.12em] transition-colors"
           >
             About
           </Link>
@@ -242,11 +298,11 @@ export default async function Home() {
             className="hidden md:flex items-center"
             style={{
               padding: "5px 12px",
-              border: "0.5px solid #00ff41",
-              background: "#00ff4108",
+              border: "0.5px solid var(--accent)",
+              background: "var(--accent-surface)",
               borderRadius: 3,
               fontSize: 13,
-              color: "#00ff41",
+              color: "var(--accent)",
               letterSpacing: "0.12em",
               textTransform: "uppercase",
               whiteSpace: "nowrap",
@@ -258,17 +314,17 @@ export default async function Home() {
             className="flex items-center gap-2"
             style={{
               padding: "5px 12px",
-              border: "0.5px solid #00ff41",
-              background: "#00ff4108",
+              border: "0.5px solid var(--accent)",
+              background: "var(--accent-surface)",
               borderRadius: 3,
               fontSize: 13,
-              color: "#00ff41",
+              color: "var(--accent)",
               letterSpacing: "0.12em",
               textTransform: "uppercase",
               whiteSpace: "nowrap",
             }}
           >
-            <span className="inline-block w-1.5 h-1.5 bg-[#00ff41] animate-pulse" />
+            <span className="inline-block w-1.5 h-1.5 bg-[var(--accent)] animate-pulse" />
             <span className="hidden sm:inline">All systems nominal</span>
             <span className="sm:hidden">LIVE</span>
           </div>
@@ -277,18 +333,19 @@ export default async function Home() {
       </nav>
 
       {/* HERO */}
-      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] px-4 sm:px-12 border-b border-[#1f1f1f]">
+      <section className="relative grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] px-4 sm:px-12 border-b border-[var(--line)]">
+        {HERO_FX_ENABLED && <HeroBackgroundFx />}
         {/* LEFT */}
-        <div className="lg:border-r border-[#1f1f1f] lg:pr-16 pt-12 lg:pt-16 pb-8 lg:pb-10 flex flex-col min-w-0">
+        <div className="relative z-10 lg:border-r border-[var(--line)] lg:pr-16 pt-12 lg:pt-16 pb-8 lg:pb-10 flex flex-col min-w-0">
           <div
-            className="flex items-center gap-3 mb-7 text-[#888] tracking-[0.2em] uppercase"
+            className="flex items-center gap-3 mb-7 text-[var(--fg-subtle)] tracking-[0.2em] uppercase"
             style={{ whiteSpace: "nowrap", fontSize: 14 }}
           >
-            <span className="text-[#00ff41]">//</span>
+            <span className="text-[var(--accent)]">//</span>
             <span>DeFi Position Intelligence</span>
           </div>
           <h1
-            className="font-bold text-[#e8e8e8] mb-6"
+            className="font-bold text-[var(--fg)] mb-6"
             style={{
               fontSize: "clamp(40px, 5vw, 72px)",
               lineHeight: 1.15,
@@ -297,13 +354,13 @@ export default async function Home() {
           >
             Track every
             <br />
-            <span className="text-[#00ff41]">DeFi position,</span>
+            <span className="text-[var(--accent)]">DeFi position,</span>
             <br />
             one screen.
             <BlinkingCursor />
           </h1>
           <p
-            className="text-[#c8c8c8] max-w-[460px] mb-12 font-light"
+            className="text-[var(--fg-muted)] max-w-[460px] mb-12 font-light"
             style={{ fontSize: 17, lineHeight: 1.9 }}
           >
             Real-time liquidity position tracking across EVM, Solana, and Sui. Value, APY, fees,
@@ -312,14 +369,14 @@ export default async function Home() {
           <div className="flex gap-3 mb-10 flex-wrap">
             <Link
               href="/dashboard"
-              className="bg-[#00ff41] hover:bg-[#00cc33] text-black font-bold tracking-[0.1em] uppercase transition-all hover:shadow-[0_0_24px_rgba(0,255,65,0.18)]"
+              className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-fg)] font-bold tracking-[0.1em] uppercase transition-all hover:shadow-[0_0_24px_color-mix(in srgb, var(--accent) 18%, transparent)]"
               style={{ padding: "14px 32px", fontSize: 16 }}
             >
               ▸ Go to Dashboard
             </Link>
             <Link
               href="/analytics"
-              className="border border-[#00e5ff] text-[#00e5ff] hover:bg-[rgba(0,229,255,0.1)] font-bold tracking-[0.1em] uppercase transition-all hover:shadow-[0_0_24px_rgba(0,229,255,0.15)]"
+              className="border border-[var(--info)] text-[var(--info)] hover:bg-[color-mix(in srgb, var(--info) 10%, transparent)] font-bold tracking-[0.1em] uppercase transition-all hover:shadow-[0_0_24px_color-mix(in srgb, var(--info) 15%, transparent)]"
               style={{ padding: "14px 32px", fontSize: 16 }}
             >
               ▸ View Analytics
@@ -330,7 +387,7 @@ export default async function Home() {
 
         {/* RIGHT */}
         <div
-          className="lg:pl-16 pt-8 lg:pt-16 pb-8 lg:pb-10 flex flex-col"
+          className="relative z-10 lg:pl-16 pt-8 lg:pt-16 pb-8 lg:pb-10 flex flex-col"
           style={{ alignSelf: "stretch" }}
         >
           <DashboardPreview />
@@ -341,33 +398,33 @@ export default async function Home() {
       <PriceTickerStrip />
 
       {/* PROTOCOLS */}
-      <section className="px-4 sm:px-12 py-12 border-b border-[#1f1f1f]">
-        <div className="text-[12px] text-[#888] uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
-          <span className="text-[#00ff41]">//</span>
+      <section className="px-4 sm:px-12 py-12 border-b border-[var(--line)]">
+        <div className="text-[12px] text-[var(--fg-subtle)] uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
+          <span className="text-[var(--accent)]">//</span>
           <span>Supported Protocols</span>
-          <span className="flex-1 h-px bg-[#1f1f1f]" />
-          <span className="text-[#888] tracking-[0.1em] text-[12px]">src: defillama</span>
+          <span className="flex-1 h-px bg-[var(--line)]" />
+          <span className="text-[var(--fg-subtle)] tracking-[0.1em] text-[12px]">src: defillama</span>
         </div>
         <ProtocolScroll protocols={protocolItems} />
       </section>
 
       {/* FEATURES */}
-      <section className="grid grid-cols-1 md:grid-cols-3 border-b border-[#1f1f1f]">
+      <section className="grid grid-cols-1 md:grid-cols-3 border-b border-[var(--line)]">
         {FEATURES.map((f, i) => (
           <div
             key={f.num}
-            className={`px-8 sm:px-12 py-10 ${i < FEATURES.length - 1 ? "md:border-r border-[#1f1f1f] border-b md:border-b-0" : ""}`}
+            className={`px-8 sm:px-12 py-10 ${i < FEATURES.length - 1 ? "md:border-r border-[var(--line)] border-b md:border-b-0" : ""}`}
           >
             <div
-              className="font-bold text-[#2e2e2e] leading-none mb-4"
+              className="font-bold text-[var(--line-strong)] leading-none mb-4"
               style={{ fontSize: 60, letterSpacing: "-0.04em" }}
             >
               {f.num}
             </div>
-            <div className="text-[17px] font-bold text-[#e8e8e8] tracking-[0.04em] mb-2.5">
+            <div className="text-[17px] font-bold text-[var(--fg)] tracking-[0.04em] mb-2.5">
               {f.title}
             </div>
-            <div className="text-[15px] text-[#c8c8c8]" style={{ lineHeight: 1.8 }}>
+            <div className="text-[15px] text-[var(--fg-muted)]" style={{ lineHeight: 1.8 }}>
               {f.desc}
             </div>
           </div>
@@ -378,28 +435,28 @@ export default async function Home() {
       <ShipNotifications />
 
       {/* FOOTER */}
-      <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[14px] text-[#888] tracking-[0.08em]">
+      <footer className="px-4 sm:px-12 py-5 flex flex-col md:flex-row items-start md:items-center md:justify-between gap-3 text-[14px] text-[var(--fg-subtle)] tracking-[0.08em]">
         <div>
-          <span className="text-[#c8c8c8]">DEFIDESH</span> — DeFi Position Intelligence{" "}
-          <span className="text-[#00ff41]">//</span> v0.9.1-beta
+          <span className="text-[var(--fg-muted)]">DEFIDESH</span> — DeFi Position Intelligence{" "}
+          <span className="text-[var(--accent)]">//</span> v0.9.1-beta
         </div>
         <div className="flex gap-6">
           <a
             href="https://github.com/Robicon0/lp-tracker"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-[#e8e8e8] transition-colors"
+            className="hover:text-[var(--fg)] transition-colors"
           >
             GitHub
           </a>
-          <Link href="/docs" className="hover:text-[#e8e8e8] transition-colors">
+          <Link href="/docs" className="hover:text-[var(--fg)] transition-colors">
             Docs
           </Link>
           <a
             href="https://x.com/defidesh"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-[#e8e8e8] transition-colors"
+            className="hover:text-[var(--fg)] transition-colors"
           >
             𝕏 @defidesh
           </a>

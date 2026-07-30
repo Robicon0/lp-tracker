@@ -16,16 +16,16 @@ const EVM_CHAINS = new Set([
 ]);
 
 const CHAIN_COLORS: Record<string, string> = {
-  Ethereum: "#627eea",
-  Base: "#0052ff",
+  Ethereum: "var(--chain-ethereum)",
+  Base: "var(--chain-base)",
   Arbitrum: "#2d9cdb",
-  Optimism: "#ff0420",
-  Polygon: "#8247e5",
-  "BNB Chain": "#f0b90b",
-  Avalanche: "#e84142",
-  HyperEVM: "#00d4aa",
-  Solana: "#9945ff",
-  Sui: "#3d9fff",
+  Optimism: "var(--chain-optimism)",
+  Polygon: "var(--chain-polygon)",
+  "BNB Chain": "var(--chain-bnb)",
+  Avalanche: "var(--chain-avalanche)",
+  HyperEVM: "var(--pos)",
+  Solana: "var(--chain-solana)",
+  Sui: "var(--info)",
 };
 
 function fmt$(n: number, dec = 2) {
@@ -40,7 +40,7 @@ function fmtBalance(n: number) {
 }
 
 const SCANLINE =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.012) 3px, rgba(0,0,0,0.012) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
 
 // ── Token icon ────────────────────────────────────────────────────────────────
 function TokenIcon({
@@ -54,12 +54,12 @@ function TokenIcon({
 }) {
   const [err, setErr] = useState(false);
   const src = (!err && (logo || getTokenLogo(symbol))) || null;
-  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#262626";
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "var(--line-strong)";
   const base: CSSProperties = {
     width: size,
     height: size,
     flexShrink: 0,
-    border: "1px solid #262626",
+    border: "1px solid var(--line-strong)",
   };
   if (src) {
     // eslint-disable-next-line @next/next/no-img-element
@@ -77,7 +77,7 @@ function TokenIcon({
       style={{
         ...base,
         background: color,
-        color: "#fff",
+        color: "var(--fg)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -111,7 +111,7 @@ function Donut({
   });
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#111" strokeWidth="14" />
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--surface)" strokeWidth="14" />
       {slices.map((s, i) => (
         <circle
           key={i}
@@ -137,10 +137,10 @@ function TokenRow({ token }: { token: TokenItem }) {
   const showChange = change !== null && Number.isFinite(change);
   return (
     <div
-      className="flex items-center gap-3.5 px-6 py-3 border-b border-[#1c1c1c] last:border-b-0 transition-colors"
+      className="flex items-center gap-3.5 px-6 py-3 border-b border-[var(--line)] last:border-b-0 transition-colors"
       style={{ background: "transparent" }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "rgba(255,255,255,0.012)";
+        e.currentTarget.style.background = "var(--surface-hover)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
@@ -150,7 +150,7 @@ function TokenRow({ token }: { token: TokenItem }) {
       <div className="flex-1 min-w-0">
         <div
           className="font-bold truncate"
-          style={{ fontSize: 15, color: "#e0e0e0", letterSpacing: "0.04em" }}
+          style={{ fontSize: 15, color: "var(--fg)", letterSpacing: "0.04em" }}
         >
           {token.symbol}
         </div>
@@ -158,7 +158,7 @@ function TokenRow({ token }: { token: TokenItem }) {
           className="mt-0.5 truncate"
           style={{
             fontSize: 11,
-            color: "#a0a0a0",
+            color: "var(--fg-muted)",
             opacity: 0.5,
             letterSpacing: "0.06em",
             textTransform: "uppercase",
@@ -175,10 +175,10 @@ function TokenRow({ token }: { token: TokenItem }) {
             fontWeight: 700,
             padding: "3px 8px",
             border: "1px solid",
-            borderColor: change! >= 0 ? "#00992a" : "rgba(255,51,85,0.3)",
+            borderColor: change! >= 0 ? "var(--accent-hover)" : "color-mix(in srgb, var(--neg) 30%, transparent)",
             background:
-              change! >= 0 ? "rgba(0,255,65,0.06)" : "rgba(255,51,85,0.06)",
-            color: change! >= 0 ? "#00ff41" : "#ff3355",
+              change! >= 0 ? "color-mix(in srgb, var(--accent) 6%, transparent)" : "color-mix(in srgb, var(--neg) 6%, transparent)",
+            color: change! >= 0 ? "var(--accent)" : "var(--neg)",
             letterSpacing: "0.06em",
           }}
         >
@@ -191,8 +191,8 @@ function TokenRow({ token }: { token: TokenItem }) {
             fontSize: 11,
             fontWeight: 700,
             padding: "3px 8px",
-            border: "1px solid #262626",
-            color: "#a0a0a0",
+            border: "1px solid var(--line-strong)",
+            color: "var(--fg-muted)",
             letterSpacing: "0.06em",
             opacity: 0.6,
           }}
@@ -205,26 +205,26 @@ function TokenRow({ token }: { token: TokenItem }) {
           <>
             <div
               className="font-bold tabular-nums"
-              style={{ fontSize: 16, color: "#f0f0f0" }}
+              style={{ fontSize: 16, color: "var(--fg)" }}
             >
               {fmt$(token.usdValue)}
             </div>
             <div
               className="mt-0.5 tabular-nums"
-              style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.55, letterSpacing: "0.04em" }}
+              style={{ fontSize: 11, color: "var(--fg-muted)", opacity: 0.55, letterSpacing: "0.04em" }}
             >
               {fmtBalance(token.balance)} {token.symbol} @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
             </div>
           </>
         ) : (
           <>
-            <div style={{ fontSize: 16, color: "#a0a0a0", opacity: 0.4 }}>—</div>
+            <div style={{ fontSize: 16, color: "var(--fg-muted)", opacity: 0.4 }}>—</div>
             <div
               className="mt-0.5 tabular-nums"
-              style={{ fontSize: 11, color: "#a0a0a0", opacity: 0.55, letterSpacing: "0.04em" }}
+              style={{ fontSize: 11, color: "var(--fg-muted)", opacity: 0.55, letterSpacing: "0.04em" }}
             >
               {fmtBalance(token.balance)} {token.symbol}
-              <span className="ml-1.5" style={{ color: "#ff3355", opacity: 0.7 }}>
+              <span className="ml-1.5" style={{ color: "var(--neg)", opacity: 0.7 }}>
                 no price data
               </span>
             </div>
@@ -257,12 +257,12 @@ function ChainSection({
 }) {
   return (
     <div
-      className="mb-6 border border-[#1c1c1c]"
-      style={{ background: "#090909", animation: "wal-fade-up 0.5s ease both" }}
+      className="mb-6 border border-[var(--line)]"
+      style={{ background: "var(--surface)", animation: "wal-fade-up 0.5s ease both" }}
     >
       <div
-        className="flex items-center justify-between px-6 py-4 border-b border-[#1c1c1c]"
-        style={{ background: "#0d0d0d" }}
+        className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)]"
+        style={{ background: "var(--surface)" }}
       >
         <div className="flex items-center gap-3">
           <div
@@ -275,14 +275,14 @@ function ChainSection({
           />
           <span
             className="font-bold"
-            style={{ fontSize: 16, color: "#e0e0e0", letterSpacing: "0.04em" }}
+            style={{ fontSize: 16, color: "var(--fg)", letterSpacing: "0.04em" }}
           >
             {title}
           </span>
           <span
             style={{
               fontSize: 11,
-              color: "#a0a0a0",
+              color: "var(--fg-muted)",
               opacity: 0.55,
               letterSpacing: "0.12em",
               textTransform: "uppercase",
@@ -295,8 +295,8 @@ function ChainSection({
           className="font-bold tabular-nums"
           style={{
             fontSize: 22,
-            color: "#00ff41",
-            textShadow: "0 0 14px rgba(0,255,65,0.18)",
+            color: "var(--accent)",
+            textShadow: "0 0 14px color-mix(in srgb, var(--accent) 18%, transparent)",
           }}
         >
           {total > 0 ? fmt$(total) : "—"}
@@ -383,7 +383,7 @@ export default function TokensPage() {
         chain,
         value,
         pct: (value / total) * 100,
-        color: CHAIN_COLORS[chain] ?? "#a0a0a0",
+        color: CHAIN_COLORS[chain] ?? "var(--fg-muted)",
       }))
       .sort((a, b) => b.value - a.value);
   }, [regularTokens]);
@@ -398,8 +398,8 @@ export default function TokensPage() {
     <div
       className="min-h-screen"
       style={{
-        background: "#050505",
-        color: "#a0a0a0",
+        background: "var(--bg)",
+        color: "var(--fg-muted)",
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 15,
         lineHeight: 1.5,
@@ -425,7 +425,7 @@ export default function TokensPage() {
         {/* Back link */}
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-2 mb-5 text-[#a0a0a0] hover:text-[#00ff41] transition-colors no-underline"
+          className="inline-flex items-center gap-2 mb-5 text-[var(--fg-muted)] hover:text-[var(--accent)] transition-colors no-underline"
           style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}
         >
           ← Back to Dashboard
@@ -438,35 +438,35 @@ export default function TokensPage() {
             fontSize: 11,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
-            color: "#a0a0a0",
+            color: "var(--fg-muted)",
             opacity: 0.6,
           }}
         >
-          <span className="text-[#00ff41]" style={{ opacity: 1 }}>// wallet</span> · idle balances across connected wallets
+          <span className="text-[var(--accent)]" style={{ opacity: 1 }}>// wallet</span> · idle balances across connected wallets
         </div>
         <h1
           className="font-bold mb-1.5"
-          style={{ fontSize: 32, color: "#f0f0f0", letterSpacing: "-0.02em" }}
+          style={{ fontSize: 32, color: "var(--fg)", letterSpacing: "-0.02em" }}
         >
           Wallet Balances
         </h1>
-        <p className="mb-6" style={{ fontSize: 14, color: "#a0a0a0", opacity: 0.6 }}>
+        <p className="mb-6" style={{ fontSize: 14, color: "var(--fg-muted)", opacity: 0.6 }}>
           Idle tokens across all connected wallets
         </p>
 
         {!hasWallet ? (
           <div className="text-center py-16">
-            <p style={{ fontSize: 15, color: "#a0a0a0", marginBottom: 20 }}>
+            <p style={{ fontSize: 15, color: "var(--fg-muted)", marginBottom: 20 }}>
               Connect a wallet to see your token holdings.
             </p>
             <Link
               href="/dashboard"
-              className="inline-block border border-[#00992a] text-[#00ff41] px-5 py-2.5 no-underline hover:bg-[rgba(0,255,65,0.08)] transition-colors"
+              className="inline-block border border-[var(--accent-hover)] text-[var(--accent)] px-5 py-2.5 no-underline hover:bg-[color-mix(in srgb, var(--accent) 8%, transparent)] transition-colors"
               style={{
                 fontSize: 14,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
-                background: "rgba(0,255,65,0.06)",
+                background: "color-mix(in srgb, var(--accent) 6%, transparent)",
               }}
             >
               ▸ Go to Dashboard
@@ -477,12 +477,12 @@ export default function TokensPage() {
             {/* Summary: total + donut */}
             <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-4 mb-6">
               <div
-                className="border border-[#1c1c1c] px-7 py-6 flex items-center justify-between flex-wrap gap-3 relative"
-                style={{ background: "#090909" }}
+                className="border border-[var(--line)] px-7 py-6 flex items-center justify-between flex-wrap gap-3 relative"
+                style={{ background: "var(--surface)" }}
               >
                 <div
                   className="absolute top-0 left-0 right-0 h-px"
-                  style={{ background: "linear-gradient(90deg, transparent, #262626, transparent)" }}
+                  style={{ background: "linear-gradient(90deg, transparent, var(--line-strong), transparent)" }}
                 />
                 <div>
                   <div
@@ -491,7 +491,7 @@ export default function TokensPage() {
                       fontSize: 10,
                       letterSpacing: "0.2em",
                       textTransform: "uppercase",
-                      color: "#a0a0a0",
+                      color: "var(--fg-muted)",
                       opacity: 0.6,
                     }}
                   >
@@ -500,7 +500,7 @@ export default function TokensPage() {
                   {isLoading ? (
                     <div
                       className="font-bold"
-                      style={{ fontSize: 34, color: "#a0a0a0", letterSpacing: "-0.02em" }}
+                      style={{ fontSize: 34, color: "var(--fg-muted)", letterSpacing: "-0.02em" }}
                     >
                       Loading…
                     </div>
@@ -509,9 +509,9 @@ export default function TokensPage() {
                       className="font-bold tabular-nums"
                       style={{
                         fontSize: 34,
-                        color: "#00ff41",
+                        color: "var(--accent)",
                         letterSpacing: "-0.02em",
-                        textShadow: "0 0 22px rgba(0,255,65,0.22)",
+                        textShadow: "0 0 22px color-mix(in srgb, var(--accent) 22%, transparent)",
                       }}
                     >
                       <AnimatedCount target={totalTokenValue} prefix="$" decimals={2} />
@@ -521,7 +521,7 @@ export default function TokensPage() {
                 <div
                   style={{
                     fontSize: 12,
-                    color: "#a0a0a0",
+                    color: "var(--fg-muted)",
                     opacity: 0.6,
                     letterSpacing: "0.04em",
                     textAlign: "right",
@@ -534,8 +534,8 @@ export default function TokensPage() {
               </div>
 
               <div
-                className="border border-[#1c1c1c] px-6 py-5 flex items-center gap-4"
-                style={{ background: "#090909" }}
+                className="border border-[var(--line)] px-6 py-5 flex items-center gap-4"
+                style={{ background: "var(--surface)" }}
               >
                 {donutSlices.length > 0 ? (
                   <Donut data={donutSlices} size={92} />
@@ -544,7 +544,7 @@ export default function TokensPage() {
                     style={{
                       width: 92,
                       height: 92,
-                      border: "1px solid #1c1c1c",
+                      border: "1px solid var(--line)",
                       flexShrink: 0,
                     }}
                   />
@@ -556,14 +556,14 @@ export default function TokensPage() {
                       fontSize: 10,
                       letterSpacing: "0.2em",
                       textTransform: "uppercase",
-                      color: "#a0a0a0",
+                      color: "var(--fg-muted)",
                       opacity: 0.6,
                     }}
                   >
                     By Chain
                   </div>
                   {chainBreakdown.length === 0 ? (
-                    <div style={{ fontSize: 12, color: "#a0a0a0", opacity: 0.5 }}>—</div>
+                    <div style={{ fontSize: 12, color: "var(--fg-muted)", opacity: 0.5 }}>—</div>
                   ) : (
                     chainBreakdown.slice(0, 5).map((c) => (
                       <div key={c.chain} className="flex items-center gap-2" style={{ fontSize: 12 }}>
@@ -578,13 +578,13 @@ export default function TokensPage() {
                         />
                         <span
                           className="flex-1 truncate"
-                          style={{ color: "#aaaaaa" }}
+                          style={{ color: "var(--fg-muted)" }}
                         >
                           {c.chain}
                         </span>
                         <span
                           className="font-bold tabular-nums"
-                          style={{ color: "#e0e0e0" }}
+                          style={{ color: "var(--fg)" }}
                         >
                           {c.pct.toFixed(0)}%
                         </span>
@@ -597,12 +597,12 @@ export default function TokensPage() {
 
             {/* Controls */}
             <div
-              className="flex items-stretch border border-[#1c1c1c] mb-4 flex-wrap"
-              style={{ background: "#090909" }}
+              className="flex items-stretch border border-[var(--line)] mb-4 flex-wrap"
+              style={{ background: "var(--surface)" }}
             >
-              <div className="flex-1 flex items-center px-3.5 border-r border-[#1c1c1c] min-w-[180px]">
+              <div className="flex-1 flex items-center px-3.5 border-r border-[var(--line)] min-w-[180px]">
                 <span
-                  className="mr-2.5 text-[#00ff41]"
+                  className="mr-2.5 text-[var(--accent)]"
                   style={{ fontSize: 14 }}
                 >
                   &gt;_
@@ -616,7 +616,7 @@ export default function TokensPage() {
                   style={{
                     fontFamily: "var(--font-jetbrains-mono)",
                     fontSize: 14,
-                    color: "#e0e0e0",
+                    color: "var(--fg)",
                     padding: "12px 0",
                   }}
                 />
@@ -627,13 +627,13 @@ export default function TokensPage() {
 
             {/* Sections */}
             {isLoading && grouped.evmGroups.length === 0 && grouped.nonEvmGroups.length === 0 ? (
-              <div className="text-center py-16" style={{ color: "#a0a0a0" }}>
+              <div className="text-center py-16" style={{ color: "var(--fg-muted)" }}>
                 <div
                   className="mx-auto mb-4"
                   style={{
                     width: 24,
                     height: 24,
-                    border: "2px solid #00ff41",
+                    border: "2px solid var(--accent)",
                     borderTopColor: "transparent",
                     animation: "wal-spin 1s linear infinite",
                   }}
@@ -644,7 +644,7 @@ export default function TokensPage() {
                 </span>
               </div>
             ) : grouped.evmGroups.length === 0 && grouped.nonEvmGroups.length === 0 ? (
-              <div className="text-center py-16" style={{ color: "#a0a0a0", fontSize: 15 }}>
+              <div className="text-center py-16" style={{ color: "var(--fg-muted)", fontSize: 15 }}>
                 No tokens found{search ? ` matching "${search}"` : ""}.
               </div>
             ) : (
@@ -653,31 +653,31 @@ export default function TokensPage() {
                 {grouped.evmGroups.length > 0 && (
                   <ChainSection
                     title="EVM"
-                    color="#627eea"
+                    color="var(--chain-ethereum)"
                     total={evmTotal}
                     tokenCount={evmTokenCount}
                   >
                     {grouped.evmGroups.map((cg, i) => (
                       <div
                         key={cg.chain}
-                        className={i < grouped.evmGroups.length - 1 ? "border-b border-[#1c1c1c]" : ""}
+                        className={i < grouped.evmGroups.length - 1 ? "border-b border-[var(--line)]" : ""}
                       >
                         <div
                           className="flex items-center justify-between px-6 py-2.5"
-                          style={{ background: "#0a0a0a" }}
+                          style={{ background: "var(--surface)" }}
                         >
                           <div className="flex items-center gap-2.5">
                             <div
                               style={{
                                 width: 7,
                                 height: 7,
-                                background: CHAIN_COLORS[cg.chain] ?? "#a0a0a0",
+                                background: CHAIN_COLORS[cg.chain] ?? "var(--fg-muted)",
                               }}
                             />
                             <span
                               style={{
                                 fontSize: 14,
-                                color: "#aaaaaa",
+                                color: "var(--fg-muted)",
                                 fontWeight: 600,
                                 letterSpacing: "0.04em",
                               }}
@@ -687,7 +687,7 @@ export default function TokensPage() {
                             <span
                               style={{
                                 fontSize: 11,
-                                color: "#a0a0a0",
+                                color: "var(--fg-muted)",
                                 opacity: 0.55,
                                 letterSpacing: "0.1em",
                                 textTransform: "uppercase",
@@ -698,7 +698,7 @@ export default function TokensPage() {
                           </div>
                           <span
                             className="font-bold tabular-nums"
-                            style={{ fontSize: 15, color: "#aaaaaa" }}
+                            style={{ fontSize: 15, color: "var(--fg-muted)" }}
                           >
                             {cg.total > 0 ? fmt$(cg.total) : "—"}
                           </span>
@@ -716,7 +716,7 @@ export default function TokensPage() {
                   <ChainSection
                     key={cg.chain}
                     title={cg.chain}
-                    color={CHAIN_COLORS[cg.chain] ?? "#a0a0a0"}
+                    color={CHAIN_COLORS[cg.chain] ?? "var(--fg-muted)"}
                     total={cg.total}
                     tokenCount={cg.toks.length}
                   >
@@ -747,17 +747,17 @@ function ToggleBtn({
     <button
       type="button"
       onClick={() => onChange(!value)}
-      className="flex items-center gap-1.5 px-4 border-r border-[#1c1c1c] last:border-r-0 transition-colors"
+      className="flex items-center gap-1.5 px-4 border-r border-[var(--line)] last:border-r-0 transition-colors"
       style={{
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 11,
         height: 42,
         letterSpacing: "0.12em",
         textTransform: "uppercase",
-        background: value ? "rgba(0,255,65,0.06)" : "transparent",
-        color: value ? "#00ff41" : "#a0a0a0",
+        background: value ? "color-mix(in srgb, var(--accent) 6%, transparent)" : "transparent",
+        color: value ? "var(--accent)" : "var(--fg-muted)",
         border: "none",
-        borderRight: "1px solid #1c1c1c",
+        borderRight: "1px solid var(--line)",
         cursor: "pointer",
       }}
     >
@@ -766,9 +766,9 @@ function ToggleBtn({
         style={{
           width: 9,
           height: 9,
-          border: `1px solid ${value ? "#00992a" : "#262626"}`,
-          background: value ? "rgba(0,255,65,0.06)" : "transparent",
-          color: "#00ff41",
+          border: `1px solid ${value ? "var(--accent-hover)" : "var(--line-strong)"}`,
+          background: value ? "color-mix(in srgb, var(--accent) 6%, transparent)" : "transparent",
+          color: "var(--accent)",
           fontSize: 7,
         }}
       >

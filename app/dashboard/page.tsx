@@ -56,81 +56,81 @@ function chainCategory(chain: string): "EVM" | "Solana" | "Sui" | "OTHER" {
 }
 
 const PROTOCOL_COLORS: Record<string, string> = {
-  Aerodrome:    "#00ff41",
-  "Uniswap V3": "#00d4ff",
-  Velodrome:    "#3d9fff",
-  Orca:         "#ffaa00",
-  Raydium:      "#ff3355",
-  Cetus:        "#9945ff",
-  Bluefin:      "#3d9fff",
-  Momentum:     "#00ff41",
-  HyperSwap:    "#ffaa00",
-  KittenSwap:   "#9945ff",
-  ProjectX:     "#9945ff",
-  PRJX:         "#9945ff",
-  PancakeSwap:  "#ffaa00",
+  Aerodrome:    "var(--accent)",
+  "Uniswap V3": "var(--info)",
+  Velodrome:    "var(--info)",
+  Orca:         "var(--warn)",
+  Raydium:      "var(--neg)",
+  Cetus:        "var(--chain-solana)",
+  Bluefin:      "var(--info)",
+  Momentum:     "var(--accent)",
+  HyperSwap:    "var(--warn)",
+  KittenSwap:   "var(--chain-solana)",
+  ProjectX:     "var(--chain-solana)",
+  PRJX:         "var(--chain-solana)",
+  PancakeSwap:  "var(--warn)",
 };
 
 const STABLES_SET = new Set(["USDC", "USDT", "DAI", "USDbC", "USDC.e", "USDS"]);
 
 export const TOKEN_COLORS: Record<string, string> = {
-  ETH: "#627EEA", WETH: "#627EEA",
-  USDC: "#2775CA", "USDC.e": "#2775CA", USDbC: "#2775CA",
+  ETH: "var(--chain-ethereum)", WETH: "var(--chain-ethereum)",
+  USDC: "var(--chain-usdc)", "USDC.e": "var(--chain-usdc)", USDbC: "var(--chain-usdc)",
   USDT: "#26A17B",
-  BTC: "#F7931A", WBTC: "#F7931A", cbBTC: "#F7931A", tBTC: "#F7931A",
-  SOL: "#9945FF", WSOL: "#9945FF",
+  BTC: "var(--chain-bitcoin)", WBTC: "var(--chain-bitcoin)", cbBTC: "var(--chain-bitcoin)", tBTC: "var(--chain-bitcoin)",
+  SOL: "var(--chain-solana)", WSOL: "var(--chain-solana)",
   SUI: "#6FBCF0",
-  HYPE: "#00D4AA", WHYPE: "#00D4AA",
+  HYPE: "var(--pos)", WHYPE: "var(--pos)",
   DAI: "#F5AC37",
-  BNB: "#F0B90B", WBNB: "#F0B90B",
-  MATIC: "#8247E5", POL: "#8247E5",
-  AVAX: "#E84142",
+  BNB: "var(--chain-bnb)", WBNB: "var(--chain-bnb)",
+  MATIC: "var(--chain-polygon)", POL: "var(--chain-polygon)",
+  AVAX: "var(--chain-avalanche)",
   ARB: "#2D9CDB",
-  OP: "#FF0420",
+  OP: "var(--chain-optimism)",
   USDS: "#26A17B",
 };
 
 export function getTokenColor(symbol: string): string {
-  return TOKEN_COLORS[symbol] ?? "#6B7280";
+  return TOKEN_COLORS[symbol] ?? "var(--fg-subtle)";
 }
 
 // ── Terminal palette (matches dashboard.html exactly) ─────────────────────────
 const C = {
-  bg:         "#050505",
-  bg1:        "#090909",
-  bg2:        "#0d0d0d",
-  bg3:        "#121212",
-  bg4:        "#171717",
-  border:     "#1c1c1c",
-  borderHi:   "#262626",
-  borderGlow: "#2e2e2e",
-  text:       "#a0a0a0",
-  textMid:    "#aaaaaa",
-  textBright: "#e0e0e0",
-  textWhite:  "#f0f0f0",
-  green:      "#00ff41",
+  bg:         "var(--bg)",
+  bg1:        "var(--surface)",
+  bg2:        "var(--surface)",
+  bg3:        "var(--surface)",
+  bg4:        "var(--surface-2)",
+  border:     "var(--line)",
+  borderHi:   "var(--line-strong)",
+  borderGlow: "var(--line-strong)",
+  text:       "var(--fg-muted)",
+  textMid:    "var(--fg-muted)",
+  textBright: "var(--fg)",
+  textWhite:  "var(--fg)",
+  green:      "var(--accent)",
   green2:     "#00e535",
-  greenDim:   "#00b82a",
-  greenFaint: "rgba(0,255,65,0.06)",
-  greenGlow:  "rgba(0,255,65,0.18)",
-  cyan:       "#00d4ff",
+  greenDim:   "var(--accent-hover)",
+  greenFaint: "color-mix(in srgb, var(--accent) 6%, transparent)",
+  greenGlow:  "color-mix(in srgb, var(--accent) 18%, transparent)",
+  cyan:       "var(--info)",
   cyanDim:    "#0099bb",
-  cyanFaint:  "rgba(0,212,255,0.07)",
-  red:        "#ff3355",
-  redFaint:   "rgba(255,51,85,0.08)",
-  purple:     "#9945ff",
-  blue:       "#3d9fff",
-  amber:      "#ffaa00",
+  cyanFaint:  "color-mix(in srgb, var(--info) 7%, transparent)",
+  red:        "var(--neg)",
+  redFaint:   "color-mix(in srgb, var(--neg) 8%, transparent)",
+  purple:     "var(--chain-solana)",
+  blue:       "var(--info)",
+  amber:      "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
 const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.015) 3px, rgba(0,0,0,0.015) 4px)";
+  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
 
 // ── Chain UI tokens ───────────────────────────────────────────────────────────
 const CHAIN_DISPLAY: Record<"EVM" | "Solana" | "Sui", { color: string; faint: string; border: string }> = {
-  EVM:    { color: C.cyan,   faint: "rgba(0,212,255,0.06)",  border: "rgba(0,212,255,0.27)"  },
+  EVM:    { color: C.cyan,   faint: "color-mix(in srgb, var(--info) 6%, transparent)",  border: "color-mix(in srgb, var(--info) 27%, transparent)"  },
   Solana: { color: C.purple, faint: "rgba(153,69,255,0.06)", border: "rgba(153,69,255,0.27)" },
   Sui:    { color: C.blue,   faint: "rgba(61,159,255,0.06)", border: "rgba(61,159,255,0.27)" },
 };
@@ -141,7 +141,7 @@ function TokenCircle({
 }: { symbol: string; size?: number; style?: CSSProperties }) {
   const [imgError, setImgError] = useState(false);
   const logoUrl = getTokenLogo(symbol);
-  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "#6B7280";
+  const color = TOKEN_COLORS[symbol] ?? TOKEN_COLORS[symbol.toUpperCase()] ?? "var(--fg-subtle)";
   const shared: CSSProperties = {
     width: size, height: size, borderRadius: "50%",
     border: `2px solid ${C.bg}`, flexShrink: 0, ...style,
@@ -171,7 +171,7 @@ function getProtocolColor(protocol: string): string {
   for (const [key, color] of Object.entries(PROTOCOL_COLORS)) {
     if (protocol.includes(key)) return color;
   }
-  return "#9945ff";
+  return "var(--chain-solana)";
 }
 
 function effectiveStatus(p: { value: number; fees: number; status: string }): "In Range" | "Out of Range" | "Closed" {
@@ -674,9 +674,9 @@ export default function Dashboard() {
         @keyframes _fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         .spin-icon { display:inline-block; animation: _spin 1s linear infinite; }
         .ptable tbody tr { transition: background 0.1s; }
-        .ptable tbody tr:hover td { background: rgba(255,255,255,0.013); }
+        .ptable tbody tr:hover td { background: var(--surface-hover); }
         .pos-row { transition: background 0.1s; }
-        .pos-row:hover { background: rgba(255,255,255,0.013); }
+        .pos-row:hover { background: var(--surface-hover); }
         .nav-tab-link:hover { color: ${C.textMid} !important; background: ${C.bg2} !important; }
         .filter-pill { transition: all 0.12s; }
         .filter-pill:hover { color: ${C.textMid}; border-color: ${C.border}; }
@@ -688,7 +688,7 @@ export default function Dashboard() {
         .pane-link:hover { color: ${C.green}; }
         .lending-card:hover { border-color: ${C.green} !important; }
         .term-btn:hover { color: ${C.green} !important; border-color: ${C.borderGlow} !important; background: ${C.bg2} !important; }
-        .save-btn:hover { background: ${C.green2} !important; box-shadow: 0 4px 20px rgba(0,255,65,0.2); }
+        .save-btn:hover { background: ${C.green2} !important; box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 20%, transparent); }
         .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
         .scroll-thin::-webkit-scrollbar-thumb { background: ${C.borderHi}; }
         .anim-fade { animation: _fadeUp 0.45s ease both; }
@@ -728,8 +728,8 @@ export default function Dashboard() {
             gap: 12,
             padding: "10px 16px",
             margin: "12px 16px 0",
-            background: "rgba(0,255,136,0.04)",
-            border: "1px solid rgba(0,255,136,0.2)",
+            background: "color-mix(in srgb, var(--pos) 4%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--pos) 20%, transparent)",
             borderRadius: 4,
             fontFamily: FONT,
             flexWrap: "wrap",
@@ -738,7 +738,7 @@ export default function Dashboard() {
           <span
             style={{
               fontSize: 10,
-              color: "#666",
+              color: "var(--fg-subtle)",
               letterSpacing: "0.08em",
               textTransform: "uppercase",
               flexShrink: 0,
@@ -746,11 +746,11 @@ export default function Dashboard() {
           >
             // VIEWING_ADDRESS
           </span>
-          <span style={{ color: "#1a1a1a", fontSize: 12, flexShrink: 0 }}>·</span>
+          <span style={{ color: "var(--surface-2)", fontSize: 12, flexShrink: 0 }}>·</span>
           <span
             style={{
               fontSize: 13,
-              color: "#00ff88",
+              color: "var(--pos)",
               letterSpacing: "0.04em",
               fontFamily: FONT,
               wordBreak: "break-all",
@@ -764,8 +764,8 @@ export default function Dashboard() {
           <span
             style={{
               fontSize: 9,
-              color: "#444",
-              background: "rgba(255,255,255,0.03)",
+              color: "var(--fg-subtle)",
+              background: "var(--surface-hover)",
               padding: "2px 6px",
               borderRadius: 2,
               letterSpacing: "0.1em",
@@ -780,9 +780,9 @@ export default function Dashboard() {
             onClick={handleAddScanToWatched}
             style={{
               fontSize: 10,
-              color: "#00ff88",
-              background: "rgba(0,255,136,0.06)",
-              border: "1px solid rgba(0,255,136,0.27)",
+              color: "var(--pos)",
+              background: "color-mix(in srgb, var(--pos) 6%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--pos) 27%, transparent)",
               borderRadius: 3,
               padding: "5px 10px",
               letterSpacing: "0.08em",
@@ -791,12 +791,12 @@ export default function Dashboard() {
               transition: "border-color 0.12s, background 0.12s",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "rgba(0,255,136,0.53)";
-              e.currentTarget.style.background = "rgba(0,255,136,0.1)";
+              e.currentTarget.style.borderColor = "color-mix(in srgb, var(--pos) 53%, transparent)";
+              e.currentTarget.style.background = "color-mix(in srgb, var(--pos) 10%, transparent)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "rgba(0,255,136,0.27)";
-              e.currentTarget.style.background = "rgba(0,255,136,0.06)";
+              e.currentTarget.style.borderColor = "color-mix(in srgb, var(--pos) 27%, transparent)";
+              e.currentTarget.style.background = "color-mix(in srgb, var(--pos) 6%, transparent)";
             }}
           >
             + ADD TO WATCHED
@@ -807,9 +807,9 @@ export default function Dashboard() {
             title="Dismiss scan and return to your own wallets"
             style={{
               fontSize: 12,
-              color: "#333",
+              color: "var(--line-strong)",
               background: "transparent",
-              border: "1px solid #1a1a1a",
+              border: "1px solid var(--surface-2)",
               borderRadius: 3,
               padding: "4px 9px",
               cursor: "pointer",
@@ -818,12 +818,12 @@ export default function Dashboard() {
               transition: "color 0.12s, border-color 0.12s",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = "#888";
-              e.currentTarget.style.borderColor = "#333";
+              e.currentTarget.style.color = "var(--fg-subtle)";
+              e.currentTarget.style.borderColor = "var(--line-strong)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#333";
-              e.currentTarget.style.borderColor = "#1a1a1a";
+              e.currentTarget.style.color = "var(--line-strong)";
+              e.currentTarget.style.borderColor = "var(--surface-2)";
             }}
           >
             ✕
@@ -863,7 +863,7 @@ export default function Dashboard() {
               aria-hidden
               style={{
                 position: "absolute", right: -40, top: -40, width: 300, height: 300,
-                background: "radial-gradient(circle, rgba(0,255,65,0.04) 0%, transparent 70%)",
+                background: "radial-gradient(circle, color-mix(in srgb, var(--accent) 4%, transparent) 0%, transparent 70%)",
                 pointerEvents: "none",
               }}
             />
@@ -900,7 +900,7 @@ export default function Dashboard() {
                     color: C.textWhite,
                     letterSpacing: "-0.04em",
                     lineHeight: 1,
-                    textShadow: "0 0 60px rgba(0,255,65,0.08)",
+                    textShadow: "0 0 60px color-mix(in srgb, var(--accent) 8%, transparent)",
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
@@ -1052,7 +1052,7 @@ export default function Dashboard() {
                       color:
                         s.cls === "green" ? C.green :
                         s.cls === "white" ? C.textWhite : C.textMid,
-                      textShadow: s.cls === "green" ? "0 0 20px rgba(0,255,65,0.2)" : "none",
+                      textShadow: s.cls === "green" ? "0 0 20px color-mix(in srgb, var(--accent) 20%, transparent)" : "none",
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
@@ -1125,7 +1125,7 @@ export default function Dashboard() {
                   enables this CTA. */}
               {hasWallet && (
                 <>
-                  <div style={{ height: 1, background: "#1a1a1a", margin: "8px 0 8px" }} />
+                  <div style={{ height: 1, background: "var(--surface-2)", margin: "8px 0 8px" }} />
                   <Link
                     href="/dashboard/wallets"
                     style={{
@@ -1133,10 +1133,10 @@ export default function Dashboard() {
                       alignItems: "center",
                       gap: 9,
                       padding: "10px 12px",
-                      background: "rgba(0,255,136,0.04)",
-                      border: "1px solid rgba(0,255,136,0.27)",
+                      background: "color-mix(in srgb, var(--pos) 4%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--pos) 27%, transparent)",
                       borderRadius: 4,
-                      color: "#00ff88",
+                      color: "var(--pos)",
                       textDecoration: "none",
                       fontFamily: "var(--font-jetbrains-mono)",
                       fontSize: 11,
@@ -1144,21 +1144,21 @@ export default function Dashboard() {
                       transition: "border-color 0.12s, background 0.12s",
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = "rgba(0,255,136,0.53)";
-                      e.currentTarget.style.background = "rgba(0,255,136,0.08)";
+                      e.currentTarget.style.borderColor = "color-mix(in srgb, var(--pos) 53%, transparent)";
+                      e.currentTarget.style.background = "color-mix(in srgb, var(--pos) 8%, transparent)";
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = "rgba(0,255,136,0.27)";
-                      e.currentTarget.style.background = "rgba(0,255,136,0.04)";
+                      e.currentTarget.style.borderColor = "color-mix(in srgb, var(--pos) 27%, transparent)";
+                      e.currentTarget.style.background = "color-mix(in srgb, var(--pos) 4%, transparent)";
                     }}
                   >
-                    <span style={{ color: "#3a3a3a", fontSize: 11, flexShrink: 0 }}>▸</span>
-                    <span style={{ flex: 1, color: "#00ff88" }}>WALLET_BALANCES</span>
+                    <span style={{ color: "var(--line-strong)", fontSize: 11, flexShrink: 0 }}>▸</span>
+                    <span style={{ flex: 1, color: "var(--pos)" }}>WALLET_BALANCES</span>
                     <span
                       style={{
                         fontSize: 9,
-                        color: "rgba(0,255,136,0.4)",
-                        background: "rgba(0,255,136,0.067)",
+                        color: "color-mix(in srgb, var(--pos) 40%, transparent)",
+                        background: "color-mix(in srgb, var(--pos) 6.7%, transparent)",
                         padding: "2px 6px",
                         borderRadius: 2,
                         letterSpacing: "0.08em",
@@ -1166,7 +1166,7 @@ export default function Dashboard() {
                     >
                       VIEW
                     </span>
-                    <span style={{ color: "rgba(0,255,136,0.5)", fontSize: 10, flexShrink: 0 }}>▸</span>
+                    <span style={{ color: "color-mix(in srgb, var(--pos) 50%, transparent)", fontSize: 10, flexShrink: 0 }}>▸</span>
                   </Link>
                 </>
               )}
@@ -1202,7 +1202,7 @@ export default function Dashboard() {
                   letterSpacing: "-0.03em",
                   lineHeight: 1,
                   margin: "6px 0",
-                  textShadow: "0 0 32px rgba(0,255,65,0.25)",
+                  textShadow: "0 0 32px color-mix(in srgb, var(--accent) 25%, transparent)",
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
@@ -1270,7 +1270,7 @@ export default function Dashboard() {
                     letterSpacing: "-0.03em",
                     lineHeight: 1,
                     margin: "6px 0",
-                    textShadow: "0 0 32px rgba(0,212,255,0.2)",
+                    textShadow: "0 0 32px color-mix(in srgb, var(--info) 20%, transparent)",
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
@@ -1490,9 +1490,9 @@ export default function Dashboard() {
                           // Active = full green box on all 4 sides; inactive =
                           // no border. Setting border (shorthand) covers all
                           // 4 sides so no gap is possible.
-                          border: active ? "1px solid #00ff41" : "none",
+                          border: active ? "1px solid var(--accent)" : "none",
                           background: "transparent",
-                          color: active ? "#00ff41" : C.text,
+                          color: active ? "var(--accent)" : C.text,
                           marginRight: 6,
                         }}
                       >
@@ -1538,7 +1538,7 @@ export default function Dashboard() {
                         <stop offset="100%" stopColor={C.green} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="4 6" stroke="rgba(255,255,255,0.03)" />
+                    <CartesianGrid strokeDasharray="4 6" stroke="var(--surface-hover)" />
                     <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.2)", fontSize: 11, fontFamily: FONT }}
                       axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis tick={{ fill: "rgba(255,255,255,0.18)", fontSize: 11, fontFamily: FONT }}
@@ -1650,8 +1650,8 @@ export default function Dashboard() {
                       m.cls === "cyan"  ? C.cyan  :
                       C.textBright,
                     textShadow:
-                      m.cls === "green" ? "0 0 24px rgba(0,255,65,0.2)" :
-                      m.cls === "cyan"  ? "0 0 24px rgba(0,212,255,0.15)" : "none",
+                      m.cls === "green" ? "0 0 24px color-mix(in srgb, var(--accent) 20%, transparent)" :
+                      m.cls === "cyan"  ? "0 0 24px color-mix(in srgb, var(--info) 15%, transparent)" : "none",
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
@@ -1697,7 +1697,7 @@ export default function Dashboard() {
                       color: active ? C.green : C.text,
                       cursor: "pointer",
                       transition: "all 0.12s",
-                      boxShadow: active ? "0 0 10px rgba(0,255,65,0.08)" : "none",
+                      boxShadow: active ? "0 0 10px color-mix(in srgb, var(--accent) 8%, transparent)" : "none",
                     }}
                   >
                     {s === "All" ? "All Positions" : s}{" "}
@@ -1970,7 +1970,7 @@ export default function Dashboard() {
                           <td style={{ padding: "13px 16px 13px 0", borderBottom: `1px solid ${C.border}`, textAlign: "right", verticalAlign: "middle", cursor: "pointer" }}>
                             {pos.apy > 0 ? (
                               <>
-                                <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px rgba(0,255,65,0.25)", fontVariantNumeric: "tabular-nums" }}>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px color-mix(in srgb, var(--accent) 25%, transparent)", fontVariantNumeric: "tabular-nums" }}>
                                   {pos.apy.toFixed(1)}%
                                 </div>
                                 <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
@@ -1979,7 +1979,7 @@ export default function Dashboard() {
                               </>
                             ) : derivedApr !== null ? (
                               <>
-                                <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px rgba(0,255,65,0.25)", fontVariantNumeric: "tabular-nums" }}>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px color-mix(in srgb, var(--accent) 25%, transparent)", fontVariantNumeric: "tabular-nums" }}>
                                   ~{derivedApr.toFixed(1)}%
                                 </div>
                                 <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
@@ -2001,7 +2001,7 @@ export default function Dashboard() {
                                     fontWeight: 700,
                                     color: pnlUsd >= 0 ? C.green : C.red,
                                     fontVariantNumeric: "tabular-nums",
-                                    textShadow: pnlUsd >= 0 ? "0 0 10px rgba(0,255,65,0.25)" : "0 0 10px rgba(255,51,85,0.25)",
+                                    textShadow: pnlUsd >= 0 ? "0 0 10px color-mix(in srgb, var(--accent) 25%, transparent)" : "0 0 10px color-mix(in srgb, var(--neg) 25%, transparent)",
                                   }}
                                 >
                                   {pnlUsd >= 0 ? "+" : "-"}{fmt$(Math.abs(pnlUsd))}
@@ -2135,13 +2135,13 @@ export default function Dashboard() {
                   // via ZERION_CHAIN_MAP. Unknown chains fall through to
                   // the neutral border color — never crashes the row.
                   const ZERION_CHAIN_COLORS: Record<string, string> = {
-                    "Ethereum":  "#627eea",
+                    "Ethereum":  "var(--chain-ethereum)",
                     "Arbitrum":  "#28a0f0",
-                    "Optimism":  "#ff0420",
-                    "Polygon":   "#8247e5",
-                    "BNB Chain": "#f0b90b",
-                    "Avalanche": "#e84142",
-                    "Base":      "#0052ff",
+                    "Optimism":  "var(--chain-optimism)",
+                    "Polygon":   "var(--chain-polygon)",
+                    "BNB Chain": "var(--chain-bnb)",
+                    "Avalanche": "var(--chain-avalanche)",
+                    "Base":      "var(--chain-base)",
                     "Fantom":    "#1969ff",
                     "Gnosis":    "#04795b",
                     "Celo":      "#35d07f",
@@ -2150,7 +2150,7 @@ export default function Dashboard() {
                     "Scroll":    "#ffeed4",
                     "Blast":     "#fcfc03",
                     "Mode":      "#dffe00",
-                    "Mantle":    "#000000",
+                    "Mantle":    "var(--bg)",
                     "Manta":     "#19d3ff",
                     "Metis":     "#00dacc",
                     "Sonic":     "#f76b1c",
@@ -2311,7 +2311,7 @@ export default function Dashboard() {
             <span><span style={{ color: C.green }}>[F5]</span> refresh</span>
             <span><span style={{ color: C.green }}>[W]</span> manage wallets</span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: C.borderGlow }}>v0.9.1-beta</span>
+            <span style={{ color: "var(--fg-subtle)" }}>v0.9.1-beta</span>
           </div>
         </main>
       </div>
@@ -2320,7 +2320,7 @@ export default function Dashboard() {
       {showManageWallets && mounted && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div
-            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(4px)" }}
+            style={{ position: "absolute", inset: 0, background: "var(--overlay)", backdropFilter: "blur(4px)" }}
             onClick={() => {
               setShowManageWallets(false);
               setShowEvmConnectors(false);
@@ -2448,7 +2448,7 @@ export default function Dashboard() {
                       width: "100%",
                       background: addWalletAddress.trim() ? C.green : C.bg1,
                       border: `1px solid ${addWalletAddress.trim() ? C.green : C.border}`,
-                      color: addWalletAddress.trim() ? "#000" : C.text,
+                      color: addWalletAddress.trim() ? "var(--bg)" : C.text,
                       padding: "9px",
                       fontSize: 14,
                       fontWeight: 700,
@@ -2937,7 +2937,7 @@ function SubPickerOverlay({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(0,0,0,0.85)",
+        background: "var(--overlay)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

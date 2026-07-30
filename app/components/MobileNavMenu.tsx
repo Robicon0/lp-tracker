@@ -18,9 +18,9 @@ const NAV_LINKS: { href: string; label: string }[] = [
 ];
 
 const FONT     = "'JetBrains Mono','Courier New',monospace";
-const GREEN    = "#00ff41";
-const BORDER   = "#1c1c1c";
-const TEXT_MID = "#b4b4b4";
+const GREEN    = "var(--accent)";
+const BORDER   = "var(--line)";
+const TEXT_MID = "var(--fg-muted)";
 
 export default function MobileNavMenu() {
   const pathname = usePathname() ?? "/";
@@ -96,9 +96,9 @@ export default function MobileNavMenu() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "#050505",
+              background: "var(--bg)",
               borderBottom: `1px solid ${BORDER}`,
-              boxShadow: "0 8px 32px rgba(0, 255, 65, 0.05)",
+              boxShadow: "0 8px 32px color-mix(in srgb, var(--accent) 5%, transparent)",
             }}
           >
             {NAV_LINKS.map((l) => {
@@ -116,7 +116,7 @@ export default function MobileNavMenu() {
                     letterSpacing: "0.16em",
                     textTransform: "uppercase",
                     color:      active ? GREEN : TEXT_MID,
-                    background: active ? "rgba(0, 255, 65, 0.05)" : "transparent",
+                    background: active ? "color-mix(in srgb, var(--accent) 5%, transparent)" : "transparent",
                     borderLeft: `3px solid ${active ? GREEN : "transparent"}`,
                     borderBottom: `1px solid ${BORDER}`,
                     textDecoration: "none",
