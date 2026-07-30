@@ -366,6 +366,46 @@ accrued-interest pricing-invariants decision, so if that decision is not yet mad
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`1986313` + `0f33321`** — **UI/DESIGN: design-token theme system (light + dark), home v2
+  live, LP calculator.** NOT a sprint — accumulated local UI work shipped in one pass, and
+  the first change to the product's visual layer since the terminal-green original. NEW
+  `app/tokens.css` is now the **single source of truth for colour** (three tiers:
+  primitives → semantic → component; only the SEMANTIC tier may be referenced by a
+  component). **A raw hex in a .tsx is now a bug**, with ONE deliberate exception: chain/
+  token BRAND colours (`--chain-solana` etc.), which are external identity and stay
+  mode-invariant on purpose. Light mode swaps `data-theme` on `<html>` and rebinds the
+  semantic tier only; `app/components/theme/ThemeScript.tsx` stamps the attribute in a
+  BLOCKING inline `<head>` script (resolution order: stored choice → OS preference → dark)
+  so there is no flash of the wrong theme — never move this to a `useEffect`. Tailwind v4
+  `@theme inline` maps the tokens to utilities (`bg-surface`, `text-fg-muted`,
+  `border-line`, `text-pos/neg/warn/info`, `text-accent`), which is why `inline` matters:
+  it keeps the `var()` live so a swap is instant rather than a rebuild. **Home v2**
+  (`app/components/home/*`) is gated on `NEXT_PUBLIC_HOME_V2 === "1"`, now set for
+  **Production** in Vercel (Preview/Development deliberately NOT set — the old home still
+  renders there). Restyled onto tokens: dashboard (+ lending, wallets, position detail),
+  analytics, about, docs, wallet, watched, navbar, sidebars. NEW `/lp-calculator` (IL +
+  hedging; standalone, **no navbar and unlinked from any nav — reachable only by direct
+  URL**). Deps added: framer-motion, lucide-react, clsx, cva, tailwind-merge, radix Slot
+  (shadcn base in `components/ui` + `lib/utils.ts`); playwright as a devDependency.
+  `0f33321` is the follow-up that migrated the calculator itself onto the tokens (it had
+  shipped fully dark in light mode), fixed its 390px layout (nested `grid-cols-2` was
+  producing four ~80px columns; `flex-1` presets forced a min-width wider than the viewport
+  and overlapped the next row), and fixed the **HYPE logo**: the page carried a private
+  `TOKEN_IMAGES` map — the per-route token map **architecture Rule 9 forbids** — whose HYPE
+  entry pointed at CoinGecko image id 37880, which answers **403 with an
+  `application/xml` body**, so Chrome's Opaque Response Blocking rejected it and the logo
+  was broken for every visitor; `tokenLogos.ts` already had the corrected id 50882 on
+  `coin-images.coingecko.com` and the private copy simply never received it. Now imports
+  the shared `TOKEN_LOGOS`. **NO pricing, valuation, position-discovery, or cache logic was
+  touched anywhere in either commit — display layer only, so NO cache bumps.** Verified
+  (Playwright, clean ephemeral profile, no wallet): 30 production page loads (10 pages ×
+  light/dark/mobile) = **0 JS page errors, 0 console errors, 0 page-level horizontal
+  scroll**, `data-theme` correct on all 10; calculator re-verified on a local production
+  build across light+dark × 1440/390 × both tabs = 0 errors, 0 broken images, 0 page
+  overflow. **Verification gotcha worth remembering: a `fullPage` screenshot does NOT
+  trigger `whileInView` reveals**, so home v2's sections photograph blank unless the script
+  scrolls the page first — that is a tooling artifact, not a bug.
+
 - **`4a25c69`** — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1: leverage & liquidation on the
   wrapper detail page.** A leveraged LP user's most important number — distance to
   liquidation — was invisible product-wide; Phase 1 already FETCHED it and threw it away
@@ -485,20 +525,11 @@ shorthand.
   object-filter indexes are ~1-yr shallow (returned 3 of 5 txs for the DEEP/SUI
   position) — ChangedObject is a weak net; FromAddress reached 2025-02 complete.
 
-- **`7784ed2`** — RPC env-var URL guard: NEW `app/lib/rpcEnv.ts` `rpcUrlFromEnv(name)` —
-  a URL-typed RPC env var that is MALFORMED (e.g. a bare API key pasted where the full
-  https URL belongs) now behaves exactly like UNSET, so the existing graceful-degrade
-  paths cover it instead of a fetch URL-parse throw → hard 500 that silently corrupts
-  Capital G/L totals. Wired at all three URL-typed sites: `ALCHEMY_SOLANA_RPC`
-  (solanaClosedPositions — the live incident), `SUI_RPC_URL` (suiRpc → public-fullnode
-  fallback carries the load), `HYPEREVM_ARCHIVE_RPC` (hyperswap/activity ×3 →
-  archive-unconfigured). One-time loud `[rpcEnv]` console.error, never leaks the raw
-  value. Key-typed vars (HELIUS_API_KEY) interpolated into hardcoded URLs can't URL-throw
-  and are unchanged. Verified: 9/9 guard cases incl. the exact incident string; live
-  engine repro returns empty + `complete=false` (uncacheable) without throwing; suiRpc
-  with malformed primary answers from the public fullnode; tsc + build clean. No cache
-  bumps. General pattern: ANY future URL-typed RPC env var must be read via
-  `rpcUrlFromEnv`, never `process.env.X` directly into `fetch`.
+- _(`7784ed2` — RPC env-var URL guard (`app/lib/rpcEnv.ts` `rpcUrlFromEnv`): a MALFORMED
+  URL-typed RPC env var now behaves exactly like UNSET instead of throwing a hard 500 that
+  silently corrupts Capital G/L. **Standing pattern: ANY URL-typed RPC env var must be read
+  via `rpcUrlFromEnv`, never `process.env.X` straight into `fetch`** — rolled off this list;
+  see git history.)_
 
 - _(Sprint SPOT-RESILIENCE-V2 `c6e31ee` — per-position last-known-good (LKG) + degrade funnel
   (STALE→ESTIMATED→EXCLUDED) so a transient per-position failure never deletes a position from
