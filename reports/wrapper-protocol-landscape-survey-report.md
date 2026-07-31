@@ -326,3 +326,161 @@ exactly like DefiTuna Lending.
 - Beefy CLM (receipt token) — https://docs.beefy.finance/beefy-products/clm ; ICHI — https://defillama.com/protocol/ichi
 - Cetus Vaults (Sui) — https://github.com/CetusProtocol/cetus-sdk-v2/blob/main/packages/vaults/README.md ; Kriya vaults — https://docs.kriya.finance/kriya-strategy-vaults/clmm-lp-optimizer-vaults/vault-strategy-auto-rebalancing-and-compounding
 - Solana context (Kamino/Meteora/Loopscale vaults) — https://solana.com/news/solana-ecosystem-roundup-june-2026 ; https://solanacompass.com/projects/loopscale
+
+---
+
+# APPROVED PHASE B BUILD PLAN — vfat / Sickle
+
+**Status:** APPROVED, not yet built. Recorded 2026-07-31.
+**Scope:** implements the vfat/Sickle candidate investigated above (see
+"vfat.io / Sickle ★ TOP CANDIDATE ★" and the two verification sections). This
+section is the authoritative build spec; the sections above are the evidence
+it rests on.
+
+**Origin note:** the Phase A investigation above was produced in this repo and
+is on disk. The plan below was agreed in a separate Claude conversation that
+was never written to a file — it is transcribed here verbatim in substance so
+the decision record survives. Nothing in this section was inferred or invented;
+where the plan is silent, it says so.
+
+## 1. Discovery method
+
+Use the on-chain `sickles(owner)` getter as **primary**. The offline CREATE2
+`predict()` derivation — proven 3/3 against on-chain in Phase A — is a
+**documented future optimization, NOT MVP**. Rationale: `sickles()` returns
+`0x0` for non-users, so one call answers both "what is the address" and "does
+it exist"; the offline path is an RPC-count optimization we can adopt later
+without changing any consumer.
+
+## 2. Chain scope
+
+**All four chains with confirmed factories at once — Base, Optimism, Arbitrum,
+Ethereum.** Not phased by chain. Factory addresses are already confirmed in the
+Phase A deep-dive above:
+
+| Chain | SickleFactory |
+|---|---|
+| Base | `0x71D234A3e1dfC161cc1d081E6496e76627baAc31` |
+| Optimism | `0xB4C31b0f0B76b351395D4aCC94A54dD4e6fbA1E8` |
+| Arbitrum | `0x53d9780DbD3831E3A797Fd215be4131636cD5FDf` |
+| Ethereum | `0x9D70…7F95` (**truncated in the Phase A record — must be resolved to the full address during the build's investigation phase**) |
+
+The factory address is **not uniform across chains**, so a per-chain config map
+is required. That is a config parameter, not a client-code branch — architecture
+Rule 2 compliant.
+
+## 3. New files
+
+- **`app/lib/vfatConfig.ts`** — per-chain factory address config. A plain map
+  (config-not-branch, Rule 2).
+- **`app/api/vfat/sickles/route.ts`** — `GET ?owner=0x..` →
+  `{ sickles: [{ chain, address }] }`, **deployed Sickles only**. One `eth_call`
+  per configured chain to `factory.sickles(owner)`, issued in parallel;
+  non-zero results only.
+- **`app/lib/vfatSickle.ts`** — client-side wrapper that calls the route above.
+
+## 4. Pipeline integration
+
+In `app/contexts/PositionsContext.tsx`, resolve Sickle addresses for the
+effective EVM owner set — connected + watched EOAs, **and the scanned EVM
+address in scan mode too**. Build:
+
+```
+evmFetchAddresses = dedup(evmAddresses ∪ resolvedSickles)
+```
+
+and use that expanded set for the EVM fetcher fan-out (the existing
+`for (const a of evmAddresses)` loop that pushes Aerodrome / Uniswap V3 /
+Velodrome / HyperEVM / PancakeSwap source queries).
+
+**Approved decision — use the SIMPLE version:** scan each resolved Sickle
+address against **ALL** EVM fetchers/chains, exactly how watched wallets already
+work today. A precise per-chain-only fan-out (only querying the chain a given
+Sickle was found on) is noted as a **future optimization, not required for MVP**.
+
+## 5. Non-blocking resolution
+
+Sickle resolution must be **async and non-blocking**. EOA positions render
+immediately at the existing ~1–4 s baseline; Sickle positions stream in
+progressively behind them. This is architecture Rule 10 — the expanded address
+set must never gate the first paint of the positions array.
+
+## 6. Attribution and dedup
+
+- Dedup via a **lowercased Set union**, so a user who has already added their
+  own Sickle address as a watched wallet is not queried twice.
+- Position-level collisions are impossible: a Sickle address ≠ its owner EOA,
+  and NFT ids are unique per position.
+- **CRITICAL:** a Sickle address must **NOT** appear as its own wallet chip in
+  the UI. It is a derived sub-account, not something the user added. Keep
+  `evmFetchAddresses` (used ONLY for the fetch fan-out) completely separate from
+  `evmAddresses` (used for identity, wallet chips, and `/api/wallets/register`),
+  so the existing wallet-chip and registration rules are untouched.
+
+## 7. Closed positions
+
+**IN SCOPE for Phase B, not deferred.** Sickle-held closed positions surface via
+the existing `evmEverOwnedNftIds` mechanism pointed at the Sickle address — this
+was already verified in the Phase A regression test, where Capital G/L correctly
+picked up the closed USDC/cbBTC leg on the primary regression wallet. No
+separate phase needed.
+
+## 8. Cache versioning
+
+- **NO bump** to `lp-pnl-events` or `analytics-activity`. Sickle positions are
+  simply new per-position entries keyed by their own id/URL; no existing cached
+  entry changes shape. Same reasoning as DefiTuna Phase 1's "no cache bumps".
+- **NEW key `vfat_sickles_v1`** for the Sickle-resolution results themselves:
+  cache a **deployed** Sickle address long/permanently (immutable once created);
+  cache a **"no Sickle found"** result **short (~5 min)**, so a newly-created
+  Sickle appears on a later load without a long wait.
+
+## 9. Degrade behaviour (Rule 11)
+
+If the RPC call for a given chain fails, that chain simply contributes **no
+Sickle result for this load**. Never throw, never block the rest of the page.
+
+## 10. Residual verification checks — SHIPPING GATES, not follow-ups
+
+Both were raised in Phase A and are **gates for shipping Phase B**:
+
+- **(a) Gauge-staked-through-a-Sickle.** Confirm a gauge-staked position held
+  through a Sickle surfaces correctly via the existing Aerodrome/Velodrome
+  reader (which already handles staked positions for normal wallets and is
+  address-agnostic). Expected to be a **confirmation, not new code** — but must
+  be verified against a real staked-through-Sickle position before shipping.
+- **(b) Long-tail token resolution.** Confirm long-tail/unusual tokens on
+  Sickle-held positions either resolve correctly or degrade cleanly to "price
+  unavailable" with correct symbol/decimals — **never wrong data**. Re-check the
+  specific dust-Sickle case found in Phase A (pools `0x948e80fb…` /
+  `0xcf88b8bf…`, which rendered `TOKEN0` placeholders).
+
+## 11. Verification / commit gate
+
+- **Primary regression wallet:** owner
+  `0xD4bE1ae0f492CC58d6353BBb43CDb1D718eedb87` →
+  Sickle `0x06C3F4125E7d2d139D0Ab6a73c2112b7E949e09f`
+  (WETH/USDC ~$4.9k open + USDC/cbBTC closed). Confirm the position appears
+  through the dashboard, the value matches the exact-block figure already
+  verified in Phase A (WETH `0.480116`, USDC `3998.474372`, total `$4904.64`),
+  and Capital G/L correctly picks up the closed USDC/cbBTC leg.
+- **Negative control:** an EVM wallet with no Sickle shows no change and no
+  errors.
+- **Build clean** (`npm run build`), **performance baseline intact** — EOA
+  positions still render at ~1–4 s, Sickle positions stream in behind without
+  blocking.
+- **Both residual checks (10a, 10b) confirmed before shipping.**
+
+## Explicitly out of scope for Phase B
+
+Recorded so it is not re-litigated or quietly widened during the build:
+
+- Offline `predict()` CREATE2 derivation as the discovery path (§1 — future
+  optimization).
+- Precise per-chain-only fetcher fan-out (§4 — future optimization).
+- Chains beyond the four with confirmed factories (vfat runs on ~18).
+- The non-Aerodrome/Velodrome/Uniswap-V3 connectors vfat supports (Curve, Ichi,
+  Ramses, Nuri, Thena, Kodiak, Fenix, Shadow, Swapx) — DefiDesh does not decode
+  those AMMs today, and adding them is a separate protocol-integration effort.
+- Enumerating all Sickles globally via the `Deploy` event (needed only for
+  protocol-wide TVL, never for per-user discovery, and blocked on the free tier).
