@@ -418,7 +418,7 @@ never verified, and unreachable today precisely because those are CLOSED positio
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`7157d94`** — **Sprint WRAPPER-PROTOCOLS: vfat / Sickle (EVM) — OPEN positions.**
+- **`20693ca`** — **Sprint WRAPPER-PROTOCOLS: vfat / Sickle (EVM) — OPEN positions.**
   vfat deploys a **Sickle**, a per-user smart-contract wallet (one per user per chain)
   that HOLDS the user's AMM position NFTs — so the EOA owns nothing and DefiDesh's EVM
   readers returned **zero** for every vfat user. Same wrapper-invisibility class as
