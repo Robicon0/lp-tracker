@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { WalletName } from "@solana/wallet-adapter-base";
-import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "./contexts/WalletAuthContext";
 import { setDisconnected } from "./lib/walletDisconnectFlag";
@@ -72,61 +71,16 @@ export default function Navbar() {
   // knows to capture publicKey once the adapter state updates.
   const awaitingSolanaConnect = useRef(false);
 
-  // On mount: if no Solana wallet extension is installed, clear any stale localStorage
-  // entries so the UI shows "Connect Solana" instead of a phantom connected address.
-  // Also clear the wallet adapter's own stored wallet name to prevent autoConnect attempts.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const hasInstalledSolana = solanaWallets.some(
-      (w) => w.readyState === WalletReadyState.Installed
-    );
-    if (!hasInstalledSolana) {
-      if (localStorage.getItem('defidesh-solana-addr')) {
-        localStorage.removeItem('defidesh-solana-addr');
-      }
-      // Solana wallet adapter stores selected wallet name — clear it too
-      if (localStorage.getItem('walletName')) {
-        localStorage.removeItem('walletName');
-      }
-    }
-  }, [solanaWallets]);
-
-  // Persist solanaAddress to localStorage so it survives page refresh.
-  // Only SAVE here — never clear. localStorage is cleared in handleSolanaDisconnect.
-  // Reason: on page refresh solanaAddress initializes as null, which would delete
-  // the saved address before the restoration effect has a chance to read it.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (solanaAddress) {
-      localStorage.setItem('defidesh-solana-addr', solanaAddress);
-    }
-  }, [solanaAddress]);
-
-  // Restore solanaAddress after autoConnect or Wallet Standard silent reconnect.
-  // Only runs when adapter has reconnected and we haven't set an address yet.
-  // The awaitingSolanaConnect guard prevents interference with manual connects.
-  // CRITICAL: Only restore if a Solana wallet extension is actually installed in the browser.
-  // Without this check, localStorage persistence shows a connected address even on browsers
-  // that have no Solana wallet extension at all.
-  useEffect(() => {
-    if (awaitingSolanaConnect.current) return;
-    if (adapterSolanaConnected && adapterPublicKey && !solanaAddress) {
-      // Check if ANY Solana wallet adapter reports as Installed
-      const hasInstalledWallet = solanaWallets.some(
-        (w) => w.readyState === WalletReadyState.Installed
-      );
-      if (!hasInstalledWallet) {
-        // No Solana wallet extension in this browser — clear stale localStorage
-        localStorage.removeItem('defidesh-solana-addr');
-        return;
-      }
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('defidesh-solana-addr') : null;
-      if (saved && saved === adapterPublicKey.toBase58()) {
-        setSolanaAddress(saved);
-      }
-    }
-  }, [adapterSolanaConnected, adapterPublicKey, solanaAddress, setSolanaAddress, solanaWallets]);
-
+  // NOTE (2026-08-02): the Solana restore / persist / stale-clear effects that
+  // used to live here were REMOVED. They were a duplicate of the ones in
+  // `app/components/WalletRestoreEffect.tsx`, which is mounted at the root and
+  // is now the single owner. Two components independently deciding to delete
+  // the same localStorage keys was an aggravating factor in the "wallet
+  // disconnects by itself" bug. Do not reintroduce them here.
+  //
+  // What remains below is CONNECT MECHANICS, which genuinely belong to the
+  // Navbar: capturing the address once an explicit user-initiated connect
+  // completes, gated by the `awaitingSolanaConnect` ref.
   useEffect(() => {
     if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
       setSolanaAddress(adapterPublicKey.toBase58());
@@ -134,60 +88,17 @@ export default function Navbar() {
     }
   }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
 
-  // Clear if adapter disconnects mid-session (e.g. wallet emits accounts-change).
-  useEffect(() => {
-    if (!adapterSolanaConnected && solanaAddress) {
-      setSolanaAddress(null);
-      localStorage.removeItem('defidesh-solana-addr');
-    }
-  }, [adapterSolanaConnected, solanaAddress, setSolanaAddress]);
-
   // --- Sui connection tracking ---
   const awaitingSuiConnect = useRef(false);
 
-  // On mount: if no Sui wallet extension is installed, clear any stale localStorage
-  // entries so the UI shows "Connect Sui" instead of a phantom connected address.
-  // Also clear dapp-kit's own stored wallet preference to prevent autoConnect attempts.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (suiWallets.length === 0) {
-      if (localStorage.getItem('defidesh-sui-addr')) {
-        localStorage.removeItem('defidesh-sui-addr');
-      }
-      // dapp-kit stores preferred wallet name — clear it too
-      const dappKitKey = 'dapp-kit:wallet-connection-info';
-      if (localStorage.getItem(dappKitKey)) {
-        localStorage.removeItem(dappKitKey);
-      }
-    }
-  }, [suiWallets]);
-
-  // Persist suiAddress to localStorage so it survives page refresh.
-  // Only SAVE here — never clear. localStorage is cleared in handleSuiDisconnect.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (suiAddress) {
-      localStorage.setItem('defidesh-sui-addr', suiAddress);
-    }
-  }, [suiAddress]);
-
-  // Restore suiAddress after autoConnect / dapp-kit persistence on page load.
-  // CRITICAL: Only restore if a Sui wallet extension is actually present.
-  useEffect(() => {
-    if (awaitingSuiConnect.current) return;
-    if (adapterSuiAccount && !suiAddress) {
-      if (suiWallets.length === 0) {
-        // No Sui wallet extension — clear stale localStorage
-        localStorage.removeItem('defidesh-sui-addr');
-        return;
-      }
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('defidesh-sui-addr') : null;
-      if (saved && saved === adapterSuiAccount.address) {
-        setSuiAddress(saved);
-      }
-    }
-  }, [adapterSuiAccount, suiAddress, setSuiAddress, suiWallets]);
-
+  // NOTE (2026-08-02): the Sui restore / persist / stale-clear effects that used
+  // to live here were REMOVED — duplicates of WalletRestoreEffect.tsx, which is
+  // now the single owner. The removed copy also deleted dapp-kit's private
+  // `dapp-kit:wallet-connection-info` key, which is what made the
+  // self-disconnect bug unrecoverable. Do not reintroduce them here.
+  //
+  // Connect mechanics stay: capture the address once an explicit user-initiated
+  // connect completes, gated by the `awaitingSuiConnect` ref.
   useEffect(() => {
     if (awaitingSuiConnect.current && adapterSuiAccount) {
       setSuiAddress(adapterSuiAccount.address);
@@ -195,13 +106,12 @@ export default function Navbar() {
     }
   }, [adapterSuiAccount, setSuiAddress]);
 
-  // Clear if adapter disconnects mid-session.
-  useEffect(() => {
-    if (!adapterSuiAccount && suiAddress) {
-      setSuiAddress(null);
-      localStorage.removeItem('defidesh-sui-addr');
-    }
-  }, [adapterSuiAccount, suiAddress, setSuiAddress]);
+  // (The undebounced "clear if adapter disconnects mid-session" effect was
+  // REMOVED here on 2026-08-02. It fired on ANY momentary null from
+  // useCurrentAccount() — including the normal async autoConnect window — and
+  // permanently deleted the saved address. WalletRestoreEffect.tsx now owns
+  // this, with a settle gate plus a debounce so a transient blip cannot
+  // destroy a live connection.)
 
   // --- Connect / disconnect handlers ---
   // Each chain has a per-chain "explicitly disconnected" flag in localStorage

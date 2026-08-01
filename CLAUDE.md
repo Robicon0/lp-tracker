@@ -418,6 +418,46 @@ never verified, and unreachable today precisely because those are CLOSED positio
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`WALLETFIX_HASH`** — **Sui/Solana wallets self-disconnected and had to be re-added by
+  hand, every time.** Root cause: `app/components/WalletRestoreEffect.tsx` (mounted at the
+  root, so it ran on every page) DESTROYED persisted state in response to an ambiguous
+  reading from an asynchronously-initialising adapter. Two paths: (1) `useWallets()` is
+  populated ASYNCHRONOUSLY — Wallet Standard extensions announce via window events after
+  load, so the array is empty on first render whether or not a wallet exists; the code read
+  `suiWallets.length === 0` as "not installed" and deleted our `defidesh-sui-addr` **AND
+  dapp-kit's private `dapp-kit:wallet-connection-info`**. (2) `useCurrentAccount()` is null
+  until autoConnect resolves, so ANY momentary null (extension hiccup, wallet switch,
+  extension update, tab backgrounding) permanently deleted the saved address. **Deleting
+  dapp-kit's key is what made it unrecoverable** — dapp-kit could no longer auto-reconnect,
+  forcing a manual re-add. Reproduced live: both keys gone **within 500 ms** of page load;
+  `defidesh_sui_disconnected` was never set, so this was NOT a regression of the
+  disconnected-flag mechanism (that still works). Fixes: a **15 s settle gate** before any
+  cleanup (deliberately generous — a 3 s window would have left the bug alive in the
+  reported "correlates with browser restarts" case, where a cold-start extension can
+  announce late and the key would be deleted moments before the adapter reconnects); a
+  **2 s debounce** so a transient null cancels instead of destroying; **never touching
+  another library's private storage** (`dapp-kit:wallet-connection-info`, Solana's
+  `walletName`) — only our own `defidesh-*-addr`; **normalized** Sui comparison via the
+  official `normalizeSuiAddress` (Solana stays exact — base58 is case-sensitive); and the
+  **duplicate copy in `Navbar.tsx` removed** (−137 lines) so ONE component owns
+  restore/persist/clear. Navbar keeps only the explicit-connect capture. A THIRD copy — an
+  undebounced Sui clear still live in Navbar — was found and removed during the fix.
+  Identical treatment applied to the Solana block (same structure, same latent bug).
+  **THE RULE, worth not re-deriving: an "empty"/"absent" reading from an asynchronously
+  initialising adapter is NOT EVIDENCE OF ABSENCE — never take a destructive action on it
+  until it has settled.** `providers.tsx`'s `useClearOnConfirmedConnect` already skipped its
+  first effect run for exactly this reason; the lesson simply hadn't been applied here. Same
+  principle as `suiRpcIndexed()` throwing rather than returning a misleading empty.
+  Verified: seeded identity survives 10 s (was gone in <500 ms), dapp-kit/walletName never
+  deleted, explicit-disconnect flag still wins, EVM positions unaffected (In Range (2), 0
+  errors). **Limit: could not install a real Sui extension headlessly, so the
+  announce→restore→reconnect cycle is reasoned, not measured — worth one manual
+  connect/close-browser/reopen check.** No cache bumps; display/identity layer only.
+  **Bug 1 (EVM "connected but no positions" on a locked wallet) is NOT addressed here** —
+  it did not reproduce (EVM position routes are server-side by address and never touch the
+  extension; nothing clears EVM identity on a wagmi event). Open hypothesis: it was this
+  same Sui bug misattributed. Needs the user to say which chain the missing positions were on.
+
 - **`20693ca`** — **Sprint WRAPPER-PROTOCOLS: vfat / Sickle (EVM) — OPEN positions.**
   vfat deploys a **Sickle**, a per-user smart-contract wallet (one per user per chain)
   that HOLDS the user's AMM position NFTs — so the EOA owns nothing and DefiDesh's EVM
