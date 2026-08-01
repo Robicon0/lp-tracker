@@ -55,9 +55,15 @@ export default function Navbar() {
   const { mutate: disconnectSui } = useDisconnectWallet();
 
   // Our source of truth — only set after explicit user-initiated connect.
-  const { evmAddress, setEvmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress, setEvmAddress, evmIdentitySource, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
   const address = evmAddress;
   const isConnected = !!evmAddress;
+  // A RESTORED address is a cached best guess, not a live connection, and it
+  // may be stale (confirmed 2026-08-02: a stale address was shown as
+  // "Connected" while every position query ran against the wrong wallet). Show
+  // it, because it is still a useful read-only view, but never dressed up as
+  // live — and offer the one-click way to make it live.
+  const isRestoredEvm = isConnected && evmIdentitySource === "restored";
 
   const [showEvmModal, setShowEvmModal] = useState(false);
   const [showSolanaModal, setShowSolanaModal] = useState(false);
@@ -214,9 +220,24 @@ export default function Navbar() {
               {/* EVM Wallet */}
               {mounted && isConnected && address ? (
                 <div className="flex items-center space-x-2">
-                  <span className="bg-emerald-950 border border-emerald-400/30 text-emerald-400 px-3 py-1.5 rounded-lg text-base font-mono">
-                    {truncateAddress(address)}
+                  <span
+                    title={isRestoredEvm
+                      ? `Last used address — your wallet is locked or not connected, so this may not be your current account. Click to connect and confirm.`
+                      : address}
+                    className={isRestoredEvm
+                      ? "bg-transparent border border-dashed border-amber-400/40 text-amber-300/90 px-3 py-1.5 rounded-lg text-base font-mono"
+                      : "bg-emerald-950 border border-emerald-400/30 text-emerald-400 px-3 py-1.5 rounded-lg text-base font-mono"}
+                  >
+                    {isRestoredEvm ? "◌ " : ""}{truncateAddress(address)}
                   </span>
+                  {isRestoredEvm && (
+                    <button
+                      onClick={() => setShowEvmModal(true)}
+                      className="text-amber-300/80 hover:text-amber-200 text-xs underline underline-offset-2 transition-colors whitespace-nowrap"
+                    >
+                      unlock to confirm
+                    </button>
+                  )}
                   <button onClick={handleEvmDisconnect} className="text-emerald-300/70 hover:text-red-400 text-base transition-colors">✕</button>
                 </div>
               ) : (

@@ -37,6 +37,38 @@ What is STILL forbidden: restoring a wallet after an explicit disconnect
 (the flag always wins), and clearing the flag on anything other than a
 user-confirmed connect.
 
+### A restored identity must be VISIBLY distinct from a live connection
+_(amended 2026-08-02 after a confirmed production bug — this is the gap that
+the original wording left open.)_
+
+Restoring the address is permitted. Presenting it as a live connection is not.
+A restored address is a CACHED BEST GUESS and may be stale; a live address is
+what the wallet reports right now. The UI must distinguish them, and the app
+must actively reconcile:
+
+- **Track the source.** `WalletAuthContext.evmIdentitySource` is `"live"`
+  (wagmi reports it from an active connection — authoritative) or `"restored"`
+  (read from localStorage — may be stale).
+- **Never label a restored address "Connected."** Render it visibly differently
+  (DefiDesh uses a dashed chip + "LAST USED") with a way to make it live.
+- **Live always overwrites restored**, and is persisted as the new
+  last-confirmed identity.
+- **Reconcile without a page reload.** An installed, unlocked, already-
+  authorized wallet does NOT by itself make wagmi connected, so a restored
+  identity is never corrected unless the app asks: attempt a silent
+  `reconnect()` on mount, and listen for the provider's `accountsChanged` /
+  `connect` so an unlock or account switch updates the identity live.
+
+**Why this is a security rule, not a UX preference:** without it, a stale
+address is displayed as the user's connected wallet and every balance,
+position and P&L figure on the page is computed for the WRONG account, with no
+signal that anything is wrong. Confirmed in production 2026-08-02: a user's
+dashboard showed a stale address as "Connected" and zero positions while their
+actual Rabby account held the funds. Showing one wallet's identity over
+another's data is a correctness and trust failure.
+
+Any future chain that gains session persistence inherits this requirement.
+
 ### Why
 Wallets that auto-connect on refresh expose user addresses without consent.
 Even though DefiDesh is read-only, surprise connections violate user

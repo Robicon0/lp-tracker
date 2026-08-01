@@ -418,6 +418,46 @@ never verified, and unreachable today precisely because those are CLOSED positio
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`EVMFIX_HASH`** — **EVM dashboard showed a STALE address as "Connected" and fetched
+  every position against the WRONG wallet.** Confirmed in production: the user's chip showed
+  a valid-looking address with ZERO positions while their actual Rabby account held the
+  funds. Root cause: `defidesh-evm-addr` is treated as authoritative identity but is only
+  ever corrected when wagmi holds an **active connection** — and an installed, unlocked,
+  already-authorized wallet does **NOT** by itself make wagmi connected (wagmi reconnects
+  only from its own stored state). So a stale address was displayed and queried
+  **indefinitely**, and reloading did not fix it. Direct consequence of the `f64da31`
+  session-persistence amendment, which made a cached address visually identical to a live
+  connection with no reconciliation path. **Ruled out first** (all measured, not assumed): a
+  locked wallet does NOT block fetching (simulated EIP-6963/1193 provider returning `[]` for
+  `eth_accounts` — all 5 EVM routes fired, positions rendered); the routes are healthy
+  (aerodrome 200/3, uniswap-v3/velodrome/hyperswap/pancakeswap 200/0, 0.6–1.7 s); and only
+  two writers to the key exist, so it cannot be poisoned. Fixes: (1) NEW
+  `evmIdentitySource: "live" | "restored"` + a separate `restoreEvmAddress()` so no call
+  site can promote a cached address to authoritative; (2) **silent `reconnect()` on mount**
+  — the core fix, promoting an already-authorized wallet to a live connection with no
+  prompt; (3) NEW `EvmUnlockWatcher` listening to the injected provider's `accountsChanged`
+  / `connect` DIRECTLY (wagmi only surfaces those for a connector it is ALREADY connected
+  to — the failing case is the opposite) plus a `visibilitychange` sweep; (4) live always
+  overwrites restored and rewrites storage. **No manual query invalidation needed** —
+  `PositionsContext` keys queries by address, so correcting it refetches automatically.
+  UI: a restored chip renders dashed + `LAST USED` with an honest tooltip, never
+  "Connected" — applied to **BOTH** `Navbar.tsx` and `TerminalNavbar.tsx` (the dashboard
+  renders the latter; editing only the former silently did nothing, caught in verification).
+  Verified: stale+unlocked → corrected, In Range (2); stale+locked → honest `LAST USED`
+  marker, 0 positions; **unlock mid-session with NO reload → chip flips, positions 0→2**;
+  account switch live → chip/positions/storage all follow; **GUARD: explicit-disconnect flag
+  still wins even with an unlocked wallet present** (wallet-security Rule 1 intact — silent
+  reconnect is exactly the change that could have violated it); clean browser 0 errors.
+  **`.claude/rules/wallet-security.md` Rule 1 AMENDED** — a restored identity must be
+  VISIBLY distinct from a live connection, live must win, and reconciliation must not
+  require a reload; the original wording permitted the restore but never required it be
+  distinguishable, which is the gap that caused this. **Limit: verified against a SIMULATED
+  provider, not a real Rabby extension** — real event timing may differ; the
+  `visibilitychange` fallback covers a wallet that unlocks silently. Worth one real check:
+  load with Rabby locked (expect dashed `LAST USED`), then unlock without touching the page.
+  Note a visible behaviour change: the chip now shows `LAST USED` whenever the wallet is
+  locked at load — intended honesty, not a regression. No cache bumps; identity layer only.
+
 - **`5bec9df`** — **Sui/Solana wallets self-disconnected and had to be re-added by
   hand, every time.** Root cause: `app/components/WalletRestoreEffect.tsx` (mounted at the
   root, so it ran on every page) DESTROYED persisted state in response to an ambiguous

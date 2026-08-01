@@ -31,6 +31,7 @@ const C = {
   cyan:      "var(--info)",
   purple:    "var(--chain-solana)",
   blue:      "var(--info)",
+  warn:      "var(--warn)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
@@ -44,7 +45,7 @@ export default function TerminalNavbar() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
+  const { evmAddress: address, evmIdentitySource, solanaAddress, suiAddress } = useWalletAuth();
   const { watchedWallets, scanAddress } = useWatchedWallets();
 
   // Wallet chips show EVERY wallet the pages are computing over — connected,
@@ -53,13 +54,17 @@ export default function TerminalNavbar() {
   // dashboard/analytics below were full of their positions.
   const CHAIN_COLOR: Record<string, string> = { evm: C.cyan, solana: C.purple, sui: C.blue };
   const CHAIN_LABEL: Record<string, string> = { evm: "EVM", solana: "SOL", sui: "SUI" };
-  type ChipEntry = { chain: string; addr: string; kind: "connected" | "watched" | "scan" };
+  type ChipEntry = { chain: string; addr: string; kind: "connected" | "watched" | "scan"; restored?: boolean };
   const chips: ChipEntry[] = [];
   if (scanAddress) {
     // Scan mode overrides everything else app-wide; the bar mirrors that.
     chips.push({ chain: scanAddress.chain, addr: scanAddress.address, kind: "scan" });
   } else {
-    if (address) chips.push({ chain: "evm", addr: address, kind: "connected" });
+    // A RESTORED EVM address is a cached best guess and may be STALE — the
+    // confirmed 2026-08-02 bug showed a stale address as "connected" while
+    // every position query ran against the wrong wallet. Mark it so the bar
+    // never overstates what we know.
+    if (address) chips.push({ chain: "evm", addr: address, kind: "connected", restored: evmIdentitySource === "restored" });
     if (solanaAddress) chips.push({ chain: "solana", addr: solanaAddress, kind: "connected" });
     if (suiAddress) chips.push({ chain: "sui", addr: suiAddress, kind: "connected" });
     for (const w of watchedWallets) {
@@ -95,31 +100,36 @@ export default function TerminalNavbar() {
     color: C.textBright,
   };
 
-  type ChipProps = { color: string; chain: string; addr: string };
-  function Chip({ color, chain, addr }: ChipProps) {
+  type ChipProps = { color: string; chain: string; addr: string; restored?: boolean };
+  function Chip({ color, chain, addr, restored }: ChipProps) {
     return (
       <button
         type="button"
         onClick={() => navigator.clipboard.writeText(addr)}
-        title={`Copy ${chain} address`}
+        title={restored
+          ? `${addr}\n\nLAST USED address — your wallet is locked or not connected, so this may not be your current account. Unlock it and this updates automatically.`
+          : `Copy ${chain} address`}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
           padding: "5px 10px",
-          border: `1px solid ${C.border}`,
-          background: C.bg2,
+          border: restored ? `1px dashed ${C.warn}` : `1px solid ${C.border}`,
+          background: restored ? "transparent" : C.bg2,
           cursor: "pointer",
           fontSize: 10,
           letterSpacing: "0.04em",
           fontFamily: FONT,
         }}
       >
-        <span style={{ width: 5, height: 5, background: color, flexShrink: 0 }} />
+        <span style={{ width: 5, height: 5, background: restored ? "transparent" : color, border: restored ? `1px solid ${color}` : undefined, flexShrink: 0 }} />
         <span style={{ color: C.text, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase" }}>
           {chain}
         </span>
         <span style={{ color: C.textMid }}>{truncate(addr)}</span>
+        {restored && (
+          <span style={{ color: C.warn, fontSize: 8, letterSpacing: "0.1em" }}>LAST USED</span>
+        )}
       </button>
     );
   }
@@ -210,6 +220,7 @@ export default function TerminalNavbar() {
             color={CHAIN_COLOR[c.chain] ?? C.text}
             chain={c.kind === "scan" ? `${CHAIN_LABEL[c.chain] ?? c.chain}·SCAN` : (CHAIN_LABEL[c.chain] ?? c.chain)}
             addr={c.addr}
+            restored={c.restored}
           />
         ))}
         {mounted && overflowCount > 0 && (
