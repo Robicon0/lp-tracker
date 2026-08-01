@@ -418,7 +418,7 @@ never verified, and unreachable today precisely because those are CLOSED positio
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`WALLETFIX_HASH`** — **Sui/Solana wallets self-disconnected and had to be re-added by
+- **`5bec9df`** — **Sui/Solana wallets self-disconnected and had to be re-added by
   hand, every time.** Root cause: `app/components/WalletRestoreEffect.tsx` (mounted at the
   root, so it ran on every page) DESTROYED persisted state in response to an ambiguous
   reading from an asynchronously-initialising adapter. Two paths: (1) `useWallets()` is
