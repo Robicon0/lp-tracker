@@ -418,7 +418,7 @@ never verified, and unreachable today precisely because those are CLOSED positio
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`EVMFIX_HASH`** — **EVM dashboard showed a STALE address as "Connected" and fetched
+- **`866ead0`** — **EVM dashboard showed a STALE address as "Connected" and fetched
   every position against the WRONG wallet.** Confirmed in production: the user's chip showed
   a valid-looking address with ZERO positions while their actual Rabby account held the
   funds. Root cause: `defidesh-evm-addr` is treated as authoritative identity but is only
