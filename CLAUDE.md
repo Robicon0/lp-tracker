@@ -23,6 +23,9 @@ branch `main`. Local dev: `~/lp-tracker-fresh`. Twitter: `@defidesh`.
 **Chains and protocols:**
 - EVM (Base, Arbitrum, Optimism, Ethereum, Polygon, HyperEVM): Aerodrome,
   Uniswap V3, Velodrome, HyperSwap, KittenSwap, ProjectX
+- EVM wrappers: **vfat / Sickle** (Base, Optimism, Arbitrum, Ethereum) — LP positions held
+  in a per-user Sickle contract wallet, discovered via `sickles(owner)` and scanned through
+  the existing EVM readers. OPEN positions only; CLOSED are suppressed pending queue item A.
 - Solana: Orca + Raydium (both full: open positions, closed-position Capital G/L, lifetime fees)
 - Solana wrappers: **DefiTuna** (leveraged LP held in the protocol's vault — OPEN positions
   across BOTH AMM backends, Orca and Fusion, with EQUITY semantics + leverage/debt/
@@ -237,6 +240,52 @@ code required. **Part 3 (closed Tuna) is the next DefiTuna work** — but it is 
 accrued-interest pricing-invariants decision, so if that decision is not yet made, item 4
 (scan-mode detail navigation, SMALL and user-visible) is the better thing to pick up.)_
 
+**⚠️ A. ACTIVE BUG — HIGH PRIORITY — EVM wallet-scope closed-position scan applies ONE
+pool's token decimals to EVERY event, producing a catastrophically wrong Capital G/L.**
+_(Found live 2026-08-01 during vfat/Sickle Phase B verification. This is a REAL, ACTIVE,
+USER-FACING BUG — not hardening, not deferred. It supersedes the "EVM is NOT currently
+broken" claim in queue item 10, which is now known to be FALSE.)_
+
+**Who is affected:** ANY wallet — vfat or not, watched, connected, or scanned — that has
+CLOSED EVM positions across **two or more pools with different token-decimal pairs**. A
+wallet whose pools all share one decimal pair is unaffected, which is why this went
+unnoticed: the common single-pair case masks it.
+
+**Mechanism:** the wallet-scope activity scan (`/api/{protocol}/activity?positionId=all`)
+is called with ONE representative pool's `t0d`/`t1d` and applies those decimals to every
+event it finds. An 18-decimal WETH amount decoded as 6-decimal inflates by **1e12**.
+
+**Live evidence** (Sickle `0x06C3F412…e09f`, Base — reproduces identically as a plain
+watched wallet, so it is NOT vfat-specific): the wallet-scope call returned deposit events
+of **$342,298,111,238.86** and **$167,113,757,805.22**. The Capital G/L breakdown then
+attributed **$9,988.84 deposited / $0.00 withdrawn** to a single closed USDC/cbBTC position
+whose OWN per-position activity route reports a deposit of **$1.195** — wrong by ~5 orders
+of magnitude, displayed to the user as a confident **−$9,988.84**.
+
+**Why it is severe:** it is silent and plausible-looking. There is no exclusion banner and
+no pending-claim notice — the number simply renders as fact, and it dominates Net P&L.
+Per pricing-invariants, a wrong number is worse than a missing one.
+
+**Fix:** resolve each event's REAL pool (and therefore its decimals) per event, exactly as
+Sprint TOKEN-RESOLUTION (`a866576`) did for Sui via `suiPoolContext.ts` — the EVM analogue
+of Contract invariant (i). The per-POSITION scans already carry correct context (Sprint
+2.1b `5b8f6b7`); it is specifically the wallet-scope `positionId=all` path that is wrong.
+Complexity MEDIUM. **Verify with a multi-decimal-pair wallet** — a single-pair wallet
+cannot reproduce it.
+
+**Current mitigation (partial, vfat only):** vfat/Sickle ships with CLOSED positions
+suppressed (`SICKLE_CLOSED_SUPPRESSED` in `PositionsContext.tsx`) so vfat users see no
+Capital G/L rather than a wrong one. **This does NOT protect non-vfat wallets**, which
+remain exposed today. Delete that constant once this item ships.
+
+**When re-enabling closed Sickle positions under this item, RE-INSTATE the two vfat
+shipping gates** that were relaxed for the narrower Option-2 ship (owner decision,
+2026-08-01, recorded in `reports/wrapper-protocol-landscape-survey-report.md`):
+**(10a)** confirm a gauge-staked-through-a-Sickle position surfaces correctly — never
+verified, no such Sickle was found; **(10b)** confirm long-tail token resolution on the
+dust Sickle (pools `0x948e80fb…` / `0xcf88b8bf…`, which render `TOKEN0` placeholders) —
+never verified, and unreachable today precisely because those are CLOSED positions.
+
 0. _(DONE — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1**: wrapper position-detail page,
    SHIPPED `4a25c69` 2026-07-21. See Recent fixes.)_
 0b. _(CLOSED — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 2** (Fusion LP): **NO CODE REQUIRED.**
@@ -338,13 +387,16 @@ accrued-interest pricing-invariants decision, so if that decision is not yet mad
    pancakeswap) and the activity routes to `resolveToken`, then remove the
    per-route `KNOWN_COINS`/`KNOWN_TOKENS`/`TOKENS` maps once resolver coverage is
    proven in production (architecture-principles Rule 9).
-10. **EVM per-event token resolution (hardening, not blocking)** — apply the Sprint
-   TOKEN-RESOLUTION per-event pool-context pattern to the EVM wallet-scope fee scans
-   (aerodrome/velodrome/uniswap). EVM is NOT currently broken — its fallback addresses are
-   correct and Sprint 2.1b (`5b8f6b7`) routes closed positions through per-position scans
-   with correct context, so the single-representative-pool risk is mitigated — but resolving
-   each Collect event's token0/token1 from its pool on-chain would remove the last residual
-   of the same bug class. Verify-and-document only until a real EVM user impact surfaces.
+10. **EVM per-event token resolution — ⚠️ SUPERSEDED BY QUEUE ITEM A (see top of queue).**
+   ~~EVM is NOT currently broken … the single-representative-pool risk is mitigated …
+   verify-and-document only until a real EVM user impact surfaces.~~ **That premise is
+   FALSE and this item is no longer "hardening, not blocking."** A real user impact DID
+   surface (2026-08-01): on a wallet with closed positions across pools with different
+   decimal pairs, the wallet-scope scan produced deposit events of $342bn/$167bn and a
+   confident, silently-wrong Capital G/L of −$9,988.84 against a real ~$1.20 leg. The
+   mitigation noted here only ever covered the per-POSITION path; the wallet-scope
+   `positionId=all` path was never covered. Do the work under item A — this entry is kept
+   only so the superseded reasoning is not re-derived from the old text.
 11. **Sui wallet-scope tx-history scan latency (optional, non-blocking)** — after Sprint
    SUI-HISTORICAL-REDIS `776fcaa` the Sui wallet-scope routes drop from ~111 s to ~18–20 s; the
    residual floor is the **~17 s public-Sui-RPC `queryTransactionBlocks` + `multiGet` scan** (240
@@ -365,6 +417,47 @@ accrued-interest pricing-invariants decision, so if that decision is not yet mad
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`7157d94`** — **Sprint WRAPPER-PROTOCOLS: vfat / Sickle (EVM) — OPEN positions.**
+  vfat deploys a **Sickle**, a per-user smart-contract wallet (one per user per chain)
+  that HOLDS the user's AMM position NFTs — so the EOA owns nothing and DefiDesh's EVM
+  readers returned **zero** for every vfat user. Same wrapper-invisibility class as
+  DefiTuna, now on EVM; ~$30.9M TVL, concentrated on Base, wrapping the exact AMMs
+  DefiDesh already decodes. Discovery is the whole fix: NEW `app/lib/vfatConfig.ts`
+  (per-chain SickleFactory map — the address is **NOT uniform across chains**, so config,
+  not branch, Rule 2), NEW `app/api/vfat/sickles` (one `eth_call` to
+  `sickles(owner)` per chain, in parallel, deployed Sickles only, Rule 11 per-chain
+  degrade), NEW `app/lib/vfatSickleCache.ts` (`vfat_sickles_v1`: a **deployed** address is
+  immutable → 30 d; **"none found" → 5 min**, so a newly-created Sickle isn't hidden;
+  a PARTIAL empty is never cached), NEW `app/lib/vfatSickle.ts` (client wrapper).
+  `PositionsContext` builds `evmFetchAddresses = evmAddresses ∪ resolvedSickles` and drives
+  the EVM fan-out from it. **`evmFetchAddresses` is deliberately SEPARATE from
+  `evmAddresses`** (identity → wallet chips + `/api/wallets/register`): a Sickle is a
+  derived sub-account and must never become a chip or a registered wallet — verified live
+  (0 register POSTs, address absent from UI text, navbar shows the OWNER). Resolution is
+  its own `useQueries` so it never gates first paint (Rule 10 — 311–404 ms measured).
+  Simple approved fan-out: each Sickle scanned against ALL EVM fetchers, as watched
+  wallets already work; per-chain-restricted fan-out and offline CREATE2 `predict()` are
+  documented future optimizations. **Ethereum factory recovered** —
+  `0x9D70B9E5ac2862C405D64A0193b4A4757Aab7F95` (truncated in the Phase A record), verified
+  live. Verified on third-party wallet `0xD4bE…db87` → Sickle `0x06C3F412…e09f`: EOA
+  through `/api/aerodrome` = **0 positions**, same UNMODIFIED reader at the Sickle = **3**;
+  dashboard **In Range (2), Closed (0)**; Phase A's NFT `73552127` $4,904.64 → $4,904.86
+  (+0.0045%, price drift); negative control clean; 0 page errors.
+  **⚠️ SHIPPED AS OPTION 2 — CLOSED positions SUPPRESSED** (`SICKLE_CLOSED_SUPPRESSED`),
+  deviating from the plan's "closed in scope", because verification exposed the
+  **pre-existing non-vfat decimals bug now tracked as queue item A** (wallet-scope scan
+  applied one pool's decimals to every event → $342bn/$167bn deposit events → a confident
+  Capital G/L of −$9,988.84 vs a real ~$1.20 leg). **Proven not caused by this work** — the
+  same Sickle added as an ordinary watched wallet reproduces it byte-identically.
+  Suppression is scoped to DERIVED Sickles only (a user-added one behaves normally) and
+  provably does not touch open numbers: Deposited $9,855.53 / Current Value / IL +$31.56
+  identical on and off; only Capital G/L moves (−$9,988.84 → +$0.00). **Delete the constant
+  when item A ships, and re-instate gates 10a/10b** (both relaxed by owner decision for
+  this narrower ship — see item A and the report). **No cache bumps** to `lp-pnl-events` /
+  `analytics-activity` (Sickle positions are new per-position entries; no existing entry
+  changes shape); new `vfat_sickles_v1` key only. Report:
+  `reports/wrapper-protocol-landscape-survey-report.md`.
 
 - **`1986313` + `0f33321`** — **UI/DESIGN: design-token theme system (light + dark), home v2
   live, LP calculator.** NOT a sprint — accumulated local UI work shipped in one pass, and

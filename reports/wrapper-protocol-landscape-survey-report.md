@@ -484,3 +484,72 @@ Recorded so it is not re-litigated or quietly widened during the build:
   those AMMs today, and adding them is a separate protocol-integration effort.
 - Enumerating all Sickles globally via the `Deploy` event (needed only for
   protocol-wide TVL, never for per-user discovery, and blocked on the free tier).
+
+---
+
+# PHASE B — BUILD OUTCOME (2026-08-01)
+
+**Shipped as OPTION 2: open positions only. Closed Sickle positions deliberately
+suppressed.** This deviates from the approved plan §7 ("closed positions IN SCOPE"),
+on owner approval, for the reason below.
+
+## What works (verified live, third-party wallet, local production build)
+
+- **Discovery.** `sickles(owner)` (selector `0x967e4da8`) resolves the hidden
+  sub-account. Base: `0xD4bE…db87` → `0x06C3F412…e09f`, matching Phase A exactly.
+  Negative control (`0x…dEaD`) → `0x0`. Malformed / missing owner → empty, no error.
+  Checksum-case input resolves identically.
+- **The gap, closed.** Owner EOA through `/api/aerodrome` → **0 positions**; the same
+  UNMODIFIED reader at the Sickle → **3**. Pasting the owner into the dashboard now
+  surfaces them: **In Range (2), Closed (0)**.
+- **Values exact.** Phase A's NFT `73552127` was $4,904.64; measured $4,904.86
+  (+0.0045%, tracking live price drift).
+- **Position count changed legitimately.** Phase A recorded 2 positions; there are now
+  3. NFT `73702907` is a higher, later-minted id — the third-party wallet opened another
+  position in the interim. Not a duplicate: three distinct ids.
+- **Identity separation holds.** The Sickle address appears nowhere in UI text, produces
+  no wallet chip, and is never POSTed to `/api/wallets/register`. Navbar shows the OWNER.
+- **Rule 10.** First meaningful render 311–404 ms; Sickle positions stream in behind.
+- **Rule 11.** A failed chain contributes no result and never blocks the page.
+- **Ethereum factory recovered:** `0x9D70B9E5ac2862C405D64A0193b4A4757Aab7F95` (the
+  Phase A record had it truncated). Verified live: has code, `sickles()` returns a clean
+  `0x0`, `implementation()` returns a real address.
+
+## Why closed positions were dropped from scope
+
+Verification surfaced a **pre-existing, non-vfat bug**: the EVM wallet-scope
+closed-position scan (`positionId=all`) applies ONE representative pool's token decimals
+to every event, so an 18-decimal amount read as 6-decimal inflates by 1e12. Measured on
+this Sickle: deposit events of **$342,298,111,238.86** and **$167,113,757,805.22**,
+yielding a confident Capital G/L of **−$9,988.84** against a real closed leg of **~$1.20**.
+
+**Proven NOT caused by this work:** scanning the same Sickle as an ordinary watched
+wallet — zero vfat code in the path — reproduces the figure byte-identically. It affects
+any wallet with closed positions across pools of differing decimal pairs. It is now
+tracked as **queue item A (ACTIVE BUG, HIGH PRIORITY)**, and supersedes the former
+item 10's "EVM is NOT currently broken" premise.
+
+Suppression is one constant, `SICKLE_CLOSED_SUPPRESSED` in `PositionsContext.tsx`, and
+applies ONLY to Sickles DefiDesh derived — a Sickle the user adds themselves as a watched
+wallet behaves like any other wallet. **Delete the constant and its `.filter()` once
+item A ships.** Open-position numbers are provably untouched by it: Deposited
+($9,855.53), Current Value and IL (+$31.56) are identical with suppression on and off;
+only Capital G/L changes (−$9,988.84 → +$0.00), and Net P&L becomes −$19.35.
+
+## Shipping gates 10a / 10b — RELAXED for this ship (owner decision, 2026-08-01)
+
+The approved plan made both residual checks shipping gates. **Owner explicitly relaxed
+both for this narrower ship**, on the reasoning that Option 2 reduces the blast radius to
+open positions only:
+
+- **10a — gauge-staked-through-a-Sickle: NOT VERIFIED.** No Sickle holding a
+  gauge-staked position was found to test against. Risk assessed low: the Aerodrome
+  (Sugar) reader already surfaces gauge-staked positions for ordinary wallets and is
+  address-agnostic, and every funded Sickle sampled in Phase A held its CL NFT directly.
+- **10b — long-tail token resolution on the dust Sickle** (pools `0x948e80fb…` /
+  `0xcf88b8bf…`, which rendered `TOKEN0` placeholders): **NOT VERIFIED.** Those were
+  CLOSED positions worth ~$0.01 — and closed Sickle positions are exactly what this ship
+  suppresses, so the case is not reachable by a vfat user today.
+
+**If either surfaces for a real user, address it then.** Both should be re-instated as
+gates before closed Sickle positions are re-enabled under item A.
