@@ -240,7 +240,7 @@ code required. **Part 3 (closed Tuna) is the next DefiTuna work** — but it is 
 accrued-interest pricing-invariants decision, so if that decision is not yet made, item 4
 (scan-mode detail navigation, SMALL and user-visible) is the better thing to pick up.)_
 
-**✅ A. FIXED (`ITEMA_HASH`, 2026-08-02) — EVM wallet-scope per-event pool context.**
+**✅ A. FIXED (`78e80db`, 2026-08-02) — EVM wallet-scope per-event pool context.**
 _(Kept here rather than only in Recent fixes because the remaining caveats below are
 load-bearing. Original title: "EVM wallet-scope closed-position scan applies ONE pool's
 token decimals to EVERY event.")_
@@ -473,7 +473,7 @@ route reports incompleteness rather than a clean zero.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`ITEMA_HASH`** — **Sprint ITEM-A: EVM wallet-scope per-event pool context.** The
+- **`78e80db`** — **Sprint ITEM-A: EVM wallet-scope per-event pool context.** The
   wallet-scope closed-position scans (`positionId=all` / `tokenId=all`) enumerated EVERY
   tokenId a wallet ever owned, unioned their logs, and decoded them ALL with ONE
   representative pool's decimals — "whichever position happens to be open". Amounts are raw
