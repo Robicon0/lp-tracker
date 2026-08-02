@@ -7,6 +7,7 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -87,6 +88,9 @@ const PUBNODE_CHUNK = 49_000;
 const MAX_CONCURRENCY = 50;
 
 // Standard Uniswap V3 event topic0 hashes — same for all V3 forks
+// Pool Mint topic (same across all Uniswap-V3 forks) — identifies a
+// position's OWN pool from its mint tx receipt.
+const POOL_MINT_TOPIC = '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde';
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
 const TOPIC_COLLECT  = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
@@ -425,68 +429,100 @@ async function GET_impl(request: Request) {
     const blastRpc   = BLAST_RPCS[chain];
     const alchemyRpc = ALCHEMY_RPCS[chain];
 
-    let logs: RawLog[];
+    // ── WALLET SCOPE ────────────────────────────────────────────────────
+    // Process EACH ever-owned tokenId through this same route with ITS OWN
+    // resolved pool context, then merge.
+    //
+    // This replaces a BATCHED array-topic getLogs that unioned every tokenId's
+    // logs and decoded them all with one representative pool's decimals. The
+    // batching saved RPC calls precisely BY discarding which position each log
+    // belonged to — which is the bug. Correctness wins: the fan-out is bounded
+    // by MAX_WALLET_IDS exactly as the batch was, and per-position results are
+    // individually cacheable.
+    //
+    // Removing this also removes the need for the `<= $50M` artifact filter in
+    // useWalletLevelFees, which was a band-aid that only ever caught the
+    // INFLATION direction and never the (more dangerous, plausible-looking)
+    // crushing direction. See app/lib/evmPoolContext.ts.
     if (walletScope) {
-      // Enumerate every tokenId this wallet ever owned on this chain, then union
-      // their NFT-manager logs with BATCHED array-topic eth_getLogs (topic1 = an
-      // OR list of tokenIds) — ONE archive call per batch, not one per tokenId,
-      // so an active LP with hundreds of positions doesn't fan out into hundreds
-      // of concurrent requests (which rate-limits the archive RPC to empty).
-      // Requires an archive RPC (Tenderly); chains without one (BNB) yield empty
-      // (graceful). MAX_WALLET_IDS bounds the cost for market-maker wallets.
-      const MAX_WALLET_IDS = 30;     // bound tokenId fan-out (market-maker wallets)
-      const MAX_WALLET_LOGS = 1500;  // bound downstream timestamp/price cost
-      const BATCH = 30;
-      const GETLOGS_TIMEOUT_MS = 25_000; // fail fast on whale-sized responses
+      const MAX_WALLET_IDS = 30;  // unchanged bound for market-maker wallets
       const archiveRpc = TENDERLY_RPCS[chain];
       const nftManager = NFT_MANAGERS[chain];
       if (!archiveRpc || !nftManager) {
-        logs = [];
-      } else {
-        const allIds = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
-        const ids = allIds.slice(0, MAX_WALLET_IDS);
-        const fromHex = '0x' + (DEPLOY_BLOCKS[chain] ?? 0).toString(16);
-        const collected: RawLog[] = [];
-        for (let i = 0; i < ids.length; i += BATCH) {
-          const topicIds = ids.slice(i, i + BATCH).map((idStr) => '0x' + BigInt(idStr).toString(16).padStart(64, '0'));
-          // Timeout-guarded so a market-maker wallet whose positions imply a
-          // massive log set fails fast (→ empty) instead of hanging the route.
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), GETLOGS_TIMEOUT_MS);
-          try {
-            const r = await fetch(archiveRpc, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0', method: 'eth_getLogs', params: [{
-                  address: nftManager,
-                  topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], topicIds],
-                  fromBlock: fromHex, toBlock: 'latest',
-                }], id: 1,
-              }),
-              signal: controller.signal,
-            });
-            const j = await r.json() as { result?: RawLog[]; error?: { message: string } };
-            if (!j.error && j.result) collected.push(...j.result);
-            else if (j.error) console.warn('[uniswap/activity] wallet-scope getLogs error:', j.error.message);
-          } catch (e) {
-            console.warn('[uniswap/activity] wallet-scope getLogs timeout/err:', String(e));
-          } finally {
-            clearTimeout(timer);
-          }
+        return NextResponse.json({
+          events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
+          positions: [], excluded: [{ tokenId: 'all', reason: 'no-archive-rpc-for-chain' }],
+        });
+      }
+      const allIds = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
+      const ids = allIds.slice(0, MAX_WALLET_IDS);
+      const ctxs = await resolveEvmPositionContexts(ids, {
+        chain: chain as Parameters<typeof resolveEvmPositionContexts>[1]['chain'],
+        rpc: archiveRpc,
+        nftManager,
+        increaseTopic: TOPIC_INCREASE,
+        poolMintTopic: POOL_MINT_TOPIC,
+        deployBlock: DEPLOY_BLOCKS[chain] ?? 0,
+      });
+
+      const origin = new URL(request.url).origin;
+      const perPosition: Array<Record<string, unknown>> = [];
+      const excluded: Array<{ tokenId: string; reason: string }> = [];
+      const merged: ActivityEvent[] = [];
+      let ni0 = 0, ni1 = 0, tf0 = 0, tf1 = 0;
+
+      for (const id of ids) {
+        const ctx = ctxs.get(id) ?? null;
+        if (!ctx) {
+          // Honest degradation (Rule 11): excluded and surfaced, NEVER decoded
+          // with a foreign pool's decimals.
+          excluded.push({ tokenId: id, reason: 'pool-context-unresolved' });
+          continue;
         }
-        // Very active LPs can emit thousands of logs — keep the most recent
-        // window so the timestamp/price pipeline stays bounded. Retail wallets
-        // (the defensive target) are far under this and keep everything.
-        if (collected.length > MAX_WALLET_LOGS) {
-          collected.sort((a, b) => parseInt(b.blockNumber, 16) - parseInt(a.blockNumber, 16));
-          logs = collected.slice(0, MAX_WALLET_LOGS);
-        } else {
-          logs = collected;
+        const sub = new URL('/api/uniswap/activity', origin);
+        sub.searchParams.set('tokenId', id);
+        sub.searchParams.set('chain', chain);
+        sub.searchParams.set('token0', ctx.token0);
+        sub.searchParams.set('token1', ctx.token1);
+        sub.searchParams.set('t0d', String(ctx.decimals0));
+        sub.searchParams.set('t1d', String(ctx.decimals1));
+        sub.searchParams.set('pool', ctx.pool);
+        try {
+          const res = await GET_impl(new Request(sub.toString()));
+          const body = (await res.json()) as ActivityResponse & { error?: string };
+          if (body.error) { excluded.push({ tokenId: id, reason: body.error }); continue; }
+          merged.push(...(body.events ?? []));
+          ni0 += body.netInvested0 ?? 0; ni1 += body.netInvested1 ?? 0;
+          tf0 += body.totalFees0 ?? 0;   tf1 += body.totalFees1 ?? 0;
+          perPosition.push({
+            tokenId: id, pool: ctx.pool, chain,
+            pair: `${ctx.symbol0} / ${ctx.symbol1}`,
+            token0: ctx.token0, token1: ctx.token1,
+            decimals0: ctx.decimals0, decimals1: ctx.decimals1,
+            netInvested0: body.netInvested0, netInvested1: body.netInvested1,
+            totalFees0: body.totalFees0, totalFees1: body.totalFees1,
+            events: body.events ?? [],
+          });
+        } catch (err) {
+          excluded.push({ tokenId: id, reason: String(err).slice(0, 80) });
         }
       }
-      console.log(`[uniswap/activity] tokenId=all chain=${chain} account=${account} → ${logs.length} logs`);
-    } else {
+
+      console.log(`[uniswap/activity] tokenId=all chain=${chain} account=${account} → ${ids.length} tokenIds, ${perPosition.length} resolved, ${excluded.length} excluded`);
+
+      // Per-position breakdown so a WALLET-WIDE total is never attributed to
+      // one position.
+      return NextResponse.json({
+        events: merged,
+        netInvested0: ni0, netInvested1: ni1,
+        totalFees0: tf0, totalFees1: tf1,
+        positions: perPosition,
+        excluded,
+      });
+    }
+
+    let logs: RawLog[];
+    {
       const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
       logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex);
     }

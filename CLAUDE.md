@@ -240,8 +240,36 @@ code required. **Part 3 (closed Tuna) is the next DefiTuna work** — but it is 
 accrued-interest pricing-invariants decision, so if that decision is not yet made, item 4
 (scan-mode detail navigation, SMALL and user-visible) is the better thing to pick up.)_
 
-**⚠️ A. ACTIVE BUG — HIGH PRIORITY — EVM wallet-scope closed-position scan applies ONE
-pool's token decimals to EVERY event, producing a catastrophically wrong Capital G/L.**
+**✅ A. FIXED (`ITEMA_HASH`, 2026-08-02) — EVM wallet-scope per-event pool context.**
+_(Kept here rather than only in Recent fixes because the remaining caveats below are
+load-bearing. Original title: "EVM wallet-scope closed-position scan applies ONE pool's
+token decimals to EVERY event.")_
+
+**What shipped:** all three EVM wallet-scope routes (Aerodrome, Velodrome, Uniswap V3) now
+resolve EACH position's own pool context on-chain via NEW `app/lib/evmPoolContext.ts` and
+fan out per position through the already-correct per-position path, returning a
+per-position breakdown plus an `excluded[]` list. The `<= $50M` Uniswap band-aid is GONE.
+
+**⚠️ Caveats that outlive the fix:**
+- **Velodrome executed only its empty branch in testing** — no test wallet holds Velodrome
+  positions. Structurally identical to Aerodrome (same Slipstream architecture) and
+  compiles/returns valid empties, but no real position has flowed through it. Uniswap was
+  verified on a SINGLE-decimal-pair wallet only. Owner-accepted risk (2026-08-02): a real
+  wallet will surface any problem visibly rather than silently.
+- **`SICKLE_CLOSED_SUPPRESSED` is UNCHANGED and closed vfat positions REMAIN SUPPRESSED.**
+  That flag exists for the GAUGE-STAKING misclassification (below), which is unrelated to
+  decimals and still unresolved. Do not delete the flag on the strength of this fix.
+- **NEW finding — gauge-staked positions are misclassified as Closed.** vfat position
+  `73551608` is staked (`ownerOf` = `0x6399ed67…79a8`, a gauge — NOT the owner), has ZERO
+  `DecreaseLiquidity` logs, still holds ~$10k, and is booked as Closed with the full
+  deposit as a loss (−$9,988.84). This is residual check **10a** from vfat Phase B, relaxed
+  at ship time and now confirmed real. Needs its own scoping.
+- **CORRECTION to the original Item A writeup:** it claimed the position's true deposit was
+  ~$1.20 and the figure was wrong by ~5 orders of magnitude. **That was wrong.** The $1.20
+  came from a diagnostic call that itself passed the wrong decimals (18/6 to a 6/8
+  position) — the bug reproduced inside its own diagnosis. Raw on-chain: 9,210.35 USDC +
+  0.01195 cbBTC ≈ **$10,285**, so ~$9,988.84 was approximately right. The decimals bug was
+  still real (proven independently in both directions); only that one figure was misread.
 _(Found live 2026-08-01 during vfat/Sickle Phase B verification. This is a REAL, ACTIVE,
 USER-FACING BUG — not hardening, not deferred. It supersedes the "EVM is NOT currently
 broken" claim in queue item 10, which is now known to be FALSE.)_
@@ -285,6 +313,33 @@ shipping gates** that were relaxed for the narrower Option-2 ship (owner decisio
 verified, no such Sickle was found; **(10b)** confirm long-tail token resolution on the
 dust Sickle (pools `0x948e80fb…` / `0xcf88b8bf…`, which render `TOKEN0` placeholders) —
 never verified, and unreachable today precisely because those are CLOSED positions.
+
+**⚠️ B. ACTIVE BUG (scope-and-fix later) — a FAILED wallet enumeration returns an empty
+result that is indistinguishable from "no positions", and gets CACHED as truth.**
+_(Found 2026-08-02 while verifying Item A. NOT fixed there, deliberately — logged separately
+so it can be scoped properly.)_
+
+**Observed:** `getEverOwnedTokenIds` returned `[]` for a wallet with 3 known positions after
+the public Tenderly gateway throttled. The route reported **"0 tokenIds, 0 resolved, 0
+excluded"** — a confident, well-formed empty — and `withActivityRouteCache` cached it for
+60 s. A fresh process returned all 3 correctly. **Pre-existing; unchanged by Item A** (the
+old union code did the same thing).
+
+**Why it matters:** the user sees "no closed positions" / zero fees, with no banner, no
+exclusion, no error. It is the exact failure mode this project has now hit FOUR times —
+`suiRpcIndexed` (fixed by throwing `SuiIndexUnavailableError`), the Sui wallet
+self-disconnect (fixed by a settle gate), the Solana closed-scan empty-cache rule
+(`stats.complete`), and now this. **The standing lesson: an empty result from an
+asynchronous/remote source is NOT evidence of absence, and must never be cached as though
+it were.**
+
+**Shape of the fix:** `getEverOwnedTokenIds` must distinguish "scan completed, wallet
+genuinely owns nothing" from "scan failed/partial" — return completeness alongside the ids
+(the `stats.complete` pattern already proven in `solanaClosedPositions.ts`). Callers then
+surface a failed enumeration in `excluded[]` rather than as an empty success, and the
+activity-route cache must not store a non-complete empty. Complexity SMALL–MEDIUM.
+**Verify by forcing the failure** (throttle or point at a dead RPC) and confirming the
+route reports incompleteness rather than a clean zero.
 
 0. _(DONE — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1**: wrapper position-detail page,
    SHIPPED `4a25c69` 2026-07-21. See Recent fixes.)_
@@ -417,6 +472,40 @@ never verified, and unreachable today precisely because those are CLOSED positio
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`ITEMA_HASH`** — **Sprint ITEM-A: EVM wallet-scope per-event pool context.** The
+  wallet-scope closed-position scans (`positionId=all` / `tokenId=all`) enumerated EVERY
+  tokenId a wallet ever owned, unioned their logs, and decoded them ALL with ONE
+  representative pool's decimals — "whichever position happens to be open". Amounts are raw
+  integers, so the wrong decimals mis-scale by a power of ten, in EITHER direction:
+  **inflation** (representative USDC/cbBTC 6/8 applied to 18-dec WETH → deposit events of
+  **$342,298,111,238** and **$167,113,757,805**) or **crushing** (representative WETH/USDC
+  18/6 applied to 6-dec USDC → **14 fee claims under $0.50 on Account 1**, one of which was
+  truly ~$294). Crushing is the more dangerous half: it looks plausible, no magnitude filter
+  can catch it, and it silently UNDER-reports. Only wallets holding pools with DIFFERENT
+  decimal pairs are affected, which is why it survived. FIX: NEW `app/lib/evmPoolContext.ts`
+  — the EVM analogue of `suiPoolContext.ts` (Contract invariant (i)) — resolves each
+  position's OWN pool + token pair on-chain (first Increase log → mint tx receipt → pool's
+  Mint log, whose `address` IS the pool → `token0()`/`token1()` → decimals via `resolveToken`,
+  **never a blind 18**), Redis-cached (`evm_pos_ctx_v1`, immutable, 90 d; only POSITIVE
+  results persisted so a transient failure can't freeze in). All three routes then **fan out
+  per position through the already-correct per-position path** rather than reimplementing
+  pricing — so accuracy is identical by construction (verified: fan-out $4,920.08 === direct
+  per-position $4,920.08). Adds a **per-position `positions[]` breakdown** so a WALLET-WIDE
+  total can never be attributed to one position, and an **`excluded[]`** list — a position
+  whose context won't resolve is surfaced, NEVER decoded with a foreign pool's decimals
+  (Rule 11). Uniswap's batched array-topic `getLogs` was removed (the batching saved calls
+  precisely BY discarding position association); `MAX_WALLET_IDS=30` preserved. **The `<=
+  $50M` artifact filter in `useWalletLevelFees` is DELETED** — a band-aid that caught only
+  inflation, never crushing, and would have discarded a legitimate large claim. Verified:
+  Account 1 (both decimal pairs) 8/8 positions, 0 excluded, 0 artifacts, and its USDC/cbBTC
+  position now reads **$296.16 vs the documented true $294**; vfat Sickle 3/3 with correct
+  6/8 + 18/6, **0 events >$50M** (was two, at $342bn/$167bn); Uniswap Arbitrum 3/3.
+  **⚠️ Velodrome executed only its empty branch — no test wallet holds Velodrome positions;
+  Uniswap verified single-pair only. Owner-accepted risk.** **⚠️ `SICKLE_CLOSED_SUPPRESSED`
+  is UNCHANGED — closed vfat positions REMAIN SUPPRESSED**, because the gauge-staking
+  misclassification (queue item A caveats) is unrelated to decimals and still open.
+  No cache bumps to `lp-pnl-events`/`analytics-activity`; new `evm_pos_ctx_v1` key only.
 
 - **`866ead0`** — **EVM dashboard showed a STALE address as "Connected" and fetched
   every position against the WRONG wallet.** Confirmed in production: the user's chip showed

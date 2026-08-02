@@ -8,6 +8,7 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
@@ -35,6 +36,9 @@ const PUBNODE_CHUNK = 49_000;
 const MAX_CONCURRENCY = 50;
 
 // Standard V3 event topic0 hashes (identical across all V3-fork NFT managers)
+// Pool Mint topic (same signature across all Uniswap-V3 forks) — identifies
+// a position's OWN pool from its mint tx receipt.
+const POOL_MINT_TOPIC = '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde';
 const TOPIC_INCREASE = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
 const TOPIC_DECREASE = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
 const TOPIC_COLLECT  = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
@@ -265,20 +269,84 @@ async function GET_impl(request: Request) {
   }
 
   try {
-    let logs: RawLog[];
+    // ── WALLET SCOPE ────────────────────────────────────────────────────
+    // Process EACH ever-owned tokenId through this same route with ITS OWN
+    // resolved pool context, then merge. Replaces the previous
+    // union-then-decode-with-one-context approach, which mis-scaled every
+    // event belonging to a pool other than the single "representative" one
+    // (x10^12 inflation or x10^-12 crushing, depending on which pool happened
+    // to be open). Identical treatment to the Aerodrome route — Velodrome is
+    // the original Slipstream architecture, so the bug and fix are the same.
+    // See app/lib/evmPoolContext.ts for the measured evidence.
     if (walletScope) {
-      // Enumerate every tokenId this wallet ever owned (Transfer→wallet logs),
-      // then union each one's NFT-manager logs. Burned positions' Collect logs
-      // persist on-chain indexed by tokenId, so this recovers fee claims Sugar
-      // can no longer surface. Reuses the same per-tokenId fetchLogs (4-tier
-      // RPC fallback) so no new RPC pattern is introduced.
       const ids = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK);
-      const groups = await Promise.all(
-        ids.map((idStr) => fetchLogs('0x' + BigInt(idStr).toString(16).padStart(64, '0'))),
-      );
-      logs = groups.flat();
-      console.log(`[velodrome/activity] positionId=all account=${account} → ${ids.length} tokenIds, ${logs.length} logs`);
-    } else {
+      const ctxs = await resolveEvmPositionContexts(ids, {
+        chain: 'optimism',
+        rpc: TENDERLY_RPC,
+        nftManager: NFT_MANAGER,
+        increaseTopic: TOPIC_INCREASE,
+        poolMintTopic: POOL_MINT_TOPIC,
+        deployBlock: DEPLOY_BLOCK,
+      });
+
+      const origin = new URL(request.url).origin;
+      const perPosition: Array<Record<string, unknown>> = [];
+      const excluded: Array<{ tokenId: string; reason: string }> = [];
+      const merged: ActivityEvent[] = [];
+      let ni0 = 0, ni1 = 0, tf0 = 0, tf1 = 0;
+
+      for (const id of ids) {
+        const ctx = ctxs.get(id) ?? null;
+        if (!ctx) {
+          // Honest degradation (Rule 11): excluded and surfaced, NEVER decoded
+          // with another pool's decimals — that is the bug itself.
+          excluded.push({ tokenId: id, reason: 'pool-context-unresolved' });
+          continue;
+        }
+        const sub = new URL('/api/velodrome/activity', origin);
+        sub.searchParams.set('positionId', id);
+        sub.searchParams.set('token0', ctx.token0);
+        sub.searchParams.set('token1', ctx.token1);
+        sub.searchParams.set('t0d', String(ctx.decimals0));
+        sub.searchParams.set('t1d', String(ctx.decimals1));
+        sub.searchParams.set('pool', ctx.pool);
+        try {
+          const res = await GET_impl(new Request(sub.toString()));
+          const body = (await res.json()) as ActivityResponse & { error?: string };
+          if (body.error) { excluded.push({ tokenId: id, reason: body.error }); continue; }
+          merged.push(...(body.events ?? []));
+          ni0 += body.netInvested0 ?? 0; ni1 += body.netInvested1 ?? 0;
+          tf0 += body.totalFees0 ?? 0;   tf1 += body.totalFees1 ?? 0;
+          perPosition.push({
+            tokenId: id, pool: ctx.pool,
+            pair: `${ctx.symbol0} / ${ctx.symbol1}`,
+            token0: ctx.token0, token1: ctx.token1,
+            decimals0: ctx.decimals0, decimals1: ctx.decimals1,
+            netInvested0: body.netInvested0, netInvested1: body.netInvested1,
+            totalFees0: body.totalFees0, totalFees1: body.totalFees1,
+            events: body.events ?? [],
+          });
+        } catch (err) {
+          excluded.push({ tokenId: id, reason: String(err).slice(0, 80) });
+        }
+      }
+
+      console.log(`[velodrome/activity] positionId=all account=${account} → ${ids.length} tokenIds, ${perPosition.length} resolved, ${excluded.length} excluded`);
+
+      // Per-position breakdown so a WALLET-WIDE total can never be attributed
+      // to a single position. Flat totals retained for compatibility and are
+      // the sum of the per-position values by construction.
+      return NextResponse.json({
+        events: merged,
+        netInvested0: ni0, netInvested1: ni1,
+        totalFees0: tf0, totalFees1: tf1,
+        positions: perPosition,
+        excluded,
+      });
+    }
+
+    let logs: RawLog[];
+    {
       const tokenIdHex = '0x' + BigInt(positionId).toString(16).padStart(64, '0');
       logs = await fetchLogs(tokenIdHex);
     }

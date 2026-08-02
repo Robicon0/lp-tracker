@@ -520,16 +520,17 @@ export function useWalletLevelFees(
         `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
         `&p0=${ctx.price0}&p1=${ctx.price1}`;
       const displayChain = UNI_CHAIN_DISPLAY[ctx.chain] ?? ctx.chain;
-      fetches.push(
-        dedupFetch(uniUrl, "Uniswap V3", displayChain).then((group) =>
-          // Drop decimals-mismatch overflow artifacts: a wallet with MULTIPLE
-          // distinct pairs on one chain has its non-representative pair scaled
-          // by the single representative context, which for a decimals
-          // mismatch yields billions. Real fee claims are far under $50M, so
-          // this strips only the garbage and never a legitimate claim.
-          group.filter((t) => Math.abs(t.event.usdAtTime ?? 0) <= 50_000_000),
-        ),
-      );
+      // The `<= $50M` artifact filter that used to wrap this call was REMOVED
+      // (2026-08-02) along with its cause. It was a band-aid over the
+      // single-representative-context decimals bug, and a poor one: it caught
+      // only the INFLATION direction. The same bug also CRUSHES amounts by the
+      // same factor when the representative pair has more decimals than the
+      // event's real pair — producing plausible small numbers that no magnitude
+      // filter can detect, silently UNDER-reporting fees (measured on Account 1:
+      // 14 fee claims under $0.50, one of which was truly $294). It would also
+      // have discarded any legitimate very large claim. The route now resolves
+      // each position's own pool context, so there are no artifacts to filter.
+      fetches.push(dedupFetch(uniUrl, "Uniswap V3", displayChain));
     }
 
     // Solana (Orca) CLOSED-position fee scan — recovers fee claims from
