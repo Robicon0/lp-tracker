@@ -341,6 +341,26 @@ activity-route cache must not store a non-complete empty. Complexity SMALL–MED
 **Verify by forcing the failure** (throttle or point at a dead RPC) and confirming the
 route reports incompleteness rather than a clean zero.
 
+**⚠️ C. BACKLOG (recorded, not fixed) — Sugar position enumeration is capped at 100 with
+no pagination, so wallets with >100 positions are SILENTLY TRUNCATED.**
+_(Found 2026-08-03 during Sprint GAUGE-STAKING. Recorded only — deliberately out of scope.)_
+
+`app/api/aerodrome/route.ts` (and the Velodrome equivalent) calls Sugar as
+`positionsByFactory(limit=100, offset=0, account, factory)` and never pages. Observed live:
+a Base contract returned **exactly 100** positions — i.e. it hit the cap, and whatever lay
+beyond it was invisible with no error, no banner, and no indication of truncation.
+
+**Why it matters:** an active LP or a protocol/router contract with >100 positions silently
+loses everything past the 100th from value, fees and P&L. Worse, the closed-position
+reconstruction computes `everOwned - heldIds`, so a truncated `heldIds` makes genuinely-OPEN
+positions look CLOSED — the same fabricated-loss failure mode Sprint GAUGE-STAKING just
+fixed, arriving by a different route.
+
+**Shape of the fix:** page with `offset` until a short page is returned, and treat a
+full-limit page as "there may be more" rather than "that's all". If pagination cannot be
+completed, surface incompleteness rather than returning a confident partial set — same
+principle as queue item B. Complexity SMALL.
+
 0. _(DONE — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1**: wrapper position-detail page,
    SHIPPED `4a25c69` 2026-07-21. See Recent fixes.)_
 0b. _(CLOSED — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 2** (Fusion LP): **NO CODE REQUIRED.**
@@ -472,6 +492,37 @@ route reports incompleteness rather than a clean zero.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`GAUGE_HASH`** — **Sprint GAUGE-STAKING: a STAKED position was booked as CLOSED with its
+  whole deposit as a realized loss.** Staking a Slipstream CL position transfers its NFT to
+  the pool's GAUGE. Sugar's `positionsByFactory` enumerates only DIRECTLY-HELD NFTs, so the
+  position vanished from its result — and the closed reconstruction
+  (`closedIds = everOwned.filter(id => !heldIds.has(id))`, aerodrome/route.ts:125) read that
+  absence as closure. It never called `ownerOf`, never checked burn status, never consulted
+  withdrawal events. Live: vfat Sickle `0x06C3F412…e09f` position `73551608` — ~$10k still
+  staked and earning AERO — showed a **−$9,988.84** Capital G/L. **NOT vfat-specific:** any
+  address, EOA or contract, that stakes is exposed; vfat merely stakes routinely. (Account 1
+  was unaffected — 7 genuinely burned, 1 held, 0 staked.) FIX: NEW
+  `app/lib/evmGaugeStaking.ts` resolves what ACTUALLY happened to each unreturned tokenId —
+  `burned` (genuinely closed), `staked`, `third-party` (transferred/sold), or `unresolved`
+  (RPC failure). **Only `burned` is emitted as Closed**; the rest are excluded or emitted
+  OPEN, so no verdict can produce a fabricated loss. Gauge identity is **DOUBLE-CHECKED** —
+  the holder must report `nft() == positionManager` AND be the address `voter.gauges(pool)`
+  returns; either alone could be an arbitrary contract, and if they disagree the position is
+  excluded. Staked positions are valued from the pool's REAL `slot0.sqrtPriceX96` via
+  `amountsFromLiquidity` (deliberately NOT the midpoint approximation in
+  `uniswap/v3/route.ts:286-297` — that is an estimate, and this feeds a displayed dollar
+  value), emitted in the OPEN shape with additive `isStaked` + `gaugeAddress`, which also
+  keeps them out of Capital G/L (Rule 4, closed-only). Applied to Aerodrome AND Velodrome.
+  **Trap worth remembering: `positions(uint256)` is `0x99fbab88`** — an earlier attempt used
+  a transposed `0x99fd0e82` and reverted on every tokenId, which looks exactly like "position
+  doesn't exist". Verified: `73551608` now **In Range, isStaked, $9,911.02** (was Closed
+  −$9,988.84); wallet Capital G/L **−$9,988.84 → +$0.00** with `9,988.84` absent from the
+  page; portfolio $9.8K → $19.7K and Net P&L −$10,008 → −$98.92 as the live asset is counted;
+  **Account 1 regression byte-clean — 8 total, 7 Closed, 1 open, 0 staked, unchanged.**
+  ⚠️ **Velodrome could not be exercised — no available test wallet holds Velodrome
+  positions.** Safe by construction though: if `VELODROME_VOTER` were wrong, detection fails
+  to `third-party` → EXCLUDED, never back to a fabricated loss. No cache bumps.
 
 - **`78e80db`** — **Sprint ITEM-A: EVM wallet-scope per-event pool context.** The
   wallet-scope closed-position scans (`positionId=all` / `tokenId=all`) enumerated EVERY

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
 import { resolveToken } from '../../lib/tokenResolver';
+import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -16,6 +17,11 @@ const SUGAR_ADDRESS = '0xb8a82f0334e43c2eb0ab5d799036965f7bf07ba8';
 // Tenderly archive RPC is required for full-range eth_getLogs (Alchemy free
 // tier caps at 10 blocks). Mirrors app/api/aerodrome/route.ts.
 const TENDERLY_RPC = 'https://optimism.gateway.tenderly.co';
+// Velodrome Voter — the protocol's own pool -> gauge registry, used to CONFIRM
+// a holder really is that pool's gauge (Sprint GAUGE-STAKING). If this were
+// wrong, detection fails CLOSED-SAFE: the position is excluded, never booked
+// as a loss.
+const VELODROME_VOTER = '0x41C914ee0c7E1A5edCD0295623e6dC557B5aBf3C';
 const NFT_MANAGER = '0x416b433906b1B72FA758e166e239c43d68dC6F29';
 const NFT_DEPLOY_BLOCK = 10_000_000;
 // IncreaseLiquidity (NFT manager) + pool Mint (CL pool) topic0 — used to derive
@@ -128,7 +134,80 @@ async function buildClosedPositions(
   const closedIds = everOwned.filter((id) => !heldIds.has(id));
   if (closedIds.length === 0) return [];
 
-  return Promise.all(closedIds.map(async (tokenId): Promise<Record<string, unknown>> => {
+  // ── Sprint GAUGE-STAKING ─────────────────────────────────────────────
+  // Identical treatment to the Aerodrome route — Velodrome is the original
+  // Slipstream architecture, so "not returned by Sugar" was equally wrong as a
+  // proxy for "closed". Staking moves the NFT to the pool's gauge; Sugar
+  // enumerates only directly-held NFTs, so a live staked position looked closed
+  // and had its whole deposit booked as a realized loss.
+  //
+  // Verdicts other than `burned` are NEVER emitted as Closed:
+  //   staked      → emitted below in the OPEN shape with its real current value
+  //   third-party → transferred/sold; excluded (not our position, not our loss)
+  //   unresolved  → RPC failure; excluded rather than guessed (Rule 11)
+  //
+  // NOTE: gauge detection requires BOTH `holder.nft() == positionManager` AND
+  // `voter.gauges(pool) == holder`. If VELODROME_VOTER were ever wrong, a staked
+  // position degrades to `third-party` and is EXCLUDED — it can never be turned
+  // back into a fabricated loss. Safe by construction.
+  const verdicts = await Promise.all(
+    closedIds.map(async (id) => {
+      try {
+        return { id, v: await resolveHolderVerdict({ rpc: TENDERLY_RPC, nftManager: NFT_MANAGER, voter: VELODROME_VOTER, tokenId: id }) };
+      } catch {
+        return { id, v: { kind: 'unresolved' as const } };
+      }
+    }),
+  );
+
+  const stakedOut: Record<string, unknown>[] = [];
+  for (const { id, v } of verdicts) {
+    if (v.kind !== 'staked') continue;
+    const s = v.state;
+    const t0 = TOKENS[s.token0];
+    const t1 = TOKENS[s.token1];
+    const r0 = t0 ?? (await resolveToken({ chain: 'optimism', contractAddress: s.token0 }).catch(() => null));
+    const r1 = t1 ?? (await resolveToken({ chain: 'optimism', contractAddress: s.token1 }).catch(() => null));
+    const d0 = r0?.decimals ?? 18;
+    const d1 = r1?.decimals ?? 18;
+    const { amount0, amount1 } = amountsFromLiquidity(s.liquidity, s.tickLower, s.tickUpper, s.sqrtPriceX96, d0, d1);
+    const p0 = prices[s.token0] ?? 0;
+    const p1 = prices[s.token1] ?? 0;
+    const value = amount0 * p0 + amount1 * p1;
+    const inRange = s.tickCurrent >= s.tickLower && s.tickCurrent < s.tickUpper;
+    stakedOut.push({
+      id: `velo-${id}`,
+      pair: `${r0?.symbol ?? 'TOKEN0'} / ${r1?.symbol ?? 'TOKEN1'}`,
+      protocol: 'Velodrome',
+      chain: 'Optimism',
+      value: Math.round(value * 100) / 100,
+      apy: 0,
+      fees: 0,
+      status: inRange ? 'In Range' : 'Out of Range',
+      depositId: id,
+      amount0: Math.round(amount0 * 1e6) / 1e6,
+      amount1: Math.round(amount1 * 1e6) / 1e6,
+      token0Symbol: r0?.symbol ?? 'TOKEN0',
+      token1Symbol: r1?.symbol ?? 'TOKEN1',
+      fees0: 0, fees1: 0,
+      tickLower: s.tickLower, tickUpper: s.tickUpper,
+      token0Decimals: d0, token1Decimals: d1,
+      liquidity: s.liquidity.toString(),
+      price0: p0, price1: p1,
+      token0Address: s.token0, token1Address: s.token1,
+      walletAddress: account,
+      isStaked: true,
+      gaugeAddress: s.gauge,
+    });
+  }
+
+  const trulyClosedIds = verdicts.filter(({ v }) => v.kind === 'burned').map(({ id }) => id);
+  const excludedCount = verdicts.length - trulyClosedIds.length - stakedOut.length;
+  if (stakedOut.length || excludedCount) {
+    console.log(`[velodrome] closed-scan: ${trulyClosedIds.length} burned, ${stakedOut.length} gauge-staked (kept OPEN), ${excludedCount} excluded (third-party/unresolved)`);
+  }
+
+  const closedBuilt = await Promise.all(trulyClosedIds.map(async (tokenId): Promise<Record<string, unknown>> => {
     const minimal: Record<string, unknown> = {
       id: `velo-${tokenId}`,
       pair: 'Velodrome Position',
@@ -190,6 +269,10 @@ async function buildClosedPositions(
       return minimal;
     }
   }));
+
+  // Genuinely-burned positions keep their existing Closed behaviour; staked
+  // ones ride along in the OPEN shape.
+  return [...closedBuilt, ...stakedOut];
 }
 
 // Fetch prices from CoinGecko
