@@ -493,7 +493,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`GAUGE_HASH`** — **Sprint GAUGE-STAKING: a STAKED position was booked as CLOSED with its
+- **`494725f`** — **Sprint GAUGE-STAKING: a STAKED position was booked as CLOSED with its
   whole deposit as a realized loss.** Staking a Slipstream CL position transfers its NFT to
   the pool's GAUGE. Sugar's `positionsByFactory` enumerates only DIRECTLY-HELD NFTs, so the
   position vanished from its result — and the closed reconstruction
