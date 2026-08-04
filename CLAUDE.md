@@ -266,6 +266,45 @@ hint. The user cannot tell which reading, if any, is right.
    but NOT the figure (+$14.61 local vs +$16.25 prod on the same commit). **Until this is
    fixed, do not trust a Capital G/L delta as evidence of anything.**
 
+**✅ CAUSE IDENTIFIED FROM EVIDENCE 2026-08-05 (diagnostic run, `scripts/capgl-determinism.mjs`).
+The earlier "leading hypothesis" below — queue item B, a failed enumeration — was WRONG.**
+
+**What the evidence showed:**
+- `deposited` and `current` are STABLE across loads; only `capitalGL` varies (spread $2,297
+  over 3 loads: −$1,355.49 / −$2,274.08 / −$3,652.87). So OPEN-position valuation is fine.
+- Every `/api` call returns **200** in every run, the call SET is identical, and no activity
+  route returns zero events. **Not an RPC or enumeration failure.**
+- Within a SINGLE load the value is completely stable (−$1,808.93 held from t=30 s to
+  t=360 s). **It is not "still converging"** — each load reaches a DIFFERENT stable answer.
+- The UI states the reason plainly: **"⚠ N positions could not be fully calculated and are
+  excluded from totals: WETH / USDC (Aerodrome · Base) — Deposit price data unavailable"**
+  (`useLpPnl.ts:122`, reason `missing_deposit_prices`). The excluded COUNT varies per load
+  (4 / 3 / 1), and the number of closed rows moves inversely (5 / 6 / 8).
+
+**Root cause:** Capital G/L depends on **claim/deposit-date HISTORICAL prices**, and the
+activity routes read them **cached-only** (`getCachedOnlyTokenPrice` /
+`getCachedOnlyDefillamaPrice`, aerodrome/activity ~721-723) while the warm-up is
+**fire-and-forget** (`void prewarmTokenPrices(pairs).catch(...)`, ~line 564 — deliberately
+not awaited so CoinGecko cannot blow the function timeout). So each page load values
+whatever historical dates happen to be warm in Redis AT THAT MOMENT; every cold date makes
+its position unpriceable, which EXCLUDES the position from the total. Different cache
+warmth per load → different excluded subset → a different, confidently-rendered Capital G/L.
+
+**Correction to the original report of this bug:** it claimed the failure was SILENT with
+"no banner, no exclusion notice". **That was wrong** — the UI does surface both the count
+and the per-position reason. The real defect is subtler and arguably worse: the exclusion is
+disclosed, but the TOTAL is still presented as an authoritative figure, so two loads yield
+two different "true" Capital G/L values, each with its own honest-looking footnote.
+
+**Why it is a real bug and not just a documented tradeoff:** the fire-and-forget design is
+deliberate and correct in intent (never block a route on CoinGecko). What was not intended
+is a headline money figure silently changing by ~$2,300 depending on cache warmth. Any fix
+must keep the non-blocking property — the likely shape is to make an incompletely-priced
+Capital G/L *declare itself incomplete* rather than render as a total, and/or to hold the
+prior complete value until pricing is whole.
+
+**Superseded hypothesis (kept so it is not re-derived):**
+
 **Leading hypothesis — NOT yet proven, and the investigation must establish cause before any
 fix:** queue item B (a failed/partial enumeration returning an empty that is cached as
 truth). `getEverOwnedTokenIds` was observed returning `[]` for a wallet with 3 known
