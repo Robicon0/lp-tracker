@@ -50,37 +50,35 @@ interface SourceQuery {
   label: string; // protocol display label for pendingSources
   address: string;
   fetcher: (address: string) => Promise<AerodromePosition[]>;
-  // True when this address is a vfat Sickle DERIVED for the user (not one the
-  // user added themselves). Gates the temporary closed-position suppression
-  // below — see SICKLE_CLOSED_SUPPRESSED.
-  isDerivedSickle?: boolean;
 }
 
-// TEMPORARY — vfat/Sickle closed positions are suppressed from the positions
-// array (so they reach neither Capital G/L nor the Closed tab).
+// HISTORY (kept deliberately — this is the second time a wrong diagnosis here
+// cost real time, and the correction is worth more than the code it replaced):
 //
-// WHY: a Sickle commonly holds positions across pools with DIFFERENT token
-// decimal pairs (e.g. WETH/USDC 18/6 alongside USDC/cbBTC 6/8). The EVM
-// wallet-scope closed-position scan applies ONE representative pair's decimals
-// to every event it finds, so an 18-decimal amount read as 6-decimal inflates
-// by 1e12. Measured live on Sickle 0x06C3F412…e09f: deposit events of
-// $342,298,111,238 and $167,113,757,805, producing a Capital G/L of −$9,988.84
-// against a real closed leg of ~$1.20.
+// Between 2026-08-02 and 2026-08-04 a `SICKLE_CLOSED_SUPPRESSED` flag filtered
+// CLOSED positions out of derived vfat/Sickle sources, because a Sickle showed
+// a Capital G/L of −$9,988.84 on a position whose deposit was ~$10,285. The
+// flag's own comment blamed the EVM wallet-scope DECIMALS bug and asserted the
+// position's real value was "~$1.20".
 //
-// This bug is NOT caused by vfat and NOT specific to it — it reproduces
-// identically when the same Sickle is added as an ordinary watched wallet, and
-// affects ANY wallet with closed positions across pools with differing
-// decimals. It is tracked as its own queue item (EVM per-event token
-// resolution). But vfat is what makes it *reachable* for these users, and a
-// wrong Capital G/L is worse than a missing one — so closed Sickle positions
-// stay out until that fix lands.
+// BOTH claims were wrong. The "$1.20" came from a diagnostic call that itself
+// passed 18/6 decimals to a 6/8 position — the bug reproduced inside its own
+// diagnosis. And the −$9,988.84 was not decimals at all: the position was
+// GAUGE-STAKED, so its NFT had moved to the gauge, Sugar stopped returning it,
+// and `everOwned − heldIds` read that absence as closure and booked the whole
+// deposit as a realized loss.
 //
-// OPEN positions are unaffected: they are valued per-position with the correct
-// pool context and were verified exact against Phase A.
+// Both underlying bugs are now fixed — decimals in `78e80db` (per-position pool
+// context) and gauge-staking in `494725f` (`app/lib/evmGaugeStaking.ts`, which
+// only ever emits `burned` as Closed). With the cause gone the suppression was
+// removed on 2026-08-04, verified against a Sickle that has a genuinely closed
+// position (`0xf61df878…6292`, Capital G/L +$72.57) rather than against the
+// original wallet, which turned out to have no closed positions at all and so
+// could not have demonstrated anything either way.
 //
-// TO REVERT once the decimals bug is fixed: delete this constant and the
-// `.filter()` that references it. Nothing else depends on it.
-const SICKLE_CLOSED_SUPPRESSED = true;
+// THE LESSON: when a number looks impossible, verify the "correct" value with a
+// method that cannot share the suspected bug. A suppression flag is a fine
+// stopgap, but it is only as good as the diagnosis that motivated it.
 
 export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // Use addresses from WalletAuthContext — the only source of truth for wallet
@@ -203,17 +201,12 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // to only the chain it was found on is a known future optimization — it would
   // cut redundant calls but changes no output, so it is deliberately not MVP.
   for (const a of evmFetchAddresses) {
-    // A DERIVED Sickle: resolved on the user's behalf, not an address they
-    // added. If the user has separately added the Sickle as a watched wallet it
-    // is in evmAddresses and is treated as an ordinary wallet (no suppression)
-    // — their explicit choice, and identical to today's behaviour.
-    const isDerivedSickle = resolvedSickles.includes(a) && !evmAddresses.includes(a);
     sources.push(
-      { label: "Aerodrome", address: a, fetcher: fetchAerodromePositions, isDerivedSickle },
-      { label: "Uniswap V3", address: a, fetcher: fetchUniswapV3Positions, isDerivedSickle },
-      { label: "Velodrome", address: a, fetcher: fetchVelodromePositions, isDerivedSickle },
-      { label: "HyperEVM", address: a, fetcher: fetchHyperSwapPositions, isDerivedSickle },
-      { label: "PancakeSwap", address: a, fetcher: fetchPancakeSwapPositions, isDerivedSickle },
+      { label: "Aerodrome", address: a, fetcher: fetchAerodromePositions },
+      { label: "Uniswap V3", address: a, fetcher: fetchUniswapV3Positions },
+      { label: "Velodrome", address: a, fetcher: fetchVelodromePositions },
+      { label: "HyperEVM", address: a, fetcher: fetchHyperSwapPositions },
+      { label: "PancakeSwap", address: a, fetcher: fetchPancakeSwapPositions },
     );
   }
   for (const a of solanaAddresses) {
@@ -250,15 +243,7 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   // depend on that identity and were built for wave-by-wave arrival.
   const signature = queries.map((q) => q.dataUpdatedAt).join(",") + `|${sources.length}`;
   const positions = useMemo(
-    () => queries.flatMap((q, i) => {
-      const data = q.data ?? [];
-      // Suppress CLOSED positions from derived Sickles only — see
-      // SICKLE_CLOSED_SUPPRESSED. Every other source is untouched, so normal
-      // wallets' closed positions still reach Capital G/L and the Closed tab
-      // exactly as before.
-      if (!SICKLE_CLOSED_SUPPRESSED || !sources[i]?.isDerivedSickle) return data;
-      return data.filter((p) => p.status !== "Closed");
-    }),
+    () => queries.flatMap((q) => q.data ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [signature],
   );

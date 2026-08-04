@@ -333,6 +333,25 @@ self-disconnect (fixed by a settle gate), the Solana closed-scan empty-cache rul
 asynchronous/remote source is NOT evidence of absence, and must never be cached as though
 it were.**
 
+**⚠️ ESCALATED 2026-08-05 — this now demonstrably corrupts DISPLAYED DOLLAR FIGURES on
+Osho's own account.** Measured during Sprint SICKLE-CLOSED-REVERIFY with an IDENTICAL build
+and NO code change between runs, Account 1 (`0xD99a9e66…4F20`) analytics:
+
+```
+run 1:  DEPOSITED $8,184.28 | CAPITAL G/L -$3,219.10 | NET P&L  +$110.66
+run 2:  DEPOSITED $8,243.79 | CAPITAL G/L -$2,165.85 | NET P&L +$1,104.24
+```
+
+A **$1,053 swing (~33%) in Capital G/L between two identical page loads**, with Net P&L
+flipping sign. Each load looks confident — no banner, no exclusion notice. This is the
+transient/partial-scan empty being treated as truth, landing directly in user-facing money.
+
+**Second-order cost:** it sets a measurement floor of roughly ±$1,000 on any Capital G/L
+reading, which silently undermines every before/after verification in this project. It is
+why Sprint SICKLE-CLOSED-REVERIFY could confirm its target position showed a GAIN but could
+not confirm the exact figure. **Fix this before trusting any further Capital G/L
+comparison.**
+
 **Shape of the fix:** `getEverOwnedTokenIds` must distinguish "scan completed, wallet
 genuinely owns nothing" from "scan failed/partial" — return completeness alongside the ids
 (the `stats.complete` pattern already proven in `solanaClosedPositions.ts`). Callers then
@@ -492,6 +511,32 @@ principle as queue item B. Complexity SMALL.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`REVERIFY_HASH`** — **Sprint SICKLE-CLOSED-REVERIFY: `SICKLE_CLOSED_SUPPRESSED` REMOVED
+  — closed vfat/Sickle positions are live again.** The flag was a stopgap added 2026-08-02
+  when a Sickle showed a Capital G/L of −$9,988.84. **Its stated rationale was WRONG on both
+  counts**: it blamed the wallet-scope DECIMALS bug and asserted the position's real value
+  was "~$1.20". The $1.20 came from a diagnostic that itself passed 18/6 decimals to a 6/8
+  position (the bug reproduced inside its own diagnosis), and the −$9,988.84 was actually
+  GAUGE-STAKING misclassification. Both underlying causes are now fixed (`78e80db` decimals,
+  `494725f` gauge), so the suppression was removed and `isDerivedSickle` deleted with it.
+  **The replaced comment is kept as a HISTORY block** in `PositionsContext.tsx` — the lesson
+  (verify a "correct" value with a method that cannot share the suspected bug) is worth more
+  than the code it replaced. Verification: the ORIGINAL test wallet `0x06C3…e09f` turned out
+  to have **ZERO genuinely-closed positions** (3 ever-owned, all live), so removal is a
+  NO-OP there and it could never have demonstrated anything — a second Sickle was found via
+  factory `Deploy` logs (`0xf61df878…6292`, owner `0xcc11dd1e…e82b`, 1 closed + 1 open) and
+  its closed position now reports **Capital G/L +$14.61, a gain, with closed rows present**
+  (was suppressed, +$0.00). `0x06C3…e09f` unchanged (3 open, 0 closed, +$0.00); no value
+  >$50M anywhere. **Accounts 1 and 2 moved (~$565 / ~$300) but NOT because of this change** —
+  `/api/vfat/sickles` returns `[]` for both, so the filter was structurally incapable of
+  touching them, and an identical-build control run showed a LARGER swing (see queue item B).
+  Two findings recorded rather than fixed: (a) the **Empty-Sugar gate**
+  (`aerodrome/route.ts:373-374` returns early on zero open positions, so
+  `buildClosedPositions` never runs) means a closed-ONLY Sickle still shows nothing —
+  verified on a Sickle with 6 burned positions returning count=0; (b) **Sugar DOES return
+  some gauge-staked positions**, so the `isStaked` badge only appears on ones Sugar misses —
+  cosmetic inconsistency, not a correctness issue. No cache bumps.
 
 - **`494725f`** — **Sprint GAUGE-STAKING: a STAKED position was booked as CLOSED with its
   whole deposit as a realized loss.** Staking a Slipstream CL position transfers its NFT to
