@@ -234,11 +234,63 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 ## Sprint queue
 
 In order. One active at a time. Each sprint must ship before the next begins.
+
+> **🔴 NEXT UP — ITEM 0 (Sprint CAPGL-DETERMINISM). This is the top of the queue and
+> supersedes the ordering note below.** Added 2026-08-05 at the owner's direction: it ranks
+> ABOVE queue items B and C and above WRAPPER-PROTOCOLS Part 3.
+
+**🔴 ITEM 0 — Capital G/L is NON-DETERMINISTIC. The same wallet, same build, two page loads,
+produces different money.**
+
+**Evidence** (Account 1 `0xD99a9e66…4F20`, analytics, IDENTICAL build, NO code change between
+runs, captured during Sprint SICKLE-CLOSED-REVERIFY):
+
+```
+run 1:  DEPOSITED $8,184.28 | CAPITAL G/L -$3,219.10 | NET P&L  +$110.66
+run 2:  DEPOSITED $8,243.79 | CAPITAL G/L -$2,165.85 | NET P&L +$1,104.24
+```
+
+**$1,053 swing (~33%) in Capital G/L; NET P&L FLIPS SIGN** (−$331 → +$1,104 across the wider
+sample). Every load renders confidently — no banner, no exclusion notice, no "still scanning"
+hint. The user cannot tell which reading, if any, is right.
+
+**Why this is item 0:**
+1. **It is the product's core promise failing.** DefiDesh's pitch is "reconciled against
+   on-chain truth, not estimates". A number that changes by a third on refresh is an
+   estimate, and an unsignposted one.
+2. **It is on OSHO'S OWN ACCOUNT** — the wallet used to validate everything else.
+3. **It invalidates the project's verification method.** It sets a **±$1,000 measurement
+   floor** on any Capital G/L reading, so every before/after comparison in this repo —
+   including the ones that signed off recent sprints — is only trustworthy to about a
+   thousand dollars. Sprint SICKLE-CLOSED-REVERIFY could confirm its target showed a GAIN
+   but NOT the figure (+$14.61 local vs +$16.25 prod on the same commit). **Until this is
+   fixed, do not trust a Capital G/L delta as evidence of anything.**
+
+**Leading hypothesis — NOT yet proven, and the investigation must establish cause before any
+fix:** queue item B (a failed/partial enumeration returning an empty that is cached as
+truth). `getEverOwnedTokenIds` was observed returning `[]` for a wallet with 3 known
+positions under RPC throttling. If per-load a different subset of positions resolves, both
+Deposited and Capital G/L shift. But **other candidates have NOT been excluded**: the
+per-position LKG/degrade funnel (Rule 11 STALE/ESTIMATED/EXCLUDED) settling differently per
+load; `withActivityRouteCache` TTL boundaries; partial closed-scan results; or the
+progressive-aggregate render (Rule 10) being sampled before settle. **Do not assume B.**
+
+**Investigation shape:** instrument one wallet across N identical loads and capture, per
+load, the exact set of positions included in the aggregate plus each one's degrade state —
+then diff the sets. The delta between runs names the cause. Expect to need a determinism
+harness (repeat-load, compare, report variance) as a permanent regression guard; the absence
+of one is why this went unnoticed for so long.
+
+**Acceptance:** the same wallet on the same build produces the SAME Capital G/L across
+repeated loads, or visibly declares incompleteness (Rule 11 — degrade, never silently
+differ). Complexity UNKNOWN until the cause is named; the harness is SMALL.
+
 _(Sprint WRAPPER-PROTOCOLS — DefiTuna wrapper positions — is the ACTIVE sprint above.
 Phase 1 shipped `4c450a1`; Phase 2 Part 1 shipped `4a25c69`; Phase 2 Part 2 CLOSED with no
 code required. **Part 3 (closed Tuna) is the next DefiTuna work** — but it is BLOCKED on the
-accrued-interest pricing-invariants decision, so if that decision is not yet made, item 4
-(scan-mode detail navigation, SMALL and user-visible) is the better thing to pick up.)_
+accrued-interest pricing-invariants decision. **NOTE (2026-08-05): regardless of that
+decision, ITEM 0 (Capital G/L non-determinism) is now the next thing to pick up — it ranks
+above Part 3 and above queue items B and C, at the owner's direction.**)_
 
 **✅ A. FIXED (`78e80db`, 2026-08-02) — EVM wallet-scope per-event pool context.**
 _(Kept here rather than only in Recent fixes because the remaining caveats below are
@@ -332,6 +384,11 @@ self-disconnect (fixed by a settle gate), the Solana closed-scan empty-cache rul
 (`stats.complete`), and now this. **The standing lesson: an empty result from an
 asynchronous/remote source is NOT evidence of absence, and must never be cached as though
 it were.**
+
+**➡️ SEE ITEM 0 (top of queue).** The measurements below are the symptom that promoted
+Capital G/L non-determinism to the top of the queue as its own investigation. Item B (a
+failed enumeration cached as an empty) is the LEADING HYPOTHESIS for that symptom but is
+**not proven** — item 0 must name the cause first, and may land here or elsewhere.
 
 **⚠️ ESCALATED 2026-08-05 — this now demonstrably corrupts DISPLAYED DOLLAR FIGURES on
 Osho's own account.** Measured during Sprint SICKLE-CLOSED-REVERIFY with an IDENTICAL build
