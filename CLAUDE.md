@@ -512,7 +512,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`REVERIFY_HASH`** — **Sprint SICKLE-CLOSED-REVERIFY: `SICKLE_CLOSED_SUPPRESSED` REMOVED
+- **`44f2ef2`** — **Sprint SICKLE-CLOSED-REVERIFY: `SICKLE_CLOSED_SUPPRESSED` REMOVED
   — closed vfat/Sickle positions are live again.** The flag was a stopgap added 2026-08-02
   when a Sickle showed a Capital G/L of −$9,988.84. **Its stated rationale was WRONG on both
   counts**: it blamed the wallet-scope DECIMALS bug and asserted the position's real value
