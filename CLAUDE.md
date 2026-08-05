@@ -269,7 +269,7 @@ SMALL.
 > its narrow, isolated remainder and inherits the top-of-queue position. Both rank ABOVE
 > queue items B and C and above WRAPPER-PROTOCOLS Part 3.
 
-**🟠 ITEM 0 — Capital G/L non-determinism. LARGELY FIXED (`CAPGL_HASH`, 2026-08-05):
+**🟠 ITEM 0 — Capital G/L non-determinism. LARGELY FIXED (`4fcc617`, 2026-08-05):
 variance cut 97.4%, from a $2,297.38 spread to $59.48. NOT fully closed — see ITEM 0b,
 which is the narrow remaining cause and the next thing to investigate.**
 
@@ -648,7 +648,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`CAPGL_HASH`** — **Sprint CAPGL-DETERMINISM: Capital G/L stops presenting an INCOMPLETE
+- **`4fcc617`** — **Sprint CAPGL-DETERMINISM: Capital G/L stops presenting an INCOMPLETE
   sum as a final total.** Same wallet, same build, two loads → different money: Account 1's
   Capital G/L spread **$2,297.38** across 3 identical loads with Net P&L flipping sign.
   **Cause (from evidence, not guessed):** Capital G/L depends on claim-date HISTORICAL
