@@ -82,6 +82,13 @@ export interface PositionPnLData {
   // Optional/back-compat: absent === 0 (e.g. buildFallbackPnL constructs its
   // own PnL object).
   pendingClaimCount?: number;
+  /**
+   * Deposit/withdrawal events valued at CURRENT spot because their claim-date
+   * historical price was unavailable. > 0 means this position's realised value
+   * is not yet final — see the withdrawal loop for why this drives Capital G/L
+   * non-determinism.
+   */
+  spotFallbackEventCount?: number;
 }
 
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
@@ -190,6 +197,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   // than silently understating lifetime fees.
   let feesCollected = 0;
   let pendingClaimCount = 0;
+  let spotFallbackEventCount = 0;
   for (const e of sorted) {
     if (e.type !== 'fee_claim' && e.type !== 'reward_claim') continue;
     if (e.usdAtTime != null) {
@@ -227,6 +235,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     ilAvailable,
     depositTxHashes,
     pendingClaimCount,
+    spotFallbackEventCount,
   };
 
   // ── IL formula (concentrated liquidity, exact) ────────────────────────
@@ -253,6 +262,22 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       } else if (w.price0AtTime != null && w.price1AtTime != null) {
         closingValue += w.amount0 * w.price0AtTime + w.amount1 * w.price1AtTime;
       } else {
+        // LAST RESORT: value the exit at CURRENT spot. Permitted by
+        // pricing-invariants Rule 2 (a withdrawal is a point-in-time position
+        // value, not historical earnings) and kept — but COUNTED, because it is
+        // the direct cause of a non-deterministic Capital G/L.
+        //
+        // Which branch runs depends purely on whether the claim-date historical
+        // price happened to be warm in the cache at that moment, so the SAME
+        // closed position is valued historically on one load and at spot on the
+        // next. Measured 2026-08-05 on Account 1: one position's withdrawn value
+        // read $6,364.83 vs $7,019.10 across identical loads, and two such
+        // positions accounted for the entire $738.81 Capital G/L spread.
+        //
+        // Counting it lets the caller mark the position "not finally priced yet"
+        // so Capital G/L declares itself incomplete and retries, instead of
+        // presenting a spot-derived figure as a settled historical total.
+        spotFallbackEventCount += 1;
         closingValue += w.amount0 * price0 + w.amount1 * price1;
       }
     }

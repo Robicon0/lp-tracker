@@ -235,12 +235,52 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
-> **🔴 NEXT UP — ITEM 0 (Sprint CAPGL-DETERMINISM). This is the top of the queue and
-> supersedes the ordering note below.** Added 2026-08-05 at the owner's direction: it ranks
-> ABOVE queue items B and C and above WRAPPER-PROTOCOLS Part 3.
+**🔴 ITEM 0b — NEXT UP. One closed position is returned by the API but INCONSISTENTLY
+INCLUDED in the aggregate, with no exclusion notice.** _(Isolated 2026-08-05 as the residual
+after ITEM 0's fix; narrowly scoped on purpose.)_
 
-**🔴 ITEM 0 — Capital G/L is NON-DETERMINISTIC. The same wallet, same build, two page loads,
-produces different money.**
+**Exact signature:** the Aerodrome closed position with **deposited $9,246.39** on Account 1
+(`0xD99a9e66…4F20`) appeared in 1 of 3 identical loads. In every run `/api/aerodrome`
+returned **pos=8** — the source is stable — so the position is dropped DOWNSTREAM, silently:
+`excludedNotice` was **null** in all three runs, so it is not travelling the exclusion path
+that ITEM 0 fixed. Residual spread $59.48; runs 1 and 2 were byte-identical to each other
+(row sums both −$3,888.82), so this single position is the entire remaining delta.
+
+**This is a THIRD mechanism, distinct from the two ITEM 0 addressed** (pricing exclusions,
+and spot-fallback withdrawal valuation). Candidates NOT yet excluded: the eligibility filter
+in `useLpPnl`'s fetch effect; the Rule 11 degrade funnel resolving to a state that drops it
+without reporting; an `isClosed` mismatch eviction; or a race between the positions array and
+the aggregate memo. **Do not guess — reproduce with
+`node scripts/capgl-determinism.mjs --runs 5` and diff which run includes it.**
+
+**Acceptance:** that position is present in every run, or its absence is REPORTED. The
+harness must go green (`VERDICT: deterministic ✓`).
+
+**🟡 ITEM 0c — MINOR: token symbol display is non-deterministic.** The SAME closed position
+renders as `WETH / USDC` on one load and the generic `Aerodrome Position` placeholder on the
+next, depending on whether token-symbol resolution landed. **Display-only — it does not move
+any total** (verified: rows with drifting labels had identical dollar figures), which is why
+it is filed separately and low. It was initially mistaken for position-set churn by the
+determinism harness; the harness now keys rows on position identity and reports label drift
+separately. Likely the same cold-cache shape as ITEM 0 but in `tokenResolver`. Complexity
+SMALL.
+
+> **🔴 NEXT UP — ITEM 0b.** ITEM 0 shipped largely fixed (97.4% variance reduction); 0b is
+> its narrow, isolated remainder and inherits the top-of-queue position. Both rank ABOVE
+> queue items B and C and above WRAPPER-PROTOCOLS Part 3.
+
+**🟠 ITEM 0 — Capital G/L non-determinism. LARGELY FIXED (`CAPGL_HASH`, 2026-08-05):
+variance cut 97.4%, from a $2,297.38 spread to $59.48. NOT fully closed — see ITEM 0b,
+which is the narrow remaining cause and the next thing to investigate.**
+
+**Shipped:** Capital G/L now DECLARES itself incomplete (`≈` + "incomplete — pricing N
+positions…") instead of rendering a partial sum as final, retries the pending positions in
+the background (bypassing both 5-minute caches, which is what made the first retry attempt a
+no-op), and counts withdrawal events that fell back to CURRENT SPOT as not-yet-final. Result
+across 3 identical loads: exclusions 4/3/1 → **0**, closed rows 5/6/8 → 7/7/8, and two of the
+three runs were **identical to the cent**.
+
+**Original evidence, kept because it is the baseline any future work measures against:**
 
 **Evidence** (Account 1 `0xD99a9e66…4F20`, analytics, IDENTICAL build, NO code change between
 runs, captured during Sprint SICKLE-CLOSED-REVERIFY):
@@ -607,6 +647,37 @@ principle as queue item B. Complexity SMALL.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`CAPGL_HASH`** — **Sprint CAPGL-DETERMINISM: Capital G/L stops presenting an INCOMPLETE
+  sum as a final total.** Same wallet, same build, two loads → different money: Account 1's
+  Capital G/L spread **$2,297.38** across 3 identical loads with Net P&L flipping sign.
+  **Cause (from evidence, not guessed):** Capital G/L depends on claim-date HISTORICAL
+  prices, which the activity routes read **cached-only** while the warm-up is
+  **fire-and-forget** (deliberate — CoinGecko must never blow the function timeout). Each
+  load therefore valued whatever dates were warm at that instant. Two distinct consequences,
+  both fixed: (1) a cold DEPOSIT price EXCLUDED the position outright
+  (`missing_deposit_prices`); (2) a cold WITHDRAWAL price silently fell back to **CURRENT
+  SPOT** (`positionPnl.ts` withdrawal last resort) — no exclusion, no warning, just a
+  different number. (2) accounted for **exactly** the $738.81 that remained after fixing (1)
+  ($654.28 + $84.53 on two positions). FIX: NEW `capitalGLComplete` /
+  `capitalGLPricingPending` (computed from a preserved `rawReason`, because the friendly
+  string cannot be classified — "Deposit price data unavailable" is transient, "No deposit
+  events found" is permanent) + spot-fallback event counting; the UI renders **`≈` + dimmed +
+  "incomplete — pricing N positions…"** instead of a confident figure; and a **bounded
+  background retry** (15 s × 8) resolves it to the real total. **The retry needed
+  cache-BYPASS to work at all** — both the localStorage event cache AND the server's
+  `withActivityRouteCache` hold successes for 5 min, so the first attempt replayed the
+  identical unpriced body and changed nothing (measured: 3 positions still pending after
+  200 s). Retries now skip the client cache and vary the URL; steady-state loads keep the
+  full cache benefit. Verified with the NEW **`scripts/capgl-determinism.mjs`** harness
+  (N loads → diff; exits 1 on any variance, CI-ready): spread **$2,297.38 → $59.48
+  (−97.4%)**, exclusions **4/3/1 → 0**, `Deposited` now stable, and 2 of 3 runs **identical
+  to the cent**. **NOT fully closed** — one position is still intermittently included
+  (**ITEM 0b**, next up) and token symbols drift (**ITEM 0c**, display-only). The harness
+  correctly still reports `NON-DETERMINISTIC ✗`; it also caught two of my own errors during
+  the work (my `≈` marker broke its own regex — its gap-detector flagged the run unreliable
+  rather than scraping null; and its row key had to move off the label once the label itself
+  proved non-deterministic). No cache bumps.
 
 - **`44f2ef2`** — **Sprint SICKLE-CLOSED-REVERIFY: `SICKLE_CLOSED_SUPPRESSED` REMOVED
   — closed vfat/Sickle positions are live again.** The flag was a stopgap added 2026-08-02

@@ -2059,10 +2059,16 @@ export default function Analytics() {
                           color: c.color,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                           textShadow: c.color === C.green ? "0 0 12px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
-                          opacity: (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading)) ? 0.6 : 1,
+                          opacity: (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete)) ? 0.6 : 1,
                         }}
                       >
-                        {c.val}
+                        {/* An incompletely-priced Capital G/L is a PARTIAL sum,
+                            not a total. Rendering it as a plain figure is the
+                            2026-08-05 bug: the same wallet showed -$1,355.49 /
+                            -$2,274.08 / -$3,652.87 across three identical loads,
+                            each looking final. The "≈" plus the sub-note below
+                            say so until every position is priced. */}
+                        {c.pendingClosed && !lpPnl.capitalGLComplete ? `≈ ${c.val}` : c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
@@ -2070,7 +2076,13 @@ export default function Analytics() {
                         ? "calculating…"
                         : (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading))
                           ? "scanning closed positions…"
-                          : c.sub}
+                          : (c.pendingClosed && !lpPnl.capitalGLComplete)
+                            // Not final: N positions are excluded ONLY because
+                            // their claim-date price has not warmed yet. The
+                            // hook retries in the background and this resolves
+                            // to the real total on its own.
+                            ? `incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`
+                            : c.sub}
                     </div>
                   </div>
                 ))}

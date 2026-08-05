@@ -13,7 +13,43 @@ export interface ExcludedPosition {
   chain: string;
   /** User-friendly reason — already mapped from the technical code. */
   reason: string;
+  /**
+   * The UNMAPPED technical reason. Kept alongside the friendly string because
+   * the friendly one cannot be classified: "Deposit price data unavailable" is
+   * a TRANSIENT pricing gap that resolves as the historical-price cache warms,
+   * whereas "No deposit events found" is permanent. Capital G/L completeness
+   * depends on telling those apart — see PRICING_PENDING_REASONS.
+   */
+  rawReason: string;
 }
+
+/**
+ * Exclusion reasons that are TRANSIENT: the position is fine, its claim-date
+ * historical price simply is not in the cache YET.
+ *
+ * The activity routes read historical prices CACHED-ONLY
+ * (`getCachedOnlyTokenPrice` / `getCachedOnlyDefillamaPrice`) while the warm-up
+ * is fire-and-forget (`void prewarmTokenPrices(...)`) so a route can never be
+ * blocked by CoinGecko and blow the function timeout. That is deliberate and
+ * stays. The consequence, measured 2026-08-05, is that each page load values
+ * whatever dates happen to be warm at that moment: Account 1's Capital G/L
+ * varied -$1,355.49 / -$2,274.08 / -$3,652.87 across three identical loads
+ * (spread $2,297) purely from cache warmth, each rendered as a confident total.
+ *
+ * Positions excluded for these reasons are therefore NOT a final answer — they
+ * are "not priced yet", and Capital G/L must say so rather than quietly
+ * omitting them from a total that looks authoritative.
+ */
+const PRICING_PENDING_REASONS = new Set(["missing_deposit_prices"]);
+
+// Retry cadence for pricing-pending positions. The route's prewarm is
+// fire-and-forget, so the warmed price only becomes visible on a SUBSEQUENT
+// fetch — nothing re-reads it otherwise, which is why a single load stayed
+// frozen at one incomplete value from t=30 s to t=360 s. Bounded so a
+// genuinely unpriceable date (e.g. CoinGecko's rolling 365-day horizon) retries
+// a few times and then stops rather than looping forever.
+const PRICING_RETRY_MS = 15_000;
+const PRICING_RETRY_MAX = 8;
 
 export interface LpPnlResult {
   initialValue: number;
@@ -72,6 +108,19 @@ export interface LpPnlResult {
   // entry degrade to STALE (below) and stay in totals; positions with a live
   // value degrade to an estimate. So this list is near-empty in practice.
   excludedPositions: ExcludedPosition[];
+  /**
+   * How many positions are excluded ONLY because their claim-date historical
+   * price has not arrived yet (see PRICING_PENDING_REASONS). > 0 means Capital
+   * G/L is INCOMPLETE, not final.
+   */
+  capitalGLPricingPending: number;
+  /**
+   * False while any position is pricing-pending. The UI must NOT present
+   * Capital G/L as an authoritative total while this is false — that is
+   * exactly the bug: an incomplete sum rendered as a confident figure, landing
+   * on a different value each load.
+   */
+  capitalGLComplete: boolean;
   // Sprint SPOT-RESILIENCE-V2: positions whose fresh load failed but that are
   // still IN the totals via their last-known-good computed values (STALE). Shown
   // as a subtle, non-alarming "showing last-known values" note with an age — NOT
@@ -99,6 +148,8 @@ const EMPTY: LpPnlResult = {
   closedRows: [],
   perPosition: {},
   excludedPositions: [],
+  capitalGLPricingPending: 0,
+  capitalGLComplete: true,
   stalePositions: [],
   estimatedPositionCount: 0,
   pendingClaimCount: 0,
@@ -847,21 +898,37 @@ function degradeOnFailure(
 
 async function fetchAndCompute(
   pos: AerodromePosition,
+  /**
+   * Retry for a PRICING-PENDING position. Both caches in front of this fetch —
+   * the localStorage event cache and the server's withActivityRouteCache — hold
+   * successful responses for 5 minutes keyed by position/URL. A plain retry
+   * therefore replays the SAME body with the SAME missing prices and changes
+   * nothing (measured: 3 positions still pending after 200 s of retrying).
+   * When set, we skip the client cache AND vary the URL so the server
+   * recomputes against a now-warmer historical-price cache.
+   */
+  forceRepricing = false,
 ): Promise<
   | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } }
   | { ok: false; reason: string }
 > {
   const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
 
-  const url = buildActivityUrl(pos);
-  if (!url) {
+  const baseUrl = buildActivityUrl(pos);
+  if (!baseUrl) {
     console.error(`${tag} no activity URL — protocol not wired`);
     return degradeOnFailure(pos, "no activity URL");
   }
+  // Cache-bust ONLY on a repricing retry. The steady-state URL is unchanged, so
+  // normal loads keep the full benefit of the route cache and its in-flight
+  // dedup; only the bounded retries pay for a recompute.
+  const url = forceRepricing
+    ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}_reprice=${Date.now()}`
+    : baseUrl;
 
   // Try cache first.
   let rawEvents: Array<Record<string, unknown>> | null = null;
-  const cached = cacheGet(pos.id);
+  const cached = forceRepricing ? null : cacheGet(pos.id);
   if (cached) {
     if (cached.events === null) {
       console.log(`${tag} cache hit — empty (${cached.reason ?? "no events"})`);
@@ -1098,6 +1165,7 @@ function aggregate(
           excludedPositions.push({
             id, pair: m.pair, protocol: m.protocol, chain: m.chain,
             reason: userFriendlyReason("value_overflow", m.protocol),
+            rawReason: "value_overflow",
           });
         }
         excluded += 1;
@@ -1167,6 +1235,7 @@ function aggregate(
         excludedPositions.push({
           id, pair: meta.pair, protocol: meta.protocol, chain: meta.chain,
           reason: userFriendlyReason(r.reason, meta.protocol),
+          rawReason: r.reason,
         });
       }
       if (isTransportError(r.reason)) {
@@ -1225,9 +1294,31 @@ function aggregate(
     }
   }
 
+  // Capital G/L completeness. A position excluded ONLY because its claim-date
+  // historical price has not warmed yet is "not priced yet", not "worth zero" —
+  // so the total that omits it is a PARTIAL sum, and must not be rendered as
+  // final. This is what stops the same wallet reporting a different Capital G/L
+  // on every load.
+  // Two distinct ways Capital G/L can be not-yet-final, both rooted in a cold
+  // claim-date historical price:
+  //   1. the position was EXCLUDED outright (missing_deposit_prices), or
+  //   2. it was INCLUDED but its exit was valued at CURRENT SPOT because the
+  //      historical price had not warmed (positionPnl withdrawal last resort).
+  // (2) is the subtler one: nothing is excluded, no warning fires, the total
+  // just quietly differs between loads. Both must count, or the "complete"
+  // signal lies.
+  const spotFallbackPositions = Object.values(perPosition).filter(
+    (d) => (d?.spotFallbackEventCount ?? 0) > 0,
+  ).length;
+  const capitalGLPricingPending = excludedPositions.filter((e) =>
+    PRICING_PENDING_REASONS.has(e.rawReason),
+  ).length + spotFallbackPositions;
+  const capitalGLComplete = capitalGLPricingPending === 0;
+
   return {
     initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
     ilUSD, capitalGL, netPnl, netPnlPct, included, excluded,
+    capitalGLPricingPending, capitalGLComplete,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
     inflightCount: inflight,
@@ -1292,6 +1383,12 @@ const SOLANA_CLOSED_PROTOCOL_LABEL: Record<SolanaClosedPositionDTO["protocol"], 
 // empty → no Sui closed-position fetch (e.g. the dashboard caller).
 export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: string[] = [], solanaWalletAddresses: string[] = []): LpPnlResult {
   const [result, setResult] = useState<LpPnlResult>({ ...EMPTY });
+  // Bumped to re-run the fetch effect once background price-warming has had
+  // time to land; see the pricing-pending retry effect below.
+  const [pricingRetry, setPricingRetry] = useState(0);
+  const pricingAttemptsRef = useRef(0);
+  // IDs evicted by the retry effect, awaiting a cache-bypassing refetch.
+  const repriceIdsRef = useRef<Set<string>>(new Set());
   // Per-position results map — persists across renders, never reset.
   const resultsRef = useRef<Map<string, PosResult>>(new Map());
   // IDs currently being fetched — prevents duplicate fetches.
@@ -1449,6 +1546,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
           unsupported.push({
             id: p.id, pair: p.pair, protocol: p.protocol, chain: p.chain,
             reason: userFriendlyReason("unsupported protocol", p.protocol),
+            rawReason: "unsupported protocol",
           });
         }
         return false;
@@ -1546,11 +1644,16 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     // endpoint pathname, with no special-casing.
     for (const pos of toFetch) {
       const activityUrl = buildActivityUrl(pos);
+      // A position the retry effect evicted for a pricing gap must bypass both
+      // 5-minute caches, or it replays the same unpriced body and the retry
+      // achieves nothing. Consumed once so a later ordinary refetch is normal.
+      const reprice = repriceIdsRef.current.has(pos.id);
+      if (reprice) repriceIdsRef.current.delete(pos.id);
       // Positions with no activity URL still flow through fetchAndCompute (it
       // returns {ok:false}); only paced when there's a real endpoint to gate.
       const run = activityUrl
-        ? () => paceByEndpoint(endpointKeyOf(activityUrl), () => fetchAndCompute(pos))
-        : () => fetchAndCompute(pos);
+        ? () => paceByEndpoint(endpointKeyOf(activityUrl), () => fetchAndCompute(pos, reprice))
+        : () => fetchAndCompute(pos, reprice);
       run().then((r) => {
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
@@ -1558,7 +1661,38 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
       });
     }
-  }, [positions]);
+  }, [positions, pricingRetry]);
+
+  // ── Pricing-pending retry ─────────────────────────────────────────────
+  // A position excluded for a PRICING reason is not a final answer: the
+  // route's background prewarm is still fetching that date. Nothing re-reads
+  // it, so the aggregate would stay incomplete for the whole session. Evict
+  // those results on a bounded schedule; the effect above then re-fetches them
+  // and picks up the now-warm price, which is what lets Capital G/L actually
+  // REACH a complete, stable total instead of merely declaring itself pending.
+  useEffect(() => {
+    if (result.capitalGLComplete) { pricingAttemptsRef.current = 0; return; }
+    if (pricingAttemptsRef.current >= PRICING_RETRY_MAX) return;
+    const t = setTimeout(() => {
+      pricingAttemptsRef.current += 1;
+      for (const [id, r] of Array.from(resultsRef.current.entries())) {
+        // Two shapes to retry, matching the two ways Capital G/L can be
+        // not-final: an outright pricing EXCLUSION (ok:false), and a SUCCESSFUL
+        // result whose exit was valued at spot because the historical price was
+        // cold (ok:true). The second is easy to miss — it looks like a healthy
+        // result — and it was the entire remaining $738.81 spread.
+        const pendingExclusion = !r.ok && PRICING_PENDING_REASONS.has(r.reason);
+        const pendingSpotFallback = r.ok && (r.data.spotFallbackEventCount ?? 0) > 0;
+        if (pendingExclusion || pendingSpotFallback) {
+          resultsRef.current.delete(id);
+          repriceIdsRef.current.add(id);
+        }
+      }
+      setPricingRetry((n) => n + 1);
+    }, PRICING_RETRY_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result.capitalGLComplete, pricingRetry]);
 
   return result;
 }

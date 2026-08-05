@@ -56,24 +56,44 @@ const CAPTURE = () => {
   const grab = (re) => { const m = flat.match(re); return m ? m[0] : null; };
 
   // Per-closed-position rows from the Capital G/L breakdown table. Matched
-  // structurally (a row containing a pair and >=3 dollar figures) so it does
-  // not depend on exact column headings.
+  // structurally (a row with >=3 dollar figures) so it does not depend on exact
+  // column headings.
+  //
+  // Row IDENTITY is (index within the table + pair + protocol/chain + the
+  // deposited figure), NOT the concatenated cell text. Several rows can share a
+  // pair name ("WETH / USDC" appears many times), and the earlier
+  // label-only key silently merged them — which under-counted the set and could
+  // hide exactly the appear/disappear signal this harness exists to detect.
   const rows = [];
+  let idx = 0;
   for (const tr of document.querySelectorAll("tr")) {
     const cells = [...tr.querySelectorAll("td")].map((td) => td.innerText.replace(/\s+/g, " ").trim());
     if (cells.length < 4) continue;
     const dollars = cells.filter((c) => /^-?\$/.test(c));
     if (dollars.length < 3) continue;
     if (!/\/|TOKEN|Position/i.test(cells[0])) continue;
-    rows.push({ label: cells[0], cells });
+    const pair = (cells[0].match(/^[^A-Z]*([A-Za-z0-9.]+ ?\/ ?[A-Za-z0-9.]+)/) || [, cells[0]])[1];
+    // Key on POSITION (row index + its stable deposited figure), NOT the label.
+    // The label is itself non-deterministic — the same position renders as
+    // "WETH / USDC" on one load and the "Aerodrome Position" placeholder on the
+    // next, depending on whether token-symbol resolution landed. Including it
+    // reported phantom set churn and masked the real question: did the same
+    // position get valued differently? `pair` is still captured, and label drift
+    // is reported separately below rather than as a set change.
+    rows.push({ key: `#${idx++}|${dollars[0]}`, pair, cells, dollars });
   }
 
   return {
     deposited: grab(/TOTAL DEPOSITED -?\$[\d,.]+/i),
     current: grab(/CURRENT VALUE -?\$[\d,.]+/i),
-    capitalGL: grab(/CAPITAL G\/L(?: .)? ?. -?\$[\d,.]+/i),
-    netPnl: grab(/NET P&L -?\$[\d,.]+/i),
-    feesCollected: grab(/FEES COLLECTED -?\$[\d,.]+/i),
+    // NOTE: tolerate a leading marker such as the "≈" the UI shows while the
+    // total is still incomplete. The first version of this regex required the
+    // figure to follow the label immediately and silently scraped null the
+    // moment that marker shipped — the gap-detector below caught it, which is
+    // precisely why that check exists.
+    capitalGL: grab(/CAPITAL G\/L[^$]{0,40}-?\$[\d,.]+/i),
+    netPnl: grab(/NET P&L[^$]{0,40}-?\$[\d,.]+/i),
+    feesCollected: grab(/FEES COLLECTED[^$]{0,40}-?\$[\d,.]+/i),
     portfolio: grab(/TOTAL PORTFOLIO \S+/i),
     closedHeader: grab(/\d+ CLOSED POSITION/i),
     rows,
@@ -84,6 +104,8 @@ const CAPTURE = () => {
       excludedNotice: grab(/\d+ position[s]? (?:excluded|could not)/i),
       pending: grab(/\d+ claim[s]? pending/i),
       scanning: /scanning/i.test(txt),
+      // NEW: the fix's own signal — Capital G/L declaring itself not-final.
+      pricingIncomplete: /incomplete — pricing/i.test(txt) || /≈ *-?\$/.test(flat),
       calculating: /calculating/i.test(txt),
     },
   };
@@ -124,13 +146,23 @@ for (let r = 1; r <= RUNS; r++) {
 
   await page.goto(`${BASE}/analytics`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(SETTLE_MS);
-  // Expand the Capital G/L breakdown so the per-position rows render.
+
+  // PHASE 1 — headline aggregate, read BEFORE expanding. Clicking the Capital
+  // G/L cell re-flows the block, which previously made netPnl / feesCollected
+  // scrape as null and silently dropped them from the diff.
+  const head = await page.evaluate(CAPTURE);
+
+  // PHASE 2 — expand for the per-position breakdown rows only.
   try {
     await page.getByText(/CAPITAL G\/L/i).first().click();
     await page.waitForTimeout(4000);
   } catch {}
+  const expanded = await page.evaluate(CAPTURE);
 
-  const cap = await page.evaluate(CAPTURE);
+  // Headline numbers come from phase 1; rows from phase 2.
+  const cap = { ...head, rows: expanded.rows };
+  const missing = ["deposited", "current", "capitalGL", "netPnl"].filter((f) => !cap[f]);
+  if (missing.length) console.log(`   ⚠ capture gap: ${missing.join(", ")} not found — treat this run as unreliable`);
   runs.push({ run: r, ...cap, api, errs });
 
   console.log(`\n── run ${r} ─────────────────────────────────────────`);
@@ -162,7 +194,7 @@ for (const f of FIELDS) {
 
 // The decisive diff: did the SET of closed positions change between runs?
 console.log(`\n  closed-position SET per run:`);
-const sets = runs.map((r) => new Set(r.rows.map((x) => x.label)));
+const sets = runs.map((r) => new Set(r.rows.map((x) => x.key)));
 runs.forEach((r, i) => console.log(`    run ${r.run}: ${r.rows.length} rows  [${[...sets[i]].join(" · ") || "none"}]`));
 const union = new Set(sets.flatMap((s) => [...s]));
 const unstable = [...union].filter((k) => !sets.every((s) => s.has(k)));
@@ -173,9 +205,17 @@ if (unstable.length) {
   console.log(`  => the SET is unstable: an ENUMERATION / degrade problem, not pricing.`);
 } else if (union.size) {
   console.log(`  ✓ identical position set across all runs.`);
+  // Label (token symbol) drift — real, but a DISPLAY issue, not a set change.
+  const labelsByKey = {};
+  for (const r of runs) for (const row of r.rows) (labelsByKey[row.key] ||= new Set()).add(row.pair);
+  const drifted = Object.entries(labelsByKey).filter(([, v]) => v.size > 1);
+  if (drifted.length) {
+    console.log(`  ⚠ token-SYMBOL drift (display only, does not affect totals):`);
+    drifted.forEach(([k, v]) => console.log(`      ${k}  ->  ${[...v].join("  /  ")}`));
+  }
   // Same set but different money => valuation differs per load.
   const perPos = {};
-  for (const r of runs) for (const row of r.rows) (perPos[row.label] ||= []).push(row.cells.join(" | "));
+  for (const r of runs) for (const row of r.rows) (perPos[row.key] ||= []).push(row.cells.join(" | "));
   const valueUnstable = Object.entries(perPos).filter(([, v]) => new Set(v).size > 1);
   if (valueUnstable.length) {
     varied = true;
