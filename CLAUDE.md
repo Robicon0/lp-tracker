@@ -243,8 +243,15 @@ after ITEM 0's fix; narrowly scoped on purpose.)_
 (`0xD99a9e66…4F20`) appeared in 1 of 3 identical loads. In every run `/api/aerodrome`
 returned **pos=8** — the source is stable — so the position is dropped DOWNSTREAM, silently:
 `excludedNotice` was **null** in all three runs, so it is not travelling the exclusion path
-that ITEM 0 fixed. Residual spread $59.48; runs 1 and 2 were byte-identical to each other
+that ITEM 0 fixed. Residual spread **$654.28 on production**; runs 1 and 2 were byte-identical
 (row sums both −$3,888.82), so this single position is the entire remaining delta.
+
+**Strong lead — the residual is EXACTLY a previously-identified figure.** The production
+spread is **$654.28**, which is precisely the row-#3 delta measured before the fix
+($654.28 + $84.53 = the $738.81 that remained after the deposit-side fix). The $84.53 half
+closed when spot-fallback valuation was counted; the $654.28 half did not. So that same
+position stopped flipping between VALUATION states and is now flipping between INCLUSION
+states — narrowing this to one position and one decision point.
 
 **This is a THIRD mechanism, distinct from the two ITEM 0 addressed** (pricing exclusions,
 and spot-fallback withdrawal valuation). Candidates NOT yet excluded: the eligibility filter
@@ -265,12 +272,14 @@ determinism harness; the harness now keys rows on position identity and reports 
 separately. Likely the same cold-cache shape as ITEM 0 but in `tokenResolver`. Complexity
 SMALL.
 
-> **🔴 NEXT UP — ITEM 0b.** ITEM 0 shipped largely fixed (97.4% variance reduction); 0b is
+> **🔴 NEXT UP — ITEM 0b.** ITEM 0 shipped largely fixed (71.5% variance reduction measured
+> ON PRODUCTION); 0b is
 > its narrow, isolated remainder and inherits the top-of-queue position. Both rank ABOVE
 > queue items B and C and above WRAPPER-PROTOCOLS Part 3.
 
 **🟠 ITEM 0 — Capital G/L non-determinism. LARGELY FIXED (`4fcc617`, 2026-08-05):
-variance cut 97.4%, from a $2,297.38 spread to $59.48. NOT fully closed — see ITEM 0b,
+variance cut **71.5% ON PRODUCTION**, from a $2,297.38 spread to $654.28. NOT fully closed —
+see ITEM 0b,
 which is the narrow remaining cause and the next thing to investigate.**
 
 **Shipped:** Capital G/L now DECLARES itself incomplete (`≈` + "incomplete — pricing N
@@ -670,9 +679,14 @@ shorthand.
   identical unpriced body and changed nothing (measured: 3 positions still pending after
   200 s). Retries now skip the client cache and vary the URL; steady-state loads keep the
   full cache benefit. Verified with the NEW **`scripts/capgl-determinism.mjs`** harness
-  (N loads → diff; exits 1 on any variance, CI-ready): spread **$2,297.38 → $59.48
-  (−97.4%)**, exclusions **4/3/1 → 0**, `Deposited` now stable, and 2 of 3 runs **identical
-  to the cent**. **NOT fully closed** — one position is still intermittently included
+  (N loads → diff; exits 1 on any variance, CI-ready).
+  **MEASURE ON PRODUCTION, NOT LOCALHOST.** Spread **$2,297.38 → $654.28 (−71.5%)** on
+  defidesh.com. A local single-server run of the SAME commit reported $59.48 (−97.4%) —
+  **do not quote that figure**: one warm local server has far less cold-cache surface than
+  production's multiple instances under concurrent CoinGecko pressure, which is precisely
+  the variable this bug turns on. The local number was measured first and briefly recorded
+  here; production is the honest one. Exclusions **4/3/1 → 0** in both environments;
+  `Deposited` stable in both. **NOT fully closed** — one position is still intermittently included
   (**ITEM 0b**, next up) and token symbols drift (**ITEM 0c**, display-only). The harness
   correctly still reports `NON-DETERMINISTIC ✗`; it also caught two of my own errors during
   the work (my `≈` marker broke its own regex — its gap-detector flagged the run unreliable
