@@ -30,6 +30,47 @@ import { logPrice } from './priceLogger';
 
 const SLOT0_SELECTOR = "0x3850c7bd"; // slot0()
 
+// ── ITEM 0d: cross-instance Redis tier ────────────────────────────────────
+// A pool's sqrtPriceX96 AT A FINALIZED BLOCK never changes, so this price is
+// as immutable as `evm_pos_ctx_v1` and cacheable on the same contract.
+//
+// WHY IT MATTERS (this is the determinism fix, not an optimization): this
+// resolver is TIER 1 of the deposit/withdrawal price cascade. When the archive
+// RPC doesn't answer, the route silently drops to a tick-boundary estimate or
+// to current spot — a DIFFERENT price basis, which is what made the same
+// wallet report a different Capital G/L on every load (ITEM 0b measured a
+// $690.49 spread across 3 identical loads, one position flipping between its
+// historical $9,246.39 and its tick-derived $9,294.71). Marking made that
+// honest; keeping tier 1 WARM is what makes it stable.
+//
+// Contract, identical to evm_pos_ctx_v1 / redisSpotCache:
+//   • own client, PRICE_CACHE_KV_*, no-op stub when unset, never throws
+//   • fire-and-forget writes
+//   • POSITIVE RESULTS ONLY. A null may be a transient archive failure, and
+//     persisting it would pin the position to the substitute basis for 90 days
+//     — permanently freezing in the exact bug this is meant to remove.
+const REDIS_KEY_PREFIX = 'evm_hist_price_v1:';
+const REDIS_TTL_SECONDS = 90 * 24 * 60 * 60;
+
+let redis: { get: (k: string) => Promise<unknown>; set: (k: string, v: unknown, o: { ex: number }) => Promise<unknown> } | null = null;
+try {
+  const url = process.env.PRICE_CACHE_KV_REST_API_URL;
+  const token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
+  if (url && token) {
+    const { Redis } = require('@upstash/redis') as typeof import('@upstash/redis');
+    redis = new Redis({ url, token }) as unknown as typeof redis;
+  }
+} catch {
+  redis = null;
+}
+
+// Observability for the ITEM 0d verification (and for spotting a cold-cache
+// regression later): process-wide counters, read via histPriceCacheSnapshot().
+let hits = 0, misses = 0, writes = 0;
+export function histPriceCacheSnapshot() {
+  return { hits, misses, writes, enabled: redis != null };
+}
+
 export interface HistPriceContext {
   rpc: string;
   pool: string;
@@ -38,6 +79,13 @@ export interface HistPriceContext {
   decimals0: number;
   decimals1: number;
   stablecoins: Set<string>;
+  /**
+   * ITEM 0d — chain slug for the Redis key namespace. The same pool ADDRESS can
+   * exist on multiple chains, so a chain-less key could serve one chain's price
+   * for another's block. OMIT IT and the Redis tier is simply skipped (the
+   * in-process cache still applies) — never guessed.
+   */
+  chain?: string;
 }
 
 export interface HistPrices {
@@ -110,8 +158,33 @@ async function ethCallAt(
 export function createHistoricalFeePriceResolver(ctx: HistPriceContext) {
   const cache = new Map<string, HistPrices | null>();
 
+  // Redis key is (chain, pool, block) — decimals/stablecoin anchoring are
+  // derived from the pool's own immutable token pair, so they cannot vary for a
+  // given pool and need not enter the key.
+  const redisKey = (blockHex: string) =>
+    `${REDIS_KEY_PREFIX}${ctx.chain}:${ctx.pool.toLowerCase()}:${blockHex}`;
+
   async function resolveOne(blockHex: string): Promise<HistPrices | null> {
     if (cache.has(blockHex)) return cache.get(blockHex)!;
+
+    // ITEM 0d — cross-instance tier, ahead of the RPC. A hit here is what stops
+    // the cascade falling through to a substitute price basis on a cold
+    // instance, which is the whole point.
+    if (redis && ctx.chain) {
+      try {
+        const hit = (await redis.get(redisKey(blockHex))) as HistPrices | null;
+        if (hit && typeof hit.price0Usd === 'number' && typeof hit.price1Usd === 'number') {
+          hits += 1;
+          cache.set(blockHex, hit);
+          return hit;
+        }
+        misses += 1;
+      } catch {
+        // Treat a Redis failure as a miss — never let the cache break pricing.
+        misses += 1;
+      }
+    }
+
     const result = await ethCallAt(ctx.rpc, ctx.pool, SLOT0_SELECTOR, blockHex);
     if (!result) {
       cache.set(blockHex, null);
@@ -145,6 +218,13 @@ export function createHistoricalFeePriceResolver(ctx: HistPriceContext) {
     const human = sqrtPriceX96ToHumanPrice(sqrt, ctx.decimals0, ctx.decimals1);
     const prices = applyStableAnchor(human, ctx.token0, ctx.token1, ctx.stablecoins);
     cache.set(blockHex, prices);
+    // POSITIVE ONLY — see the contract note at the top of this file. A null here
+    // can be a transient archive failure; persisting it for 90 days would pin
+    // the position to a substitute basis forever.
+    if (prices && redis && ctx.chain) {
+      writes += 1;
+      redis.set(redisKey(blockHex), prices, { ex: REDIS_TTL_SECONDS }).catch(() => {});
+    }
     logPrice({
       event: 'price_lookup',
       caller: 'v3HistoricalFeePrice',

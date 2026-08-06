@@ -584,6 +584,8 @@ async function GET_impl(request: Request) {
           const resolver = createHistoricalFeePriceResolver({
             rpc: TENDERLY_RPC, pool, token0, token1,
             decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
+            chain: 'base', // ITEM 0d — namespaces the Redis price key
+
           });
           try { return await resolver.resolveMany(allBlocks); }
           catch (err) { console.error('[aerodrome/activity] hist price resolve failed:', err); return null; }

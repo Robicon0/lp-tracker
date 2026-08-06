@@ -819,6 +819,8 @@ async function GET_impl(request: Request) {
           const resolver = createHistoricalFeePriceResolver({
             rpc: archiveRpc, pool, token0, token1,
             decimals0: t0d, decimals1: t1d, stablecoins: STABLECOINS,
+            chain: 'hyperevm', // ITEM 0d — namespaces the Redis price key
+
           });
           try { return await resolver.resolveMany(allBlocks); }
           catch (err) { console.error('[hyperswap/activity] hist price resolve failed:', err); return null; }

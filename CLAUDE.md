@@ -315,9 +315,19 @@ Withdrawn by way of a shared spot basis. Harness green:
 **Half met by `c18cbd8`:** the "declares itself incomplete" clause is satisfied on every load;
 the "SAME Capital G/L" clause is NOT, and is ITEM 0d's job.
 
-**🔴 ITEM 0d — NEXT UP, and the DIRECT CONTINUATION of ITEM 0b (not a backlog item — do not
-let it slip). Redis-cache the per-event historical sqrtPriceX96 prices so tier 1 answers on
-every load and the substitute bases stop being reached.**
+**✅ ITEM 0d — SHIPPED. The substitute-basis FLIP is eliminated; the residual is a different
+mechanism, now isolated as ITEM 0g.** Redis-cached the per-event historical sqrtPriceX96
+prices so tier 1 answers on every load.
+
+**Verified:** with the archive RPC completely dead and a FRESH process (empty in-process
+cache), `71729936` and `71734039` still price on the correct historical basis with exact
+values (dep $9,246.39 / wd $9,150.70 and $9,153.80 / $8,818.06) — the identical condition
+produced the tick-derived $9,294.71 collapse before. Across repeated loads every
+sqrtPrice-priced position is now STABLE and `71729936` no longer flips; two consecutive
+loads reproduced Capital G/L **−$3,656.47 to the cent**. Capital G/L spread from the
+substitute-basis flip: **$690.49 → $0.00**.
+
+**Not yet `deterministic ✓`** — see ITEM 0g. Original scoping kept below.
 
 **Why this is the actual fix:** ITEM 0b proved the number moves because the CASCADE moves —
 tier 1 (the pool's `sqrtPriceX96` at the event's own block, via the Tenderly archive) answers
@@ -335,6 +345,28 @@ resolver already batches per block via `resolveMany`, so the cache slots in at t
 wallet, and the harness goes `deterministic ✓`.** Complexity SMALL–MEDIUM. Verify with
 `node scripts/capgl-determinism.mjs --runs 3` on production — spread must reach $0.00, and the
 `≈` marker must disappear once warm.
+
+**🔴 ITEM 0g — NEXT UP for determinism. On the FIRST load of a cold process ONE position is
+still EXCLUDED for a cold deposit-date price, and the ITEM 0 retry does not resolve it within
+the load.** _(Isolated 2026-08-06 as the residual after ITEM 0d; it is the ORIGINAL ITEM 0
+exclusion path — `missing_deposit_prices` / `useLpPnl.ts:122` — not a price-basis problem.)_
+
+**Signature:** run 1 of a fresh process shows **7 closed rows** and `⚠ 1 position could not…`;
+runs 2 and 3 show **8 rows** and are identical to the cent. The dropped position
+(deposited **$7,937.69**) is worth **$628.83–$1,572.87** of Capital G/L swing, which is now
+the ENTIRE remaining spread. It is DISCLOSED on every occurrence, so no wrong number is
+presented as final — this is a determinism gap, not a correctness one.
+
+**Why ITEM 0d didn't cover it:** 0d warms the on-chain sqrtPriceX96 tier. This position fails
+on the **CoinGecko historical deposit-date** price, a different source with its own Redis
+namespace (`price:historical:{cgId}:{YYYYMMDD}`) filled by a FIRE-AND-FORGET prewarm.
+
+**Shape of the fix (pick after measuring):** (a) confirm why the bounded retry (15 s × 8)
+doesn't land it — it may be exhausting before the fire-and-forget prewarm completes, in which
+case widening the window or awaiting the prewarm for CLOSED positions only is enough; or
+(b) treat a closed position's deposit-date prices as immutable and persist them the way 0d
+does. Complexity SMALL–MEDIUM. **Acceptance:** `node scripts/capgl-determinism.mjs --runs 3`
+on production → `VERDICT: deterministic ✓`.
 
 **🟡 ITEM 0e — Rule 1a LEAK: Uniswap and PancakeSwap can value a FEE CLAIM at current spot.**
 _(Found 2026-08-06 while implementing ITEM 0b; recorded, deliberately NOT fixed there.)_
@@ -750,6 +782,26 @@ principle as queue item B. Complexity SMALL.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`PENDING-0D`** — **ITEM 0d: Redis-cache the historical sqrtPriceX96 prices — the flip that
+  made Capital G/L non-deterministic is GONE.** ITEM 0b proved the number moved because the
+  CASCADE moved: tier 1 (pool `sqrtPriceX96` at the event's own block) answered on one load
+  and not the next, and the lower tiers produce a different, non-historical basis. A finalized
+  block's pool price is IMMUTABLE, so `v3HistoricalFeePrice.ts` now persists it in Upstash
+  (`evm_hist_price_v1:{chain}:{pool}:{blockHex}`, 90 d) on the `evm_pos_ctx_v1` contract —
+  own client, `PRICE_CACHE_KV_*`, no-op stub when unset, never throws, fire-and-forget writes,
+  **POSITIVE RESULTS ONLY** (persisting a null would pin the position to a substitute basis
+  for 90 days — freezing in the exact bug). `chain` is now passed by all five callers and the
+  Redis tier is SKIPPED rather than guessed when absent, because the same pool address exists
+  on several chains. **Verified with the archive RPC fully dead and a FRESH process:** both
+  target positions still priced historically and exactly (dep $9,246.39 / wd $9,150.70;
+  $9,153.80 / $8,818.06) where the same condition previously produced the tick-derived
+  dep === wd $9,294.71 collapse. Substitute-basis spread **$690.49 → $0.00**; two consecutive
+  loads reproduced Capital G/L −$3,656.47 to the cent. **Still not `deterministic ✓`** — the
+  first load of a cold process excludes one position ($7,937.69 deposited) on a cold
+  CoinGecko deposit-date price and discloses it; that is ITEM 0g and a different mechanism.
+  No cache bumps to `lp-pnl-events`/`analytics-activity` — a cached value is byte-identical to
+  a live archive read.
 
 - **`c18cbd8`** — **ITEM 0b: an activity route may no longer SILENTLY SWAP PRICE BASIS.** A
   deposit/withdrawal whose own historical price wasn't available was quietly valued on a

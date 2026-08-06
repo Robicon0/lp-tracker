@@ -651,6 +651,8 @@ async function GET_impl(request: Request) {
           const resolver = createHistoricalFeePriceResolver({
             rpc: tenderlyRpc, pool, token0, token1,
             decimals0: t0d, decimals1: t1d, stablecoins,
+            chain, // ITEM 0d — the SAME pool address can exist on several chains
+
           });
           try { return await resolver.resolveMany(allBlocks); }
           catch (err) { console.error('[uniswap/activity] hist price resolve failed:', err); return null; }
