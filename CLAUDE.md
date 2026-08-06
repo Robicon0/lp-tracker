@@ -783,7 +783,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`PENDING-0D`** — **ITEM 0d: Redis-cache the historical sqrtPriceX96 prices — the flip that
+- **`934a5ca`** — **ITEM 0d: Redis-cache the historical sqrtPriceX96 prices — the flip that
   made Capital G/L non-deterministic is GONE.** ITEM 0b proved the number moved because the
   CASCADE moved: tier 1 (pool `sqrtPriceX96` at the event's own block) answered on one load
   and not the next, and the lower tiers produce a different, non-historical basis. A finalized
