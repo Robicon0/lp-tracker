@@ -63,6 +63,10 @@ export interface ActivityEvent {
   usdAtTime: number | null; // null if historical price could not be resolved
   price0AtTime: number | null;
   price1AtTime: number | null;
+  // ITEM 0b — set when this event was valued on a substitute basis (a
+  // tick-boundary estimate, or current spot) rather than its own historical
+  // price. Consumers treat it as not-yet-final.
+  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
   cumulativeFeeUSD: number; // running total of fee+reward USD; 0 for non-fee events
   rewardSymbol?: string;    // set for reward_claim events
 }
@@ -429,6 +433,7 @@ async function GET_impl(request: Request) {
       let price0AtTime: number | null = null;
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
+      let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
       // Which historical source priced this claim (for the [PRICE_LOG] block).
       // NEVER 'cg-spot' for fee OR reward claims — Momentum claims are
       // historical-only from day one (Rule 1a).
@@ -440,9 +445,15 @@ async function GET_impl(request: Request) {
           coinTypeA, coinTypeB, STABLECOINS,
         );
         if (derived) {
-          price0AtTime = derived.price0;
+            price0AtTime = derived.price0;
           price1AtTime = derived.price1;
           usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+          // ITEM 0b: this is a TICK-BOUNDARY ESTIMATE from the position's own
+          // range, not the price at THIS event's block — so every event of the
+          // position gets the SAME price, which makes a closed position's
+          // deposit and withdrawal converge and its Capital G/L collapse
+          // toward $0. Marked so the total declares itself not-yet-final.
+          priceBasis = 'tick-derived-estimate';
         }
       }
 
@@ -569,6 +580,7 @@ async function GET_impl(request: Request) {
         usdAtTime,
         price0AtTime,
         price1AtTime,
+        ...(priceBasis ? { priceBasis } : {}),
         cumulativeFeeUSD,
         ...(ev.rewardSymbol ? { rewardSymbol: ev.rewardSymbol } : {}),
       };

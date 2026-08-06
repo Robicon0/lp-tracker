@@ -118,6 +118,11 @@ export interface ActivityEvent {
   // exists for the token (caller should treat as "no entry-price data" for IL).
   price0AtTime: number | null;
   price1AtTime: number | null;
+  // ITEM 0b — set ONLY when this event's claim-date historical price was cold
+  // and CURRENT SPOT was substituted instead. Consumers must treat the value as
+  // not-yet-final rather than settled. Absent = priced on its own historical
+  // basis. Never set for fee claims (they stay pending instead — Rule 1a).
+  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
   cumulativeFeeUSD: number;   // running total of fee_claim USD; 0 for non-fee events
   // On-chain log index of the source event. The analytics Fee Income dedup
   // keys on (protocol, txHash, logIndex) so the SAME Collect seen by BOTH the
@@ -654,6 +659,7 @@ async function GET_impl(request: Request) {
       let price0AtTime: number | null = null;
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
+      let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
       // Sprint 2.1b: which historical source priced a fee claim (read by the
       // [PRICE_LOG] re-derivation below). NEVER cg-spot — fee claims are
       // historical-only (Rule 1a).
@@ -682,6 +688,12 @@ async function GET_impl(request: Request) {
             price0AtTime = derived.price0;
             price1AtTime = derived.price1;
             usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+            // ITEM 0b: this is a TICK-BOUNDARY ESTIMATE from the position's own
+            // range, not the price at THIS event's block — so every event of the
+            // position gets the SAME price, which makes a closed position's
+            // deposit and withdrawal converge and its Capital G/L collapse
+            // toward $0. Marked so the total declares itself not-yet-final.
+            priceBasis = 'tick-derived-estimate';
           }
         }
       }
@@ -740,11 +752,16 @@ async function GET_impl(request: Request) {
       // position value, NOT historical earnings). Fee claims are handled above
       // and NEVER fall to spot (Rule 1a). currentSpot0/1 was promoted above
       // from caller fallback / a fresh CG simple-price lookup / stablecoin $1.
+      // ITEM 0b: the substitution is still ALLOWED (Rule 2), but it is no longer
+      // SILENT — it is marked, so the position is reported as not-yet-finally-
+      // priced and retried once the historical price warms, instead of a
+      // spot-derived figure rendering as a settled Capital G/L.
       if (usdAtTime == null && ev.type !== 'fee_claim') {
         price0AtTime = currentSpot0 || null;
         price1AtTime = currentSpot1 || null;
         if (currentSpot0 > 0 || currentSpot1 > 0) {
           usdAtTime = amount0 * currentSpot0 + amount1 * currentSpot1;
+          priceBasis = 'current-spot-substituted';
         }
       }
 
@@ -795,6 +812,7 @@ async function GET_impl(request: Request) {
         usdAtTime,
         price0AtTime,
         price1AtTime,
+        ...(priceBasis ? { priceBasis } : {}),
         cumulativeFeeUSD,
       };
     });

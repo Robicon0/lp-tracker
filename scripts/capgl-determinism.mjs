@@ -224,6 +224,42 @@ if (unstable.length) {
   }
 }
 
+// ── ITEM 0b REGRESSION GUARD: the deposited === withdrawn fingerprint ──────
+// When an activity route substitutes CURRENT SPOT for a cold claim-date
+// historical price, it applies the SAME prices to that position's deposits AND
+// its withdrawals, so the two sides converge and its Capital G/L collapses
+// toward $0. Deposited matching Withdrawn to the cent on a closed position is
+// therefore the signature of a spot-substituted valuation, not a coincidence.
+//
+// The guard is conditional on DISCLOSURE, which is the whole point of the fix:
+//   - fingerprint present AND the UI declares the total incomplete  => ⚠ expected,
+//     transient; the background retry should resolve it (not a failure).
+//   - fingerprint present AND the total renders as FINAL             => ✗ FAIL,
+//     the substitution went unreported. This is the ITEM 0b bug returning.
+console.log(`\n  deposited===withdrawn fingerprint (ITEM 0b):`);
+{
+  let anyUndisclosed = false, anyDisclosed = false;
+  for (const r of runs) {
+    const hits = r.rows.filter((row) => row.dollars.length >= 2
+      && money(row.dollars[0]) !== null
+      && money(row.dollars[0]) === money(row.dollars[1])
+      && money(row.dollars[0]) !== 0);
+    if (!hits.length) continue;
+    const disclosed = r.degrade?.pricingIncomplete === true;
+    (disclosed ? (anyDisclosed = true) : (anyUndisclosed = true));
+    console.log(`    run ${r.run}: ${hits.length} row(s) ${disclosed ? "(declared incomplete — OK)" : "(rendered as FINAL — ✗)"}`);
+    hits.forEach((h) => console.log(`        ${h.key}  ${h.pair}  dep=${h.dollars[0]} wd=${h.dollars[1]}`));
+  }
+  if (anyUndisclosed) {
+    varied = true;
+    console.log(`  ✗ a spot-substituted valuation was presented as a settled total (ITEM 0b regression).`);
+  } else if (anyDisclosed) {
+    console.log(`  ⚠ fingerprint present but correctly disclosed as incomplete — retry should resolve it.`);
+  } else {
+    console.log(`  ✓ no spot-substitution fingerprint in any run.`);
+  }
+}
+
 // API-call diff — a differing call set points at the enumeration layer.
 console.log(`\n  /api call counts per run:`);
 const apiKey = (r) => r.api.map((a) => a.path).sort().join(",");

@@ -130,7 +130,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // included (parity with useLpPnl's v26 → v27).
 // v20 (Sprint CETUS-V1-EVENTS): Cetus V1 Add/RemoveLiquidityEvent now parsed —
 // re-resolve in lockstep with lp-pnl-events v27 → v28.
-function cacheKey(id: string) { return `analytics-activity-v20-${id}`; }
+// v20 → v21 (ITEM 0b): lockstep with lp-pnl-events-v29 — cached events predate
+// the `priceBasis` marker, so a spot-substituted event would be indistinguishable
+// from a historically-priced one.
+function cacheKey(id: string) { return `analytics-activity-v21-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

@@ -139,6 +139,9 @@ export interface ActivityEvent {
   // Per-event historical prices (null when no CoinGecko mapping for the token).
   price0AtTime: number | null;
   price1AtTime: number | null;
+  // ITEM 0b — set ONLY when this event's claim-date historical price was cold
+  // and CURRENT SPOT was substituted. Consumers treat it as not-yet-final.
+  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
   cumulativeFeeUSD: number;
 }
 
@@ -870,6 +873,7 @@ async function GET_impl(request: Request) {
       let price0AtTime: number | null = null;
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
+      let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
 
       // For deposits/withdrawals, try historical sqrtPrice at the block
       // FIRST. Only fall back to deriveDepositPrices's tick estimate when
@@ -894,6 +898,12 @@ async function GET_impl(request: Request) {
             price0AtTime = derived.price0;
             price1AtTime = derived.price1;
             usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+            // ITEM 0b: this is a TICK-BOUNDARY ESTIMATE from the position's own
+            // range, not the price at THIS event's block — so every event of the
+            // position gets the SAME price, which makes a closed position's
+            // deposit and withdrawal converge and its Capital G/L collapse
+            // toward $0. Marked so the total declares itself not-yet-final.
+            priceBasis = 'tick-derived-estimate';
           }
         }
       }
@@ -934,11 +944,13 @@ async function GET_impl(request: Request) {
       // Rule 1 — "Never use current spot for fee-claim valuation, on any chain").
       // An unresolved fee claim stays null below and is surfaced to the user as
       // "pending price resolution" rather than silently mis-valued.
+      // ITEM 0b: allowed but MARKED — never silently substituted.
       if (usdAtTime == null && ev.type !== 'fee_claim') {
         price0AtTime = currentSpot0 || null;
         price1AtTime = currentSpot1 || null;
         if (currentSpot0 > 0 || currentSpot1 > 0) {
           usdAtTime = amount0 * currentSpot0 + amount1 * currentSpot1;
+          priceBasis = 'current-spot-substituted';
         }
       }
 
@@ -1010,6 +1022,7 @@ async function GET_impl(request: Request) {
         usdAtTime,
         price0AtTime,
         price1AtTime,
+        ...(priceBasis ? { priceBasis } : {}),
         cumulativeFeeUSD,
       };
     });

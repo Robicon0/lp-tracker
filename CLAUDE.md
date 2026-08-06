@@ -235,33 +235,127 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
-**🔴 ITEM 0b — NEXT UP. One closed position is returned by the API but INCONSISTENTLY
-INCLUDED in the aggregate, with no exclusion notice.** _(Isolated 2026-08-05 as the residual
-after ITEM 0's fix; narrowly scoped on purpose.)_
+**🟠 ITEM 0b — DISCLOSURE SHIPPED (2026-08-06), DETERMINISM STILL OPEN → see ITEM 0d, which
+is the direct continuation and the NEXT thing to build.** The activity route silently
+substituted a different price basis when a position's historical price wasn't available,
+producing a plausible-looking but WRONG Capital G/L. **It no longer renders as final** — a
+substituted valuation is marked and the total declares itself `≈ incomplete`. **The value
+still varies between loads** (measured on healthy code, 3 loads: spread **$690.49**, position
+`71729936` flipping between its historical $9,246.39 and its tick-derived $9,294.71), because
+the flip happens upstream in the price cascade. ITEM 0d removes the flip.
 
-**Exact signature:** the Aerodrome closed position with **deposited $9,246.39** on Account 1
-(`0xD99a9e66…4F20`) appeared in 1 of 3 identical loads. In every run `/api/aerodrome`
-returned **pos=8** — the source is stable — so the position is dropped DOWNSTREAM, silently:
-`excludedNotice` was **null** in all three runs, so it is not travelling the exclusion path
-that ITEM 0 fixed. Residual spread **$654.28 on production**; runs 1 and 2 were byte-identical
-(row sums both −$3,888.82), so this single position is the entire remaining delta.
+**⚠️ A SECOND substitute basis was found during implementation and is the one that actually
+fires in the browser.** The plan named only tier 3 (current spot). Tier 2 —
+`deriveDepositPrices`, a TICK-BOUNDARY estimate — is what the client path actually hits,
+because the client passes `tickLower`/`tickUpper` and tier 2 therefore covers for a failed
+tier 1. It has NO per-block input, so **every event of a position gets the same price**,
+which is the mechanism behind the deposited === withdrawn fingerprint. Both bases are now
+marked; they are handled DIFFERENTLY (see the fix entry for `2c0ef67`).
 
-**Strong lead — the residual is EXACTLY a previously-identified figure.** The production
-spread is **$654.28**, which is precisely the row-#3 delta measured before the fix
-($654.28 + $84.53 = the $738.81 that remained after the deposit-side fix). The $84.53 half
-closed when spot-fallback valuation was counted; the $654.28 half did not. So that same
-position stopped flipping between VALUATION states and is now flipping between INCLUSION
-states — narrowing this to one position and one decision point.
+_(Original problem statement below, kept because it is the baseline ITEM 0d measures against.)_
 
-**This is a THIRD mechanism, distinct from the two ITEM 0 addressed** (pricing exclusions,
-and spot-fallback withdrawal valuation). Candidates NOT yet excluded: the eligibility filter
-in `useLpPnl`'s fetch effect; the Rule 11 degrade funnel resolving to a state that drops it
-without reporting; an `isClosed` mismatch eviction; or a race between the positions array and
-the aggregate memo. **Do not guess — reproduce with
-`node scripts/capgl-determinism.mjs --runs 5` and diff which run includes it.**
+**⚠️ CORRECTION — the earlier description of this item was WRONG.** It said "one closed
+position is returned by the API but INCONSISTENTLY INCLUDED in the aggregate", and pointed
+the investigation at client-side inclusion/exclusion (`useLpPnl`'s eligibility filter, the
+Rule 11 degrade funnel, an `isClosed` eviction, a render race). **None of those is the
+cause.** Nothing is being included or excluded — the position is present in every run. It is
+being **valued differently** run to run, on the SERVER, inside the activity route. Do not
+re-derive the inclusion hypothesis.
 
-**Acceptance:** that position is present in every run, or its absence is REPORTED. The
-harness must go green (`VERDICT: deterministic ✓`).
+**The mechanism** (`app/api/aerodrome/activity/route.ts:743-748`). For deposit and withdrawal
+events the route runs a three-tier cascade:
+
+1. **sqrtPriceX96 at the event's own block** (`histPrices`) — the correct historical basis.
+2. `deriveDepositPrices` tick-boundary estimate (~line 676) — an approximation, not the
+   event-block price.
+3. **CURRENT SPOT** (`currentSpot0/1`) — `if (usdAtTime == null && ev.type !== 'fee_claim')`,
+   a WHOLLY DIFFERENT price basis, applied silently.
+
+Tier 3 assigns `price0AtTime`/`price1AtTime` = today's spot and computes a non-null
+`usdAtTime`. **That is what makes it invisible**: downstream the event is indistinguishable
+from a properly historically-priced one. In particular it **BYPASSES the ITEM 0 spot-fallback
+counter** — `positionPnl.ts`'s `spotFallbackEventCount` only increments when `usdAtTime` is
+null AND both prices are null (`positionPnl.ts:259-281`), which a route-substituted event
+never is. So `capitalGLPricingPending` stays false, the total renders as final, and the
+background retry never fires for these positions.
+
+**Affected positions (Account 1, `0xD99a9e66…4F20`, Aerodrome/Base): `71729936`, `71734039`,
+`71735590`** — three positions, not one.
+
+**Signature symptom: deposited and withdrawn collapse to an IDENTICAL figure.** When tier 3
+fires, both the deposit events and the withdrawal events of the same position are valued with
+the SAME current-spot prices, so the two sides converge and that position's Capital G/L
+collapses toward ~$0. On a warm load the same position values historically and contributes a
+real, non-zero G/L. **Deposited === Withdrawn to the cent on a closed position is the
+fingerprint of this bug, and is the fastest way to spot it in a harness diff.** (It also
+explains why `Deposited` looked "stable" in the ITEM 0 diagnostic: the deposit side moves in
+lockstep with the withdrawal side, so the two errors partly cancel in the wallet total while
+Capital G/L moves.)
+
+**Why the number changes per load:** identical to ITEM 0's root cause — the historical price
+is read cached-only while the warm-up is fire-and-forget, so which tier answers depends purely
+on cache warmth at that instant. ITEM 0 fixed the two paths that were *visible* (exclusion,
+and the `positionPnl` spot fallback); this is the third path, and it is the one that reports
+nothing at all.
+
+**Not Aerodrome-specific.** The same tier-3 substitution exists in **six** activity routes:
+`aerodrome` (743), `velodrome` (618), `hyperswap` (937), plus `bluefin`, `raydium`, `cetus`,
+`orca`. Any fix is platform-level (architecture Rule 1), not a one-route patch.
+
+**Rule status:** this does NOT violate pricing-invariants Rule 1a (that governs fee claims,
+and fee claims correctly stay pending here). Rule 2 does permit spot as a last resort for a
+deposit/withdrawal point-in-time value. The defect is that the substitution is **silent** —
+Rule 11 requires degrading visibly, never differing silently, and a headline money figure
+must not swap price bases without saying so.
+
+**Acceptance:** across N identical loads the same wallet produces the SAME Capital G/L, or the
+total declares itself incomplete and names the unpriced positions. Deposited must never equal
+Withdrawn by way of a shared spot basis. Harness green:
+`node scripts/capgl-determinism.mjs --runs 5` → `VERDICT: deterministic ✓`.
+**Half met by `2c0ef67`:** the "declares itself incomplete" clause is satisfied on every load;
+the "SAME Capital G/L" clause is NOT, and is ITEM 0d's job.
+
+**🔴 ITEM 0d — NEXT UP, and the DIRECT CONTINUATION of ITEM 0b (not a backlog item — do not
+let it slip). Redis-cache the per-event historical sqrtPriceX96 prices so tier 1 answers on
+every load and the substitute bases stop being reached.**
+
+**Why this is the actual fix:** ITEM 0b proved the number moves because the CASCADE moves —
+tier 1 (the pool's `sqrtPriceX96` at the event's own block, via the Tenderly archive) answers
+on one load and not the next, and whichever lower tier catches it produces a different,
+non-historical valuation. Marking made that honest; only making tier 1 RELIABLE makes it
+stable. A closed position's per-event historical price is **IMMUTABLE** — the block is
+finalized — so it is exactly the shape the repo already caches elsewhere.
+
+**Shape:** the `evm_pos_ctx_v1` pattern (Sprint ITEM-A) applied to
+`app/lib/v3HistoricalFeePrice.ts`'s `createHistoricalFeePriceResolver`: key on
+`(chain, pool, blockNumber)`, 90 d TTL, **POSITIVE results only** (a null may be a transient
+archive failure and freezing it in would permanently pin a position to the estimate). The
+resolver already batches per block via `resolveMany`, so the cache slots in at that boundary.
+**Expected result: the tick-derived path becomes rare, `pricingIncomplete` clears on a warm
+wallet, and the harness goes `deterministic ✓`.** Complexity SMALL–MEDIUM. Verify with
+`node scripts/capgl-determinism.mjs --runs 3` on production — spread must reach $0.00, and the
+`≈` marker must disappear once warm.
+
+**🟡 ITEM 0e — Rule 1a LEAK: Uniswap and PancakeSwap can value a FEE CLAIM at current spot.**
+_(Found 2026-08-06 while implementing ITEM 0b; recorded, deliberately NOT fixed there.)_
+Every other route gates its spot last resort on `ev.type !== 'fee_claim'`. These two do not —
+`app/api/uniswap/activity/route.ts:757` and `app/api/pancakeswap/activity/route.ts:~445` read
+`if (usdAtTime == null)`, so a claim that misses sqrtPriceX96 AND CoinGecko-historical falls
+through to `currentSpot0/1`. That is a **direct pricing-invariants Rule 1a violation** — the
+exact failure that over-reported Account 2's ProjectX fees by 26% in Sprint 1.5 — and it is
+distinct from ITEM 0b (which is about deposit/withdrawal valuation, where Rule 2 permits
+spot). **Fix:** gate both branches on `ev.type !== 'fee_claim'` and let the claim stay pending,
+matching Cetus/Bluefin/Aerodrome. Requires a `lp-pnl-events`/`analytics-activity` bump (fee
+totals change). Complexity SMALL. Verify on a Uniswap wallet with a claim CoinGecko can't
+price: the claim must report pending, never a spot figure.
+
+**⚪ ITEM 0f — LOW / cosmetic: the determinism harness's row scraper also matches the
+OPEN-positions table, so live price movement reads as "the position SET is unstable".**
+_(Found 2026-08-06.)_ `scripts/capgl-determinism.mjs` selects any `<tr>` with ≥3 dollar cells,
+which catches the main positions table as well as the Capital G/L breakdown; an open
+position's mark-to-market value differing by cents between runs then prints as a set change
+and can mask the real signal. **Fix:** scope the selector to the Capital G/L breakdown table
+only. Affects the TESTING TOOL, not the product — no user impact. Complexity SMALL.
 
 **🟡 ITEM 0c — MINOR: token symbol display is non-deterministic.** The SAME closed position
 renders as `WETH / USDC` on one load and the generic `Aerodrome Position` placeholder on the
@@ -657,6 +751,41 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`2c0ef67`** — **ITEM 0b: an activity route may no longer SILENTLY SWAP PRICE BASIS.** A
+  deposit/withdrawal whose own historical price wasn't available was quietly valued on a
+  different basis and rendered as settled. Every activity event now carries an additive
+  `priceBasis`, set ONLY when a substitute basis was used, across **10 routes** (aerodrome,
+  velodrome, hyperswap, uniswap, pancakeswap, bluefin, cetus, orca, raydium, momentum —
+  uniswap/pancakeswap/momentum were NOT in the original scope but carry identical code, so
+  excluding them would have left the same bug live).
+  **TWO substitute bases, found to need DIFFERENT handling — this is the load-bearing
+  detail:** (1) `current-spot-substituted` is TRANSIENT (the price simply isn't warm), so it
+  counts as pending AND is retried — the ITEM 0 machinery resolves it, verified end-to-end
+  with a cold-then-warm harness: first request returned dep === wd === $10,147.12, the
+  cache-bypassing retry returned the true dep $9,246.39 / wd $9,150.70. (2)
+  `tick-derived-estimate` (`deriveDepositPrices`) is NOT transient — re-fetching returns the
+  identical estimate — so it DISCLOSES but is deliberately NOT retried. **Making it retryable
+  was tried and reverted:** it evicted every position on a loop (activity calls 33 → 71) and
+  left the aggregate reading **$0.00 even after 260 s**, worse than the bug and a Rule 11
+  violation. It is now disclosed-and-kept-in-totals (degraded run: Deposited $8,243.79 /
+  Capital G/L −$1,857.40, both STABLE, `≈` shown, 17 activity calls).
+  **The tick-derived basis is the one that actually fires in the browser** — the client passes
+  ticks, so tier 2 covers for a failed tier 1 — and because it has no per-block input it
+  applies ONE price to every event of a position, which is exactly why a closed position's
+  deposit and withdrawal collapse to an identical figure and its Capital G/L goes to ~$0.
+  **A DEAD COUNTER from ITEM 0 was found and fixed en route:** `sharedFields` snapshotted
+  `spotFallbackEventCount` BY VALUE before the closed-path withdrawal loop incremented it, and
+  the closed return spread `...sharedFields` without re-specifying it — so ITEM 0's
+  withdrawal-side spot counter never reached the returned data on the CLOSED path, which is
+  precisely where closed-position Capital G/L lives. Proven against `HEAD`: pre-fix `0`,
+  post-fix `1` on the same input. Harness gains a permanent guard for the deposited ===
+  withdrawn fingerprint (fails only when it renders as FINAL; disclosed-incomplete reports ⚠).
+  **NOT fully closed — determinism remains open (ITEM 0d).** On healthy code, 3 loads still
+  spread **$690.49**, with `71729936` flipping between historical $9,246.39 and tick-derived
+  $9,294.71; every run now declares `≈ incomplete`, so no wrong number is presented as final,
+  but the value still moves. **Cache bumps: `lp-pnl-events` v28 → v29, `analytics-activity`
+  v20 → v21** (a cached pre-marker event would keep rendering as settled).
+
 - **`4fcc617`** — **Sprint CAPGL-DETERMINISM: Capital G/L stops presenting an INCOMPLETE
   sum as a final total.** Same wallet, same build, two loads → different money: Account 1's
   Capital G/L spread **$2,297.38** across 3 identical loads with Net P&L flipping sign.
@@ -686,8 +815,11 @@ shorthand.
   production's multiple instances under concurrent CoinGecko pressure, which is precisely
   the variable this bug turns on. The local number was measured first and briefly recorded
   here; production is the honest one. Exclusions **4/3/1 → 0** in both environments;
-  `Deposited` stable in both. **NOT fully closed** — one position is still intermittently included
-  (**ITEM 0b**, next up) and token symbols drift (**ITEM 0c**, display-only). The harness
+  `Deposited` stable in both. **NOT fully closed** — three positions are still silently
+  re-priced at CURRENT SPOT inside the activity route itself, which bypasses this fix's
+  spot-fallback counter entirely (**ITEM 0b**, next up — and note `Deposited` looking "stable"
+  is itself a symptom of that bug, not evidence against it), and token symbols drift
+  (**ITEM 0c**, display-only). The harness
   correctly still reports `NON-DETERMINISTIC ✗`; it also caught two of my own errors during
   the work (my `≈` marker broke its own regex — its gap-detector flagged the run unreliable
   rather than scraping null; and its row key had to move off the label once the label itself

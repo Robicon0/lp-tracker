@@ -75,6 +75,9 @@ export interface ActivityEvent {
   // Per-event historical prices (null when no CoinGecko mapping for the token).
   price0AtTime: number | null;
   price1AtTime: number | null;
+  // ITEM 0b — set ONLY when this event's claim-date historical price was cold
+  // and CURRENT SPOT was substituted. Consumers treat it as not-yet-final.
+  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
   cumulativeFeeUSD: number;
   // On-chain log index — the analytics Fee Income dedup keys on
   // (protocol, txHash, logIndex) so the SAME Collect seen by both the
@@ -538,6 +541,7 @@ async function GET_impl(request: Request) {
       let price0AtTime: number | null = null;
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
+      let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
       // Sprint 2.1b: which historical source priced a fee claim (read by the
       // [PRICE_LOG] re-derivation below). NEVER cg-spot (Rule 1a).
       let __feeUsedCg = false;
@@ -565,6 +569,12 @@ async function GET_impl(request: Request) {
             price0AtTime = derived.price0;
             price1AtTime = derived.price1;
             usdAtTime = amount0 * derived.price0 + amount1 * derived.price1;
+            // ITEM 0b: this is a TICK-BOUNDARY ESTIMATE from the position's own
+            // range, not the price at THIS event's block — so every event of the
+            // position gets the SAME price, which makes a closed position's
+            // deposit and withdrawal converge and its Capital G/L collapse
+            // toward $0. Marked so the total declares itself not-yet-final.
+            priceBasis = 'tick-derived-estimate';
           }
         }
       }
@@ -615,11 +625,13 @@ async function GET_impl(request: Request) {
       // Deposits / withdrawals ONLY: current-spot last resort when on-chain
       // historical derivation was unavailable (Rule 2 — point-in-time position
       // value, NOT historical earnings). Fee claims NEVER fall to spot (Rule 1a).
+      // ITEM 0b: allowed but MARKED — never silently substituted.
       if (usdAtTime == null && ev.type !== 'fee_claim') {
         price0AtTime = currentSpot0 || null;
         price1AtTime = currentSpot1 || null;
         if (currentSpot0 > 0 || currentSpot1 > 0) {
           usdAtTime = amount0 * currentSpot0 + amount1 * currentSpot1;
+          priceBasis = 'current-spot-substituted';
         }
       }
 
@@ -659,7 +671,7 @@ async function GET_impl(request: Request) {
           notes: `source=${__src}`,
         });
       }
-      return { type: ev.type, txHash: ev.txHash, logIndex: ev.logIndex, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, cumulativeFeeUSD };
+      return { type: ev.type, txHash: ev.txHash, logIndex: ev.logIndex, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), cumulativeFeeUSD };
     });
 
     events.reverse();

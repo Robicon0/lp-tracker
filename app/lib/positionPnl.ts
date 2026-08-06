@@ -15,6 +15,18 @@ export interface ActivityEventForPnL {
   price0AtTime: number | null;
   price1AtTime: number | null;
   txHash?: string;
+  // ITEM 0b — which PRICE BASIS actually valued this event. An activity route
+  // may substitute CURRENT SPOT for a deposit's / withdrawal's claim-date
+  // historical price when that price is not warm in the cache. The substituted
+  // event is otherwise INDISTINGUISHABLE from a correctly-priced one (it
+  // carries a non-null usdAtTime and non-null per-token prices), so without
+  // this marker the substitution is silent and the position's Capital G/L
+  // changes between loads with nothing reporting it.
+  //
+  // Set ONLY when the route actually substituted. Absent = priced on its own
+  // historical basis (sqrtPriceX96 at the event block, tick-derived, or
+  // claim-date historical).
+  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
 }
 
 export interface PositionPnLInput {
@@ -89,6 +101,14 @@ export interface PositionPnLData {
    * non-determinism.
    */
   spotFallbackEventCount?: number;
+  /**
+   * ITEM 0b — deposit/withdrawal events valued from the position's TICK-BOUNDARY
+   * estimate rather than the price at their own block. > 0 means Capital G/L is
+   * APPROXIMATE (and, for a closed position, structurally near $0 because the
+   * same estimate values both sides). Disclosed to the user, kept IN the totals,
+   * and NOT retried — the estimate does not change on a re-fetch.
+   */
+  estimatedBasisEventCount?: number;
 }
 
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
@@ -198,6 +218,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   let feesCollected = 0;
   let pendingClaimCount = 0;
   let spotFallbackEventCount = 0;
+  let estimatedBasisEventCount = 0;
   for (const e of sorted) {
     if (e.type !== 'fee_claim' && e.type !== 'reward_claim') continue;
     if (e.usdAtTime != null) {
@@ -207,6 +228,43 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     } else {
       pendingClaimCount += 1;
     }
+  }
+
+  // ITEM 0b — count events the ROUTE valued at current spot instead of their
+  // own claim-date historical price. This is the third, previously-silent way
+  // Capital G/L can be not-yet-final, and the only one that reported NOTHING:
+  // a substituted event arrives with a non-null usdAtTime, so it never reaches
+  // the withdrawal last-resort branch below and never got counted. Both sides
+  // matter — when the substitution fires, the deposit AND the withdrawal of the
+  // same position are valued with the SAME current prices, so the two converge
+  // and that position's Capital G/L collapses toward $0 (the deposited ===
+  // withdrawn fingerprint). Counting it here routes the position into the
+  // existing ITEM 0 pending/retry machinery in useLpPnl — no new path.
+  // TWO substitute bases, both non-historical, both with the same consequence:
+  //   'current-spot-substituted' — today's price applied to a past event.
+  //   'tick-derived-estimate'    — a price inferred from the position's own tick
+  //                                RANGE. It is identical for EVERY event of the
+  //                                position (it has no per-block input), so a
+  //                                closed position's deposit and withdrawal come
+  //                                out the SAME to the cent and Capital G/L
+  //                                collapses to ~$0. Measured live on Account 1
+  //                                position 71729936: dep === wd === $9,294.71
+  //                                vs the true historical −$95.69.
+  // They are counted SEPARATELY because they need different handling:
+  //   spot  — TRANSIENT (the historical price simply isn't warm yet), so the
+  //           position is worth re-fetching; the ITEM 0 retry resolves it.
+  //   tick  — NOT transient. If the archive can't serve that block, retrying
+  //           returns the identical estimate. Counting it as retryable evicts
+  //           and re-fetches every position on a loop, which amplifies load
+  //           (measured: 33 → 71 activity calls per load) and leaves the
+  //           aggregate reading $0.00 because nothing is ever settled — worse
+  //           than the bug, and a Rule 11 violation (never drop a position from
+  //           totals). So tick-derived DISCLOSES ("≈ incomplete") while its
+  //           value stays IN the totals, and is not retried.
+  for (const e of sorted) {
+    if (e.type !== 'deposit' && e.type !== 'withdrawal') continue;
+    if (e.priceBasis === 'current-spot-substituted') spotFallbackEventCount += 1;
+    else if (e.priceBasis === 'tick-derived-estimate') estimatedBasisEventCount += 1;
   }
 
   // Calculation detail fields
@@ -236,6 +294,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     depositTxHashes,
     pendingClaimCount,
     spotFallbackEventCount,
+    estimatedBasisEventCount,
   };
 
   // ── IL formula (concentrated liquidity, exact) ────────────────────────
@@ -303,6 +362,13 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
       ok: true,
       data: {
         ...sharedFields,
+        // MUST come after the spread: `sharedFields` snapshotted
+        // spotFallbackEventCount BY VALUE before the withdrawal loop above ran,
+        // so the spread alone would return the pre-loop count and silently
+        // discard every withdrawal spot-fallback this position hit. Found while
+        // fixing ITEM 0b — it made ITEM 0's withdrawal-side counter dead on the
+        // CLOSED path, which is exactly where closed-position Capital G/L lives.
+        spotFallbackEventCount,
         initialValue,
         currentValue: 0,
         closingValue,

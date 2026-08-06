@@ -581,7 +581,11 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // V1 package's AddLiquidityEvent / RemoveLiquidityEvent (pre-V2 deposits and
 // withdrawals were invisible → false no_deposits / wrong Capital G/L). Cached
 // LP-P&L outputs for affected positions change, so flush v27.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v28-";
+// v28 → v29 (ITEM 0b): activity events now carry `priceBasis`, and a
+// spot-substituted deposit/withdrawal makes the position report as pricing-
+// pending. A v28 entry has no marker, so a cached spot-substituted event would
+// keep rendering as a settled historical value — exactly the bug being fixed.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v29-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
@@ -994,6 +998,13 @@ async function fetchAndCompute(
     price0AtTime: (e.price0AtTime as number | null) ?? null,
     price1AtTime: (e.price1AtTime as number | null) ?? null,
     txHash: (e.txHash as string | undefined) ?? undefined,
+    // ITEM 0b — carry the route's price-basis marker through. Without this the
+    // substitution is invisible to computePositionPnL and Capital G/L renders
+    // a spot-derived figure as a settled historical total.
+    priceBasis:
+      e.priceBasis === 'current-spot-substituted' || e.priceBasis === 'tick-derived-estimate'
+        ? (e.priceBasis as 'current-spot-substituted' | 'tick-derived-estimate')
+        : undefined,
   }));
 
   const result = computePositionPnL({
@@ -1307,8 +1318,12 @@ function aggregate(
   // (2) is the subtler one: nothing is excluded, no warning fires, the total
   // just quietly differs between loads. Both must count, or the "complete"
   // signal lies.
+  // ITEM 0b adds a THIRD way (the tick-boundary estimate). It counts toward the
+  // DISCLOSURE here — the user must be told the figure is approximate — but it
+  // is deliberately NOT retried below: unlike a cold price, re-fetching returns
+  // the identical estimate, and evicting on a loop would empty the totals.
   const spotFallbackPositions = Object.values(perPosition).filter(
-    (d) => (d?.spotFallbackEventCount ?? 0) > 0,
+    (d) => (d?.spotFallbackEventCount ?? 0) > 0 || (d?.estimatedBasisEventCount ?? 0) > 0,
   ).length;
   const capitalGLPricingPending = excludedPositions.filter((e) =>
     PRICING_PENDING_REASONS.has(e.rawReason),
