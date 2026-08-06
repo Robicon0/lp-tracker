@@ -250,7 +250,7 @@ fires in the browser.** The plan named only tier 3 (current spot). Tier 2 —
 because the client passes `tickLower`/`tickUpper` and tier 2 therefore covers for a failed
 tier 1. It has NO per-block input, so **every event of a position gets the same price**,
 which is the mechanism behind the deposited === withdrawn fingerprint. Both bases are now
-marked; they are handled DIFFERENTLY (see the fix entry for `2c0ef67`).
+marked; they are handled DIFFERENTLY (see the fix entry for `c18cbd8`).
 
 _(Original problem statement below, kept because it is the baseline ITEM 0d measures against.)_
 
@@ -312,7 +312,7 @@ must not swap price bases without saying so.
 total declares itself incomplete and names the unpriced positions. Deposited must never equal
 Withdrawn by way of a shared spot basis. Harness green:
 `node scripts/capgl-determinism.mjs --runs 5` → `VERDICT: deterministic ✓`.
-**Half met by `2c0ef67`:** the "declares itself incomplete" clause is satisfied on every load;
+**Half met by `c18cbd8`:** the "declares itself incomplete" clause is satisfied on every load;
 the "SAME Capital G/L" clause is NOT, and is ITEM 0d's job.
 
 **🔴 ITEM 0d — NEXT UP, and the DIRECT CONTINUATION of ITEM 0b (not a backlog item — do not
@@ -751,7 +751,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`2c0ef67`** — **ITEM 0b: an activity route may no longer SILENTLY SWAP PRICE BASIS.** A
+- **`c18cbd8`** — **ITEM 0b: an activity route may no longer SILENTLY SWAP PRICE BASIS.** A
   deposit/withdrawal whose own historical price wasn't available was quietly valued on a
   different basis and rendered as settled. Every activity event now carries an additive
   `priceBasis`, set ONLY when a substitute basis was used, across **10 routes** (aerodrome,
