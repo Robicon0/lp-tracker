@@ -817,7 +817,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`PENDING-0G`** — **ITEM 0g: Capital G/L is DETERMINISTIC — −$4,635.37 on three identical
+- **`4a4d564`** — **ITEM 0g: Capital G/L is DETERMINISTIC — −$4,635.37 on three identical
   loads (spread $1,401.93 → $0.00), 9/9/9 identical closed rows, 0 exclusions.** Three parts,
   in the order they matter:
   **G1 (the actual root cause, and it was not what the item was originally scoped as).** The
