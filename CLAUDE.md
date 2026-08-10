@@ -346,8 +346,15 @@ wallet, and the harness goes `deterministic ✓`.** Complexity SMALL–MEDIUM. V
 `node scripts/capgl-determinism.mjs --runs 3` on production — spread must reach $0.00, and the
 `≈` marker must disappear once warm.
 
-**✅ ITEM 0g — SHIPPED. Capital G/L is now STABLE across identical loads: −$4,635.37 on all
-3 runs (spread $1,401.93 → $0.00), 9/9/9 identical closed rows, 0 exclusions.** The
+**✅ ITEM 0g — SHIPPED AND CONFIRMED ON PRODUCTION.** Capital G/L is STABLE across identical
+loads: −$4,635.37 on all 3 local runs (spread $1,401.93 → $0.00), 9/9/9 identical closed rows,
+0 exclusions. **On defidesh.com (`4a4d564` deployed): two independent loads reproduced
+−$4,635.37 TO THE CENT with Deposited $8,184.28, 9 identical closed rows and 0 exclusions —
+matching local exactly**, and both `/api/aerodrome` and `/api/uniswap/v3` confirmed returning
+`poolAddress` live. _(A third production load rendered all-zero totals; that is **ITEM 0i**,
+a hung positions source under load I had induced myself — NOT a Capital G/L regression. A
+clean production re-measure from a quiet state is still worth doing once, but the two matching
+loads are the confirmation.)_ The
 measurement that scoped it also found the real cause was NOT the retry window: the Uniswap
 V3 and HyperSwap positions routes never returned a `poolAddress`, so the activity route's
 tier-1 historical price source was never even constructed for them. See the fix entry for
@@ -371,6 +378,49 @@ case widening the window or awaiting the prewarm for CLOSED positions only is en
 (b) treat a closed position's deposit-date prices as immutable and persist them the way 0d
 does. Complexity SMALL–MEDIUM. **Acceptance:** `node scripts/capgl-determinism.mjs --runs 3`
 on production → `VERDICT: deterministic ✓`.
+
+**🟠 ITEM 0i — A HUNG positions source renders a confident $0.00 total, with NO loading state,
+NO error, and NO banner — while the breakdown table below it still shows real positions.**
+_(Found 2026-08-10 on production during the ITEM 0g verification. Load-induced — see the
+honesty note below — but the failure shape is real and reachable by a normal user.)_
+
+**Observed:** analytics showed `TOTAL DEPOSITED $0.00` / `CAPITAL G/L +$0.00` for a full
+400 s, with `pricingIncomplete:false`, no exclusion notice, no "calculating…", and **zero
+non-200 API responses** — while the Capital G/L breakdown immediately below listed **7 real
+closed positions** with real dollar figures.
+
+**Mechanism (evidenced, not guessed).** Six repeated calls to production `/api/aerodrome`
+returned `count=8` four times (6.8–11.8 s) and **hung once with no response for ~100 minutes**.
+It NEVER returned `count=0`. So this is NOT queue item B (a transient empty cached as truth) —
+the route either answers correctly or does not answer at all. A hang means:
+`PositionsContext` never resolves → the positions array stays empty → `useLpPnl` has nothing
+to compute → `included === 0` **with nothing in flight** → the aggregate renders $0.00 AND the
+loading gate (`included === 0 && isLoading`) never fires, because there is no in-flight
+per-position work to make `isLoading` true. Every symptom follows from that, including the
+missing "calculating…".
+
+**Why it matters:** this is architecture Rule 11 at the SOURCE layer rather than the
+per-position layer. The degrade funnel protects a position whose own fetch fails; nothing
+protects the case where the positions SOURCE never answers, and the failure renders as
+authoritative zeros — the same "confidently wrong number" class as ITEM 0/0b.
+
+**Shape of the fix:** (a) a structural invariant that is cheap and catches this regardless of
+cause — **the aggregate must never render $0.00 while the breakdown it summarizes is
+non-empty**; the two are computed from the same data and disagreeing is definitionally a bug;
+(b) a client-side timeout/abort on the positions queries so a hang becomes a visible error
+state rather than a silent empty; (c) distinguish "no positions" from "positions not yet
+known" in `PositionsContext` so the UI can say which. Complexity SMALL–MEDIUM.
+**Verify by forcing the failure** (point a positions route at a dead endpoint or add an
+artificial hang) and confirming the page reports rather than showing zeros.
+
+**⚠️ Honesty note on provenance:** the hang was triggered by MY OWN load — ~6 full analytics
+loads plus direct route calls against production inside ~40 minutes, each firing the heavy
+ever-owned-tokenId scan and closed reconstruction, which throttled the shared free-tier
+upstreams (the documented Tenderly per-IP `getLogs` throttle). Production recovered
+immediately once the load stopped (`/api/aerodrome` back to 200 in 5.7 s). So the TRIGGER was
+self-inflicted; the RENDERING BEHAVIOUR is a genuine defect, because a real user on a
+throttled upstream or a cold instance reaches the same state. **Do not load-test production
+repeatedly to reproduce it — force the hang locally instead.**
 
 **🟠 ITEM 0h — CHAIN-SPECIFIC: HyperEVM deposits/withdrawals cannot get a tier-1 historical
 price, so they are valued from a TICK ESTIMATE / current spot on every load.** _(Isolated
