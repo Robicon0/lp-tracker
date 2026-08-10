@@ -128,7 +128,49 @@ const SELECTORS = {
   positions: '0x99fbab88',     // positions(uint256) — keccak256("positions(uint256)")[:4]. Same selector across every Uniswap V3 NPM deployment (Ethereum / Arbitrum / Optimism / Polygon / BNB Chain) and across HyperEVM V3 forks. Was '0x99fd0e82' (wrong — reverts on every chain).
   symbol: '0x95d89b41',
   decimals: '0x313ce567',
+  getPool: '0x1698ee82',        // getPool(address,address,uint24) on the V3 factory
 };
+
+// ── ITEM 0g (G1): resolve each position's POOL ────────────────────────────
+// Why a positions route cares about the pool address: the activity route's
+// TIER 1 historical price source reads the pool's `sqrtPriceX96` at the block
+// of each deposit/withdrawal, and it is constructed ONLY when the client passes
+// a `pool` param — which the client forwards only if the position carries a
+// `poolAddress`. This route never returned one, so tier 1 was NEVER ATTEMPTED
+// for any Uniswap position and every deposit/withdrawal fell through to a
+// substitute price basis (a tick-boundary estimate, or current spot) on EVERY
+// load. Measured 2026-08-10 on Account 1: 9 spot-substituted + 6 tick-derived
+// events across 3 Uniswap positions, all of them avoidable.
+//
+// (factory, token0, token1, fee) → pool is IMMUTABLE, and the tuple repeats
+// across a wallet's positions in the same pool, so an in-process map is enough;
+// nothing here needs to be re-derived within a request.
+const poolAddressCache: Record<string, string | null> = {};
+
+async function resolvePoolAddress(
+  rpc: string,
+  factory: string,
+  token0: string,
+  token1: string,
+  fee: number,
+): Promise<string | null> {
+  const key = `${factory}-${token0}-${token1}-${fee}`.toLowerCase();
+  if (key in poolAddressCache) return poolAddressCache[key];
+  try {
+    const data = SELECTORS.getPool + padAddress(token0) + padAddress(token1) + padUint256(BigInt(fee));
+    const result = await rpcCall(rpc, factory, data);
+    const addr = result && result !== '0x' ? '0x' + result.slice(-40) : null;
+    // A zero address means "no such pool" — never emit it, or the activity
+    // route would build a resolver against address(0) and quietly get nothing.
+    const ok = addr && addr !== '0x0000000000000000000000000000000000000000' ? addr : null;
+    poolAddressCache[key] = ok;
+    return ok;
+  } catch {
+    // Leave UNCACHED on failure: a transient RPC error must not pin this
+    // position to the substitute basis for the life of the process.
+    return null;
+  }
+}
 
 function padAddress(addr: string): string {
   return addr.toLowerCase().replace('0x', '').padStart(64, '0');
@@ -436,6 +478,13 @@ async function fetchPositionsForChain(
         const fees1 = Number(pos.tokensOwed1) / (10 ** t1Info.decimals);
         const feesUsd = (fees0 * price0) + (fees1 * price1);
         
+        // ITEM 0g (G1) — the position's own pool, for the activity route's
+        // tier-1 historical price reads. Null (RPC failure / no such pool) is
+        // omitted rather than guessed; the route then behaves exactly as before.
+        const poolAddress = await resolvePoolAddress(
+          chain.rpc, chain.factory, pos.token0, pos.token1, pos.fee,
+        );
+
         // Look up APY
         const apyKey = `${chain.defillamaChain}-${[pos.token0, pos.token1].sort().join('-')}`;
         const apy = apyData[apyKey] || 0;
@@ -471,6 +520,10 @@ async function fetchPositionsForChain(
           price1,
           token0Address: pos.token0,
           token1Address: pos.token1,
+          // ITEM 0g (G1) — carries the activity route's tier-1 historical price
+          // source. Resolved for CLOSED positions too: those are precisely the
+          // ones whose Capital G/L depends on historical pricing.
+          ...(poolAddress ? { poolAddress } : {}),
           walletAddress: account,
         });
       } catch (err) {

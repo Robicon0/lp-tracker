@@ -249,6 +249,36 @@ interface PoolExtras {
   poolAddress?: string;
 }
 
+// ITEM 0g (G1) — resolve ONLY the pool address (factory → getPool), with no
+// slot0 / tick / fee-growth reads. Used for zero-liquidity positions, where
+// those extra reads have nothing to compute but the pool address is still
+// needed for historical pricing. Returns null on any failure — the caller then
+// behaves exactly as it did before, never guessing an address.
+async function resolvePoolOnly(
+  nftManager: string,
+  knownFactory: string,
+  pos: PositionData,
+  factoryCache: Record<string, string>,
+): Promise<string | null> {
+  try {
+    if (knownFactory) {
+      factoryCache[nftManager] = knownFactory;
+    } else if (!factoryCache[nftManager]) {
+      const result = await rpcCall(nftManager, SELECTORS.factory);
+      if (!result || result === '0x') return null;
+      factoryCache[nftManager] = '0x' + result.slice(-40);
+    }
+    const factory = factoryCache[nftManager];
+    const data = SELECTORS.getPool + padAddress(pos.token0) + padAddress(pos.token1) + padUint256(BigInt(pos.fee));
+    const poolResult = await rpcCall(factory, data);
+    if (!poolResult || poolResult === '0x') return null;
+    const pool = '0x' + poolResult.slice(-40);
+    return pool === '0x0000000000000000000000000000000000000000' ? null : pool;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchPoolExtras(
   nftManager: string,
   knownFactory: string,
@@ -256,7 +286,21 @@ async function fetchPoolExtras(
   factoryCache: Record<string, string>,
 ): Promise<PoolExtras> {
   const zero: PoolExtras = { pending0: 0n, pending1: 0n, sqrtPriceX96: 0n, currentTick: 0 };
-  if (pos.liquidity === 0n) return zero;
+
+  // ITEM 0g (G1): a CLOSED position (liquidity 0) used to return here BEFORE
+  // the pool was resolved, so it carried no `poolAddress` — and the client only
+  // forwards a `pool` param when the position has one, which is what the
+  // activity route's TIER 1 historical price source is built from. So closed
+  // positions, the ONLY ones whose Capital G/L depends on historical pricing,
+  // were the exact set that could never get it, and every deposit/withdrawal
+  // fell to a substitute basis (tick estimate / current spot) on every load.
+  //
+  // Pending fees and tick data are genuinely pointless at zero liquidity and
+  // are still skipped; only the single getPool() call is now made.
+  if (pos.liquidity === 0n) {
+    const pool = await resolvePoolOnly(nftManager, knownFactory, pos, factoryCache);
+    return pool ? { ...zero, poolAddress: pool } : zero;
+  }
 
   try {
     // Use hardcoded factory if available, otherwise fetch via factory() RPC call

@@ -346,10 +346,14 @@ wallet, and the harness goes `deterministic ✓`.** Complexity SMALL–MEDIUM. V
 `node scripts/capgl-determinism.mjs --runs 3` on production — spread must reach $0.00, and the
 `≈` marker must disappear once warm.
 
-**🔴 ITEM 0g — NEXT UP for determinism. On the FIRST load of a cold process ONE position is
-still EXCLUDED for a cold deposit-date price, and the ITEM 0 retry does not resolve it within
-the load.** _(Isolated 2026-08-06 as the residual after ITEM 0d; it is the ORIGINAL ITEM 0
-exclusion path — `missing_deposit_prices` / `useLpPnl.ts:122` — not a price-basis problem.)_
+**✅ ITEM 0g — SHIPPED. Capital G/L is now STABLE across identical loads: −$4,635.37 on all
+3 runs (spread $1,401.93 → $0.00), 9/9/9 identical closed rows, 0 exclusions.** The
+measurement that scoped it also found the real cause was NOT the retry window: the Uniswap
+V3 and HyperSwap positions routes never returned a `poolAddress`, so the activity route's
+tier-1 historical price source was never even constructed for them. See the fix entry for
+the three parts (G1 pool resolution, G2 retry margin, G3 honest copy).
+
+_(Original scoping kept below — the "retry window" reading was only one third of it.)_
 
 **Signature:** run 1 of a fresh process shows **7 closed rows** and `⚠ 1 position could not…`;
 runs 2 and 3 show **8 rows** and are identical to the cent. The dropped position
@@ -367,6 +371,36 @@ case widening the window or awaiting the prewarm for CLOSED positions only is en
 (b) treat a closed position's deposit-date prices as immutable and persist them the way 0d
 does. Complexity SMALL–MEDIUM. **Acceptance:** `node scripts/capgl-determinism.mjs --runs 3`
 on production → `VERDICT: deterministic ✓`.
+
+**🟠 ITEM 0h — CHAIN-SPECIFIC: HyperEVM deposits/withdrawals cannot get a tier-1 historical
+price, so they are valued from a TICK ESTIMATE / current spot on every load.** _(Isolated
+2026-08-10 during ITEM 0g, which fixed the same symptom for Uniswap. Kept separate on purpose:
+this is a data-source limitation of the CHAIN, not a bug in the pricing cascade.)_
+
+**Measured, both endpoints, against pool `0x6c9a33e3…9285`:**
+- `HYPEREVM_ARCHIVE_RPC` (Chainstack): a historical `eth_call` returns **-32002 "Archive, Debug
+  and Trace requests are not available on your plan."** Confirms the long-standing entry in
+  Known limitations.
+- **⚠️ The public `rpc.hyperliquid.xyz/evm` SILENTLY IGNORES THE BLOCK TAG.** At block
+  **10,000** — years before that pool was deployed — it reports the contract already has code
+  (43,274 chars) and returns **exactly today's `sqrtPriceX96`**. It answers every historical
+  block with CURRENT state and never errors.
+
+**Therefore: DO NOT "fix" this by pointing the historical resolver at the public HyperEVM
+RPC.** It looks like the obvious fix and it is the worst available option — tier 1 would
+return CURRENT prices stamped `historical`, with no marker and no disclosure, which is
+strictly worse than today's tick estimate (which at least self-reports via ITEM 0b's
+`priceBasis`). This is the same class of trap as the `suiRpcIndexed` silent empty: an
+endpoint answering confidently with data it does not have.
+
+**Shape of the fix:** route HyperEVM deposits/withdrawals through **CoinGecko historical,
+awaited** — already the DESIGNATED method for HyperEVM under pricing-invariants Rule 2's
+exception list, and already used there for fee claims. The deposit/withdrawal cascade simply
+never tries it: it goes sqrtPriceX96 → tick estimate → spot, with no CG-historical tier. Add
+that tier for HyperEVM before the estimate. Complexity MEDIUM. Note the CG free-tier rolling
+365-day horizon still applies, so older positions stay on the estimate — correctly marked.
+**Until this ships, HyperEVM positions legitimately display "approximate — N positions priced
+from estimates" (ITEM 0g G3); that copy is accurate, not a bug.**
 
 **🟡 ITEM 0e — Rule 1a LEAK: Uniswap and PancakeSwap can value a FEE CLAIM at current spot.**
 _(Found 2026-08-06 while implementing ITEM 0b; recorded, deliberately NOT fixed there.)_
@@ -782,6 +816,46 @@ principle as queue item B. Complexity SMALL.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`PENDING-0G`** — **ITEM 0g: Capital G/L is DETERMINISTIC — −$4,635.37 on three identical
+  loads (spread $1,401.93 → $0.00), 9/9/9 identical closed rows, 0 exclusions.** Three parts,
+  in the order they matter:
+  **G1 (the actual root cause, and it was not what the item was originally scoped as).** The
+  Uniswap V3 and HyperSwap positions routes never returned a `poolAddress`. The client only
+  forwards a `pool` param when the position has one, and the activity route only builds its
+  TIER 1 historical price source when it receives one — so tier 1 was **never attempted** for
+  those protocols and every deposit/withdrawal fell to a substitute basis on EVERY load.
+  Measured before: **9 spot-substituted + 6 tick-derived events on Uniswap**; after: **zero**.
+  Uniswap now resolves the pool via `factory.getPool(t0,t1,fee)` (immutable → in-process
+  cache; a failed lookup is left UNCACHED so a transient RPC error can't pin the position to
+  the estimate for the process lifetime). HyperSwap had a subtler version: `fetchPoolExtras`
+  returned early on `liquidity === 0n` **before** resolving the pool, so CLOSED positions —
+  the only ones whose Capital G/L depends on historical pricing — were exactly the set that
+  could never get it. Now a single `getPool()` runs for them; the pointless tick/fee-growth
+  reads are still skipped. Side effect worth noting: 3 Uniswap closed positions now enter
+  Capital G/L correctly priced, so the total legitimately MOVED (6 → 9 closed rows).
+  **G2 (margin).** The pricing retry was a flat 15 s × 8 = 120 s and the measured resolution
+  landed at **t≈120 s — the last attempt, zero margin**. Now a 12-step schedule
+  (15/15/15/15, 25×4, 40×4 ≈ 320 s), ~2.6× the measured need.
+  **⚠️ A first attempt at G2 introduced a bug and the verification caught it:** an imperative
+  `hasRetryable` guard scanned `resultsRef` before results had landed, bailed, and — with
+  deps of `[capitalGLComplete, pricingRetry]` — never re-armed. Measured: 2 positions pending,
+  value frozen at −$2,433.68 from t=60 s to t=400 s. The gate is now the REACTIVE
+  `capitalGLPricingPending`, which goes 0 → N as results arrive. **Lesson: an effect that
+  guards on a ref must not also depend only on values that the ref's arrival doesn't change.**
+  **G3 (honesty).** "incomplete — pricing N positions…" promised completion, which is true for
+  a cold price and FALSE for an estimate. Split into `capitalGLPricingPending` (transient,
+  retried) vs NEW `capitalGLApproximate` (final, never retried), rendering
+  **"approximate — N positions priced from estimates"**. Both keep the `≈`. Observed live in
+  one load: `incomplete — pricing 2 positions…` at t=60 s → retries land → **−$4,635.37** +
+  `approximate — 1 position priced from estimates` from t=150 s, stable to t=400 s; a
+  cold-process load converged to the identical figure.
+  **Cache bumps: `lp-pnl-events` v29 → v30, `analytics-activity` v21 → v22** — cached entries
+  hold the old estimate-priced Uniswap/HyperSwap events. **Remaining harness noise is NOT
+  Capital G/L**: `current`/`netPnl` differ by ~$3.50 across runs because an OPEN position is
+  marked to live market price between runs, and the row key includes that live value
+  (**ITEM 0f**). The one surviving `approximate` position is HyperEVM — **ITEM 0h**, logged
+  separately as a chain limitation.
 
 - **`934a5ca`** — **ITEM 0d: Redis-cache the historical sqrtPriceX96 prices — the flip that
   made Capital G/L non-deterministic is GONE.** ITEM 0b proved the number moved because the

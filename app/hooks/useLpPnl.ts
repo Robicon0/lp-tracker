@@ -48,8 +48,28 @@ const PRICING_PENDING_REASONS = new Set(["missing_deposit_prices"]);
 // frozen at one incomplete value from t=30 s to t=360 s. Bounded so a
 // genuinely unpriceable date (e.g. CoinGecko's rolling 365-day horizon) retries
 // a few times and then stops rather than looping forever.
-const PRICING_RETRY_MS = 15_000;
-const PRICING_RETRY_MAX = 8;
+// ITEM 0g (G2): the flat 15 s × 8 = 120 s window had NO MARGIN. Measured
+// 2026-08-10 on a cold process, Account 1: the excluded position
+// ("Deposit price data unavailable") came back at t≈120 s — i.e. on the LAST
+// of the 8 attempts. Any slower cold start (production runs more instances
+// under more concurrent CoinGecko pressure than a local server) exhausts the
+// window first, the position stays excluded for that load, and the wallet
+// reports a different Capital G/L than it does on a warmer load. That is the
+// residual determinism gap ITEM 0d left behind.
+//
+// So: keep the early attempts fast (the common case resolves in seconds and
+// should not wait), and extend the TAIL. Total ~320 s vs the ~120 s measured
+// need — 2.6× headroom. Retries stay cheap: when nothing is pending the effect
+// returns immediately, and an attempt that evicts nothing is a no-op recompute
+// (`toFetch` skips positions that already have results).
+const PRICING_RETRY_SCHEDULE_MS = [
+  15_000, 15_000, 15_000, 15_000,   // 60 s  — the common case lands here
+  25_000, 25_000, 25_000, 25_000,   // +100 s — covers the measured ~120 s case
+  40_000, 40_000, 40_000, 40_000,   // +160 s — margin for a slow cold start
+];
+const PRICING_RETRY_MAX = PRICING_RETRY_SCHEDULE_MS.length;
+const pricingRetryDelay = (attempt: number) =>
+  PRICING_RETRY_SCHEDULE_MS[Math.min(attempt, PRICING_RETRY_SCHEDULE_MS.length - 1)];
 
 export interface LpPnlResult {
   initialValue: number;
@@ -115,6 +135,13 @@ export interface LpPnlResult {
    */
   capitalGLPricingPending: number;
   /**
+   * ITEM 0g — positions whose Capital G/L contribution was computed from a
+   * tick-boundary ESTIMATE rather than the price at the event's own block.
+   * Unlike `capitalGLPricingPending` this does NOT resolve by waiting: it is
+   * an approximation, not work in progress, and the UI must say so.
+   */
+  capitalGLApproximate: number;
+  /**
    * False while any position is pricing-pending. The UI must NOT present
    * Capital G/L as an authoritative total while this is false — that is
    * exactly the bug: an incomplete sum rendered as a confident figure, landing
@@ -149,6 +176,7 @@ const EMPTY: LpPnlResult = {
   perPosition: {},
   excludedPositions: [],
   capitalGLPricingPending: 0,
+  capitalGLApproximate: 0,
   capitalGLComplete: true,
   stalePositions: [],
   estimatedPositionCount: 0,
@@ -581,11 +609,16 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // V1 package's AddLiquidityEvent / RemoveLiquidityEvent (pre-V2 deposits and
 // withdrawals were invisible → false no_deposits / wrong Capital G/L). Cached
 // LP-P&L outputs for affected positions change, so flush v27.
+// v29 → v30 (ITEM 0g): Uniswap V3 and HyperSwap positions now carry a
+// poolAddress, so their deposits/withdrawals are priced from the pool's
+// historical sqrtPriceX96 instead of a tick-boundary ESTIMATE. A v29 entry
+// holds the old estimate-priced events and would keep feeding a wrong (and
+// differently-marked) Capital G/L to returning users.
 // v28 → v29 (ITEM 0b): activity events now carry `priceBasis`, and a
 // spot-substituted deposit/withdrawal makes the position report as pricing-
 // pending. A v28 entry has no marker, so a cached spot-substituted event would
 // keep rendering as a settled historical value — exactly the bug being fixed.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v29-";
+const CACHE_KEY_PREFIX = "lp-pnl-events-v30-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
@@ -1322,18 +1355,32 @@ function aggregate(
   // DISCLOSURE here — the user must be told the figure is approximate — but it
   // is deliberately NOT retried below: unlike a cold price, re-fetching returns
   // the identical estimate, and evicting on a loop would empty the totals.
+  // ITEM 0g (G3) — TWO different kinds of not-final, which must not share one
+  // sentence. "incomplete — pricing N positions…" promises completion; that is
+  // true for a cold price and FALSE for an estimate, which never resolves on
+  // its own. Telling a user to keep waiting for something that will never
+  // arrive is its own kind of dishonesty.
+  //
+  //   PENDING     — transient: a cold historical price. Retried; will resolve.
+  //   APPROXIMATE — final: valued from a tick-boundary estimate because tier 1
+  //                 was unavailable for that position. Not retried.
   const spotFallbackPositions = Object.values(perPosition).filter(
-    (d) => (d?.spotFallbackEventCount ?? 0) > 0 || (d?.estimatedBasisEventCount ?? 0) > 0,
+    (d) => (d?.spotFallbackEventCount ?? 0) > 0,
   ).length;
   const capitalGLPricingPending = excludedPositions.filter((e) =>
     PRICING_PENDING_REASONS.has(e.rawReason),
   ).length + spotFallbackPositions;
-  const capitalGLComplete = capitalGLPricingPending === 0;
+  const capitalGLApproximate = Object.values(perPosition).filter(
+    (d) => (d?.estimatedBasisEventCount ?? 0) > 0,
+  ).length;
+  // Either state means the figure is not a settled historical total, so the
+  // `≈` marker still applies to both — only the explanation differs.
+  const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0;
 
   return {
     initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
     ilUSD, capitalGL, netPnl, netPnlPct, included, excluded,
-    capitalGLPricingPending, capitalGLComplete,
+    capitalGLPricingPending, capitalGLApproximate, capitalGLComplete,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
     inflightCount: inflight,
@@ -1685,8 +1732,23 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   // those results on a bounded schedule; the effect above then re-fetches them
   // and picks up the now-warm price, which is what lets Capital G/L actually
   // REACH a complete, stable total instead of merely declaring itself pending.
+  // ITEM 0g (G2/G3): gate on `capitalGLPricingPending`, NOT `capitalGLComplete`.
+  // Two reasons, both learned the hard way:
+  //   1. `capitalGLComplete` is now ALSO false for positions priced from a
+  //      tick-derived ESTIMATE, which never change on a re-fetch. Driving
+  //      retries off it would run the full schedule every session, evicting
+  //      nothing. `capitalGLPricingPending` counts only the RETRYABLE states
+  //      (pricing exclusions + spot fallbacks), so it is the correct trigger.
+  //   2. The first version of this guard scanned `resultsRef` imperatively and
+  //      bailed when it found nothing retryable — but on the first run the
+  //      results have not landed yet, so it bailed, and with deps of
+  //      [capitalGLComplete, pricingRetry] NEITHER ever changed again: the
+  //      timer was never armed and the total froze mid-load. Measured: 2
+  //      positions pending, value stuck at -$2,433.68 from t=60 s to t=400 s.
+  //      A REACTIVE dependency is required — `capitalGLPricingPending` goes
+  //      0 → N as results arrive, which re-runs this effect and arms the timer.
   useEffect(() => {
-    if (result.capitalGLComplete) { pricingAttemptsRef.current = 0; return; }
+    if (result.capitalGLPricingPending === 0) { pricingAttemptsRef.current = 0; return; }
     if (pricingAttemptsRef.current >= PRICING_RETRY_MAX) return;
     const t = setTimeout(() => {
       pricingAttemptsRef.current += 1;
@@ -1704,10 +1766,10 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         }
       }
       setPricingRetry((n) => n + 1);
-    }, PRICING_RETRY_MS);
+    }, pricingRetryDelay(pricingAttemptsRef.current));
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result.capitalGLComplete, pricingRetry]);
+  }, [result.capitalGLPricingPending, pricingRetry]);
 
   return result;
 }

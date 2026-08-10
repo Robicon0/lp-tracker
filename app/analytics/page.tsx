@@ -2076,13 +2076,21 @@ export default function Analytics() {
                         ? "calculating…"
                         : (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading))
                           ? "scanning closed positions…"
-                          : (c.pendingClosed && !lpPnl.capitalGLComplete)
-                            // Not final: N positions are excluded ONLY because
-                            // their claim-date price has not warmed yet. The
-                            // hook retries in the background and this resolves
-                            // to the real total on its own.
+                          // ITEM 0g (G3) — two DIFFERENT reasons a Capital G/L
+                          // is not a settled total, and they must not share a
+                          // sentence. PENDING is work in progress that the
+                          // background retry resolves on its own. APPROXIMATE
+                          // is finished work valued from a tick-boundary
+                          // estimate because the historical price source was
+                          // unavailable for that position — waiting will never
+                          // change it, so the copy must not imply it might.
+                          // Pending wins when both apply: it is the part that
+                          // is still moving.
+                          : (c.pendingClosed && lpPnl.capitalGLPricingPending > 0)
                             ? `incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`
-                            : c.sub}
+                            : (c.pendingClosed && lpPnl.capitalGLApproximate > 0)
+                              ? `approximate — ${lpPnl.capitalGLApproximate} position${lpPnl.capitalGLApproximate === 1 ? "" : "s"} priced from estimates`
+                              : c.sub}
                     </div>
                   </div>
                 ))}
