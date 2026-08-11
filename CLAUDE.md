@@ -867,7 +867,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`PENDING-UI`** — **UI: page content was legible THROUGH the fixed navbar, and the app
+- **`a091eb5`** — **UI: page content was legible THROUGH the fixed navbar, and the app
   pages had no background treatment.** Two fixes, one of them a real layout defect.
   **(1) The navbar bug was NOT spacing or z-index** — `paddingTop: 52` was correct and
   `z-index: 50` was already above content. Both nav components painted themselves with
