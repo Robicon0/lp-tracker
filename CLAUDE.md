@@ -867,7 +867,7 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`PENDING-SL`** — **UI: the CRT scanline overlay is REMOVED site-wide, and a plain body
+- **`c3405e4`** — **UI: the CRT scanline overlay is REMOVED site-wide, and a plain body
   background is now the automatic default.** Users reported a visible line pattern on
   dashboard/analytics/about in BOTH themes, separate from the ambient glow removed earlier.
   **Cause:** a `repeating-linear-gradient(0deg, …)` on a `position: fixed; inset: 0;
