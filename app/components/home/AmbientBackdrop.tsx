@@ -66,23 +66,40 @@ export default function AmbientBackdrop({
           backgroundImage:
             "linear-gradient(color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px)",
           backgroundSize: "72px 72px",
-          maskImage:
-            "radial-gradient(120% 90% at 30% 20%, black 0%, transparent 75%)",
-          WebkitMaskImage:
-            "radial-gradient(120% 90% at 30% 20%, black 0%, transparent 75%)",
+          // Same repositioning logic as the blobs below: the hero anchors this
+          // at 30%/20%, which on an app page is underneath the sidebar.
+          maskImage: isPage
+            ? "radial-gradient(120% 95% at 55% 25%, black 0%, transparent 78%)"
+            : "radial-gradient(120% 90% at 30% 20%, black 0%, transparent 75%)",
+          WebkitMaskImage: isPage
+            ? "radial-gradient(120% 95% at 55% 25%, black 0%, transparent 78%)"
+            : "radial-gradient(120% 90% at 30% 20%, black 0%, transparent 75%)",
         }}
       />
 
       {/* 2. Ambient light blobs — the depth cue. Very low alpha; they read as
              atmosphere, never as shapes. */}
+      {/* PLACEMENT, page variant — this is the whole reason the first attempt
+          shipped an invisible glow. The hero blob is centred OFF-SCREEN
+          (top -18%, left -12%), which works behind a hero because the top-left
+          of that section is empty space. On an app page the same coordinates
+          put the brightest part of the glow off-canvas, and what little
+          remained sat behind the opaque 192px sidebar — so the page still read
+          flat black. The page variant therefore pulls both blobs INTO the
+          content area and enlarges them, and lifts the accent alpha, because a
+          blob spread over 92vw is far more diffuse than the hero's 58vw. */}
       <motion.div
         className="absolute"
         style={{
-          top: "-18%",
-          left: "-12%",
-          width: "58vw",
-          height: "58vw",
-          background: blob("var(--accent-glow)"),
+          top: isPage ? "-28%" : "-18%",
+          left: isPage ? "6%" : "-12%",
+          width: isPage ? "92vw" : "58vw",
+          height: isPage ? "92vw" : "58vw",
+          background: blob(
+            isPage
+              ? "color-mix(in srgb, var(--accent-glow) 215%, transparent)"
+              : "var(--accent-glow)",
+          ),
         }}
         animate={
           reduce ? undefined : { x: [0, 40, -20, 0], y: [0, -30, 20, 0] }
@@ -92,11 +109,15 @@ export default function AmbientBackdrop({
       <motion.div
         className="absolute"
         style={{
-          bottom: "-24%",
-          right: "-10%",
-          width: "50vw",
-          height: "50vw",
-          background: blob("color-mix(in srgb, var(--info) 14%, transparent)"),
+          bottom: isPage ? "-30%" : "-24%",
+          right: isPage ? "2%" : "-10%",
+          width: isPage ? "72vw" : "50vw",
+          height: isPage ? "72vw" : "50vw",
+          background: blob(
+            isPage
+              ? "color-mix(in srgb, var(--info) 26%, transparent)"
+              : "color-mix(in srgb, var(--info) 14%, transparent)",
+          ),
         }}
         animate={
           reduce ? undefined : { x: [0, -34, 18, 0], y: [0, 26, -18, 0] }

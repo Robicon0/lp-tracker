@@ -740,7 +740,10 @@ export default function PositionDetail() {
 
       <TerminalNavbar />
 
-      <main style={{ flex: 1, background: C.bg }}>
+      <main style={{ flex: 1, /* transparent: an opaque wrapper here covered the PageBackdrop entirely
+           (measured: 0 of 18,000 sampled pixels changed when the backdrop was
+           toggled). body still paints var(--bg). */
+        background: "transparent" }}>
 
         {/* ── BACK BAR ────────────────────────────────────────────────────── */}
         <div style={{

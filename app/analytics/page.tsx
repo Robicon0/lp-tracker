@@ -1414,7 +1414,10 @@ export default function Analytics() {
           onClearFilters={clearFilters}
         />
 
-        <main className="scroll-thin md:ml-[200px]" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
+        <main className="scroll-thin md:ml-[200px]" style={{ flex: 1, overflowY: "auto", /* transparent: an opaque wrapper here covered the PageBackdrop entirely
+           (measured: 0 of 18,000 sampled pixels changed when the backdrop was
+           toggled). body still paints var(--bg). */
+        background: "transparent", minWidth: 0 }}>
 
           {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
           <section
