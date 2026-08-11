@@ -17,8 +17,11 @@ export default function TerminalNav({
 }) {
   return (
     <nav
-      className="sticky top-0 z-[300] h-[52px] flex items-stretch border-b border-[var(--line)]"
-      style={{ background: "var(--overlay)", fontFamily: "var(--font-jetbrains-mono)" }}
+      className="sticky top-0 z-[300] h-[52px] flex items-stretch border-b border-[var(--line)] backdrop-blur-[12px]"
+      // --nav-surface, not --overlay — same reason as TerminalNavbar: an
+      // overlay scrim's alpha is tuned for letting the page show through,
+      // which behind a pinned nav means content reads straight through it.
+      style={{ background: "var(--nav-surface)", fontFamily: "var(--font-jetbrains-mono)" }}
     >
       <Link
         href="/"

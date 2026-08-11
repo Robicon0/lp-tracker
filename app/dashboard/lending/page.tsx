@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNav from "../../components/TerminalNav";
+import PageBackdrop from "../../components/PageBackdrop";
 import AnimatedCount from "../../components/AnimatedCount";
 import { useWalletAuth } from "../../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../../contexts/WatchedWalletsContext";
@@ -214,7 +215,7 @@ export default function LendingPage() {
     <div
       className="min-h-screen"
       style={{
-        background: PAGE_BG,
+        background: "transparent",
         color: "var(--fg-muted)",
         fontFamily: "var(--font-jetbrains-mono)",
         fontSize: 15,
@@ -232,6 +233,7 @@ export default function LendingPage() {
         className="fixed inset-0 pointer-events-none z-[9998]"
         style={{ background: SCANLINE }}
       />
+      <PageBackdrop />
       <TerminalNav active="dashboard" />
 
       <div

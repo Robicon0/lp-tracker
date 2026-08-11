@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect, useMemo, useRef, Suspense, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNavbar from "../../../components/TerminalNavbar";
+import PageBackdrop from "../../../components/PageBackdrop";
 import { usePositions } from "../../../contexts/PositionsContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../../../contexts/WatchedWalletsContext";
 import type { AerodromePosition } from "../../../lib/aerodrome";
@@ -549,9 +550,11 @@ export default function PositionDetail() {
   // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading && !pos) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
+      <div style={{ background: "transparent", color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
+        <PageBackdrop />
         <Suspense fallback={null}><PositionScanModeListener /></Suspense>
-        <TerminalNavbar />
+        <PageBackdrop />
+      <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
           <div style={{
             width: 32, height: 32, border: `2px solid ${C.green}`, borderTopColor: "transparent",
@@ -568,7 +571,8 @@ export default function PositionDetail() {
   // ── Not found ──────────────────────────────────────────────────────────────
   if (!pos) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
+      <div style={{ background: "transparent", color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
+        <PageBackdrop />
         {/* Mounted HERE too, and this one is load-bearing: in scan mode the
             page renders "not found" on first paint (positions are empty until
             the scan identity is restored), so the listener must run from
@@ -708,7 +712,7 @@ export default function PositionDetail() {
       display: "flex",
       flexDirection: "column",
       minHeight: "100vh",
-      background: C.bg,
+      background: "transparent",
       color: C.text,
       fontFamily: FONT,
       fontSize: 16,

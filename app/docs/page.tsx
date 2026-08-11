@@ -1,4 +1,5 @@
 import TerminalNavbar from "../components/TerminalNavbar";
+import PageBackdrop from "../components/PageBackdrop";
 import type { CSSProperties } from "react";
 
 const C = {
@@ -189,7 +190,7 @@ function EntryRow({ entry }: { entry: Entry }) {
 export default function Docs() {
   return (
     <div style={{
-      background: C.bg, color: C.text, minHeight: "100vh",
+      background: "transparent", color: C.text, minHeight: "100vh",
       fontFamily: FONT, fontSize: 16, lineHeight: 1.55, overflowX: "hidden",
       paddingTop: 52,
       scrollBehavior: "smooth",
@@ -213,6 +214,7 @@ export default function Docs() {
         position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG,
       }} />
 
+      <PageBackdrop />
       <TerminalNavbar />
 
       <div style={{

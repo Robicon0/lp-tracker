@@ -141,7 +141,18 @@ export default function TerminalNavbar() {
         display: "flex",
         alignItems: "stretch",
         borderBottom: `1px solid ${C.border}`,
-        background: "var(--overlay)",
+        // --nav-surface, NOT --overlay. --overlay is a modal SCRIM (0.72/0.78
+        // alpha) whose whole job is letting the page show through; behind a
+        // FIXED navbar that is a defect. With no backdrop-filter to soften it,
+        // the dashboard's portfolio value and stat tiles read straight through
+        // the bar while scrolling under it — the reported "text collides with
+        // the navbar" bug. Reproduced by scrolling to y=260 and hit-testing the
+        // 0–52px band: section.anim-fade["// total_portfolio_value"] came back.
+        background: "var(--nav-surface)",
+        // The blur is what keeps the depth cue the translucency was there for,
+        // while making anything behind it illegible rather than merely faint.
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
         // Fixed positioning per user spec — sticky was reported as
         // not staying pinned. Pages that mount this component
         // compensate with paddingTop: 52 on their outer container so

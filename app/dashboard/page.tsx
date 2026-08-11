@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSPr
 import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import TerminalNavbar from "../components/TerminalNavbar";
+import PageBackdrop from "../components/PageBackdrop";
 import DashboardSidebar, { type NavSection } from "../components/DashboardSidebar";
 import { getTokenLogo } from "../lib/tokenLogos";
 import { useWalletTokens } from "../hooks/useWalletTokens";
@@ -659,7 +660,9 @@ export default function Dashboard() {
         display: "flex",
         flexDirection: "column",
         minHeight: "100vh",
-        background: C.bg,
+        // transparent so PageBackdrop (z-index -1) shows through; body still
+        // paints var(--bg), so the base colour is unchanged.
+        background: "transparent",
         color: C.text,
         fontFamily: FONT,
         fontSize: 16.5,
@@ -694,6 +697,8 @@ export default function Dashboard() {
         .anim-fade { animation: _fadeUp 0.45s ease both; }
         @media (max-width: 768px) { .docs-help-btn { display: none !important; } }
       `}</style>
+
+      <PageBackdrop />
 
       {/* Scanline overlay */}
       <div

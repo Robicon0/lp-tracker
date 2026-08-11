@@ -84,6 +84,16 @@
   --surface-2:     var(--n-900);
   --surface-hover: var(--n-850);
   --overlay:       rgba(10, 12, 16, 0.72);
+  /* Surface for a FIXED chrome bar that page content scrolls beneath (the
+     navbar). Deliberately NOT --overlay: that token is tuned for modal
+     scrims, where seeing the page behind is the point. Behind a fixed navbar
+     it is a bug — at 0.72/0.78 alpha with no blur, the dashboard's portfolio
+     value and stat tiles read straight THROUGH the bar as it scrolls under
+     (reproduced 2026-08-11: elementsFromPoint at y=26 returned
+     section.anim-fade["// total_portfolio_value"] beneath the nav). High
+     alpha + backdrop-blur keeps the sense of depth while staying opaque
+     enough that nothing behind it is legible. */
+  --nav-surface:   rgba(10, 12, 16, 0.92);
 
   --fg:        #e6eaf0;  /* 15.1:1 on --bg */
   --fg-muted:  #9ba6b4;  /*  7.6:1 */
@@ -125,6 +135,7 @@
   --surface-2:     var(--n-100);
   --surface-hover: var(--n-100);
   --overlay:       rgba(255, 255, 255, 0.78);
+  --nav-surface:   rgba(255, 255, 255, 0.94);
 
   --fg:        #0f172a;  /* 17.4:1 on white */
   --fg-muted:  #475569;  /*  7.5:1 */
@@ -167,6 +178,7 @@
     --surface-2: var(--n-100);
     --surface-hover: var(--n-100);
     --overlay: rgba(255, 255, 255, 0.78);
+    --nav-surface: rgba(255, 255, 255, 0.94);
     --fg: #0f172a;
     --fg-muted: #475569;
     --fg-subtle: #64748b;

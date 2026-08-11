@@ -867,6 +867,35 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`PENDING-UI`** — **UI: page content was legible THROUGH the fixed navbar, and the app
+  pages had no background treatment.** Two fixes, one of them a real layout defect.
+  **(1) The navbar bug was NOT spacing or z-index** — `paddingTop: 52` was correct and
+  `z-index: 50` was already above content. Both nav components painted themselves with
+  `var(--overlay)`, which is a **modal SCRIM** token (0.72 dark / 0.78 light) whose entire
+  purpose is letting the page show through, and neither had a `backdrop-filter`. So the
+  dashboard's portfolio value read straight through the bar while scrolling under it.
+  Reproduced by scrolling to y=260 and hit-testing the 0-52px band:
+  `section.anim-fade["// total_portfolio_value"]` came back as the top-most element. NEW
+  `--nav-surface` token (0.92/0.94) + `blur(12px)`, applied to **both** `TerminalNavbar`
+  (dashboard/analytics/about/docs/position-detail) and `TerminalNav` (lending/wallets) — the
+  second had the identical bug and would have been missed by fixing only the reported page.
+  **(2) Background consistency:** the home hero's `AmbientBackdrop` gained a
+  `variant="hero" | "page"` and a one-line `PageBackdrop` wrapper — REUSED, not
+  reimplemented, because a parallel copy is exactly how the app pages drifted to flat black
+  in the first place. Applied to all 11 app pages. **The `page` variant renders the gradient
+  glow ONLY — no `FloatingPaths`** (owner decision: the diagonals read as noise behind dense
+  data surfaces), which also means the app pages carry no animated SVG at all.
+  **The z-index is load-bearing:** the backdrop sits at **-1** with page roots set to
+  `background: transparent` (`body` already paints `var(--bg)`). At 0 it would paint ABOVE
+  every non-positioned element — positioned z-0 elements paint in a later step than in-flow
+  content — which would have forced `position: relative` onto dozens of blocks per page.
+  Verified with a REAL scroll interaction, not screenshots: scroll to y=150/300/600/1200,
+  then hit-test 19x3 points across the nav band asserting every top-most element belongs to
+  the nav's subtree and the nav stays pinned — **12/12 pass** (dark+light x 1440+390 x
+  dashboard/analytics/about), 0 page errors, no horizontal overflow. Home is the regression
+  control and still reports `position: absolute` with its 72 paths intact; app pages report
+  `fixed` with 0 paths and both glow blobs. No cache bumps — display layer only.
+
 - **`4a4d564`** — **ITEM 0g: Capital G/L is DETERMINISTIC — −$4,635.37 on three identical
   loads (spread $1,401.93 → $0.00), 9/9/9 identical closed rows, 0 exclusions.** Three parts,
   in the order they matter:
