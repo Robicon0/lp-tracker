@@ -25,7 +25,6 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
-import PageBackdrop from "../../components/PageBackdrop";
 
 function TokenCircle({ symbol, size = 32, overlap = false }: { symbol: string; size?: number; overlap?: boolean }) {
   const [imgError, setImgError] = useState(false);
@@ -317,8 +316,7 @@ export default function PositionDetail() {
 
   if (!mounted || isLoading) {
     return (
-      <div className="px-4 pt-24 pb-8 text-white min-h-screen">
-        <PageBackdrop />
+      <div className="px-4 pt-24 pb-8 bg-[var(--surface)] text-white min-h-screen">
         <Navbar />
         <div className="w-full max-w-7xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-base mb-6 inline-block">
@@ -334,8 +332,7 @@ export default function PositionDetail() {
 
   if (!pos) {
     return (
-      <div className="px-4 pt-24 pb-8 text-white min-h-screen">
-        <PageBackdrop />
+      <div className="px-4 pt-24 pb-8 bg-[var(--surface)] text-white min-h-screen">
         <Navbar />
         <div className="w-full max-w-7xl mx-auto">
           <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-base mb-6 inline-block">
@@ -425,8 +422,7 @@ export default function PositionDetail() {
   const totalLifetimeFeesUSD = totalClaimedUSD + pos.fees;
 
   return (
-    <div className="px-4 pt-24 pb-8 text-white min-h-screen">
-        <PageBackdrop />
+    <div className="px-4 pt-24 pb-8 bg-[var(--surface)] text-white min-h-screen">
       <Navbar />
       <div className="w-full max-w-7xl mx-auto">
         <Link href="/dashboard" className="text-emerald-400 hover:text-emerald-300 text-base mb-6 inline-block">

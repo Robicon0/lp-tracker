@@ -867,34 +867,35 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **`a091eb5`** — **UI: page content was legible THROUGH the fixed navbar, and the app
-  pages had no background treatment.** Two fixes, one of them a real layout defect.
-  **(1) The navbar bug was NOT spacing or z-index** — `paddingTop: 52` was correct and
-  `z-index: 50` was already above content. Both nav components painted themselves with
-  `var(--overlay)`, which is a **modal SCRIM** token (0.72 dark / 0.78 light) whose entire
-  purpose is letting the page show through, and neither had a `backdrop-filter`. So the
-  dashboard's portfolio value read straight through the bar while scrolling under it.
-  Reproduced by scrolling to y=260 and hit-testing the 0-52px band:
-  `section.anim-fade["// total_portfolio_value"]` came back as the top-most element. NEW
-  `--nav-surface` token (0.92/0.94) + `blur(12px)`, applied to **both** `TerminalNavbar`
-  (dashboard/analytics/about/docs/position-detail) and `TerminalNav` (lending/wallets) — the
-  second had the identical bug and would have been missed by fixing only the reported page.
-  **(2) Background consistency:** the home hero's `AmbientBackdrop` gained a
-  `variant="hero" | "page"` and a one-line `PageBackdrop` wrapper — REUSED, not
-  reimplemented, because a parallel copy is exactly how the app pages drifted to flat black
-  in the first place. Applied to all 11 app pages. **The `page` variant renders the gradient
-  glow ONLY — no `FloatingPaths`** (owner decision: the diagonals read as noise behind dense
-  data surfaces), which also means the app pages carry no animated SVG at all.
-  **The z-index is load-bearing:** the backdrop sits at **-1** with page roots set to
-  `background: transparent` (`body` already paints `var(--bg)`). At 0 it would paint ABOVE
-  every non-positioned element — positioned z-0 elements paint in a later step than in-flow
-  content — which would have forced `position: relative` onto dozens of blocks per page.
-  Verified with a REAL scroll interaction, not screenshots: scroll to y=150/300/600/1200,
-  then hit-test 19x3 points across the nav band asserting every top-most element belongs to
-  the nav's subtree and the nav stays pinned — **12/12 pass** (dark+light x 1440+390 x
-  dashboard/analytics/about), 0 page errors, no horizontal overflow. Home is the regression
-  control and still reports `position: absolute` with its 72 paths intact; app pages report
-  `fixed` with 0 paths and both glow blobs. No cache bumps — display layer only.
+- **`a091eb5` + follow-ups** — **UI: the navbar was TRANSLUCENT over scrolling content; an
+  ambient-background rollout was tried and REVERTED.** What shipped and stayed is small; the
+  path there is the useful part.
+  **KEPT — the real defect.** "Portfolio value collides with the navbar on scroll" was NOT
+  spacing or z-index: `paddingTop: 52` was correct and the nav already sat at `z-index: 50`.
+  Both nav components painted with `var(--overlay)` — a modal SCRIM token (0.72 dark / 0.78
+  light) whose purpose is letting the page show through — with no `backdrop-filter`, so the
+  dashboard's portfolio value was legible THROUGH the bar. Reproduced by scrolling to y=260
+  and hit-testing the 0–52px band. NEW `--nav-surface` token (0.92/0.94) + `blur(12px)` on
+  BOTH `TerminalNavbar` and `TerminalNav` (the second had the identical bug on
+  lending/wallets and would have been missed by fixing only the reported page).
+  **REVERTED — the ambient background on app pages.** Rolled out to all 11 app pages, then
+  removed at the owner's direction (2026-08-11): the glow bled through the dashboard's
+  transparent content panels and read as a distracting teal overlay. Analytics only looked
+  clean by accident — its sections carry opaque surfaces that hid the same layer, which is
+  why the two pages appeared to differ despite identical treatment. App pages are now flat
+  `var(--bg)`; the ambient treatment stays on the marketing home page only. `PageBackdrop`
+  is deleted and `AmbientBackdrop` is restored byte-identical to its pre-change state — no
+  dead `variant` prop left behind.
+  **THE LESSON WORTH KEEPING — verify pixels, not the DOM.** The first "shipped" report was
+  wrong: the glow was 100% invisible because an inner `<main style={{background: C.bg}}>`
+  covered the z-index -1 layer. It was reported as done on the strength of a DOM check
+  (blobs present) plus eyeballing a screenshot. The check that actually answers a visual
+  question is a PIXEL DIFF — screenshot with the layer visible vs `display:none`, decode
+  both in-page via canvas, diff on a grid. It scored the "shipped" glow at **0 of 18,000
+  pixels changed**. Always pair it with a CONTROL (two captures, nothing changed) to
+  establish the animation noise floor, or a blinking cursor reads as a false positive.
+  Final audit, 9 pages × 2 themes: viewport-scale gradient layers = **0 on every app page**,
+  2 on home; nav band 12/12 with 0 bleed, 0 unpinned, 0 page errors.
 
 - **`4a4d564`** — **ITEM 0g: Capital G/L is DETERMINISTIC — −$4,635.37 on three identical
   loads (spread $1,401.93 → $0.00), 9/9/9 identical closed rows, 0 exclusions.** Three parts,

@@ -4,7 +4,6 @@ import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSPr
 import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import TerminalNavbar from "../components/TerminalNavbar";
-import PageBackdrop from "../components/PageBackdrop";
 import DashboardSidebar, { type NavSection } from "../components/DashboardSidebar";
 import { getTokenLogo } from "../lib/tokenLogos";
 import { useWalletTokens } from "../hooks/useWalletTokens";
@@ -660,9 +659,7 @@ export default function Dashboard() {
         display: "flex",
         flexDirection: "column",
         minHeight: "100vh",
-        // transparent so PageBackdrop (z-index -1) shows through; body still
-        // paints var(--bg), so the base colour is unchanged.
-        background: "transparent",
+        background: C.bg,
         color: C.text,
         fontFamily: FONT,
         fontSize: 16.5,
@@ -697,8 +694,6 @@ export default function Dashboard() {
         .anim-fade { animation: _fadeUp 0.45s ease both; }
         @media (max-width: 768px) { .docs-help-btn { display: none !important; } }
       `}</style>
-
-      <PageBackdrop />
 
       {/* Scanline overlay */}
       <div
@@ -850,10 +845,7 @@ export default function Dashboard() {
           onAddWallet={() => setShowManageWallets(true)}
         />
 
-        <main className="scroll-thin md:ml-[192px]" style={{ flex: 1, overflowY: "auto", /* transparent: an opaque wrapper here covered the PageBackdrop entirely
-           (measured: 0 of 18,000 sampled pixels changed when the backdrop was
-           toggled). body still paints var(--bg). */
-        background: "transparent", minWidth: 0 }}>
+        <main className="scroll-thin md:ml-[192px]" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
 
           {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
           <section

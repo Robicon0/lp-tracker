@@ -4,7 +4,6 @@ import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } fr
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TerminalNavbar from "../components/TerminalNavbar";
-import PageBackdrop from "../components/PageBackdrop";
 import AnalyticsSidebar, { type AnalyticsSection } from "../components/AnalyticsSidebar";
 import { usePositions } from "../contexts/PositionsContext";
 import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useLendingPositions";
@@ -1277,8 +1276,7 @@ export default function Analytics() {
 
   if (mounted && !hasWallet) {
     return (
-      <div style={{ background: "transparent", color: C.text, minHeight: "100vh", fontFamily: FONT, display: "flex", flexDirection: "column", paddingTop: 52 }}>
-        <PageBackdrop />
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, display: "flex", flexDirection: "column", paddingTop: 52 }}>
         <Suspense fallback={null}><AnalyticsScanModeListener /></Suspense>
         <TerminalNavbar />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 40 }}>
@@ -1317,7 +1315,7 @@ export default function Analytics() {
         display: "flex",
         flexDirection: "column",
         minHeight: "100vh",
-        background: "transparent",
+        background: C.bg,
         color: C.text,
         fontFamily: FONT,
         fontSize: 16.5,
@@ -1398,7 +1396,6 @@ export default function Analytics() {
       />
 
       <Suspense fallback={null}><AnalyticsScanModeListener /></Suspense>
-      <PageBackdrop />
       <TerminalNavbar />
 
       <div style={{ display: "flex", flex: 1, minHeight: "calc(100vh - 52px)" }}>
@@ -1414,10 +1411,7 @@ export default function Analytics() {
           onClearFilters={clearFilters}
         />
 
-        <main className="scroll-thin md:ml-[200px]" style={{ flex: 1, overflowY: "auto", /* transparent: an opaque wrapper here covered the PageBackdrop entirely
-           (measured: 0 of 18,000 sampled pixels changed when the backdrop was
-           toggled). body still paints var(--bg). */
-        background: "transparent", minWidth: 0 }}>
+        <main className="scroll-thin md:ml-[200px]" style={{ flex: 1, overflowY: "auto", background: C.bg, minWidth: 0 }}>
 
           {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
           <section

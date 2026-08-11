@@ -1,5 +1,4 @@
 import TerminalNavbar from "../components/TerminalNavbar";
-import PageBackdrop from "../components/PageBackdrop";
 import type { CSSProperties } from "react";
 
 const C = {
@@ -102,7 +101,7 @@ function H2({ children }: { children: React.ReactNode }) {
 export default function About() {
   return (
     <div style={{
-      background: "transparent", color: C.text, minHeight: "100vh",
+      background: C.bg, color: C.text, minHeight: "100vh",
       fontFamily: FONT, fontSize: 16, lineHeight: 1.55, overflowX: "hidden",
       // Clear the now-fixed TerminalNavbar (52px tall).
       paddingTop: 52,
@@ -121,7 +120,6 @@ export default function About() {
         position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG,
       }} />
 
-      <PageBackdrop />
       <TerminalNavbar />
 
       <div style={{

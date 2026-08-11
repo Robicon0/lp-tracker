@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Navbar from "../Navbar";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
-import PageBackdrop from "../components/PageBackdrop";
 
 const CHAIN_LABELS: Record<WatchedWalletChain, string> = {
   evm:    "EVM",
@@ -55,8 +54,7 @@ export default function WatchedPage() {
   }
 
   return (
-    <div className="p-8 pt-24 text-white min-h-screen">
-      <PageBackdrop />
+    <div className="p-8 pt-24 bg-[var(--surface)] text-white min-h-screen">
       <Navbar />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-8">

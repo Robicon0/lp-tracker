@@ -4,7 +4,6 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect, useMemo, useRef, Suspense, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNavbar from "../../../components/TerminalNavbar";
-import PageBackdrop from "../../../components/PageBackdrop";
 import { usePositions } from "../../../contexts/PositionsContext";
 import { useWatchedWallets, type WatchedWalletChain } from "../../../contexts/WatchedWalletsContext";
 import type { AerodromePosition } from "../../../lib/aerodrome";
@@ -550,11 +549,9 @@ export default function PositionDetail() {
   // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading && !pos) {
     return (
-      <div style={{ background: "transparent", color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
-        <PageBackdrop />
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
         <Suspense fallback={null}><PositionScanModeListener /></Suspense>
-        <PageBackdrop />
-      <TerminalNavbar />
+        <TerminalNavbar />
         <div style={{ padding: 64, textAlign: "center" }}>
           <div style={{
             width: 32, height: 32, border: `2px solid ${C.green}`, borderTopColor: "transparent",
@@ -571,8 +568,7 @@ export default function PositionDetail() {
   // ── Not found ──────────────────────────────────────────────────────────────
   if (!pos) {
     return (
-      <div style={{ background: "transparent", color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
-        <PageBackdrop />
+      <div style={{ background: C.bg, color: C.text, minHeight: "100vh", fontFamily: FONT, paddingTop: 52 }}>
         {/* Mounted HERE too, and this one is load-bearing: in scan mode the
             page renders "not found" on first paint (positions are empty until
             the scan identity is restored), so the listener must run from
@@ -712,7 +708,7 @@ export default function PositionDetail() {
       display: "flex",
       flexDirection: "column",
       minHeight: "100vh",
-      background: "transparent",
+      background: C.bg,
       color: C.text,
       fontFamily: FONT,
       fontSize: 16,
@@ -740,10 +736,7 @@ export default function PositionDetail() {
 
       <TerminalNavbar />
 
-      <main style={{ flex: 1, /* transparent: an opaque wrapper here covered the PageBackdrop entirely
-           (measured: 0 of 18,000 sampled pixels changed when the backdrop was
-           toggled). body still paints var(--bg). */
-        background: "transparent" }}>
+      <main style={{ flex: 1, background: C.bg }}>
 
         {/* ── BACK BAR ────────────────────────────────────────────────────── */}
         <div style={{

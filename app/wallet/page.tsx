@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import Navbar from "../Navbar";
-import PageBackdrop from "../components/PageBackdrop";
 
 interface TokenBalance {
   name: string;
@@ -146,8 +145,7 @@ export default function WalletPage() {
   }, [suiAddress]);
 
   return (
-    <div className="p-8 pt-24 text-white min-h-screen">
-      <PageBackdrop />
+    <div className="p-8 pt-24 bg-[var(--surface)] text-white min-h-screen">
       <Navbar />
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl font-bold">Wallet Balances</h1>
