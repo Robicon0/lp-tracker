@@ -54,7 +54,7 @@ export default function WatchedPage() {
   }
 
   return (
-    <div className="p-8 pt-24 bg-[var(--surface)] text-white min-h-screen">
+    <div className="p-8 pt-24 text-white min-h-screen">
       <Navbar />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-8">

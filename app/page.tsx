@@ -178,9 +178,6 @@ async function fetchProtocolStats(): Promise<Map<string, Stat>> {
   return out;
 }
 
-const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 2px, var(--scanline) 2px, var(--scanline) 4px)";
-
 export default async function Home() {
   const stats = await fetchProtocolStats();
   const protocolItems: ProtocolScrollItem[] = PROTOCOL_DEFS.map((p) => {
@@ -245,13 +242,6 @@ export default async function Home() {
       {/* The FloatingFeedback round launcher is hidden site-wide via
           globals.css; the rotated FeedbackTab is mounted in app/layout.tsx
           so it appears on every page including this one. */}
-
-      {/* Scanline overlay */}
-      <div
-        aria-hidden
-        className="fixed inset-0 pointer-events-none z-[9999]"
-        style={{ background: SCANLINE_BG }}
-      />
 
       {/* NAV */}
       <nav

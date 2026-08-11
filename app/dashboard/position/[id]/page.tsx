@@ -83,9 +83,6 @@ const C = {
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
-const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
-
 // ── Token logo circle ─────────────────────────────────────────────────────────
 function TokenCircle({
   symbol, size = 44, style,
@@ -728,11 +725,6 @@ export default function PositionDetail() {
         .btn-primary:hover { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 18%, transparent); }
         .tx-link:hover { opacity: 0.7; }
       `}</style>
-
-      {/* Scanline overlay */}
-      <div aria-hidden style={{
-        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG,
-      }} />
 
       <TerminalNavbar />
 

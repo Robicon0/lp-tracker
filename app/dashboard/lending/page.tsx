@@ -145,9 +145,6 @@ function buildPositions(tokens: TokenItem[], liveRates: AaveV3RatesMap): Lending
 }
 
 const PAGE_BG = "var(--bg)";
-const SCANLINE =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function LendingPage() {
   const { evmAddress: address, solanaAddress, suiAddress } = useWalletAuth();
@@ -226,11 +223,6 @@ export default function LendingPage() {
           __html:
             '@keyframes lend-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }',
         }}
-      />
-      <div
-        aria-hidden
-        className="fixed inset-0 pointer-events-none z-[9998]"
-        style={{ background: SCANLINE }}
       />
       <TerminalNav active="dashboard" />
 

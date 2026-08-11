@@ -84,9 +84,6 @@ const C = {
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
-const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 2px, var(--scanline) 2px, var(--scanline) 4px)";
-
 const PROTOCOL_COLORS: Record<string, string> = {
   Aerodrome:      C.green,
   "Uniswap V3":   C.cyan,
@@ -1389,11 +1386,6 @@ export default function Analytics() {
           }
         }
       `}</style>
-
-      <div
-        aria-hidden
-        style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG }}
-      />
 
       <Suspense fallback={null}><AnalyticsScanModeListener /></Suspense>
       <TerminalNavbar />

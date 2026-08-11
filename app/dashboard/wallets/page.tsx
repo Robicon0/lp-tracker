@@ -39,9 +39,6 @@ function fmtBalance(n: number) {
   return n.toFixed(6);
 }
 
-const SCANLINE =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
-
 // ── Token icon ────────────────────────────────────────────────────────────────
 function TokenIcon({
   symbol,
@@ -410,11 +407,6 @@ export default function TokensPage() {
           __html:
             '@keyframes wal-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }',
         }}
-      />
-      <div
-        aria-hidden
-        className="fixed inset-0 pointer-events-none z-[9998]"
-        style={{ background: SCANLINE }}
       />
       <TerminalNav active="dashboard" />
 

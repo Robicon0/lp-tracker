@@ -118,9 +118,6 @@
   --pos-surface: rgba(43, 224, 138, 0.10);
   --neg-surface: rgba(255, 84, 112, 0.10);
 
-  /* Scanline wash — MUST stay translucent; an opaque value paints solid bands. */
-  --scanline: rgba(255, 255, 255, 0.022);
-
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
@@ -160,7 +157,6 @@
   --pos-surface: rgba(6, 118, 71, 0.08);
   --neg-surface: rgba(200, 30, 60, 0.08);
 
-  --scanline: rgba(15, 23, 42, 0.022);
 
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
@@ -198,8 +194,7 @@
     --info: var(--info-light);
     --pos-surface: rgba(6, 118, 71, 0.08);
     --neg-surface: rgba(200, 30, 60, 0.08);
-    --scanline: rgba(15, 23, 42, 0.022);
-  }
+    }
 }
 
 /* ─── CHAIN & TOKEN BRAND (mode-invariant by design) ─────────────────── */

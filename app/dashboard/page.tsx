@@ -125,9 +125,6 @@ const C = {
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
-const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
-
 // ── Chain UI tokens ───────────────────────────────────────────────────────────
 const CHAIN_DISPLAY: Record<"EVM" | "Solana" | "Sui", { color: string; faint: string; border: string }> = {
   EVM:    { color: C.cyan,   faint: "color-mix(in srgb, var(--info) 6%, transparent)",  border: "color-mix(in srgb, var(--info) 27%, transparent)"  },
@@ -694,18 +691,6 @@ export default function Dashboard() {
         .anim-fade { animation: _fadeUp 0.45s ease both; }
         @media (max-width: 768px) { .docs-help-btn { display: none !important; } }
       `}</style>
-
-      {/* Scanline overlay */}
-      <div
-        aria-hidden
-        style={{
-          position: "fixed",
-          inset: 0,
-          pointerEvents: "none",
-          zIndex: 9998,
-          background: SCANLINE_BG,
-        }}
-      />
 
       <TerminalNavbar />
 

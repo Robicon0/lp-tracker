@@ -22,9 +22,6 @@ const C = {
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
-const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
-
 const CHAINS: { name: string; color: string; live: boolean }[] = [
   { name: "Ethereum",  color: "var(--chain-ethereum)", live: true  },
   { name: "Base",      color: "var(--chain-base)", live: true  },
@@ -114,11 +111,6 @@ export default function About() {
         .ab-tech { transition: all 0.15s; }
         .ab-tech:hover { color: ${C.cyan} !important; border-color: color-mix(in srgb, var(--info) 45%, transparent) !important; background: color-mix(in srgb, var(--info) 5%, transparent) !important; }
       `}</style>
-
-      {/* Scanline overlay */}
-      <div aria-hidden style={{
-        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG,
-      }} />
 
       <TerminalNavbar />
 

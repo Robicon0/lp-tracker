@@ -867,6 +867,31 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`PENDING-SL`** — **UI: the CRT scanline overlay is REMOVED site-wide, and a plain body
+  background is now the automatic default.** Users reported a visible line pattern on
+  dashboard/analytics/about in BOTH themes, separate from the ambient glow removed earlier.
+  **Cause:** a `repeating-linear-gradient(0deg, …)` on a `position: fixed; inset: 0;
+  z-index: 9998` div — so it banded TEXT AND PANELS, not just the background. It was
+  hand-copied into **8 files** and had drifted into two densities: a `3px` variant (1px line
+  per 4px) on dashboard/about/docs/lending/wallets/position-detail, and a heavier `2px`
+  variant (2px line per 4px) on analytics and the v1 home markup.
+  **Measured before removal** — the coverage matches the gradients exactly, which is what
+  made the diagnosis conclusive: dashboard **25.0%** of pixels affected (both themes),
+  analytics **50.0%**. After: **0 repeating-gradient layers on all 9 pages × both themes.**
+  **Why the home page looked right:** production serves `HomeV2`, which never mounted a
+  scanline — the one in `app/page.tsx` belongs to the unused v1 markup. So the app pages were
+  adding a texture the live home page never had.
+  **The structural fix (this is the point):** the overlay was OPT-IN per page, which is
+  exactly how the 2px/3px drift happened and why three pages (`wallet`, `watched`,
+  `dashboard/[id]`) never had it. Deleting all 8 overlays makes `body { background: var(--bg) }`
+  from globals.css the automatic default — a new page inherits the correct background with
+  ZERO code. Those three pages also painted their own `bg-[var(--surface)]` root, one step
+  lighter than every other page; that class is dropped so they inherit `--bg` too. The
+  **`--scanline` token is retired from `tokens.css`** (all three theme blocks) so the pattern
+  cannot be copy-pasted back — there is no longer a variable to reference.
+  Audit: `repeating-gradient layers=0`, `body` = `--bg` (`#0a0c10` dark / `#fff` light) on
+  all 9 pages × 2 themes.
+
 - **`a091eb5` + follow-ups** — **UI: the navbar was TRANSLUCENT over scrolling content; an
   ambient-background rollout was tried and REVERTED.** What shipped and stayed is small; the
   path there is the useful part.

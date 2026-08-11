@@ -22,9 +22,6 @@ const C = {
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
 
-const SCANLINE_BG =
-  "repeating-linear-gradient(0deg, transparent, transparent 3px, var(--scanline) 3px, var(--scanline) 4px)";
-
 const cardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
   background: `linear-gradient(180deg, ${C.bg1}, ${C.bg})`,
@@ -207,11 +204,6 @@ export default function Docs() {
           .docs-toc { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
-
-      {/* Scanline overlay */}
-      <div aria-hidden style={{
-        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9998, background: SCANLINE_BG,
-      }} />
 
       <TerminalNavbar />
 
