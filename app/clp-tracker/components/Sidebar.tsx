@@ -174,6 +174,18 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* Way out of the section. CLP Tracker's layout renders no host navbar,
+          so without this the only route back to DefiDesh is browser-back.
+          Placed above the nav rather than in the footer block below, which is
+          `hidden md:block` — on mobile that would hide it exactly where the
+          back gesture is least discoverable. */}
+      <Link
+        href="/"
+        className="mx-3 mb-2 inline-flex w-fit items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]/60 hover:text-[var(--foreground)]"
+      >
+        <span aria-hidden="true">←</span> DefiDesh
+      </Link>
+
       <nav className="flex flex-1 flex-row gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:px-3 md:pb-6">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href);
