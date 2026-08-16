@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment } from "react";
+import CalculatorMenu from "./CalculatorMenu";
 import MobileNavMenu from "./MobileNavMenu";
 
 const TABS: { label: string; href: string; key: "home" | "dashboard" | "analytics" | "about" }[] = [
@@ -36,8 +38,8 @@ export default function TerminalNav({
         {TABS.map((t) => {
           const isActive = active === t.key;
           return (
+            <Fragment key={t.key}>
             <Link
-              key={t.key}
               href={t.href}
               className={`relative flex items-center px-[22px] border-r border-[var(--line)] no-underline transition-colors hover:bg-[var(--surface)] hover:text-[var(--fg-muted)] ${isActive ? "text-[var(--fg)]" : "text-[var(--fg-muted)]"}`}
               style={{
@@ -54,6 +56,10 @@ export default function TerminalNav({
                 />
               )}
             </Link>
+            {/* Calculator sits immediately after Analytics rather than after
+                the whole list, which is why this renders inside the map. */}
+            {t.key === "analytics" && <CalculatorMenu variant="tab" />}
+            </Fragment>
           );
         })}
       </div>

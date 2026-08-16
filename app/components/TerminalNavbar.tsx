@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useState, type CSSProperties } from "react";
+import CalculatorMenu from "./CalculatorMenu";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import MobileNavMenu from "./MobileNavMenu";
@@ -191,26 +192,27 @@ export default function TerminalNavbar() {
         {NAV_LINKS.map((l) => {
           const active = isActive(l.href);
           return (
-            <Link
-              key={l.label}
-              href={l.href}
-              style={active ? tabActive : tabBase}
-            >
-              {l.label}
-              {active && (
-                <span
-                  style={{
-                    position: "absolute",
-                    bottom: -1,
-                    left: 0,
-                    right: 0,
-                    height: 1,
-                    background: C.green,
-                    boxShadow: `0 0 8px ${C.greenGlow}`,
-                  }}
-                />
-              )}
-            </Link>
+            <Fragment key={l.label}>
+              <Link href={l.href} style={active ? tabActive : tabBase}>
+                {l.label}
+                {active && (
+                  <span
+                    style={{
+                      position: "absolute",
+                      bottom: -1,
+                      left: 0,
+                      right: 0,
+                      height: 1,
+                      background: C.green,
+                      boxShadow: `0 0 8px ${C.greenGlow}`,
+                    }}
+                  />
+                )}
+              </Link>
+              {/* Calculator sits immediately after Analytics rather than after
+                  the whole list, which is why this renders inside the map. */}
+              {l.href === "/analytics" && <CalculatorMenu variant="tab" />}
+            </Fragment>
           );
         })}
       </div>

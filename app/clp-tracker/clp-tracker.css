@@ -1,0 +1,105 @@
+/* CLP Tracker — scoped theme.
+ *
+ * Everything here is scoped to [data-app="clp-tracker"] (set on the section's
+ * layout wrapper), NOT :root. That is deliberate and load-bearing: CLP Tracker
+ * brings its own dark surface palette under names DefiDesh also uses in spirit
+ * (--surface, --border, --accent...). Defined on :root the two would overwrite
+ * each other in both directions — CLP Tracker's blue-grey surfaces would leak
+ * onto the dashboard, and DefiDesh's light theme would leak in here. Scoped to
+ * the wrapper, neither can happen: these values exist only inside /clp-tracker.
+ *
+ * NOTE there is no `@import "tailwindcss"` in this file. The host imports it
+ * once in app/globals.css; importing it again would emit a second full copy of
+ * the utility layer.
+ *
+ * NOTE there is no `@theme inline { --color-* }` block either (CLP Tracker's
+ * own globals.css had one). @theme is global by definition — it cannot be
+ * scoped to a wrapper — so keeping it would have redefined Tailwind's colour
+ * utilities site-wide, which is exactly the leak this file exists to prevent.
+ * Dropping it is safe: nothing in the copied source uses those utilities
+ * (bg-surface, text-accent, ...) — every colour is written as an arbitrary
+ * value, e.g. bg-[var(--surface)]. Verified by grep across all 32 files.
+ */
+
+[data-app="clp-tracker"] {
+  --background: #0a0b0f;
+  --surface: #111319;
+  --surface-2: #161a22;
+  /* Floating layers (dropdown panels, popovers) that sit ON TOP of a --surface
+     card. Deliberately lighter than both --surface and --surface-2: a panel
+     painted in --surface over a --surface card is pixel-identical to what is
+     behind it, so it reads as if the page were showing through even though it
+     is correctly occluding. Anything that overlays a card uses this. */
+  --surface-raised: #1e2431;
+  --border: #1f2430;
+  --border-strong: #2a3140;
+  --foreground: #e6e8ee;
+  --muted: #8a93a6;
+
+  /* BRANDING — the one colour that is deliberately NOT CLP Tracker's own.
+     Upstream this was #4f8cff (blue). Inside DefiDesh it takes the host's
+     terminal green so buttons, focus rings and highlights match the rest of
+     the site.
+
+     It reads --brand-500 rather than the host's own --accent for two reasons:
+     (1) `--accent: var(--accent)` on the same element is a self-reference and
+     resolves to nothing; (2) the host's --accent flips to the darker
+     --brand-700 under data-theme="light", which would land dark-green-on-dark
+     here, since these surfaces stay dark in either host theme. --brand-500 is
+     the neon green itself and is defined on :root in tokens.css for both
+     themes, so it resolves the same way in each. */
+  --accent: var(--brand-500);
+  --accent-soft: color-mix(in srgb, var(--brand-500) 12%, transparent);
+}
+
+/* The wrapper paints its own ground and text so the section is self-contained:
+   the host <body> keeps its own background for every other route. */
+[data-app="clp-tracker"] {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[data-app="clp-tracker"] ::selection {
+  background: var(--accent-soft);
+  color: var(--foreground);
+}
+
+/* Geist, inherited from the host layout, which declares both font variables on
+   <body>. These two rules replace what the dropped @theme block used to do for
+   the four font-sans / font-mono utilities in the copied source: without them
+   those classes would fall back to Tailwind's default stacks. Scoped, so the
+   host's own use of font-mono elsewhere is untouched. */
+[data-app="clp-tracker"] .font-sans {
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+[data-app="clp-tracker"] .font-mono {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+}
+
+/* Dark-theme scrollbars for in-app scrollable panels (dropdowns, lists), so
+   they don't render as a bright OS default against the dark UI (Part 4b).
+   Applied via the .scrollbar-dark utility wherever such a panel scrolls. */
+[data-app="clp-tracker"] .scrollbar-dark {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+[data-app="clp-tracker"] .scrollbar-dark::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+[data-app="clp-tracker"] .scrollbar-dark::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-app="clp-tracker"] .scrollbar-dark::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 9999px;
+  border: 2px solid var(--surface);
+}
+[data-app="clp-tracker"] .scrollbar-dark::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+}

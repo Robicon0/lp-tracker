@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { CALCULATOR_LINKS } from "../config/calculatorLinks";
 
 // Mobile-only hamburger trigger + dropdown menu. Reused across every nav
 // variant (TerminalNavbar, TerminalNav, the homepage inline <nav>) so all
@@ -14,6 +15,11 @@ const NAV_LINKS: { href: string; label: string }[] = [
   { href: "/",          label: "Home" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/analytics", label: "Analytics" },
+  // Calculator tools, flattened rather than nested: this menu is already an
+  // expanded list, so a dropdown inside it would be a second thing to open.
+  // Same entries as the desktop dropdown, from the same config — adding a
+  // tool there adds it here too.
+  ...CALCULATOR_LINKS,
   { href: "/about",     label: "About" },
 ];
 
