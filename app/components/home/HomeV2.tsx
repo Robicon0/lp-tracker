@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Fragment } from "react";
+import CalculatorMenu from "../CalculatorMenu";
 import HeroWalletConnect from "../HeroWalletConnect";
 import DashboardPreview from "../DashboardPreview";
 import PriceTickerStrip from "../PriceTickerStrip";
@@ -97,8 +99,8 @@ export default function HomeV2({
 
             <div className="hidden md:flex" style={{ gap: "var(--space-3xl)" }}>
               {NAV.map((n) => (
+                <Fragment key={n.href}>
                 <Link
-                  key={n.href}
                   href={n.href}
                   className="cursor-pointer uppercase transition-colors hover:text-[var(--fg)]"
                   // 15px / 0.12em — TerminalNavbar's `tabBase`. Keep these two
@@ -114,6 +116,10 @@ export default function HomeV2({
                 >
                   {n.label}
                 </Link>
+                {/* Calculator sits immediately after Analytics rather than
+                    after the whole list, hence rendering inside the map. */}
+                {n.href === "/analytics" && <CalculatorMenu variant="inline" />}
+                </Fragment>
               ))}
             </div>
 

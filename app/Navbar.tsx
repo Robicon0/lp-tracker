@@ -8,6 +8,8 @@ import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } 
 import { useWalletAuth } from "./contexts/WalletAuthContext";
 import { setDisconnected } from "./lib/walletDisconnectFlag";
 import Link from "next/link";
+import CalculatorMenu from "./components/CalculatorMenu";
+import { CALCULATOR_LINKS, CALCULATOR_MENU_LABEL } from "./config/calculatorLinks";
 
 // EVM wallet display metadata (order and logos). connectorId matches the id
 // assigned by each wagmi connector in app/config/wagmi.ts. Unmatched entries
@@ -215,6 +217,7 @@ export default function Navbar() {
               <Link href="/" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Home</Link>
               <Link href="/dashboard" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Dashboard</Link>
               <Link href="/analytics" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">Analytics</Link>
+              <CalculatorMenu variant="emerald" />
               <Link href="/about" className="text-emerald-300/80 hover:text-emerald-300 transition-colors">About</Link>
 
               {/* EVM Wallet */}
@@ -308,6 +311,13 @@ export default function Navbar() {
               <Link href="/" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Home</Link>
               <Link href="/dashboard" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Dashboard</Link>
               <Link href="/analytics" className="block text-emerald-300/80 hover:text-emerald-300 py-2">Analytics</Link>
+              {/* Calculator — flattened on mobile: a hover dropdown inside an
+                  already-expanded menu would be a second thing to open. Same
+                  entries, from the same config as the desktop dropdown. */}
+              <div className="pt-2 text-xs uppercase tracking-wider text-emerald-300/40">{CALCULATOR_MENU_LABEL}</div>
+              {CALCULATOR_LINKS.map((l) => (
+                <Link key={l.href} href={l.href} className="block pl-3 text-emerald-300/80 hover:text-emerald-300 py-2">{l.label}</Link>
+              ))}
               <Link href="/about" className="block text-emerald-300/80 hover:text-emerald-300 py-2">About</Link>
 
               {/* EVM — mobile */}
