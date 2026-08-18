@@ -18,9 +18,15 @@ import type { TrustStat } from "./components/home/TrustBand";
 const HERO_FX_ENABLED = process.env.NEXT_PUBLIC_HERO_FX === "1";
 
 /**
- * Full home-page redesign, gated the same way. `NEXT_PUBLIC_HOME_V2=1` in
- * .env.local swaps in components/home/HomeV2; unset (which is what Vercel
- * sees) renders the untouched v1 markup below.
+ * Full home-page redesign. `NEXT_PUBLIC_HOME_V2=1` swaps in
+ * components/home/HomeV2; anything else (including unset) renders the v1
+ * markup below.
+ *
+ * NOTE: unlike NEXT_PUBLIC_HERO_FX above, this one IS set to "1" in Vercel —
+ * in Production (since 2026-07-31) and in Preview (since 2026-08-19). So
+ * HomeV2 is what actually renders on every deployed environment today, and
+ * the v1 branch below is currently dead code there. Only a local checkout
+ * without the var in .env.local still sees v1.
  */
 const HOME_V2_ENABLED = process.env.NEXT_PUBLIC_HOME_V2 === "1";
 
