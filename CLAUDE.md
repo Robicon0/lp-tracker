@@ -867,6 +867,59 @@ principle as queue item B. Complexity SMALL.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`dbcde99`** — **CLP Tracker now FOLLOWS the site theme toggle; Calculator nav arrow
+  removed; the dropdown's hover-close gap fixed.** Three changes, no component logic,
+  calculation or behaviour touched.
+  **1 — the arrow.** `CalculatorMenu` no longer renders the rotating `▼` span; the trigger
+  is the label alone.
+  **2 — the hover-close bug, located by pixel geometry rather than guessed.** The panel
+  carried `marginTop: 10` on the `inline` and `emerald` variants, so those 10px belonged to
+  NO element in the wrapper's subtree. Measured on the home nav: wrapper ended at
+  **y=39.5**, panel began at **y=49.5**, and `elementFromPoint` down the trigger's centre
+  line returned the NAV BAR for **9 rows** in between — crossing them fired the wrapper's
+  `onMouseLeave` and closed the menu before the click on "CLP Tracker" could land. Fix: the
+  offset moves from `margin-top` on the panel to `padding-top` on an absolutely-positioned
+  BRIDGE anchored at `top:100%`. Identical 10px visual gap, but the strip is now a DOM
+  descendant, and `onMouseLeave` does not fire when the pointer moves to a descendant.
+  Dead rows: **inline 9→0, emerald 10→0**; the `tab` variant was already flush (0→0, its
+  `marginTop` was already 0) and is unchanged.
+  **3 — theme sync, and it is CSS-only.** `/clp-tracker` was hardcoded dark regardless of
+  Light/System/Dark. The existing declaration STAYS as the unscoped dark/default —
+  `ThemeScript` always stamps `data-theme="light"|"dark"` pre-paint and falls back to dark
+  on error, so "no data-theme" never reaches a real user — and a
+  `:root[data-theme="light"] [data-app="clp-tracker"]` block overrides the light values.
+  No JS: the toggle already flips an attribute on `<html>` and custom properties cascade
+  from it. The light values are **the host's own light tokens**, not a new palette, so the
+  section is genuinely on the platform's tier-2 semantic layer rather than merely
+  light-ish.
+  **THE SELF-REFERENCE TRAP (the load-bearing detail).** `--surface`, `--surface-2` and
+  `--accent` share their NAMES with the host's tokens and are declared BY this section, so
+  `--surface: var(--surface)` here is a cycle: invalid-at-computed-value-time, resolves to
+  nothing, paints transparent. Those three must point at the host's UNDERLYING primitives —
+  `--n-50`, `--n-100`, `--brand-700` — which is the technique the dark block already used
+  for `--accent`. The rest are safe to reference directly because the host names them
+  differently (`--bg` / `--fg` / `--fg-muted` / `--line` / `--line-strong` vs
+  `--background` / `--foreground` / `--muted` / `--border` / `--border-strong`).
+  `--accent` in light MUST move off `--brand-500`: the dark block chose the neon green
+  precisely because these surfaces used to stay dark in either host theme, and that premise
+  is what this change ends — `#00ff41` measures 1.4:1 on the new near-white surfaces.
+  **Verified on localhost:3000.** Dark is **byte-identical**: a 45-node computed-style
+  fingerprint (background/color/both border sides/outline) captured by STASHING the diff
+  matched with **0 differences** after. Light: all 10 tokens equal the host's light values
+  exactly (`--surface` `#f7f9fb`, `--surface-2` `#eef2f6`, `--border` `#e2e8f0`,
+  `--border-strong` `#cbd5e1`, `--foreground` `#0f172a`, `--muted` `#475569`, `--accent`
+  `#007a38`). **0 tokens resolve blank/invalid in EITHER theme** — probe-tested by painting
+  each onto an element and reading `backgroundColor` back, which is the exact failure mode
+  the trap causes. A real pointer trace from "Calculator" through y=40..49 kept the menu
+  open and the click navigated to `/clp-tracker`, rendering light. Homepage and dashboard
+  unaffected in both themes, driven by the real `ThemeToggle` button.
+  **TESTING NOTE, cost me a false alarm:** flipping `data-theme` via `setAttribute` from
+  the console does NOT reliably re-resolve `var()` in descendants' `background-color` —
+  the fingerprint showed 19 phantom diffs while the wrapper's own custom properties read
+  correctly dark. Set `localStorage['defidesh-theme']` and RELOAD so `ThemeScript` stamps
+  the attribute pre-paint; the same comparison then came back identical. Compare themes
+  across reloads, not across a live attribute flip.
+
 - **`c3405e4`** — **UI: the CRT scanline overlay is REMOVED site-wide, and a plain body
   background is now the automatic default.** Users reported a visible line pattern on
   dashboard/analytics/about in BOTH themes, separate from the ambient glow removed earlier.

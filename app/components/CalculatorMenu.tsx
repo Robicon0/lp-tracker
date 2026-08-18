@@ -144,17 +144,6 @@ export default function CalculatorMenu({
         }
       >
         {CALCULATOR_MENU_LABEL}
-        <span
-          aria-hidden="true"
-          style={{
-            fontSize: 9,
-            lineHeight: 1,
-            transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 0.15s",
-          }}
-        >
-          ▼
-        </span>
         {variant === "tab" && active && (
           <span
             className="absolute left-0 right-0 h-px bg-[var(--accent)]"
@@ -168,50 +157,73 @@ export default function CalculatorMenu({
       </button>
 
       {open && (
+        /* Transparent hover BRIDGE, not a wrapper for looks.
+         *
+         * The visible panel is offset 10px below the trigger on the inline and
+         * emerald variants (the tab variant sits flush against the nav cell's
+         * bottom rule and needs none). Expressed as a `margin-top` on the panel
+         * itself, as it was, those 10px belong to NO element in the wrapper's
+         * subtree — measured on the home nav, the wrapper ended at y=39.5 and
+         * the panel began at y=49.5, leaving 9 pixel rows where
+         * elementFromPoint returned the nav bar instead of anything inside the
+         * wrapper. Dragging the cursor straight down from "Calculator" to
+         * "CLP Tracker" crossed them, fired the wrapper's onMouseLeave, and
+         * closed the menu before the click could land.
+         *
+         * Moving the offset to `padding-top` on an absolutely-positioned box
+         * anchored at top:100% keeps the identical visual gap while making that
+         * strip part of the wrapper's DOM subtree. onMouseLeave does not fire
+         * when the pointer moves to a descendant, so the hover state now
+         * survives the whole trip. */
         <div
-          role="menu"
           style={{
             position: "absolute",
             top: "100%",
             left: 0,
-            minWidth: 210,
             zIndex: 400,
-            background: "var(--surface)",
-            border: "1px solid var(--line-strong)",
-            borderRadius: "var(--r-sm, 3px)",
-            boxShadow: "0 18px 45px -8px rgba(0, 0, 0, 0.65)",
-            padding: 4,
-            marginTop: variant === "tab" ? 0 : 10,
+            paddingTop: variant === "tab" ? 0 : 10,
           }}
         >
-          {CALCULATOR_LINKS.map((l) => {
-            const itemActive =
-              pathname === l.href || pathname.startsWith(`${l.href}/`);
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                role="menuitem"
-                onClick={() => setOpen(false)}
-                className="block no-underline hover:bg-[var(--accent-surface)] hover:text-[var(--accent)]"
-                style={{
-                  fontFamily: "var(--font-jetbrains-mono), monospace",
-                  fontSize: 13,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  padding: "10px 14px",
-                  borderRadius: "var(--r-sm, 3px)",
-                  color: itemActive ? "var(--accent)" : "var(--fg-muted)",
-                  background: itemActive
-                    ? "var(--accent-surface)"
-                    : "transparent",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {l.label}
-              </Link>
-            );
-          })}
+          <div
+            role="menu"
+            style={{
+              minWidth: 210,
+              background: "var(--surface)",
+              border: "1px solid var(--line-strong)",
+              borderRadius: "var(--r-sm, 3px)",
+              boxShadow: "0 18px 45px -8px rgba(0, 0, 0, 0.65)",
+              padding: 4,
+            }}
+          >
+            {CALCULATOR_LINKS.map((l) => {
+              const itemActive =
+                pathname === l.href || pathname.startsWith(`${l.href}/`);
+              return (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  role="menuitem"
+                  onClick={() => setOpen(false)}
+                  className="block no-underline hover:bg-[var(--accent-surface)] hover:text-[var(--accent)]"
+                  style={{
+                    fontFamily: "var(--font-jetbrains-mono), monospace",
+                    fontSize: 13,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    padding: "10px 14px",
+                    borderRadius: "var(--r-sm, 3px)",
+                    color: itemActive ? "var(--accent)" : "var(--fg-muted)",
+                    background: itemActive
+                      ? "var(--accent-surface)"
+                      : "transparent",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {l.label}
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

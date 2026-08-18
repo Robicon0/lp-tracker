@@ -52,6 +52,65 @@
   --accent-soft: color-mix(in srgb, var(--brand-500) 12%, transparent);
 }
 
+/* ─── LIGHT THEME ───────────────────────────────────────────────────────
+ * The block above is the DARK/default declaration and is deliberately
+ * unscoped by theme: ThemeScript stamps data-theme="light"|"dark" on <html>
+ * before first paint and falls back to "dark" on error, so "no data-theme"
+ * never reaches a real user and dark needs no selector of its own. That also
+ * keeps dark byte-identical to what it was before this block existed.
+ *
+ * This is the whole theme-sync mechanism — no JavaScript. The toggle already
+ * flips an attribute on <html>, and custom properties cascade from there into
+ * this section like any other descendant.
+ *
+ * The values are NOT a new light palette. Each one is the host's own light
+ * token from tokens.css, so /clp-tracker in light mode is painted from the
+ * same tier-2 semantic layer as the dashboard rather than merely resembling
+ * it.
+ *
+ * ⚠ THE SELF-REFERENCE TRAP — three of these names collide with the host's.
+ * --surface, --surface-2 and --accent are declared BY THIS SECTION, so inside
+ * the section `--surface: var(--surface)` reads the value being defined,
+ * which is a cycle: the property becomes invalid-at-computed-value-time and
+ * resolves to nothing (unset), painting transparent. Those three must point
+ * at the host's UNDERLYING tier-1 primitives instead — the technique already
+ * used for --accent in the dark block above:
+ *     host --surface   (light) = var(--n-50)     -> --n-50
+ *     host --surface-2 (light) = var(--n-100)    -> --n-100
+ *     host --accent    (light) = var(--brand-700)-> --brand-700
+ * The rest are safe to reference directly, because the host names them
+ * differently from CLP Tracker (--bg / --fg / --fg-muted / --line /
+ * --line-strong vs --background / --foreground / --muted / --border /
+ * --border-strong), so there is no cycle.
+ * ─────────────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] [data-app="clp-tracker"] {
+  --background: var(--bg); /* host light --bg = --n-0  #ffffff */
+  --surface: var(--n-50); /* NOT var(--surface) — see trap above */
+  --surface-2: var(--n-100); /* NOT var(--surface-2) */
+
+  /* Elevation inverts with the theme. In dark, a floating panel is LIGHTER
+     than the card it covers; in light the card is already near-white, so the
+     raised layer goes to pure --n-0 (the host's page ground) to stay
+     distinguishable from the --n-50 card beneath it. Same job as the dark
+     value, opposite direction. */
+  --surface-raised: var(--n-0);
+
+  --border: var(--line); /* host light --line        = --n-200 */
+  --border-strong: var(--line-strong); /* host light = --n-300 */
+  --foreground: var(--fg); /* host light --fg         = #0f172a */
+  --muted: var(--fg-muted); /* host light --fg-muted  = #475569 */
+
+  /* The dark block takes --brand-500 (neon green) precisely BECAUSE these
+     surfaces used to stay dark in either host theme. That premise is what
+     this file just stopped being true: on the new near-white surfaces
+     #00ff41 measures 1.4:1 and is unreadable. Light mode therefore takes
+     --brand-700, which is exactly what the host's own --accent resolves to
+     under data-theme="light" (5.1:1 on white) — reached via the primitive,
+     since var(--accent) here would self-reference. */
+  --accent: var(--brand-700);
+  --accent-soft: color-mix(in srgb, var(--brand-700) 12%, transparent);
+}
+
 /* The wrapper paints its own ground and text so the section is self-contained:
    the host <body> keeps its own background for every other route. */
 [data-app="clp-tracker"] {
