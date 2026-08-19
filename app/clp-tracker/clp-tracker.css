@@ -180,3 +180,54 @@
 [data-app="clp-tracker"] .scrollbar-dark::-webkit-scrollbar-thumb:hover {
   background-color: var(--muted);
 }
+
+/* ─── LIGHT THEME: STATUS / BADGE TEXT ──────────────────────────────────
+ * Same class of bug --accent-solid fixed for buttons, now for semantic text.
+ *
+ * The status colours (amber warnings, rose/red errors, emerald gains, sky and
+ * violet tags) are written as literal Tailwind utilities at ~165 call sites,
+ * all picked at the 200-400 end because those read well on CLP Tracker's dark
+ * surfaces. They were never given a light value, so when the theme-sync work
+ * put near-white surfaces underneath them they stayed pale: measured on
+ * --surface-2 (#eef2f6) they land between 1.11:1 and 2.39:1, i.e. every status
+ * message, Data Health banner and profit/loss figure in light mode is well
+ * under the 4.5:1 WCAG AA floor — several are barely visible.
+ *
+ * Fixed by remapping each family to its Tailwind 800 shade in light mode only.
+ * 800 rather than 700 because these sit ON a tint (bg-<family>-500/10, /20),
+ * not on bare surface: 700 clears 4.5:1 on plain --surface-2 but drops to
+ * 3.82-4.46:1 once the 20% tint is composited under it. Every 800 shade clears
+ * AA against bare surface AND the /[0.06], /10 and /20 tints — worst case
+ * 5.38:1, in line with the 5.47:1 the button fill landed on.
+ *
+ * Done as scoped overrides rather than by editing 165 call sites: the utility
+ * classes carry no theme awareness, so a per-site change would mean inventing a
+ * variable for each family and touching every file that shows a status. These
+ * rules are unlayered while Tailwind's utilities sit in @layer utilities, so
+ * they win without !important, and they are inert outside [data-app].
+ *
+ * DARK IS UNTOUCHED — this block only exists under data-theme="light".
+ * The tints, borders and rings keep their existing values in both themes;
+ * only the text colour changes, which is the half that failed.
+ * ─────────────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] [data-app="clp-tracker"] {
+  /* amber — warnings, "behind target", Data Health notices */
+  .text-amber-200,
+  .text-amber-300,
+  .text-amber-400 { color: #92400e; } /* amber-800  worst 5.49:1 */
+
+  /* rose / red — errors, losses, destructive actions */
+  .text-rose-300,
+  .text-rose-400 { color: #9f1239; }  /* rose-800   worst 5.53:1 */
+  .text-red-300  { color: #991b1b; }  /* red-800    worst 5.73:1 */
+
+  /* emerald — gains, "fully transferred/deployed", success states */
+  .text-emerald-300,
+  .text-emerald-400 { color: #065f46; } /* emerald-800 worst 5.78:1 */
+
+  /* sky / violet / orange / blue — informational tags and badges */
+  .text-sky-300    { color: #075985; } /* sky-800    worst 5.60:1 */
+  .text-violet-300 { color: #5b21b6; } /* violet-800 worst 6.30:1 */
+  .text-orange-300 { color: #9a3412; } /* orange-800 worst 5.38:1 */
+  .text-blue-300   { color: #1e40af; } /* blue-800   worst 6.26:1 */
+}
