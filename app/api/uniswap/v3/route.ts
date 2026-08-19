@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
+import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -119,9 +121,24 @@ const KNOWN_TOKENS: Record<string, Record<string, { symbol: string; decimals: nu
     '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': { symbol: 'USDC', decimals: 18, coingeckoId: 'usd-coin' },
     '0xe9e7cea3dedca5984780bafc599bd69add087d56': { symbol: 'BUSD', decimals: 18, coingeckoId: 'binance-usd' },
   },
+  robinhood: {
+    // Only the two high-stakes identities are pinned. Everything else on this
+    // chain (the tokenized-equity long tail: NVDA, AAPL, AMC, DJT…) is left to
+    // resolveToken, which reads symbol+decimals from on-chain metadata —
+    // architecture Rule 9: do not grow per-route token maps.
+    '0x0bd7d308f8e1639fab988df18a8011f41eacad73': { symbol: 'WETH', decimals: 18, coingeckoId: 'ethereum' },
+    '0x5fc5360d0400a0fd4f2af552add042d716f1d168': { symbol: 'USDG', decimals: 6, coingeckoId: 'global-dollar' },
+  },
 };
 
 // Function selectors
+// Queue item C Phase 1 — the enumeration caps, named rather than inlined so the
+// disclosure below and the cap itself can never drift apart. Phase 2 replaces
+// the open-position cap with real pagination (balanceOf is exact, so there is
+// nothing to discover — the loop simply has to run to `balance`).
+const OPEN_POSITION_CAP = 20;
+const CLOSED_CANDIDATE_CAP = 20;
+
 const SELECTORS = {
   balanceOf: '0x70a08231',     // balanceOf(address)
   tokenOfOwnerByIndex: '0x2f745c59', // tokenOfOwnerByIndex(address,uint256)
@@ -423,17 +440,32 @@ async function fetchPositionsForChain(
   account: string,
   prices: Record<string, number>,
   apyData: Record<string, number>
-) {
+): Promise<{ positions: unknown[]; truncated: RouteTruncation[] }> {
   const chain = CHAINS[chainKey];
   const knownTokens = KNOWN_TOKENS[chainKey] || {};
   const positions: any[] = [];
+  // Queue item C Phase 1 — every cap that BINDS this request is reported, never
+  // silently applied. Phase 2 removes the open-position cap outright (balanceOf
+  // already gives the exact count, one line below); until then the user is told
+  // precisely how many positions are missing.
+  const truncated: RouteTruncation[] = [];
   
   try {
     const balance = await getBalance(chain.rpc, chain.nftManager, account);
-    if (balance === 0) return [];
+    if (balance === 0) return { positions, truncated };
 
     // Limit to 20 positions per chain to avoid timeout
-    const count = Math.min(balance, 20);
+    const count = Math.min(balance, OPEN_POSITION_CAP);
+    if (balance > count) {
+      truncated.push({
+        scope: chain.chainName,
+        cap: OPEN_POSITION_CAP,
+        returned: count,
+        knownTotal: balance,
+        reason: 'open-position-scan-cap',
+      });
+      console.warn(`[uniswap] ${chain.chainName}: wallet holds ${balance} positions, scan cap is ${OPEN_POSITION_CAP} — ${balance - count} not returned`);
+    }
 
     // Fetch all token IDs
     const tokenIds: bigint[] = [];
@@ -550,7 +582,18 @@ async function fetchPositionsForChain(
       // ever-owned NFTs) can't fan out into hundreds of positions()+receipt
       // calls and time the route out. Normal users (the defensive target) have
       // a handful, so the cap never triggers for them.
-      const candidates = everOwned.filter((id) => !heldIds.has(id)).slice(0, 20);
+      const allCandidates = everOwned.filter((id) => !heldIds.has(id));
+      const candidates = allCandidates.slice(0, CLOSED_CANDIDATE_CAP);
+      if (allCandidates.length > candidates.length) {
+        truncated.push({
+          scope: `${chain.chainName} closed-position recovery`,
+          cap: CLOSED_CANDIDATE_CAP,
+          returned: candidates.length,
+          knownTotal: allCandidates.length,
+          reason: 'closed-candidate-scan-cap',
+        });
+        console.warn(`[uniswap] ${chain.chainName}: ${allCandidates.length} closed candidates, cap is ${CLOSED_CANDIDATE_CAP}`);
+      }
       const burned = await Promise.all(
         candidates.map((tokenId) => buildBurnedPosition(chainKey, tokenId, account)),
       );
@@ -560,7 +603,7 @@ async function fetchPositionsForChain(
     }
   }
 
-  return positions;
+  return { positions, truncated };
 }
 
 export async function GET(request: Request) {
@@ -599,13 +642,17 @@ export async function GET(request: Request) {
       chainsToQuery.map(c => fetchPositionsForChain(c, account, prices, apyData))
     );
     
-    const allPositions = results.flat();
+    const allPositions = results.flatMap((r) => r.positions);
+    const truncated = results.flatMap((r) => r.truncated);
     
     return NextResponse.json({
       positions: allPositions,
       count: allPositions.length,
       account,
       chains: chainsToQuery,
+      // Additive (queue item C Phase 1). Present ONLY when a cap actually bound
+      // this request; absent means the enumeration was complete.
+      ...(truncated.length > 0 ? { truncated } : {}),
     });
   } catch (err) {
     console.error('Uniswap V3 API error:', err);

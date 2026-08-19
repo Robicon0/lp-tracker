@@ -3,6 +3,7 @@ import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
+import type { RouteTruncation } from '../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -44,6 +45,17 @@ const TOKENS: Record<string, { symbol: string; decimals: number; coingeckoId: st
   '0x1f32b1c2345538c0c6f582fcb022739c4a194ebb': { symbol: 'wstETH', decimals: 18, coingeckoId: 'wrapped-steth' },
   '0x9560e827af36c94d2ac33a39bce1fe78631088db': { symbol: 'VELO', decimals: 18, coingeckoId: 'velodrome-finance' },
 };
+
+// Queue item C Phase 1 — Sugar's `_limit` argument, named so the cap and the
+// saturation check below cannot drift apart.
+//
+// ⚠️ Sugar's `_limit` counts POSITIONS but its `_offset` indexes POOLS, so the
+// two are NOT the same cursor and `offset += limit` would skip or duplicate.
+// That is why Phase 1 only DISCLOSES saturation and Phase 3 does the paging
+// properly (pool-cursor paging, after verifying the deployed contract's
+// semantics). Returning exactly `_limit` rows means the cap bound and there may
+// be more — Sugar reports no total, so `knownTotal` is honestly null.
+const SUGAR_LIMIT = 100;
 
 function padUint256(value: bigint): string {
   return value.toString(16).padStart(64, '0');
@@ -354,7 +366,7 @@ export async function GET(request: Request) {
     // Velodrome Sugar V3 uses positions(uint256,uint256,address)
     // selector = 0xedbd33bf (no factory parameter unlike Aerodrome's positionsByFactory)
     const calldata = '0xedbd33bf'
-      + padUint256(100n)
+      + padUint256(BigInt(SUGAR_LIMIT))
       + padUint256(0n)
       + padAddress(account);
 
@@ -384,6 +396,18 @@ export async function GET(request: Request) {
 
     if (rawPositions.length === 0) {
       return NextResponse.json({ positions: [], count: 0, account });
+    }
+
+    const truncated: RouteTruncation[] = [];
+    if (rawPositions.length >= SUGAR_LIMIT) {
+      truncated.push({
+        scope: 'Optimism',
+        cap: SUGAR_LIMIT,
+        returned: rawPositions.length,
+        knownTotal: null,
+        reason: 'sugar-enumeration-cap',
+      });
+      console.warn(`[velodrome] Sugar positions returned exactly ${SUGAR_LIMIT} positions — the cap bound; more may exist`);
     }
 
     // 2. Fetch token info for each unique pool
@@ -518,6 +542,8 @@ export async function GET(request: Request) {
       positions: [...positions, ...closedPositions],
       count: positions.length + closedPositions.length,
       account,
+      // Additive (queue item C Phase 1) — present ONLY when Sugar's cap bound.
+      ...(truncated.length > 0 ? { truncated } : {}),
     });
   } catch (error) {
     return NextResponse.json(

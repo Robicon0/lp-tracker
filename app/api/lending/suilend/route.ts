@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { suiRpc } from '../../../lib/suiRpc';
+import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 // Suilend on Sui — raw Sui RPC (no SDK)
 //
@@ -213,6 +214,11 @@ export async function GET(request: Request) {
   try {
     // Step 1: find ObligationOwnerCap objects
     const caps: Record<string, unknown>[] = [];
+    // Queue item C Phase 1 — the 5-page bound caps enumeration at 250 caps. Far
+    // above any realistic wallet, but a bound that can bind must say so.
+    const MAX_PAGES = 5;
+    const PAGE_SIZE = 50;
+    const truncated: RouteTruncation[] = [];
     let cursor: string | null = null;
     let page = 0;
     do {
@@ -221,13 +227,23 @@ export async function GET(request: Request) {
         account,
         { filter: { StructType: OBLIG_CAP_TYPE }, options: { showContent: true, showType: true } },
         cursor,
-        50,
+        PAGE_SIZE,
       ]) as { data?: Array<{ data?: Record<string, unknown> }>; nextCursor?: string; hasNextPage?: boolean };
       for (const item of res?.data ?? []) {
         if (item.data) caps.push(item.data);
       }
       cursor = res?.hasNextPage ? (res.nextCursor ?? null) : null;
-    } while (cursor && page < 5);
+      if (cursor && page >= MAX_PAGES) {
+        truncated.push({
+          scope: 'ObligationOwnerCap',
+          cap: MAX_PAGES * PAGE_SIZE,
+          returned: caps.length,
+          knownTotal: null,
+          reason: 'owned-object-page-cap',
+        });
+        console.warn(`[suilend/route] stopped at the ${MAX_PAGES}-page cap with more pages available`);
+      }
+    } while (cursor && page < MAX_PAGES);
 
     if (caps.length === 0) {
       return NextResponse.json({ supplies: [], borrows: [], protocol: 'Suilend', chain: 'Sui' });
@@ -327,7 +343,10 @@ export async function GET(request: Request) {
     }
 
     console.log(`[suilend/route] Final: ${supplies.length} supplies, ${borrows.length} borrows`);
-    return NextResponse.json({ supplies, borrows, protocol: 'Suilend', chain: 'Sui' });
+    return NextResponse.json({
+      supplies, borrows, protocol: 'Suilend', chain: 'Sui',
+      ...(truncated.length > 0 ? { truncated } : {}),
+    });
   } catch (err) {
     console.error('[suilend/route] Unexpected error:', err);
     return NextResponse.json({ supplies: [], borrows: [], error: String(err) });

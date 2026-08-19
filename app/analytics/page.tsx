@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } from "react";
+import { TruncationBanner } from "../components/TruncationBanner";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TerminalNavbar from "../components/TerminalNavbar";
@@ -2177,6 +2178,12 @@ export default function Analytics() {
                     "@keyframes lp-pnl-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }",
                 }}
               />
+
+              {/* Queue item C Phase 1 — an enumeration cap that bound this load
+                  means the totals above are computed over a PARTIAL position
+                  set. Sits directly beside the excluded-positions notice, which
+                  is the same honesty contract one layer down. */}
+              <TruncationBanner style={{ margin: "0 26px 18px" }} />
 
               {/* Excluded-positions warning — every position NOT contributing
                   to the totals (unsupported protocols, missing-data positions,

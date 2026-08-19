@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
+import type { RouteTruncation } from '../../lib/enumerationTruncation';
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -497,11 +498,17 @@ async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
   return (await fetchHyperSwapPoolData()).apys;
 }
 
+// Queue item C Phase 1 — named so the cap and its disclosure cannot drift.
+// Phase 2 replaces this with real pagination: `balanceOf` already returns the
+// exact position count, so nothing has to be discovered, only iterated.
+const OPEN_POSITION_CAP = 50;
+
 async function fetchPositionsForManager(
   nftManager: string,
   protocol: string,
   knownFactory: string,
   account: string,
+  truncated: RouteTruncation[],
 ): Promise<Array<{
   tokenId: bigint;
   pos: PositionData;
@@ -514,7 +521,20 @@ async function fetchPositionsForManager(
     console.log(`[HyperSwap] ${protocol} balance for ${account}: ${balance}`);
     if (balance === 0) return [];
 
-    const count = Math.min(balance, 50);
+    const count = Math.min(balance, OPEN_POSITION_CAP);
+    if (balance > count) {
+      // Silent truncation is the bug being fixed: the wallet is told about the
+      // positions this scan could not reach, rather than shown a confident
+      // partial set (architecture Rule 11 at the enumeration layer).
+      truncated.push({
+        scope: protocol,
+        cap: OPEN_POSITION_CAP,
+        returned: count,
+        knownTotal: balance,
+        reason: 'open-position-scan-cap',
+      });
+      console.warn(`[HyperSwap] ${protocol}: wallet holds ${balance} positions, scan cap is ${OPEN_POSITION_CAP} — ${balance - count} not returned`);
+    }
     const tokenIds: bigint[] = [];
     for (let i = 0; i < count; i++) {
       const id = await getTokenId(nftManager, account, i);
@@ -544,14 +564,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Account address required' }, { status: 400 });
   }
 
+  const truncated: RouteTruncation[] = [];
+
   try {
     // Fetch from all position managers in parallel
     const allRaw = (await Promise.all(
-      POSITION_MANAGERS.map(({ address, protocol, factory }) => fetchPositionsForManager(address, protocol, factory, account)),
+      POSITION_MANAGERS.map(({ address, protocol, factory }) => fetchPositionsForManager(address, protocol, factory, account, truncated)),
     )).flat();
 
     if (allRaw.length === 0) {
-      return NextResponse.json({ positions: [], count: 0, account });
+      return NextResponse.json({ positions: [], count: 0, account, ...(truncated.length > 0 ? { truncated } : {}) });
     }
 
     // Collect all unique token addresses for metadata + prices
@@ -692,7 +714,8 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json({ positions, count: positions.length, account });
+    // `truncated` is additive and present ONLY when a cap bound this request.
+    return NextResponse.json({ positions, count: positions.length, account, ...(truncated.length > 0 ? { truncated } : {}) });
   } catch (error) {
     console.error('[HyperSwap] route error:', error);
     return NextResponse.json(

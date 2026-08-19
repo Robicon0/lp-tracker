@@ -8,6 +8,7 @@ import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
+import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -459,6 +460,25 @@ async function GET_impl(request: Request) {
       }
       const allIds = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
       const ids = allIds.slice(0, MAX_WALLET_IDS);
+      // Queue item C Phase 1 — the dropped ids used to vanish without a trace,
+      // even though this route already had an `excluded[]` channel sitting right
+      // there. They now go into BOTH: `excluded[]` (so the existing per-position
+      // exclusion plumbing sees them) and `truncated` (so the wallet-level
+      // banner can say the Capital G/L below is computed over a partial set).
+      const overflowIds = allIds.slice(MAX_WALLET_IDS);
+      const truncated: RouteTruncation[] = overflowIds.length > 0 ? [{
+        // Just the chain: the client labels this source "<protocol> history
+        // scan", so repeating "wallet-scope closed scan" here reads as a
+        // stutter in the rendered notice.
+        scope: chain.charAt(0).toUpperCase() + chain.slice(1),
+        cap: MAX_WALLET_IDS,
+        returned: ids.length,
+        knownTotal: allIds.length,
+        reason: 'wallet-scope-id-cap',
+      }] : [];
+      if (overflowIds.length > 0) {
+        console.warn(`[uniswap/activity] tokenId=all chain=${chain}: ${allIds.length} ever-owned ids, cap is ${MAX_WALLET_IDS} — ${overflowIds.length} not scanned`);
+      }
       const ctxs = await resolveEvmPositionContexts(ids, {
         chain: chain as Parameters<typeof resolveEvmPositionContexts>[1]['chain'],
         rpc: archiveRpc,
@@ -470,7 +490,9 @@ async function GET_impl(request: Request) {
 
       const origin = new URL(request.url).origin;
       const perPosition: Array<Record<string, unknown>> = [];
-      const excluded: Array<{ tokenId: string; reason: string }> = [];
+      const excluded: Array<{ tokenId: string; reason: string }> = overflowIds.map((tokenId) => ({
+        tokenId, reason: 'wallet-scope-id-cap',
+      }));
       const merged: ActivityEvent[] = [];
       let ni0 = 0, ni1 = 0, tf0 = 0, tf1 = 0;
 
@@ -521,6 +543,7 @@ async function GET_impl(request: Request) {
         totalFees0: tf0, totalFees1: tf1,
         positions: perPosition,
         excluded,
+        ...(truncated.length > 0 ? { truncated } : {}),
       });
     }
 

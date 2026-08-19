@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect, type CSSProperties } from "react";
+import { TruncationBanner } from "../../components/TruncationBanner";
 import Link from "next/link";
 import TerminalNav from "../../components/TerminalNav";
 import AnimatedCount from "../../components/AnimatedCount";
@@ -261,6 +262,10 @@ export default function LendingPage() {
         <p className="mb-6" style={{ fontSize: 14, color: "var(--fg-muted)", opacity: 0.6 }}>
           Track your lending and borrowing across DeFi protocols
         </p>
+
+        {/* Queue item C Phase 1 — an owned-object page cap that bound this load
+            means positions are missing from the lists below. */}
+        <TruncationBanner style={{ marginBottom: 16 }} />
 
         {/* Empty / loading states */}
         {!hasWallet && (

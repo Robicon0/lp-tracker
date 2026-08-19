@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
+import { applyTruncationNotices, type RouteTruncation } from "../lib/enumerationTruncation";
 
 // AlphaFi/AlphaLend (Sui) — implemented via raw Sui RPC in /api/lending/alphafi/route.ts
 // Uses suix_getOwnedObjects to find PositionCap objects, then reads position details.
@@ -169,6 +170,10 @@ export function useLendingPositions(): UseLendingPositionsData {
               const sN = (r.value?.supplies ?? []).length;
               const bN = (r.value?.borrows  ?? []).length;
               console.log(`[useLendingPositions] ${protocol} ${tag} → ${sN} supplies, ${bN} borrows`);
+              // Queue item C Phase 1 — a lending route that stopped at its
+              // owned-object page cap says so; recorded per (protocol, wallet)
+              // and cleared automatically when a later response is complete.
+              applyTruncationNotices(protocol, addr, r.value?.truncated as RouteTruncation[] | undefined);
               for (const s of (r.value?.supplies ?? []) as ExternalLendingAsset[]) supplies.push(s);
               for (const b of (r.value?.borrows  ?? []) as ExternalLendingAsset[]) borrows.push(b);
             }
