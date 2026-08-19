@@ -262,7 +262,11 @@ function TargetInputTile({
   onSave: (next: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(value));
+  // A never-set value is 0, and String(0) puts a literal "0" in the box that
+  // the user has to delete before typing. Blank instead, so typing 5000 gives
+  // 5000 rather than 05000. A real value still shows for editing. Saving a
+  // blank box is unchanged: Number("") is 0, which the commit check accepts.
+  const [draft, setDraft] = useState(value === 0 ? "" : String(value));
 
   const commit = () => {
     const parsed = Number(draft);
@@ -278,7 +282,7 @@ function TargetInputTile({
           <button
             type="button"
             onClick={() => {
-              setDraft(String(value));
+              setDraft(value === 0 ? "" : String(value));
               setEditing(true);
             }}
             aria-label="Edit target monthly percent"
