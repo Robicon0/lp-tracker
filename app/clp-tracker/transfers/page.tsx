@@ -1964,7 +1964,7 @@ export default function TransfersPage() {
           </p>
           <Link
             href="/clp-tracker/settings"
-            className="mt-5 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+            className="mt-5 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
           >
             Go to Settings
           </Link>
@@ -2039,7 +2039,7 @@ export default function TransfersPage() {
             <button
               type="button"
               onClick={() => setModal({ kind: "add" })}
-              className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+              className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
             >
               Add Transfer
             </button>
@@ -2182,7 +2182,7 @@ export default function TransfersPage() {
                   <button
                     type="button"
                     onClick={() => setModal({ kind: "add" })}
-                    className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+                    className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
                   >
                     Add Transfer
                   </button>
@@ -2228,7 +2228,7 @@ export default function TransfersPage() {
                             onClick={() =>
                               applyBulkMark(pendingBulk.status, "visible")
                             }
-                            className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[var(--accent)]/90"
+                            className="rounded-md bg-[var(--accent-solid)] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[var(--accent-solid)]/90"
                           >
                             Confirm
                           </button>
@@ -2293,7 +2293,7 @@ export default function TransfersPage() {
                             onClick={() =>
                               applyBulkMark(pendingBulk.status, "selected")
                             }
-                            className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[var(--accent)]/90"
+                            className="rounded-md bg-[var(--accent-solid)] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[var(--accent-solid)]/90"
                           >
                             Confirm
                           </button>
@@ -2488,7 +2488,7 @@ export default function TransfersPage() {
                 <button
                   type="button"
                   onClick={addCheckpoint}
-                  className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:opacity-50"
+                  className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:opacity-50"
                   disabled={newCheckpoint.trim() === ""}
                 >
                   Add Checkpoint
@@ -2522,7 +2522,7 @@ export default function TransfersPage() {
                         onClick={() => setExpenseChainFilter(chain)}
                         className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
                           expenseChainFilter === chain
-                            ? "bg-[var(--accent)] text-white"
+                            ? "bg-[var(--accent-solid)] text-white"
                             : "border border-[var(--border-strong)] bg-[var(--surface-2)] text-[var(--foreground)] hover:border-[var(--accent)]"
                         }`}
                       >
@@ -3015,7 +3015,7 @@ function TypeFilterToggle({ value, onChange }: TypeFilterToggleProps) {
               idx > 0 ? "border-l border-[var(--border-strong)]" : ""
             } ${
               selected
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-solid)] text-white"
                 : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
             }`}
           >
@@ -3165,7 +3165,7 @@ function FormActions({ onCancel, submitLabel, onDelete }: FormActionsProps) {
       </button>
       <button
         type="submit"
-        className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+        className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
       >
         {submitLabel}
       </button>
@@ -3542,7 +3542,7 @@ function DeployLinkModal({
           type="button"
           disabled={positionId === "" || eligible.length === 0}
           onClick={() => onSubmit(positionId)}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Confirm
         </button>
@@ -3625,7 +3625,7 @@ function SendToPlatformModal({
           type="button"
           disabled={platform.trim() === "" || eligible.length === 0}
           onClick={() => onSubmit(platform)}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Confirm
         </button>
@@ -3721,7 +3721,7 @@ function BulkSplitModal({
           type="button"
           disabled={plan.splittable.length === 0}
           onClick={() => onSubmit(plan)}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Split {plan.splittable.length} ({formatUsd(total)})
         </button>
@@ -3816,7 +3816,7 @@ function UndoSplitModal({
           type="button"
           disabled={plan.error !== undefined}
           onClick={() => onSubmit(plan)}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {/* On an error the button is disabled anyway, but it must not sit
               there offering to restore something that was never found. */}
@@ -3940,7 +3940,7 @@ function SplitTransferModal({
           type="button"
           disabled={plan.error !== undefined}
           onClick={() => onSubmit(plan)}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Split into two
         </button>
@@ -4100,7 +4100,7 @@ function RevertToAutoModal({
             for (const plan of usable) applyRevertToAuto(plan);
             onApplied();
           }}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Continue
         </button>
@@ -4219,7 +4219,7 @@ function MoneyStatusToggle({
         const selectedClass =
           opt.value === "expense"
             ? "bg-rose-500 text-white"
-            : "bg-[var(--accent)] text-white";
+            : "bg-[var(--accent-solid)] text-white";
         return (
           <button
             key={opt.value}
@@ -4297,7 +4297,7 @@ function TypeSegmentedToggle({ value, onChange }: TypeSegmentedToggleProps) {
               idx > 0 ? "border-l border-[var(--border-strong)]" : ""
             } ${
               selected
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-solid)] text-white"
                 : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
             }`}
           >
@@ -4430,7 +4430,7 @@ function BackfillReview({
               type="button"
               disabled={busy || toInclude.length === 0}
               onClick={() => void runClaimBackfill()}
-              className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--accent)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent)]/90 disabled:opacity-50"
+              className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--accent-solid)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-solid)]/90 disabled:opacity-50"
             >
               {busy
                 ? "Creating…"

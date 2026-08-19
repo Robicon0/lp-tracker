@@ -400,7 +400,7 @@ export default function BusinessPnlPage() {
             </p>
             <Link
               href="/clp-tracker/claims"
-              className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+              className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
             >
               Go to Fee Claims
             </Link>

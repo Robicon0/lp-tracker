@@ -50,6 +50,18 @@
      themes, so it resolves the same way in each. */
   --accent: var(--brand-500);
   --accent-soft: color-mix(in srgb, var(--brand-500) 12%, transparent);
+
+  /* SOLID BUTTON FILL — deliberately the SAME value in both themes.
+     --accent above is the neon --brand-500 in dark, which is correct for thin
+     highlights, focus rings, badge text and low-opacity tints, but wrong as a
+     large filled surface: white-on-#00ff41 measures 1.37:1, so every solid
+     button in dark mode was failing WCAG AA by a wide margin. --brand-700
+     carries white at 5.47:1 and is exactly what light mode already paints
+     these buttons, so pinning both themes to it fixes the contrast AND makes
+     the buttons look identical either side of the toggle — which is the point,
+     not an oversight. Only full-opacity button fills use this; the tints stay
+     on --accent so they keep tracking the theme. */
+  --accent-solid: var(--brand-700);
 }
 
 /* ─── LIGHT THEME ───────────────────────────────────────────────────────
@@ -109,6 +121,12 @@
      since var(--accent) here would self-reference. */
   --accent: var(--brand-700);
   --accent-soft: color-mix(in srgb, var(--brand-700) 12%, transparent);
+
+  /* Restated rather than inherited: the dark block is unscoped, so this
+     section overrides it wholesale for light. Same value on purpose — see the
+     note in the dark block. In light it happens to equal --accent; in dark it
+     deliberately does not. */
+  --accent-solid: var(--brand-700);
 }
 
 /* The wrapper paints its own ground and text so the section is self-contained:
