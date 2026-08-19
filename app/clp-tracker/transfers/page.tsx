@@ -4218,7 +4218,7 @@ function MoneyStatusToggle({
         const selected = value === opt.value;
         const selectedClass =
           opt.value === "expense"
-            ? "bg-rose-500 text-white"
+            ? "bg-rose-600 text-white"
             : "bg-[var(--accent-solid)] text-white";
         return (
           <button

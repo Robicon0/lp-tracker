@@ -9,7 +9,12 @@ import {
   getPositions,
   getTransfers,
 } from "../lib/storage";
-import { calcBusinessPnL, getEffectiveDeposited } from "../lib/calculations";
+import {
+  calcBusinessPnL,
+  getEffectiveDeposited,
+  withLiveValues,
+} from "../lib/calculations";
+import { useLivePositionPrices } from "../lib/useLivePositionPrices";
 import { useHydrated } from "../lib/useHydrated";
 import { mergePrices, useTokenPrices } from "../lib/useTokenPrices";
 import type { FeeClaim, Position, Transfer } from "../lib/types";
@@ -155,9 +160,18 @@ export function Sidebar() {
   // While prices are still in flight, fetchedPrices is empty and unpriced
   // tokens simply contribute 0 to All Total — the figure starts low and settles
   // upward rather than flickering or blanking, and the colour follows it.
+  // Active positions at live market value, same helper and same price
+  // resolution as the Positions page and Dashboard (Invariant #6 — the Sidebar
+  // Net P&L must equal Total P&L's, so it cannot read a staler number).
+  const { pairPriceById } = useLivePositionPrices(positions);
+  const livePositions = useMemo(
+    () => withLiveValues(positions, pairPriceById),
+    [positions, pairPriceById],
+  );
+
   const status = useMemo(
-    () => (hydrated ? computePortfolioStatus(positions, claims, prices) : null),
-    [hydrated, positions, claims, prices],
+    () => (hydrated ? computePortfolioStatus(livePositions, claims, prices) : null),
+    [hydrated, livePositions, claims, prices],
   );
 
   return (

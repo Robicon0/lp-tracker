@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { getClaims, getPositions } from "../lib/storage";
 import {
   calcTokenPnL,
+  withLiveValues,
   computePositionIL,
   getEffectiveDeposited,
   type ILResult,
@@ -15,6 +16,7 @@ import {
   HypotheticalNotice,
   HypotheticalTag,
 } from "../components/Hypothetical";
+import { useLivePositionPrices } from "../lib/useLivePositionPrices";
 import { useHydrated } from "../lib/useHydrated";
 import type { FeeClaim, Position } from "../lib/types";
 
@@ -129,9 +131,18 @@ export default function PoolPnlPage() {
     setClaims(getClaims());
   });
 
+  // Active positions at live market value, same helper and same price
+  // resolution as the Positions page and Dashboard (Invariant #6 — these
+  // figures appear on more than one page and may not disagree).
+  const { pairPriceById } = useLivePositionPrices(positions);
+  const livePositions = useMemo(
+    () => withLiveValues(positions, pairPriceById),
+    [positions, pairPriceById],
+  );
+
   const tokenRows = useMemo(
-    () => (hydrated ? calcTokenPnL(positions, claims) : []),
-    [hydrated, positions, claims],
+    () => (hydrated ? calcTokenPnL(livePositions, claims) : []),
+    [hydrated, livePositions, claims],
   );
 
   // The single filtered set the whole page describes. Both the table and the
@@ -141,11 +152,11 @@ export default function PoolPnlPage() {
   const filteredPositions = useMemo(
     () =>
       hydrated
-        ? positions.filter((p) =>
+        ? livePositions.filter((p) =>
             statusFilter === "all" ? true : p.status === statusFilter,
           )
         : [],
-    [hydrated, positions, statusFilter],
+    [hydrated, livePositions, statusFilter],
   );
 
   const rows = useMemo(() => {

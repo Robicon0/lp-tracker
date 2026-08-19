@@ -19,6 +19,7 @@ import {
   OverallPnLCard,
 } from "./components/CapitalCards";
 import { GrowthTargetSection } from "./components/GrowthTarget";
+import { useLivePositionPrices } from "./lib/useLivePositionPrices";
 import { DataHealthCard } from "./components/DataHealthCard";
 import { MixedStableRecoveryCard } from "./components/MixedStableRecoveryCard";
 import { computeDataHealth, type DataHealthReport } from "./lib/dataHealth";
@@ -29,6 +30,7 @@ import {
   calcFeeAPR,
   calcOverallPnL,
   calcPortfolioSummary,
+  withLiveValues,
   calcUnconvertedHoldings,
   type OverallPnL,
   calcPositionProfit,
@@ -345,12 +347,23 @@ export default function DashboardPage() {
     setTargetMonthlyPercent(next);
   };
 
+  // Active positions valued at the live market price, exactly as the Positions
+  // page cards show them. Invariant #6: Current Value and Total Profit (Active)
+  // here must be the same figures that page reports, so both read the same
+  // helper over the same price resolution. Closed positions and unresolved
+  // prices keep their stored value.
+  const { pairPriceById } = useLivePositionPrices(positions);
+  const livePositions = useMemo(
+    () => withLiveValues(positions, pairPriceById),
+    [positions, pairPriceById],
+  );
+
   const overall = useMemo(
     () =>
       hydrated
-        ? calcOverallPnL(positions, claims, transfers, initialCapital)
+        ? calcOverallPnL(livePositions, claims, transfers, initialCapital)
         : EMPTY_OVERALL,
-    [hydrated, positions, claims, transfers, initialCapital],
+    [hydrated, livePositions, claims, transfers, initialCapital],
   );
 
   // What the still-held (unconverted) fee tokens are worth today — the figure
@@ -386,16 +399,16 @@ export default function DashboardPage() {
   // ever opened and now feeds exactly one card: Lifetime Total Deposited.
   // The whole-business view of profit lives on the Total P&L page.
   const summary = hydrated
-    ? calcPortfolioSummary(positions, claims)
+    ? calcPortfolioSummary(livePositions, claims)
     : EMPTY_SUMMARY;
   const activeSummary = hydrated
     ? calcPortfolioSummary(
-        positions.filter((p) => p.status === "active"),
+        livePositions.filter((p) => p.status === "active"),
         claims,
       )
     : EMPTY_SUMMARY;
   const activeRows = hydrated
-    ? deriveRows(positions.filter((p) => p.status === "active"), claims)
+    ? deriveRows(livePositions.filter((p) => p.status === "active"), claims)
     : [];
   const claimRows = hydrated ? recentClaims(claims) : [];
   const lastUpdated = useMemo(
@@ -672,7 +685,7 @@ export default function DashboardPage() {
           </div>
 
           <GrowthTargetSection
-            positions={positions}
+            positions={livePositions}
             claims={claims}
             prices={prices}
             initialCapital={initialCapital}

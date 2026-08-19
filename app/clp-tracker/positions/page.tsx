@@ -52,6 +52,7 @@ import {
   entryPriceFromTokens,
   getEffectiveClaimed,
   getEffectiveDeposited,
+  withLiveValues,
   getEffectiveTotalFees,
   liquidityFromDeposited,
   splitDepositedIntoTokens,
@@ -996,6 +997,17 @@ export default function PositionsPage() {
     return map;
   }, [positions, positionPrices, fetchedPrices]);
 
+  // Active positions carry their LIVE value in currentBalance, derived from the
+  // same currentPriceById that Range Health already uses — so Current, Profit
+  // and Fee APR on the card read the market, not the last manual Update, and
+  // the card cannot disagree with the badge beside it. Closed positions and any
+  // active one whose price is unresolved pass through with their stored value.
+  // Nothing is persisted; the stored field stays the fallback.
+  const livePositions = useMemo(
+    () => withLiveValues(positions, currentPriceById),
+    [positions, currentPriceById],
+  );
+
   const healthById = useMemo(() => {
     const map = new Map<string, RangeHealth>();
     for (const p of positions) {
@@ -1048,7 +1060,7 @@ export default function PositionsPage() {
 
   const active = hydrated
     ? derive(
-        positions
+        livePositions
           .filter((p) => p.status === "active" && inChain(p))
           .sort(byEntryDesc),
         claims,
@@ -2578,7 +2590,7 @@ function DeletePositionModal({
           type="button"
           disabled={!confirmed}
           onClick={onConfirm}
-          className="inline-flex h-9 items-center justify-center rounded-md bg-rose-500 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-rose-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Delete permanently
         </button>
@@ -4710,7 +4722,7 @@ function FormActions({
 }: FormActionsProps) {
   const submitClass =
     submitTone === "danger"
-      ? "bg-rose-500 hover:bg-rose-500/90 text-white"
+      ? "bg-rose-600 hover:bg-rose-600/90 text-white"
       : "bg-[var(--accent-solid)] hover:bg-[var(--accent-solid)]/90 text-white";
   return (
     <div className="flex justify-end gap-2 px-5 py-4">

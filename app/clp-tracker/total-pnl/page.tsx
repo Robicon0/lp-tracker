@@ -15,6 +15,7 @@ import {
   calcDaysActive,
   calcFeeAPR,
   calcOverallPnL,
+  withLiveValues,
   calcPositionProfit,
   calcPriceDiff,
   calcUnconvertedHoldings,
@@ -28,6 +29,7 @@ import {
 } from "../components/CapitalCards";
 import { Breakdown } from "../components/Breakdown";
 import { GrowthTargetSection } from "../components/GrowthTarget";
+import { useLivePositionPrices } from "../lib/useLivePositionPrices";
 import { useHydrated } from "../lib/useHydrated";
 import { mergePrices, useTokenPrices } from "../lib/useTokenPrices";
 import type { FeeClaim, Position, Transfer } from "../lib/types";
@@ -357,10 +359,19 @@ export default function TotalPnlPage() {
   // activeCapital below): capital in a closed position has been withdrawn and
   // redeployed, so counting it again would double-count it. The Dashboard
   // carries the open-only view of profit.
+  // Active positions at live market value, same helper and same price
+  // resolution as the Positions page and Dashboard (Invariant #6 — these
+  // figures appear on more than one page and may not disagree).
+  const { pairPriceById } = useLivePositionPrices(positions);
+  const livePositions = useMemo(
+    () => withLiveValues(positions, pairPriceById),
+    [positions, pairPriceById],
+  );
+
   const totals = useMemo(
     () =>
       hydrated
-        ? computeTotals(positions, claims, feesAtCurrentValue)
+        ? computeTotals(livePositions, claims, feesAtCurrentValue)
         : {
             totalInvested: 0,
             totalCurrentValue: 0,
@@ -370,7 +381,7 @@ export default function TotalPnlPage() {
             lpPnL: 0,
             netPnL: 0,
           },
-    [hydrated, positions, claims, feesAtCurrentValue],
+    [hydrated, livePositions, claims, feesAtCurrentValue],
   );
 
   // Capital deployed RIGHT NOW. Deliberately a separate, open-only pass:
@@ -382,7 +393,7 @@ export default function TotalPnlPage() {
     () =>
       hydrated
         ? computeTotals(
-            positions.filter((p) => p.status === "active"),
+            livePositions.filter((p) => p.status === "active"),
             claims,
           )
         : {
@@ -394,7 +405,7 @@ export default function TotalPnlPage() {
             lpPnL: 0,
             netPnL: 0,
           },
-    [hydrated, positions, claims],
+    [hydrated, livePositions, claims],
   );
 
   // LP P&L split into active price movement vs closed-position scalp, drawn
@@ -426,9 +437,9 @@ export default function TotalPnlPage() {
   const overall = useMemo(
     () =>
       hydrated
-        ? calcOverallPnL(positions, claims, transfers, initialCapital)
+        ? calcOverallPnL(livePositions, claims, transfers, initialCapital)
         : EMPTY_OVERALL,
-    [hydrated, positions, claims, transfers, initialCapital],
+    [hydrated, livePositions, claims, transfers, initialCapital],
   );
 
   const lifetimeDeposited = useMemo(
@@ -443,11 +454,11 @@ export default function TotalPnlPage() {
     () =>
       hydrated
         ? summarizeSegment(
-            positions.filter((p) => p.status === "active"),
+            livePositions.filter((p) => p.status === "active"),
             claims,
           )
         : emptySegment(),
-    [hydrated, positions, claims],
+    [hydrated, livePositions, claims],
   );
 
   const closedSummary = useMemo(

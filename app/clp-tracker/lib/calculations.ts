@@ -1436,3 +1436,67 @@ export function calcGrowthTarget(
     },
   };
 }
+
+// ─── LIVE POSITION VALUE ────────────────────────────────────────────────
+//
+// What an OPEN position is worth at the current pair price, derived from the
+// same perLiquidity core the out-of-range projections use.
+//
+// ⚠️ NOT (entry token counts x live prices). Those counts are the amounts at
+// ENTRY; a CLMM position's composition changes as price moves, so multiplying
+// frozen counts by live prices gives the HODL-equivalent value, and the gap
+// between that and the real position value IS impermanent loss. Measured on
+// SUI/USDC entry 5.00 range 4-6 $10,000: at price 6.00 the HODL figure reads
+// $10,904 against a true LP value of $10,432 (+4.5%), and at 7.00 it reads
+// $11,809 against $10,432 (+13.2%) because LP value is CAPPED above the top of
+// the range while a HODL keeps climbing. Feeding that into Profit and the
+// portfolio totals would overstate them without bound.
+//
+// UNITS: liquidityFromDeposited treats `deposited` as quote-denominated, which
+// is the app's existing convention (Invariant #9: deposited = base x entryPrice
+// + quote, and entryPrice is quote-per-base). The value returned here is in the
+// same units as `deposited`, so it is directly comparable to it — which is
+// exactly what Profit needs. No unit conversion is introduced.
+export function livePositionValue(
+  position: Position,
+  pairPrice: number | null | undefined,
+): number | null {
+  if (position.status !== "active") return null;
+  if (!Number.isFinite(pairPrice) || (pairPrice as number) <= 0) return null;
+  const deposited = getEffectiveDeposited(position);
+  const liquidity = liquidityFromDeposited(
+    deposited,
+    toFinite(position.entryPrice),
+    toFinite(position.bottomRange),
+    toFinite(position.topRange),
+  );
+  if (liquidity === null) return null;
+  return depositedFromLiquidity(
+    liquidity,
+    pairPrice as number,
+    toFinite(position.bottomRange),
+    toFinite(position.topRange),
+  );
+}
+
+// Returns a copy of `positions` whose ACTIVE entries carry their live value in
+// currentBalance, so every existing formula (calcPortfolioSummary, computeTotals,
+// calcPositionProfit, calcFeeAPR...) is fed a live number without any of them
+// changing. Closed positions pass through untouched — their currentBalance is
+// the recorded value-at-close and must never move. An active position whose
+// price is unresolved, or whose liquidity cannot be derived, ALSO passes through
+// untouched, so it falls back to whatever was last entered manually rather than
+// showing something wrong.
+//
+// Nothing here is persisted: this is a display/derivation layer over the stored
+// records, so the manual Update flow and currentBalanceOverride keep working
+// exactly as before — they set the stored value, which remains the fallback.
+export function withLiveValues(
+  positions: Position[],
+  pairPriceById: Map<string, number | null>,
+): Position[] {
+  return positions.map((p) => {
+    const live = livePositionValue(p, pairPriceById.get(p.id));
+    return live === null ? p : { ...p, currentBalance: live };
+  });
+}
