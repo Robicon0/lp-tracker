@@ -478,7 +478,7 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={handleClearAll}
-                    className="inline-flex h-9 items-center justify-center rounded-md bg-rose-500 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-500/90"
+                    className="inline-flex h-9 items-center justify-center rounded-md bg-rose-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600/90"
                   >
                     Yes, Delete Everything
                   </button>
