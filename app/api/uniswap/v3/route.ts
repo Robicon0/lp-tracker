@@ -3,6 +3,7 @@ import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 import type { RouteTruncation } from '../../../lib/enumerationTruncation';
+import { ethCallMany } from '../../../lib/evmBatchCall';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -131,13 +132,29 @@ const KNOWN_TOKENS: Record<string, Record<string, { symbol: string; decimals: nu
   },
 };
 
-// Function selectors
-// Queue item C Phase 1 — the enumeration caps, named rather than inlined so the
-// disclosure below and the cap itself can never drift apart. Phase 2 replaces
-// the open-position cap with real pagination (balanceOf is exact, so there is
-// nothing to discover — the loop simply has to run to `balance`).
-const OPEN_POSITION_CAP = 20;
-const CLOSED_CANDIDATE_CAP = 20;
+// Queue item C Phase 2a — the OPEN-position cap is GONE. `balanceOf` returns the
+// exact number of position NFTs the wallet holds, so there was never anything
+// to discover here, only to iterate; the old `Math.min(balance, 20)` discarded
+// a number the route already had in hand. Enumeration is now batched (one
+// JSON-RPC request per 100 tokenIds, paced by evmRpc's global semaphore)
+// instead of one serial round trip per index, so removing the cap makes the
+// route FASTER for every wallet, not slower.
+//
+// The CLOSED-candidate bound is deliberately KEPT and raised. It is a different
+// shape of problem: each candidate costs a positions() call plus an archive
+// eth_getLogs plus a transaction receipt against Tenderly, which throttles
+// per-IP — an unbounded fan-out there is the documented route to a hung
+// positions source (ITEM 0i). It stays disclosed via Phase 1's `truncated`
+// whenever it binds, and is now high enough that no ordinary wallet reaches it.
+// Only the CHEAP, exactly-countable enumeration is uncapped.
+const CLOSED_CANDIDATE_CAP = 200;
+
+// Per-chain wall-clock budget for the uncapped enumeration. The five chains run
+// in parallel inside one request whose Vercel `maxDuration` is 300 s, so a
+// single chain must not be able to consume the whole budget. Whatever the
+// budget cannot reach is DISCLOSED, never dropped — the bound moved from
+// "how many positions" to "how long", which is the honest axis.
+const ENUMERATION_BUDGET_MS = 60_000;
 
 const SELECTORS = {
   balanceOf: '0x70a08231',     // balanceOf(address)
@@ -220,14 +237,6 @@ async function getBalance(rpc: string, nftManager: string, account: string): Pro
   return parseInt(result, 16);
 }
 
-// Get token ID at index
-async function getTokenId(rpc: string, nftManager: string, account: string, index: number): Promise<bigint> {
-  const data = SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(index));
-  const result = await rpcCall(rpc, nftManager, data);
-  if (!result || result === '0x') return 0n;
-  return BigInt(result);
-}
-
 // Decode position data from positions(uint256) call
 // Returns: nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity,
 //          feeGrowthInside0LastX128, feeGrowthInside1LastX128, tokensOwed0, tokensOwed1
@@ -255,7 +264,16 @@ async function getPosition(rpc: string, nftManager: string, tokenId: bigint): Pr
   const selector = '0x99fbab88';
   const data = selector + padUint256(tokenId);
   const result = await rpcCall(rpc, nftManager, data);
-  
+  return decodePositionData(result);
+}
+
+/**
+ * Pure decoder for a positions(uint256) return payload. Split out of
+ * getPosition (queue item C Phase 2a) so the BATCHED enumeration path decodes
+ * with byte-identical logic instead of a second copy — the single-call
+ * getPosition above now delegates to it, so the two can never diverge.
+ */
+function decodePositionData(result: string | null): PositionData | null {
   if (!result || result === '0x' || result.length < 770) return null;
   
   const hex = result.startsWith('0x') ? result.slice(2) : result;
@@ -326,6 +344,92 @@ async function fetchTokenInfo(rpc: string, tokenAddress: string): Promise<{ symb
   } catch {
     return { symbol: 'UNKNOWN', decimals: 18 };
   }
+}
+
+/**
+ * symbol()+decimals() for many tokens in ONE batched pass (queue item C Phase
+ * 2a). Falls back to the per-token path for anything the batch could not read,
+ * and NEVER invents decimals: an unreadable token keeps the same
+ * UNKNOWN/18 default the single-call path already used, so behaviour for every
+ * previously-working token is unchanged.
+ */
+async function fetchTokenInfoMany(
+  rpc: string,
+  addresses: string[],
+): Promise<Record<string, { symbol: string; decimals: number }>> {
+  const out: Record<string, { symbol: string; decimals: number }> = {};
+  if (addresses.length === 0) return out;
+
+  const calls = addresses.flatMap((addr) => [
+    { to: addr, data: SELECTORS.symbol },
+    { to: addr, data: SELECTORS.decimals },
+  ]);
+  const res = await ethCallMany(rpc, calls);
+
+  const missing: string[] = [];
+  addresses.forEach((addr, i) => {
+    const symHex = res[i * 2];
+    const decHex = res[i * 2 + 1];
+    if (symHex === null && decHex === null) { missing.push(addr); return; }
+    out[addr] = {
+      symbol: decodeSymbol(symHex),
+      decimals: decHex ? parseInt(decHex, 16) : 18,
+    };
+  });
+  // Per-token fallback for the stragglers only.
+  await Promise.all(missing.map(async (addr) => { out[addr] = await fetchTokenInfo(rpc, addr); }));
+  return out;
+}
+
+/** ABI-encoded string -> JS string. Extracted from fetchTokenInfo verbatim. */
+function decodeSymbol(symResult: string | null): string {
+  if (!symResult || symResult.length <= 130) return 'UNKNOWN';
+  const hex = symResult.startsWith('0x') ? symResult.slice(2) : symResult;
+  const strLen = parseInt(hex.slice(64, 128), 16);
+  const strHex = hex.slice(128, 128 + strLen * 2);
+  let symbol = '';
+  for (let i = 0; i < strHex.length; i += 2) {
+    const charCode = parseInt(strHex.slice(i, i + 2), 16);
+    if (charCode > 0) symbol += String.fromCharCode(charCode);
+  }
+  return symbol || 'UNKNOWN';
+}
+
+/**
+ * Resolve every distinct (token0, token1, fee) tuple to its pool in ONE batched
+ * pass, filling the SAME module cache `resolvePoolAddress` reads, so the
+ * per-position loop below hits memory instead of the network (ITEM 0g / G1).
+ *
+ * Keeps 0g's rule intact: a FAILED lookup is left UNCACHED, so a transient RPC
+ * error cannot pin a position to a substitute price basis for the life of the
+ * process; only a definitive answer (a real pool, or address(0) = "no such
+ * pool") is stored.
+ */
+async function prewarmPoolAddresses(
+  rpc: string,
+  factory: string,
+  positions: PositionData[],
+): Promise<void> {
+  const tuples = new Map<string, PositionData>();
+  for (const p of positions) {
+    const key = `${factory}-${p.token0}-${p.token1}-${p.fee}`.toLowerCase();
+    if (!(key in poolAddressCache)) tuples.set(key, p);
+  }
+  if (tuples.size === 0) return;
+  const entries = [...tuples.entries()];
+  const res = await ethCallMany(
+    rpc,
+    entries.map(([, p]) => ({
+      to: factory,
+      data: SELECTORS.getPool + padAddress(p.token0) + padAddress(p.token1) + padUint256(BigInt(p.fee)),
+    })),
+  );
+  entries.forEach(([key], i) => {
+    const result = res[i];
+    if (result === null) return; // transient — leave uncached (ITEM 0g rule)
+    const addr = '0x' + result.slice(-40);
+    poolAddressCache[key] = addr !== '0x0000000000000000000000000000000000000000' ? addr : null;
+  });
 }
 
 // Calculate token amounts from liquidity and tick range
@@ -444,54 +548,106 @@ async function fetchPositionsForChain(
   const chain = CHAINS[chainKey];
   const knownTokens = KNOWN_TOKENS[chainKey] || {};
   const positions: any[] = [];
-  // Queue item C Phase 1 — every cap that BINDS this request is reported, never
-  // silently applied. Phase 2 removes the open-position cap outright (balanceOf
-  // already gives the exact count, one line below); until then the user is told
-  // precisely how many positions are missing.
+  // Anything that stops this route from returning the wallet's FULL position
+  // set is reported here, never applied silently (queue item C). Phase 2a
+  // removed the open-position cap, so what remains are transport failures and
+  // the deliberate closed-candidate bound.
   const truncated: RouteTruncation[] = [];
+  // One budget for the whole chain: the enumeration below and the burned-NFT
+  // recovery further down share it, so a wallet whose open-position scan is
+  // expensive cannot also spend the recovery's time and blow `maxDuration`.
+  const recoveryDeadline = Date.now() + ENUMERATION_BUDGET_MS;
   
   try {
     const balance = await getBalance(chain.rpc, chain.nftManager, account);
     if (balance === 0) return { positions, truncated };
 
-    // Limit to 20 positions per chain to avoid timeout
-    const count = Math.min(balance, OPEN_POSITION_CAP);
-    if (balance > count) {
+    const deadline = recoveryDeadline;
+
+    // EVERY tokenId — `balance` is exact, and the reads go out batched.
+    const idResults = await ethCallMany(
+      chain.rpc,
+      Array.from({ length: balance }, (_, i) => ({
+        to: chain.nftManager,
+        data: SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(i)),
+      })),
+      { deadline },
+    );
+    const tokenIds: bigint[] = [];
+    let unreadableIds = 0;
+    idResults.forEach((r) => {
+      if (r === null) { unreadableIds += 1; return; }
+      const id = BigInt(r);
+      if (id > 0n) tokenIds.push(id);
+    });
+    // An index the RPC could not read is NOT an absent position. Rather than
+    // drop it silently — the exact defect Phase 1 exists to end — it is
+    // disclosed through the same channel a cap would have used.
+    if (unreadableIds > 0) {
       truncated.push({
         scope: chain.chainName,
-        cap: OPEN_POSITION_CAP,
-        returned: count,
+        cap: balance,
+        returned: tokenIds.length,
         knownTotal: balance,
-        reason: 'open-position-scan-cap',
+        reason: 'tokenid-enumeration-incomplete',
       });
-      console.warn(`[uniswap] ${chain.chainName}: wallet holds ${balance} positions, scan cap is ${OPEN_POSITION_CAP} — ${balance - count} not returned`);
+      console.warn(`[uniswap] ${chain.chainName}: ${unreadableIds} of ${balance} tokenId reads unavailable (RPC failure or time budget)`);
     }
 
-    // Fetch all token IDs
-    const tokenIds: bigint[] = [];
-    for (let i = 0; i < count; i++) {
-      const id = await getTokenId(chain.rpc, chain.nftManager, account, i);
-      if (id > 0n) tokenIds.push(id);
+    // positions() for every tokenId, batched.
+    const posResults = await ethCallMany(
+      chain.rpc,
+      tokenIds.map((id) => ({ to: chain.nftManager, data: SELECTORS.positions + padUint256(id) })),
+      { deadline },
+    );
+    const posById = new Map<string, PositionData>();
+    tokenIds.forEach((id, i) => {
+      const raw = posResults[i];
+      const parsed = raw ? decodePositionData(raw) : null;
+      if (parsed) posById.set(id.toString(), parsed);
+    });
+    if (posById.size < tokenIds.length) {
+      // A HELD tokenId whose positions() cannot be read is surfaced, never
+      // dropped. (A revert would mean the NFT is burned — but an id returned by
+      // tokenOfOwnerByIndex is by definition still held, so this is transport.)
+      truncated.push({
+        scope: chain.chainName,
+        cap: balance,
+        returned: posById.size,
+        knownTotal: tokenIds.length,
+        reason: 'position-read-incomplete',
+      });
+      console.warn(`[uniswap] ${chain.chainName}: ${tokenIds.length - posById.size} positions() reads failed`);
     }
+
+    // Token metadata for each unknown token ONCE per address, batched. The old
+    // per-position loop re-fetched the same token's symbol+decimals for every
+    // position that used it — invisible under a cap of 20, quadratic without one.
+    const unknownTokens = [...new Set(
+      [...posById.values()].flatMap((p) => [p.token0, p.token1]).filter((a) => !knownTokens[a]),
+    )];
+    const fetchedTokenInfo = await fetchTokenInfoMany(chain.rpc, unknownTokens);
+
+    // Pool address for each distinct (token0, token1, fee) tuple, batched into
+    // the same module cache resolvePoolAddress reads (ITEM 0g / G1).
+    await prewarmPoolAddresses(chain.rpc, chain.factory, [...posById.values()]);
 
     // Fetch position data for each token
     for (const tokenId of tokenIds) {
       try {
-        const pos = await getPosition(chain.rpc, chain.nftManager, tokenId);
+        const pos = posById.get(tokenId.toString());
         if (!pos) continue;
-        
+
         // Get token info
         let t0Info = knownTokens[pos.token0];
         let t1Info = knownTokens[pos.token1];
-        
-        // Fetch unknown tokens from chain
+
+        // Unknown tokens resolved above, in one batch
         if (!t0Info) {
-          const fetched = await fetchTokenInfo(chain.rpc, pos.token0);
-          t0Info = { ...fetched, coingeckoId: '' };
+          t0Info = { ...fetchedTokenInfo[pos.token0], coingeckoId: '' };
         }
         if (!t1Info) {
-          const fetched = await fetchTokenInfo(chain.rpc, pos.token1);
-          t1Info = { ...fetched, coingeckoId: '' };
+          t1Info = { ...fetchedTokenInfo[pos.token1], coingeckoId: '' };
         }
         
         // Calculate amounts
@@ -574,7 +730,7 @@ async function fetchPositionsForChain(
   // balanceOf/tokenOfOwnerByIndex path above is untouched (incl. closed-but-not-
   // burned liquidity=0 positions, which still exist and are already returned).
   const archiveRpc = TENDERLY_RPCS[chainKey];
-  if (archiveRpc) {
+  if (archiveRpc && Date.now() < recoveryDeadline) {
     try {
       const heldIds = new Set(positions.map((p) => String(p.tokenId)));
       const everOwned = await getEverOwnedTokenIds(chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0);
@@ -601,6 +757,19 @@ async function fetchPositionsForChain(
     } catch (err) {
       console.error(`[uniswap] burned-recovery failed on ${chainKey}:`, err);
     }
+  } else if (archiveRpc) {
+    // The open-position enumeration consumed the chain's budget. Skipping
+    // recovery keeps the route inside `maxDuration`; saying so keeps it honest —
+    // a wallet is told its closed positions were not reached, rather than being
+    // shown a set that looks complete.
+    truncated.push({
+      scope: `${chain.chainName} closed-position recovery`,
+      cap: 0,
+      returned: 0,
+      knownTotal: null,
+      reason: 'closed-recovery-time-budget-exhausted',
+    });
+    console.warn(`[uniswap] ${chain.chainName}: skipped closed-position recovery — time budget exhausted`);
   }
 
   return { positions, truncated };

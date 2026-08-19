@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
 import type { RouteTruncation } from '../../lib/enumerationTruncation';
+import { ethCallMany } from '../../lib/evmBatchCall';
+import { evmRpcPost } from '../../lib/evmRpc';
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -86,19 +88,23 @@ function padInt256(value: number): string {
   return u.toString(16).padStart(64, '0');
 }
 
+// Routed through the shared paced transport rather than a bare `fetch`
+// (queue item C Phase 2a). This route still fans out per position in
+// `fetchPoolExtras` and per token in `fetchTokenInfo` via `Promise.all`; with
+// the 50-position cap removed those fan-outs are only as wide as the wallet is
+// large, so an unbounded bare fetch would let a big wallet fire hundreds of
+// simultaneous requests at the public HyperEVM RPC. evmRpcPost's global
+// semaphore bounds them without restructuring each caller, and adds the 12 s
+// timeout + 403/429 backoff the bare fetch never had — a hang here previously
+// blocked until the client's own abort. Successful calls are byte-identical.
 async function rpcCall(to: string, data: string): Promise<string> {
-  const res = await fetch(HYPEREVM_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'eth_call',
-      params: [{ to, data }, 'latest'],
-      id: 1,
-    }),
+  const env = await evmRpcPost(HYPEREVM_RPC, {
+    jsonrpc: '2.0',
+    method: 'eth_call',
+    params: [{ to, data }, 'latest'],
+    id: 1,
   });
-  const json = await res.json();
-  return json.result || '0x';
+  return typeof env.result === 'string' ? env.result : '0x';
 }
 
 async function getBalance(nftManager: string, account: string): Promise<number> {
@@ -106,13 +112,6 @@ async function getBalance(nftManager: string, account: string): Promise<number> 
   const result = await rpcCall(nftManager, data);
   if (!result || result === '0x') return 0;
   return parseInt(result, 16);
-}
-
-async function getTokenId(nftManager: string, account: string, index: number): Promise<bigint> {
-  const data = SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(index));
-  const result = await rpcCall(nftManager, data);
-  if (!result || result === '0x') return 0n;
-  return BigInt(result);
 }
 
 interface PositionData {
@@ -128,10 +127,12 @@ interface PositionData {
   feeGrowthInside1LastX128: bigint;
 }
 
-async function getPosition(nftManager: string, tokenId: bigint): Promise<PositionData | null> {
-  const data = SELECTORS.positions + padUint256(tokenId);
-  const result = await rpcCall(nftManager, data);
-
+/**
+ * Pure decoder for a positions(uint256) payload. Split out of getPosition
+ * (queue item C Phase 2a) so the BATCHED enumeration decodes through byte-
+ * identical logic rather than a second copy; getPosition now delegates to it.
+ */
+function decodePositionData(result: string | null): PositionData | null {
   if (!result || result === '0x' || result.length < 770) return null;
 
   const hex = result.startsWith('0x') ? result.slice(2) : result;
@@ -498,10 +499,17 @@ async function fetchHyperSwapAPYs(): Promise<Record<string, number>> {
   return (await fetchHyperSwapPoolData()).apys;
 }
 
-// Queue item C Phase 1 — named so the cap and its disclosure cannot drift.
-// Phase 2 replaces this with real pagination: `balanceOf` already returns the
-// exact position count, so nothing has to be discovered, only iterated.
-const OPEN_POSITION_CAP = 50;
+// Queue item C Phase 2a — the open-position cap is GONE. `balanceOf` returns
+// the exact count, so there was nothing to discover here, only to iterate.
+// Enumeration and positions() now go out BATCHED through the shared paced
+// transport, which also replaces the old unbounded `Promise.all(tokenIds.map(…))`
+// — with the cap removed that would have fired one simultaneous request per
+// position at the public HyperEVM RPC, the exact burst shape that throttles an
+// endpoint into the hang state ITEM 0i renders as confident zeros.
+//
+// The count bound is replaced by a TIME bound: whatever the budget cannot reach
+// is disclosed through `truncated`, never silently dropped.
+const ENUMERATION_BUDGET_MS = 60_000;
 
 async function fetchPositionsForManager(
   nftManager: string,
@@ -521,34 +529,56 @@ async function fetchPositionsForManager(
     console.log(`[HyperSwap] ${protocol} balance for ${account}: ${balance}`);
     if (balance === 0) return [];
 
-    const count = Math.min(balance, OPEN_POSITION_CAP);
-    if (balance > count) {
-      // Silent truncation is the bug being fixed: the wallet is told about the
-      // positions this scan could not reach, rather than shown a confident
-      // partial set (architecture Rule 11 at the enumeration layer).
+    // EVERY tokenId the wallet holds — `balance` is exact — read in batches.
+    const deadline = Date.now() + ENUMERATION_BUDGET_MS;
+    const idResults = await ethCallMany(
+      HYPEREVM_RPC,
+      Array.from({ length: balance }, (_, i) => ({
+        to: nftManager,
+        data: SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(i)),
+      })),
+      { deadline },
+    );
+    const tokenIds: bigint[] = [];
+    let unreadableIds = 0;
+    idResults.forEach((r) => {
+      if (r === null) { unreadableIds += 1; return; }
+      const id = BigInt(r);
+      if (id > 0n) tokenIds.push(id);
+    });
+    if (unreadableIds > 0) {
+      // Transport failure, not absence — disclosed rather than dropped.
       truncated.push({
         scope: protocol,
-        cap: OPEN_POSITION_CAP,
-        returned: count,
+        cap: balance,
+        returned: tokenIds.length,
         knownTotal: balance,
-        reason: 'open-position-scan-cap',
+        reason: 'tokenid-enumeration-incomplete',
       });
-      console.warn(`[HyperSwap] ${protocol}: wallet holds ${balance} positions, scan cap is ${OPEN_POSITION_CAP} — ${balance - count} not returned`);
-    }
-    const tokenIds: bigint[] = [];
-    for (let i = 0; i < count; i++) {
-      const id = await getTokenId(nftManager, account, i);
-      if (id > 0n) tokenIds.push(id);
+      console.warn(`[HyperSwap] ${protocol}: ${unreadableIds} of ${balance} tokenId reads failed`);
     }
     console.log(`[HyperSwap] ${protocol} tokenIds:`, tokenIds.map(String));
 
-    const results: Array<{ tokenId: bigint; pos: PositionData; protocol: string; nftManager: string; knownFactory: string }> = [];
-    await Promise.all(
-      tokenIds.map(async (tokenId) => {
-        const pos = await getPosition(nftManager, tokenId);
-        if (pos) results.push({ tokenId, pos, protocol, nftManager, knownFactory });
-      }),
+    const posResults = await ethCallMany(
+      HYPEREVM_RPC,
+      tokenIds.map((id) => ({ to: nftManager, data: SELECTORS.positions + padUint256(id) })),
+      { deadline },
     );
+    const results: Array<{ tokenId: bigint; pos: PositionData; protocol: string; nftManager: string; knownFactory: string }> = [];
+    tokenIds.forEach((tokenId, i) => {
+      const pos = decodePositionData(posResults[i]);
+      if (pos) results.push({ tokenId, pos, protocol, nftManager, knownFactory });
+    });
+    if (results.length < tokenIds.length) {
+      truncated.push({
+        scope: protocol,
+        cap: balance,
+        returned: results.length,
+        knownTotal: tokenIds.length,
+        reason: 'position-read-incomplete',
+      });
+      console.warn(`[HyperSwap] ${protocol}: ${tokenIds.length - results.length} positions() reads failed`);
+    }
     return results;
   } catch (err) {
     console.error(`[HyperSwap] fetchPositionsForManager threw for ${protocol}:`, err);
