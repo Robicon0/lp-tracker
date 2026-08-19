@@ -529,7 +529,7 @@ function InputModeTabs({
             onClick={() => onChange(tab.key)}
             className={`rounded px-3 py-1.5 text-[12px] font-medium transition-colors ${
               mode === tab.key
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-solid)] text-white"
                 : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
@@ -1269,7 +1269,7 @@ export default function PositionsPage() {
           <button
             type="button"
             onClick={() => setModal({ kind: "add" })}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+            className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
           >
             Add Position
           </button>
@@ -2288,7 +2288,7 @@ function ViewToggle({
               idx > 0 ? "border-l border-[var(--border-strong)]" : ""
             } ${
               selected
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-solid)] text-white"
                 : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
             }`}
           >
@@ -3885,7 +3885,7 @@ function CloseModeTabs({
             onClick={() => onChange(tab.key)}
             className={`rounded px-3 py-1.5 text-[12px] font-medium transition-colors ${
               mode === tab.key
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-solid)] text-white"
                 : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
@@ -4410,7 +4410,7 @@ function ClosePositionModal({
                       i > 0 ? "border-l border-[var(--border-strong)]" : ""
                     } ${
                       rangeExit === value
-                        ? "bg-[var(--accent)] text-white"
+                        ? "bg-[var(--accent-solid)] text-white"
                         : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
                     }`}
                   >
@@ -4509,7 +4509,7 @@ function ClosePositionModal({
                     onClick={() => setClaimConverted(true)}
                     className={`h-8 px-4 text-xs font-medium transition-colors ${
                       claimConverted
-                        ? "bg-[var(--accent)] text-white"
+                        ? "bg-[var(--accent-solid)] text-white"
                         : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
                     }`}
                   >
@@ -4522,7 +4522,7 @@ function ClosePositionModal({
                     onClick={() => setClaimConverted(false)}
                     className={`h-8 px-4 text-xs font-medium border-l border-[var(--border-strong)] transition-colors ${
                       !claimConverted
-                        ? "bg-[var(--accent)] text-white"
+                        ? "bg-[var(--accent-solid)] text-white"
                         : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
                     }`}
                   >
@@ -4711,7 +4711,7 @@ function FormActions({
   const submitClass =
     submitTone === "danger"
       ? "bg-rose-500 hover:bg-rose-500/90 text-white"
-      : "bg-[var(--accent)] hover:bg-[var(--accent)]/90 text-white";
+      : "bg-[var(--accent-solid)] hover:bg-[var(--accent-solid)]/90 text-white";
   return (
     <div className="flex justify-end gap-2 px-5 py-4">
       <button

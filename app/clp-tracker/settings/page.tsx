@@ -651,7 +651,7 @@ function ToggleSwitch({ checked, onChange, ariaLabel }: ToggleSwitchProps) {
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
         checked
-          ? "border-[var(--accent)] bg-[var(--accent)]"
+          ? "border-[var(--accent)] bg-[var(--accent-solid)]"
           : "border-[var(--border-strong)] bg-[var(--surface-2)]"
       }`}
     >

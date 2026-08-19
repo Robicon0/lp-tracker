@@ -288,7 +288,7 @@ export default function PoolPnlPage() {
               </p>
               <Link
                 href="/clp-tracker/positions"
-                className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+                className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
               >
                 Go to Positions
               </Link>
@@ -491,7 +491,7 @@ function StatusFilterToggle({ value, onChange }: StatusFilterToggleProps) {
               idx > 0 ? "border-l border-[var(--border-strong)]" : ""
             } ${
               selected
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-solid)] text-white"
                 : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
             }`}
           >

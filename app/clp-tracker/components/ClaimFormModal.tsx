@@ -314,7 +314,7 @@ function FormActions({ onCancel, submitLabel }: FormActionsProps) {
       </button>
       <button
         type="submit"
-        className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent)]/90"
+        className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90"
       >
         {submitLabel}
       </button>
@@ -667,7 +667,7 @@ export function ClaimFormModal({
                   onClick={() => set("convertedToStable", true)}
                   className={`h-8 px-4 text-xs font-medium transition-colors ${
                     form.convertedToStable
-                      ? "bg-[var(--accent)] text-white"
+                      ? "bg-[var(--accent-solid)] text-white"
                       : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
                   }`}
                 >
@@ -680,7 +680,7 @@ export function ClaimFormModal({
                   onClick={() => set("convertedToStable", false)}
                   className={`h-8 px-4 text-xs font-medium border-l border-[var(--border-strong)] transition-colors ${
                     !form.convertedToStable
-                      ? "bg-[var(--accent)] text-white"
+                      ? "bg-[var(--accent-solid)] text-white"
                       : "bg-[var(--surface-2)] text-[var(--muted)] hover:bg-[var(--surface-2)]/70"
                   }`}
                 >
