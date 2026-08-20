@@ -1005,6 +1005,9 @@ export function calcWideRangePercent(
 export interface OverallPnL {
   activeCurrentValue: number;
   convertedFees: number;
+  // convertedFees' volatile-token half (see ConvertedFees). Carried through so
+  // the card can explain the total without recomputing either piece.
+  convertedFromTokens: number;
   expenses: number;
   initialCapital: number;
   overall: number;
@@ -1121,6 +1124,11 @@ export function isUnvaluedConvertedClaim(claim: FeeClaim): boolean {
 
 export interface ConvertedFees {
   convertedFees: number;
+  // The two halves convertedFees is made of, named rather than left to
+  // subtraction: dollars that came from selling a volatile token, and dollars
+  // that were already stablecoin when claimed. convertedFromTokens +
+  // mixedStableRecovered === convertedFees by construction.
+  convertedFromTokens: number;
   unvaluedConvertedClaims: number;
   mixedStableClaims: number;
   mixedStableRecovered: number;
@@ -1134,6 +1142,7 @@ export interface ConvertedFees {
 // counting realized fees would eventually disagree (Invariant #6).
 export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
   let convertedFees = 0;
+  let convertedFromTokens = 0;
   let unvaluedConvertedClaims = 0;
   let mixedStableClaims = 0;
   let mixedStableRecovered = 0;
@@ -1144,6 +1153,7 @@ export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
         continue;
       }
       convertedFees += c.stableAmount as number;
+      convertedFromTokens += c.stableAmount as number;
       continue;
     }
     // Not converted overall — but any stablecoin leg is already realized.
@@ -1155,6 +1165,7 @@ export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
   }
   return {
     convertedFees,
+    convertedFromTokens,
     unvaluedConvertedClaims,
     mixedStableClaims,
     mixedStableRecovered,
@@ -1179,6 +1190,7 @@ export function calcOverallPnL(
 
   const {
     convertedFees,
+    convertedFromTokens,
     unvaluedConvertedClaims,
     mixedStableClaims,
     mixedStableRecovered,
@@ -1197,6 +1209,7 @@ export function calcOverallPnL(
   return {
     activeCurrentValue,
     convertedFees,
+    convertedFromTokens,
     expenses,
     initialCapital: capital,
     overall: activeCurrentValue + convertedFees - capital,
