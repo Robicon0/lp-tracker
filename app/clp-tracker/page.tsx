@@ -51,6 +51,7 @@ import type {
 const EMPTY_OVERALL: OverallPnL = {
   activeCurrentValue: 0,
   convertedFees: 0,
+  convertedFromTokens: 0,
   expenses: 0,
   initialCapital: 0,
   overall: 0,
