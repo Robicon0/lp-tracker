@@ -57,6 +57,7 @@ const EMPTY_OVERALL: OverallPnL = {
   unvaluedConvertedClaims: 0,
   mixedStableClaims: 0,
   mixedStableRecovered: 0,
+  convertedFromTokens: 0,
 };
 
 const EMPTY_DATA_HEALTH: DataHealthReport = {

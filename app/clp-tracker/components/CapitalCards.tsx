@@ -139,6 +139,13 @@ export function OverallPnLCard({
           : ""}{" "}
         (see Business P&amp;L for that).
       </p>
+      {result.convertedFees > 0 && (
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          Converted Fees {formatUsd(result.convertedFees)} ={" "}
+          {formatUsd(result.convertedFromTokens)} converted from tokens +{" "}
+          {formatUsd(result.mixedStableRecovered)} already earned in stablecoin.
+        </p>
+      )}
       {breakdown}
       {result.unvaluedConvertedClaims > 0 && (
         <p className="mt-2 text-[11px] text-amber-300">

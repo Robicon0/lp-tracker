@@ -10,7 +10,7 @@ import {
   getTransfers,
 } from "../lib/storage";
 import {
-  calcBusinessPnL,
+  calcFeesHeldValue,
   getEffectiveDeposited,
   withLiveValues,
 } from "../lib/calculations";
@@ -51,12 +51,18 @@ interface PortfolioStatus {
 // P&L across every position ever opened, closed included — so this must not
 // filter, or the two numbers drift apart.
 //
-// The FEE half is Business P&L's All Total, i.e. every reward token valued at
-// TODAY's price, matching 6da8f43. It is one global figure, not a per-position
-// sum: getEffectiveTotalFees would give the claim-TIME value, which is what
-// Total P&L's separate "Total Fees Earned" card shows and is deliberately a
-// different number. That is why this takes `prices` and why the Sidebar fetches
-// them at all (see the note in the component).
+// The FEE half is calcFeesHeldValue — fees already sold for stable at their
+// fixed claim-time value, PLUS the tokens still held at today's price. It is
+// one global figure, not a per-position sum: getEffectiveTotalFees would give
+// the claim-TIME value of everything, which is what Total P&L's separate
+// "Total Fees Earned" card shows and is deliberately a different number. That
+// is why this takes `prices` and why the Sidebar fetches them at all (see the
+// note in the component).
+//
+// It was Business P&L's All Total until this change. That valued EVERY token
+// ever claimed at today's rate, so fees long since converted and spent kept
+// being re-valued into Net P&L. Both pages moved together, because Invariant
+// #6 requires this figure to equal Total P&L's Net P&L exactly.
 //
 // LP P&L (currentBalance − deposited) and Short P&L are untouched.
 function computePortfolioStatus(
@@ -67,7 +73,7 @@ function computePortfolioStatus(
   if (positions.length === 0) {
     return { state: "neutral", netPnl: 0, hasData: false };
   }
-  let netPnl = calcBusinessPnL(allClaims, prices).allTotal;
+  let netPnl = calcFeesHeldValue(allClaims, prices);
   for (const p of positions) {
     netPnl += p.currentBalance - getEffectiveDeposited(p);
     if (p.shortTotal !== null && Number.isFinite(p.shortTotal)) {

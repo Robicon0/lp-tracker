@@ -1017,6 +1017,10 @@ export interface OverallPnL {
   // without recomputing it a second way (Invariant #6).
   mixedStableClaims: number;
   mixedStableRecovered: number;
+  // The volatile-token half of convertedFees, so the card can name both parts
+  // instead of showing one opaque total. Display only — nothing reads it for
+  // arithmetic, and convertedFees is unchanged.
+  convertedFromTokens: number;
 }
 
 // The face value of a claim's stablecoin legs. A stable leg is already in
@@ -1121,6 +1125,14 @@ export function isUnvaluedConvertedClaim(claim: FeeClaim): boolean {
 
 export interface ConvertedFees {
   convertedFees: number;
+  // The two halves convertedFees is made of, named rather than recovered by
+  // subtraction:
+  //   convertedFromTokens  — claims marked converted AND valued: a volatile
+  //                          token that was actually sold for stablecoin.
+  //   mixedStableRecovered — the stablecoin leg of claims marked NOT converted,
+  //                          which was never volatile and needed no converting.
+  // convertedFromTokens + mixedStableRecovered === convertedFees, always.
+  convertedFromTokens: number;
   unvaluedConvertedClaims: number;
   mixedStableClaims: number;
   mixedStableRecovered: number;
@@ -1134,6 +1146,7 @@ export interface ConvertedFees {
 // counting realized fees would eventually disagree (Invariant #6).
 export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
   let convertedFees = 0;
+  let convertedFromTokens = 0;
   let unvaluedConvertedClaims = 0;
   let mixedStableClaims = 0;
   let mixedStableRecovered = 0;
@@ -1144,6 +1157,7 @@ export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
         continue;
       }
       convertedFees += c.stableAmount as number;
+      convertedFromTokens += c.stableAmount as number;
       continue;
     }
     // Not converted overall — but any stablecoin leg is already realized.
@@ -1155,10 +1169,47 @@ export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
   }
   return {
     convertedFees,
+    convertedFromTokens,
     unvaluedConvertedClaims,
     mixedStableClaims,
     mixedStableRecovered,
   };
+}
+
+// FEE VALUE FOR NET P&L — what you actually have from fees right now.
+//
+// Two parts, each priced the only way it can honestly be priced:
+//   realized  = calcConvertedFees(claims)            — fees already sold for
+//               stable. A FIXED, known figure at claim-time value; today's
+//               token price is irrelevant because the tokens are gone.
+//   stillHeld = calcUnconvertedHoldings(..., { excludeStables: true })
+//               .totalCurrentValue                   — tokens you are still
+//               holding, at today's price, because that is what they are worth.
+//
+// REPLACES calcBusinessPnL(...).allTotal as Net P&L's fee term. allTotal prices
+// EVERY token ever claimed at today's rate — including ones long since
+// converted and spent — so a token that has since mooned inflated Net P&L by
+// the full re-valuation of fees the user no longer owns. It remains correct for
+// what it is (Business P&L's "All Total" answers "what would every fee I ever
+// claimed be worth if I still held it all"), and that card is unchanged.
+//
+// excludeStables is set because a stablecoin leg is already counted inside
+// calcConvertedFees via claimStableRealized — counting it again here would
+// double it. That is the whole reason the flag exists (92d2455).
+//
+// One definition, called by BOTH Total P&L and the Sidebar: Invariant #6 says
+// Sidebar Net P&L must equal Total P&L's Net P&L, and the last time these were
+// computed separately they silently drifted apart (the Known Issue 6d22d25
+// closed). Do not inline either half at a call site.
+export function calcFeesHeldValue(
+  claims: FeeClaim[],
+  prices: Record<string, number>,
+): number {
+  return (
+    calcConvertedFees(claims) +
+    calcUnconvertedHoldings(claims, prices, { excludeStables: true })
+      .totalCurrentValue
+  );
 }
 
 // The dollar figure alone, for callers that only need the number.
@@ -1179,6 +1230,7 @@ export function calcOverallPnL(
 
   const {
     convertedFees,
+    convertedFromTokens,
     unvaluedConvertedClaims,
     mixedStableClaims,
     mixedStableRecovered,
@@ -1203,6 +1255,7 @@ export function calcOverallPnL(
     unvaluedConvertedClaims,
     mixedStableClaims,
     mixedStableRecovered,
+    convertedFromTokens,
   };
 }
 

@@ -11,10 +11,10 @@ import {
   saveSettings,
 } from "../lib/storage";
 import {
-  calcBusinessPnL,
   calcDaysActive,
   calcFeeAPR,
   calcOverallPnL,
+  calcFeesHeldValue,
   withLiveValues,
   calcPositionProfit,
   calcPriceDiff,
@@ -43,6 +43,7 @@ const EMPTY_OVERALL: OverallPnL = {
   unvaluedConvertedClaims: 0,
   mixedStableClaims: 0,
   mixedStableRecovered: 0,
+  convertedFromTokens: 0,
 };
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
@@ -343,11 +344,14 @@ export default function TotalPnlPage() {
     [fetchedPrices, manualPrices],
   );
 
-  // Every fee token ever claimed, valued at today's price — the exact figure
-  // Business P&L's "All Total" card shows, from the same function, so the two
-  // pages cannot disagree (Invariant #6).
-  const feesAtCurrentValue = useMemo(
-    () => (hydrated ? calcBusinessPnL(claims, prices).allTotal : 0),
+  // Net P&L's fee term: fees already sold for stable (fixed, claim-time) plus
+  // the tokens still held (live). See calcFeesHeldValue — one definition, shared
+  // with the Sidebar. This deliberately REPLACES calcBusinessPnL(...).allTotal,
+  // which priced every token ever claimed at today's rate and so let a converted
+  // and spent claim keep inflating Net P&L. Business P&L's own All Total card is
+  // untouched and still shows that figure.
+  const feesHeldValue = useMemo(
+    () => (hydrated ? calcFeesHeldValue(claims, prices) : 0),
     [hydrated, claims, prices],
   );
 
@@ -371,7 +375,7 @@ export default function TotalPnlPage() {
   const totals = useMemo(
     () =>
       hydrated
-        ? computeTotals(livePositions, claims, feesAtCurrentValue)
+        ? computeTotals(livePositions, claims, feesHeldValue)
         : {
             totalInvested: 0,
             totalCurrentValue: 0,
@@ -381,7 +385,7 @@ export default function TotalPnlPage() {
             lpPnL: 0,
             netPnL: 0,
           },
-    [hydrated, livePositions, claims, feesAtCurrentValue],
+    [hydrated, livePositions, claims, feesHeldValue],
   );
 
   // Capital deployed RIGHT NOW. Deliberately a separate, open-only pass:
@@ -658,7 +662,7 @@ function PortfolioSummarySection({
                   // Not "Total Fees Earned" — that card is claim-time value and
                   // this term is today's, so reusing its name would put two
                   // different numbers under one label (Invariant #6).
-                  label: "+ Fee Tokens (Current Value)",
+                  label: "+ Fees Realized + Still Held",
                   value: formatUsd(totals.netFees),
                 },
                 {
