@@ -251,12 +251,21 @@ type ModalState =
 
 type PositionStatusFilter = "all" | "open" | "closed";
 
+// Deliberately NOT folded into Status. Status is a property of the claim's
+// PARENT POSITION (open/closed); this is a property of the CLAIM itself
+// (cashed out to stablecoin or still held as the reward token). Two different
+// questions — one control answering both would be unable to express
+// "converted claims on closed positions".
+type ConvertedFilter = "all" | "converted" | "not-converted";
+
 interface FilterState {
   positionId: string;
   platform: string;
   chain: string;
   // Filter claims by whether their linked position is active or closed.
   positionStatus: PositionStatusFilter;
+  // Filter claims by the claim's own convertedToStable flag.
+  converted: ConvertedFilter;
   // When true, show only claims marked converted with no saved USD value.
   needsValueOnly: boolean;
 }
@@ -267,6 +276,7 @@ const EMPTY_FILTERS: FilterState = {
   platform: ALL,
   chain: ALL,
   positionStatus: "all",
+  converted: "all",
   needsValueOnly: false,
 };
 
@@ -346,6 +356,10 @@ export default function ClaimsPage() {
         const wantClosed = filters.positionStatus === "closed";
         // A claim with no resolvable position is treated as open (not closed).
         if ((status === "closed") !== wantClosed) return false;
+      }
+      if (filters.converted !== "all") {
+        const wantConverted = filters.converted === "converted";
+        if (c.convertedToStable !== wantConverted) return false;
       }
       if (filters.needsValueOnly && !isUnvaluedConvertedClaim(c)) return false;
       return true;
@@ -555,7 +569,7 @@ export default function ClaimsPage() {
             </button>
           </div>
         )}
-        <div className="grid grid-cols-1 gap-3 border-b border-[var(--border)] px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 border-b border-[var(--border)] px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
           <PositionCombobox
             positions={positions}
             value={filters.positionId}
@@ -599,6 +613,24 @@ export default function ClaimsPage() {
               { value: "all", label: "All positions" },
               { value: "open", label: "Open positions" },
               { value: "closed", label: "Closed positions" },
+            ]}
+          />
+          {/* Its own control, not part of Status: Status asks about the parent
+              position, this asks about the claim. They AND together like every
+              other pair here. */}
+          <FilterSelect
+            label="Converted"
+            value={filters.converted}
+            onChange={(v) =>
+              setFilters((prev) => ({
+                ...prev,
+                converted: v as ConvertedFilter,
+              }))
+            }
+            options={[
+              { value: "all", label: "All claims" },
+              { value: "converted", label: "Converted" },
+              { value: "not-converted", label: "Not converted" },
             ]}
           />
         </div>
