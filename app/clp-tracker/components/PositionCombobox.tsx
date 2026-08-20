@@ -139,9 +139,6 @@ export function PositionCombobox({
     setQuery("");
   };
 
-  const isPlaceholder =
-    value === "" || (allValue !== undefined && value === allValue);
-
   return (
     <div className="space-y-1.5" ref={ref}>
       <span className="block text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
@@ -153,11 +150,12 @@ export function PositionCombobox({
           onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center justify-between gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-2 text-left text-sm focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
         >
-          <span
-            className={`truncate ${
-              isPlaceholder ? "text-[var(--muted)]" : "text-[var(--foreground)]"
-            }`}
-          >
+          {/* The default "All positions" state is NOT dimmed. It reads as a
+              placeholder here but sits beside Platform / Chain / Status, which
+              are plain <select>s and render their own "All X" default in full
+              foreground — dimming only this one made the row look broken
+              rather than helpful. Same brightness in every state now. */}
+          <span className="truncate text-[var(--foreground)]">
             {selectedLabel}
           </span>
           <span className="shrink-0 text-[var(--muted)]">▾</span>
