@@ -11,7 +11,7 @@ import {
   saveSettings,
 } from "../lib/storage";
 import {
-  calcBusinessPnL,
+  calcConvertedFees,
   calcDaysActive,
   calcFeeAPR,
   calcOverallPnL,
@@ -37,6 +37,7 @@ import type { FeeClaim, Position, Transfer } from "../lib/types";
 const EMPTY_OVERALL: OverallPnL = {
   activeCurrentValue: 0,
   convertedFees: 0,
+  convertedFromTokens: 0,
   expenses: 0,
   initialCapital: 0,
   overall: 0,
@@ -122,14 +123,14 @@ interface MonthRow {
   positionsActive: number;
 }
 
-// feesForNetPnL, when supplied, is the fee term Net P&L adds — Business P&L's
-// All Total, i.e. every reward token valued at TODAY's price. totalFees stays
-// the claim-time sum either way, because the Total Fees Earned card beside it
-// is a record of what was booked when it was claimed and must not move. The two
-// deliberately differ; only Net P&L switched to the current-value view, so that
-// "what is the business worth now" prices fee tokens the same way it prices
-// everything else. Omitted (the activeCapital pass) it falls back to totalFees,
-// which is harmless there since that pass is only read for capital figures.
+// feesForNetPnL, when supplied, is the fee term Net P&L adds: realized
+// converted fees (claim-time, already banked) + still-held non-stable fee
+// tokens at today's price — the fee money the business actually has. totalFees
+// stays the claim-time sum either way, because the Total Fees Earned card
+// beside it is a record of what was booked when it was claimed and must not
+// move. The two deliberately differ. Omitted (the activeCapital pass) it falls
+// back to totalFees, which is harmless there since that pass is only read for
+// capital figures.
 function computeTotals(
   positions: Position[],
   allClaims: FeeClaim[],
@@ -343,11 +344,30 @@ export default function TotalPnlPage() {
     [fetchedPrices, manualPrices],
   );
 
-  // Every fee token ever claimed, valued at today's price — the exact figure
-  // Business P&L's "All Total" card shows, from the same function, so the two
-  // pages cannot disagree (Invariant #6).
-  const feesAtCurrentValue = useMemo(
-    () => (hydrated ? calcBusinessPnL(claims, prices).allTotal : 0),
+  // The fee money you ACTUALLY have: what was realized, plus what is still
+  // held, each on its own honest basis.
+  //
+  //   realized  = calcConvertedFees — fixed, claim-time dollars, already banked
+  //   still held = calcUnconvertedHoldings(excludeStables) — live token prices
+  //
+  // Deliberately NOT Business P&L's All Total, which this used to be. All Total
+  // prices EVERY reward token ever claimed at TODAY's rate, including tokens
+  // that were converted and sold long ago — so a token that has since doubled
+  // inflated Net P&L by money the business never received. Stablecoins are
+  // excluded from the held half because their dollars are already inside the
+  // realized half (the same reason Business P&L's holdings table excludes
+  // them); counting them twice would double-count real money.
+  //
+  // Both halves come from the functions that already own those definitions, so
+  // Net P&L cannot drift from Overall P&L's Converted Fees or Business P&L's
+  // Unconverted Holdings (Invariant #6).
+  const feesForNetPnL = useMemo(
+    () =>
+      hydrated
+        ? calcConvertedFees(claims) +
+          calcUnconvertedHoldings(claims, prices, { excludeStables: true })
+            .totalCurrentValue
+        : 0,
     [hydrated, claims, prices],
   );
 
@@ -371,7 +391,7 @@ export default function TotalPnlPage() {
   const totals = useMemo(
     () =>
       hydrated
-        ? computeTotals(livePositions, claims, feesAtCurrentValue)
+        ? computeTotals(livePositions, claims, feesForNetPnL)
         : {
             totalInvested: 0,
             totalCurrentValue: 0,
@@ -381,7 +401,7 @@ export default function TotalPnlPage() {
             lpPnL: 0,
             netPnL: 0,
           },
-    [hydrated, livePositions, claims, feesAtCurrentValue],
+    [hydrated, livePositions, claims, feesForNetPnL],
   );
 
   // Capital deployed RIGHT NOW. Deliberately a separate, open-only pass:
@@ -655,10 +675,12 @@ function PortfolioSummarySection({
               rows={[
                 { label: "LP P&L", value: formatUsd(totals.lpPnL) },
                 {
-                  // Not "Total Fees Earned" — that card is claim-time value and
-                  // this term is today's, so reusing its name would put two
-                  // different numbers under one label (Invariant #6).
-                  label: "+ Fee Tokens (Current Value)",
+                  // Not "Total Fees Earned" — that card is the claim-time sum
+                  // of every fee ever earned, while this term is realized
+                  // fees + only what is STILL held, priced today. Reusing its
+                  // name would put two different numbers under one label
+                  // (Invariant #6).
+                  label: "+ Fees Realized + Still Held",
                   value: formatUsd(totals.netFees),
                 },
                 {
@@ -788,8 +810,8 @@ function NetPnlCard({ value, breakdown }: NetPnlCardProps) {
         {formatUsd(value)}
       </div>
       <p className="mt-2 text-[11px] text-[var(--muted)]">
-        LP P&amp;L + Total Fees + Short P&amp;L, across every position ever
-        opened
+        LP P&amp;L + fee money you actually have (realized + still held) + Short
+        P&amp;L, across every position ever opened
       </p>
       {breakdown}
     </div>

@@ -139,6 +139,19 @@ export function OverallPnLCard({
           : ""}{" "}
         (see Business P&amp;L for that).
       </p>
+      {/* The two halves of Converted Fees, named. Same total as before — this
+          only says what the number is made of, so "realized converted profit"
+          above stops being opaque. Rendered only when there is something to
+          split; a business with no stablecoin-leg recovery reads the same as
+          it always did. */}
+      {result.convertedFees !== 0 && result.mixedStableRecovered !== 0 && (
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          Converted Fees {formatUsd(result.convertedFees)} ={" "}
+          {formatUsd(result.convertedFromTokens)} converted from tokens (ETH,
+          SOL, etc.) + {formatUsd(result.mixedStableRecovered)} already earned
+          in stablecoin.
+        </p>
+      )}
       {breakdown}
       {result.unvaluedConvertedClaims > 0 && (
         <p className="mt-2 text-[11px] text-amber-300">
