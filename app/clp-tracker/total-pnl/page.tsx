@@ -63,6 +63,17 @@ function formatToken(value: number): string {
   return tokenFormatter.format(Number.isFinite(value) ? value : 0);
 }
 
+function formatDate(iso: string | null): string {
+  if (!iso) return "\u2014";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "\u2014";
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function formatPercent(value: number): string {
   const safe = Number.isFinite(value) ? value : 0;
   return `${safe.toFixed(2)}%`;
@@ -102,6 +113,19 @@ interface SegmentSummary {
   weight: number;
   profit: number;
   best: { pair: string; apr: number } | null;
+}
+
+// One closed position's contribution to the Scalp figure. Built in the SAME
+// pass as lpSplit.closed below and from the same two values, so the list can
+// never disagree with the number it explains.
+interface ClosedScalpRow {
+  id: string;
+  pair: string;
+  closedAt: string | null;
+  closedTs: number;
+  deposited: number;
+  finalAmount: number;
+  scalp: number;
 }
 
 interface TokenRow {
@@ -402,15 +426,35 @@ export default function TotalPnlPage() {
   // so the two parts add up to it exactly. For a closed position
   // currentBalance is the final withdrawn amount, so (final − deposited) is
   // that position's scalp by the app's definition (c372b30).
+  // The per-position rows behind `closed` are collected here rather than in a
+  // second pass, so the "Show breakdown" list under Closed positions (Scalp)
+  // is the identical arithmetic, item by item, and sums to it by construction.
   const lpSplit = useMemo(() => {
     let active = 0;
     let closed = 0;
+    const closedRows: ClosedScalpRow[] = [];
     for (const p of positions) {
-      const v = p.currentBalance - getEffectiveDeposited(p);
-      if (p.status === "active") active += v;
-      else closed += v;
+      const deposited = getEffectiveDeposited(p);
+      const v = p.currentBalance - deposited;
+      if (p.status === "active") {
+        active += v;
+        continue;
+      }
+      closed += v;
+      const ts = p.exitDatetime ? new Date(p.exitDatetime).getTime() : NaN;
+      closedRows.push({
+        id: p.id,
+        pair: p.pair,
+        closedAt: p.exitDatetime,
+        // Undated closes sort last rather than being dropped from the list.
+        closedTs: Number.isFinite(ts) ? ts : Number.NEGATIVE_INFINITY,
+        deposited,
+        finalAmount: p.currentBalance,
+        scalp: v,
+      });
     }
-    return { active, closed };
+    closedRows.sort((a, b) => b.closedTs - a.closedTs);
+    return { active, closed, closedRows };
   }, [positions]);
 
   const handleSaveInitialCapital = (next: number) => {
@@ -551,7 +595,7 @@ function EmptyIcon() {
 interface PortfolioSummarySectionProps {
   totals: PortfolioTotals;
   activeCapital: PortfolioTotals;
-  lpSplit: { active: number; closed: number };
+  lpSplit: { active: number; closed: number; closedRows: ClosedScalpRow[] };
   lifetimeDeposited: number;
   overall: OverallPnL;
   claims: FeeClaim[];
@@ -631,6 +675,12 @@ function PortfolioSummarySection({
                 {
                   label: "+ Closed positions (Scalp)",
                   value: formatUsd(lpSplit.closed),
+                  after: (
+                    <ClosedScalpList
+                      rows={lpSplit.closedRows}
+                      expected={lpSplit.closed}
+                    />
+                  ),
                 },
                 { label: "=", value: formatUsd(totals.lpPnL), isTotal: true },
               ]}
@@ -687,6 +737,87 @@ function PortfolioSummarySection({
           }
         />
       </div>
+    </div>
+  );
+}
+
+// The closed-position list behind "Closed positions (Scalp)". Collapsed by
+// default and nested under that single line, so the LP P&L card keeps its
+// height until the user asks to see the math. Purely a view of values already
+// computed in lpSplit — it adds no arithmetic of its own beyond re-summing the
+// rows for the footer, which is exactly the point: the footer proves the list
+// adds up to the figure above it.
+function ClosedScalpList({
+  rows,
+  expected,
+}: {
+  rows: ClosedScalpRow[];
+  // The "Closed positions (Scalp)" figure this list explains. Equal to the
+  // footer sum by construction (same values, same pass) — passed in only so a
+  // future divergence would be visible rather than silent.
+  expected: number;
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (rows.length === 0) return null;
+
+  const listTotal = rows.reduce((sum, r) => sum + r.scalp, 0);
+  const matches = Math.abs(listTotal - expected) < 0.005;
+
+  return (
+    <div className="mt-1 pl-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)]"
+      >
+        <span
+          aria-hidden
+          className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}
+        >
+          &#9656;
+        </span>
+        {open
+          ? "Hide breakdown"
+          : `Show breakdown (${rows.length} closed ${
+              rows.length === 1 ? "position" : "positions"
+            })`}
+      </button>
+
+      {open && (
+        <ul className="mt-1.5 space-y-1.5">
+          {rows.map((row) => (
+            <li key={row.id} className="leading-tight">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-medium text-[var(--foreground)]">
+                  {row.pair}
+                </span>
+                <span className={`tabular-nums ${pnlColor(row.scalp)}`}>
+                  {formatUsd(row.scalp)}
+                </span>
+              </div>
+              <div className="text-[10px] tabular-nums text-[var(--muted)]">
+                {formatDate(row.closedAt)} &middot; deposited{" "}
+                {formatUsd(row.deposited)} &rarr; received{" "}
+                {formatUsd(row.finalAmount)}
+              </div>
+            </li>
+          ))}
+
+          <li className="flex items-baseline justify-between gap-3 border-t border-[var(--border)] pt-1 font-medium text-[var(--foreground)]">
+            <span>= Closed positions (Scalp)</span>
+            <span className={`tabular-nums ${pnlColor(listTotal)}`}>
+              {formatUsd(listTotal)}
+            </span>
+          </li>
+          {!matches && (
+            <li className="text-[10px] text-amber-400">
+              List sum does not match the figure above ({formatUsd(expected)}).
+            </li>
+          )}
+        </ul>
+      )}
     </div>
   );
 }
