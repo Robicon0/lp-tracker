@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import type { OverallPnL } from "../lib/calculations";
+import { DisclosureToggle } from "./Breakdown";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -110,9 +111,11 @@ export function OverallPnLCard({
   heldFeesValue,
 }: {
   result: OverallPnL;
-  // Optional live formula breakdown, rendered only where it's passed. The
-  // Dashboard omits it (keeps the compact card); the Total P&L page supplies
-  // one so the number is auditable there.
+  // The live formula rows, so the number is auditable. BOTH pages that show
+  // this card pass the identical construction, because a figure that reads one
+  // way on the Dashboard and another on Total P&L is exactly what Invariant #6
+  // forbids. Pass `<Breakdown collapsible={false} .../>` — this card owns the
+  // toggle, so a Breakdown with its own would nest one inside the other.
   breakdown?: ReactNode;
   // What the excluded still-held tokens are worth today. The hint always said
   // they were excluded; naming the figure says HOW MUCH is excluded, which is
@@ -123,43 +126,63 @@ export function OverallPnLCard({
   // Undefined (or zero, when there is nothing held) renders the old sentence.
   heldFeesValue?: number;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
     <div className={cardClass}>
       <div className={labelClass}>Overall P&amp;L</div>
       <div className={`${valueClass} ${pnlColor(result.overall)}`}>
         {formatUsd(result.overall)}
       </div>
-      <p className={hintClass}>
-        Current active positions + realized converted profit − Initial Capital.
-        Pure LP business performance — personal spending / withdrawals are
-        tracked separately as Available Balance on the Transfers page. Excludes
-        tokens you&apos;re still holding
-        {heldFeesValue !== undefined && heldFeesValue !== 0
-          ? ` — ${formatUsd(heldFeesValue)} at today's value`
-          : ""}{" "}
-        (see Business P&amp;L for that).
-      </p>
-      {/* The two halves of Converted Fees, named. Same total as before — this
-          only says what the number is made of, so "realized converted profit"
-          above stops being opaque. Rendered only when there is something to
-          split; a business with no stablecoin-leg recovery reads the same as
-          it always did. */}
-      {result.convertedFees !== 0 && result.mixedStableRecovered !== 0 && (
-        <p className="mt-2 text-[11px] text-[var(--muted)]">
-          Converted Fees {formatUsd(result.convertedFees)} ={" "}
-          {formatUsd(result.convertedFromTokens)} converted from tokens (ETH,
-          SOL, etc.) + {formatUsd(result.mixedStableRecovered)} already earned
-          in stablecoin.
-        </p>
-      )}
-      {breakdown}
-      {result.unvaluedConvertedClaims > 0 && (
-        <p className="mt-2 text-[11px] text-amber-300">
-          {result.unvaluedConvertedClaims} converted{" "}
-          {result.unvaluedConvertedClaims === 1 ? "claim has" : "claims have"} no
-          USD value recorded and {result.unvaluedConvertedClaims === 1 ? "is" : "are"}{" "}
-          counted as $0 here.
-        </p>
+
+      {/* Everything that explains the number — the hint, the Converted Fees
+          split, the numeric formula and the unvalued-claims warning — sits
+          behind ONE toggle, collapsed by default, in the order it has always
+          been rendered. Four always-on blocks made this card several times the
+          height of its neighbours in the same grid for a figure most visits
+          only need to read. Same control as every other card's breakdown. */}
+      <div className="mt-2">
+        <DisclosureToggle open={open} onToggle={() => setOpen((o) => !o)} />
+      </div>
+
+      {open && (
+        <>
+          <p className={hintClass}>
+            Current active positions + realized converted profit − Initial
+            Capital. Pure LP business performance — personal spending /
+            withdrawals are tracked separately as Available Balance on the
+            Transfers page. Excludes tokens you&apos;re still holding
+            {heldFeesValue !== undefined && heldFeesValue !== 0
+              ? ` — ${formatUsd(heldFeesValue)} at today's value`
+              : ""}{" "}
+            (see Business P&amp;L for that).
+          </p>
+          {/* The two halves of Converted Fees, named. Same total as before —
+              this only says what the number is made of, so "realized converted
+              profit" above stops being opaque. Rendered only when there is
+              something to split; a business with no stablecoin-leg recovery
+              reads the same as it always did. */}
+          {result.convertedFees !== 0 && result.mixedStableRecovered !== 0 && (
+            <p className="mt-2 text-[11px] text-[var(--muted)]">
+              Converted Fees {formatUsd(result.convertedFees)} ={" "}
+              {formatUsd(result.convertedFromTokens)} converted from tokens
+              (ETH, SOL, etc.) + {formatUsd(result.mixedStableRecovered)}{" "}
+              already earned in stablecoin.
+            </p>
+          )}
+          {breakdown}
+          {result.unvaluedConvertedClaims > 0 && (
+            <p className="mt-2 text-[11px] text-amber-300">
+              {result.unvaluedConvertedClaims} converted{" "}
+              {result.unvaluedConvertedClaims === 1
+                ? "claim has"
+                : "claims have"}{" "}
+              no USD value recorded and{" "}
+              {result.unvaluedConvertedClaims === 1 ? "is" : "are"} counted as
+              $0 here.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

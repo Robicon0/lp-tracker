@@ -18,6 +18,7 @@ import {
   InitialCapitalCard,
   OverallPnLCard,
 } from "./components/CapitalCards";
+import { Breakdown } from "./components/Breakdown";
 import { GrowthTargetSection } from "./components/GrowthTarget";
 import { useLivePositionPrices } from "./lib/useLivePositionPrices";
 import { DataHealthCard } from "./components/DataHealthCard";
@@ -491,7 +492,33 @@ export default function DashboardPage() {
               value={initialCapital}
               onSave={handleSaveInitialCapital}
             />
-            <OverallPnLCard result={overall} heldFeesValue={heldFeesValue} />
+            {/* The identical breakdown Total P&L builds, from this page's own
+                `overall` result — the two pages compute the same figure and
+                must therefore explain it the same way (Invariant #6). */}
+            <OverallPnLCard
+              result={overall}
+              heldFeesValue={heldFeesValue}
+          breakdown={
+            <Breakdown
+              collapsible={false}
+              rows={[
+                {
+                  label: "Current Value (active)",
+                  value: formatUsd(overall.activeCurrentValue),
+                },
+                {
+                  label: "+ Converted Fees (realized, all-time)",
+                  value: formatUsd(overall.convertedFees),
+                },
+                {
+                  label: "− Initial Capital",
+                  value: formatUsd(overall.initialCapital),
+                },
+                { label: "=", value: formatUsd(overall.overall), isTotal: true },
+              ]}
+            />
+          }
+            />
           </div>
 
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]">

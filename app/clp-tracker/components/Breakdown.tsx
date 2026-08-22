@@ -16,6 +16,37 @@ export interface BreakdownRow {
   after?: ReactNode;
 }
 
+// The one disclosure control every "how this number was made" card uses.
+// Extracted from Breakdown below so a card that has to own its own open state
+// (OverallPnLCard, which reveals prose AND rows together) reuses this exact
+// button rather than growing a second, slightly-different one.
+export function DisclosureToggle({
+  open,
+  onToggle,
+  noun = "breakdown",
+}: {
+  open: boolean;
+  onToggle: () => void;
+  noun?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)]"
+    >
+      <span
+        aria-hidden
+        className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}
+      >
+        &#9656;
+      </span>
+      {open ? `Hide ${noun}` : `Show ${noun}`}
+    </button>
+  );
+}
+
 // A collapse/expand line-item breakdown, collapsed by default so a card that
 // carries one stays the same height as its neighbours until the user asks for
 // the detail. Shared by every card that shows "how this number was made"
@@ -25,31 +56,30 @@ export function Breakdown({
   rows,
   noun = "breakdown",
   defaultOpen = false,
+  collapsible = true,
 }: {
   rows: BreakdownRow[];
   noun?: string;
   defaultOpen?: boolean;
+  // false when an enclosing card already owns the toggle that reveals this —
+  // the rows then render bare, so a card never shows two nested "Show
+  // breakdown" controls one inside the other.
+  collapsible?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const shown = collapsible ? open : true;
 
   return (
     <div className="mt-2">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)]"
-      >
-        <span
-          aria-hidden
-          className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}
-        >
-          ▸
-        </span>
-        {open ? `Hide ${noun}` : `Show ${noun}`}
-      </button>
+      {collapsible && (
+        <DisclosureToggle
+          open={open}
+          onToggle={() => setOpen((o) => !o)}
+          noun={noun}
+        />
+      )}
 
-      {open && (
+      {shown && (
         <dl className="mt-1.5 space-y-0.5 text-[11px] tabular-nums text-[var(--muted)]">
           {rows.map((row, i) => (
             <Fragment key={i}>
