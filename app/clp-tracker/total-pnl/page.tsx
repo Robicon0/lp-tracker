@@ -756,6 +756,7 @@ function PortfolioSummarySection({
           heldFeesValue={heldFeesValue}
           breakdown={
             <Breakdown
+              collapsible={false}
               rows={[
                 {
                   label: "Current Value (active)",
