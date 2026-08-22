@@ -454,7 +454,12 @@ export default function TotalPnlPage() {
 
   // LP P&L split into active price movement vs closed-position scalp, drawn
   // from the SAME arithmetic as totals.lpPnL (Σ currentBalance − deposited)
-  // so the two parts add up to it exactly. For a closed position
+  // AND the same array — livePositions, not the stored `positions`. That
+  // matters only on the ACTIVE side: withLiveValues rewrites an active
+  // position's currentBalance to its live market value and passes closed ones
+  // through untouched (calculations.ts livePositionValue returns null for
+  // anything not active), so reading `positions` here understated Active by
+  // the whole live-vs-stored delta while the total above it was already live. For a closed position
   // currentBalance is the final withdrawn amount, so (final − deposited) is
   // that position's scalp by the app's definition (c372b30).
   // The per-position rows behind `closed` are collected here rather than in a
@@ -464,7 +469,7 @@ export default function TotalPnlPage() {
     let active = 0;
     let closed = 0;
     const closedRows: ClosedScalpRow[] = [];
-    for (const p of positions) {
+    for (const p of livePositions) {
       const deposited = getEffectiveDeposited(p);
       const v = p.currentBalance - deposited;
       if (p.status === "active") {
@@ -486,7 +491,7 @@ export default function TotalPnlPage() {
     }
     closedRows.sort((a, b) => b.closedTs - a.closedTs);
     return { active, closed, closedRows };
-  }, [positions]);
+  }, [livePositions]);
 
   const handleSaveInitialCapital = (next: number) => {
     saveSettings({ ...getSettings(), initialCapital: next });
