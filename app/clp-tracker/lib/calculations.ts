@@ -552,6 +552,35 @@ export interface UnconvertedHoldingsOptions {
   excludeStables?: boolean;
 }
 
+// One claim's still-held sides: which token, which side of the claim, how much.
+// This is THE definition of what makes up an unconverted holding — extracted so
+// the Sell Holdings planner below identifies claims through the exact same rule
+// calcUnconvertedHoldings counts them by, rather than a second implementation
+// that could drift from it (Invariant #6). `token` is the NORMALIZED grouping
+// key, i.e. what a HoldingRow.token reads (WETH rolls into ETH); `symbol` is the
+// raw stored symbol, which is what any write-back must preserve.
+export interface UnconvertedClaimSide {
+  claim: FeeClaim;
+  side: "token1" | "token2";
+  symbol: string;
+  token: string;
+  amount: number;
+}
+
+export function unconvertedClaimSides(claim: FeeClaim): UnconvertedClaimSide[] {
+  if (claim.convertedToStable) return [];
+  const out: UnconvertedClaimSide[] = [];
+  for (const [side, symbol, amount] of [
+    ["token1", claim.token1Symbol, claim.token1Amount],
+    ["token2", claim.token2Symbol, claim.token2Amount],
+  ] as Array<["token1" | "token2", string, number]>) {
+    const token = normalizeToken(symbol);
+    if (token === "" || !Number.isFinite(amount) || amount === 0) continue;
+    out.push({ claim, side, symbol, token, amount });
+  }
+  return out;
+}
+
 export function calcUnconvertedHoldings(
   claims: FeeClaim[],
   prices: Record<string, number>,
@@ -588,14 +617,11 @@ export function calcUnconvertedHoldings(
     // below — the residual owed to the volatile side is stableAmount minus the
     // stable face value — they just never become a quantity, a row or a total.
     const sides: Array<{ token: string; amount: number }> = [];
-    for (const [symbol, amount] of [
-      [claim.token1Symbol, claim.token1Amount],
-      [claim.token2Symbol, claim.token2Amount],
-    ] as Array<[string, number]>) {
-      const token = normalizeToken(symbol);
-      if (token === "" || !Number.isFinite(amount) || amount === 0) continue;
-      if (!(excludeStables && STABLE_SYMBOLS.has(token))) addQty(symbol, amount);
-      sides.push({ token, amount });
+    for (const s of unconvertedClaimSides(claim)) {
+      if (!(excludeStables && STABLE_SYMBOLS.has(s.token))) {
+        addQty(s.symbol, s.amount);
+      }
+      sides.push({ token: s.token, amount: s.amount });
     }
     if (sides.length === 0) continue;
 
@@ -1512,4 +1538,286 @@ export function withLiveValues(
     const live = livePositionValue(p, pairPriceById.get(p.id));
     return live === null ? p : { ...p, currentBalance: live };
   });
+}
+
+// ── Sell Holdings ───────────────────────────────────────────────────────────
+//
+// Converting an unconverted holding to stablecoin, oldest claim first. The
+// planner is pure and exported so the preview the user confirms and the write
+// that follows are produced by the SAME call — the preview cannot describe one
+// thing and the commit do another, because there is only one plan object.
+//
+// Claim identification goes through unconvertedClaimSides above, so a claim
+// enters a sale on exactly the rule that put its tokens in the holdings table.
+
+export interface SaleClaimPlan {
+  claimId: string;
+  date: string;
+  pair: string;
+  platform: string;
+  // The raw stored symbol on the side being sold — preserved on write, never
+  // replaced by the normalized grouping key.
+  symbol: string;
+  side: "token1" | "token2";
+  // This claim's whole unconverted quantity of the token, and how it divides.
+  availableQuantity: number;
+  soldQuantity: number;
+  remainingQuantity: number;
+  isSplit: boolean;
+  // USD written to the sold piece: its share of the sale proceeds, plus any
+  // stablecoin this claim was ALREADY contributing as realized (a mixed claim's
+  // stable leg). Without that second term, converting a mixed claim would drop
+  // money out of Converted Fees that the user never spent.
+  proceedsShare: number;
+  stableAlreadyRealized: number;
+  stableAmount: number;
+  // Claim-time value left on the untouched piece of a split. null when the
+  // original had none (unknown basis stays unknown).
+  remainderStableAmount: number | null;
+  // True when the remainder keeps the original figure verbatim because it could
+  // not be apportioned (multi-volatile claim, or no volatile residual).
+  remainderStableUnchanged: boolean;
+}
+
+export interface TokenSalePlan {
+  token: string;
+  amountSold: number;
+  pricePerToken: number;
+  totalProceeds: number;
+  availableQuantity: number;
+  claims: SaleClaimPlan[];
+  error: string | null;
+}
+
+// Quantities are compared with a tolerance: a holding is a sum of stored
+// decimals, so "sell everything" typed back from the displayed total must not
+// fail on the last bit of floating-point noise.
+const QTY_EPSILON = 1e-9;
+
+export function planTokenSale(
+  claims: FeeClaim[],
+  token: string,
+  amountSold: number,
+  pricePerToken: number,
+): TokenSalePlan {
+  const empty = (error: string | null, available = 0): TokenSalePlan => ({
+    token,
+    amountSold,
+    pricePerToken,
+    totalProceeds: 0,
+    availableQuantity: available,
+    claims: [],
+    error,
+  });
+
+  if (!Number.isFinite(amountSold) || amountSold <= 0) {
+    return empty("Enter an amount greater than zero.");
+  }
+  if (!Number.isFinite(pricePerToken) || pricePerToken <= 0) {
+    return empty("Enter a price per token greater than zero.");
+  }
+
+  // Every contributing side, grouped per claim. A claim holding this token on
+  // BOTH sides is kept whole: it can be converted entirely, but it cannot be
+  // split (which side would shrink?), and that is surfaced rather than guessed.
+  const perClaim = new Map<
+    string,
+    { claim: FeeClaim; sides: UnconvertedClaimSide[]; quantity: number }
+  >();
+  for (const claim of claims) {
+    for (const s of unconvertedClaimSides(claim)) {
+      if (s.token !== token) continue;
+      const entry = perClaim.get(claim.id) ?? {
+        claim,
+        sides: [],
+        quantity: 0,
+      };
+      entry.sides.push(s);
+      entry.quantity += s.amount;
+      perClaim.set(claim.id, entry);
+    }
+  }
+
+  const candidates = [...perClaim.values()].filter((c) => c.quantity > 0);
+  const availableQuantity = candidates.reduce((sum, c) => sum + c.quantity, 0);
+
+  if (availableQuantity <= 0) {
+    return empty(`No unconverted ${token} claims to sell.`, 0);
+  }
+  if (amountSold > availableQuantity + QTY_EPSILON) {
+    return empty(
+      `Only ${availableQuantity} ${token} is unconverted — you asked to sell ${amountSold}.`,
+      availableQuantity,
+    );
+  }
+
+  // Oldest first; claim id breaks a same-date tie so the plan is deterministic.
+  candidates.sort((a, b) => {
+    const ta = new Date(a.claim.date).getTime();
+    const tb = new Date(b.claim.date).getTime();
+    const sa = Number.isFinite(ta) ? ta : Number.POSITIVE_INFINITY;
+    const sb = Number.isFinite(tb) ? tb : Number.POSITIVE_INFINITY;
+    if (sa !== sb) return sa - sb;
+    return a.claim.id < b.claim.id ? -1 : a.claim.id > b.claim.id ? 1 : 0;
+  });
+
+  const totalProceeds = amountSold * pricePerToken;
+  const out: SaleClaimPlan[] = [];
+  let remainingToSell = amountSold;
+  let proceedsAssigned = 0;
+
+  for (const c of candidates) {
+    if (remainingToSell <= QTY_EPSILON) break;
+    const takeWhole = c.quantity <= remainingToSell + QTY_EPSILON;
+    const soldQuantity = takeWhole ? c.quantity : remainingToSell;
+    const remainingQuantity = c.quantity - soldQuantity;
+    const isSplit = !takeWhole;
+
+    if (isSplit && c.sides.length > 1) {
+      return empty(
+        `Claim ${c.claim.date} (${c.claim.pair}) holds ${token} on both sides and cannot be split. Sell the full amount, or convert that claim by hand first.`,
+        availableQuantity,
+      );
+    }
+
+    remainingToSell -= soldQuantity;
+    const last = remainingToSell <= QTY_EPSILON;
+    // The final piece takes the remainder rather than a second rounding of the
+    // same number, so the shares sum to the proceeds exactly (the transfer-split
+    // convention).
+    const proceedsShare = last
+      ? totalProceeds - proceedsAssigned
+      : (soldQuantity / amountSold) * totalProceeds;
+    proceedsAssigned += proceedsShare;
+
+    // Money this claim was already contributing to Converted Fees as an
+    // unconverted mixed claim. Carried onto the converted piece when the whole
+    // claim converts; left with the remainder (which keeps the stable leg)
+    // when it splits.
+    const stableAlreadyRealized = isSplit ? 0 : claimStableRealized(c.claim);
+
+    let remainderStableAmount: number | null = null;
+    let remainderStableUnchanged = false;
+    if (isSplit) {
+      const basis = c.claim.stableAmount;
+      if (basis === null || !Number.isFinite(basis)) {
+        remainderStableAmount = null;
+        remainderStableUnchanged = true;
+      } else {
+        const face = claimStableFace(c.claim);
+        const residual = basis - face;
+        const volatileSides = unconvertedClaimSides(c.claim).filter(
+          (s) => !isStableSymbol(s.symbol),
+        );
+        // Apportion the claim-time value only when this claim's ONLY volatile
+        // side is the one being sold. With two volatile tokens the residual is
+        // split by price weight downstream, and reproducing that here would be
+        // a guess — the figure is left verbatim instead and the preview says so.
+        if (residual > 0 && volatileSides.length === 1) {
+          remainderStableAmount =
+            face + residual * (remainingQuantity / c.quantity);
+        } else {
+          remainderStableAmount = basis;
+          remainderStableUnchanged = true;
+        }
+      }
+    }
+
+    out.push({
+      claimId: c.claim.id,
+      date: c.claim.date,
+      pair: c.claim.pair,
+      platform: c.claim.platform,
+      symbol: c.sides[0].symbol,
+      side: c.sides[0].side,
+      availableQuantity: c.quantity,
+      soldQuantity,
+      remainingQuantity,
+      isSplit,
+      proceedsShare,
+      stableAlreadyRealized,
+      stableAmount: proceedsShare + stableAlreadyRealized,
+      remainderStableAmount,
+      remainderStableUnchanged,
+    });
+  }
+
+  return {
+    token,
+    amountSold,
+    pricePerToken,
+    totalProceeds,
+    availableQuantity,
+    claims: out,
+    error: null,
+  };
+}
+
+function newClaimId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `claim_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Applies a plan, returning the NEW claims array. Pure: the caller owns the
+// write, so the same plan can be replayed in a test without touching storage.
+export function applyTokenSale(
+  claims: FeeClaim[],
+  plan: TokenSalePlan,
+): FeeClaim[] {
+  if (plan.error !== null || plan.claims.length === 0) return claims;
+  const byId = new Map(plan.claims.map((p) => [p.claimId, p]));
+  const out: FeeClaim[] = [];
+  const added: FeeClaim[] = [];
+
+  for (const claim of claims) {
+    const p = byId.get(claim.id);
+    if (p === undefined) {
+      out.push(claim);
+      continue;
+    }
+    const stableSymbol =
+      claim.stableSymbol ??
+      (isStableSymbol(claim.token1Symbol)
+        ? claim.token1Symbol
+        : isStableSymbol(claim.token2Symbol)
+          ? claim.token2Symbol
+          : "USDC");
+
+    if (!p.isSplit) {
+      out.push({
+        ...claim,
+        convertedToStable: true,
+        stableSymbol,
+        stableAmount: p.stableAmount,
+      });
+      continue;
+    }
+
+    // Split: the ORIGINAL id stays on the untouched remainder, so anything
+    // pointing at this claim (a transfer's sourceClaimId) still resolves to a
+    // live, still-unconverted claim of the same date and pair. The sold piece is
+    // the new record.
+    const amountField = p.side === "token1" ? "token1Amount" : "token2Amount";
+    const otherField = p.side === "token1" ? "token2Amount" : "token1Amount";
+    out.push({
+      ...claim,
+      [amountField]: p.remainingQuantity,
+      stableAmount: p.remainderStableAmount,
+    } as FeeClaim);
+    added.push({
+      ...claim,
+      id: newClaimId(),
+      [amountField]: p.soldQuantity,
+      // The other side goes entirely with the remainder — copying it here would
+      // duplicate real tokens (a stable leg would be counted twice).
+      [otherField]: 0,
+      convertedToStable: true,
+      stableSymbol,
+      stableAmount: p.stableAmount,
+    } as FeeClaim);
+  }
+
+  return [...out, ...added];
 }

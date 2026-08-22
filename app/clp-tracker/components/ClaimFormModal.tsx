@@ -217,7 +217,7 @@ interface ModalShellProps {
   children: ReactNode;
 }
 
-function ModalShell({ title, onCancel, children }: ModalShellProps) {
+export function ModalShell({ title, onCancel, children }: ModalShellProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();

@@ -17,6 +17,7 @@ import {
   calcGrowthTarget,
   calcUnconvertedHoldings,
 } from "../lib/calculations";
+import { SellHoldingModal } from "../components/SellHoldingModal";
 import { useHydrated } from "../lib/useHydrated";
 import { mergePrices, useTokenPrices } from "../lib/useTokenPrices";
 import { normalizeChain, normalizeToken } from "../lib/nameNormalization";
@@ -155,6 +156,11 @@ export default function BusinessPnlPage() {
       setSettings(stored);
     }
   });
+
+  // Which holding row has the Sell tool open. Null = closed. The modal reads
+  // the same `claims` state every figure on this page reads, and hands back the
+  // new array on commit, so the whole page recomputes from the written claims.
+  const [sellToken, setSellToken] = useState<string | null>(null);
 
   const persist = (next: BusinessPnLSettings) => {
     setSettings(next);
@@ -596,6 +602,9 @@ export default function BusinessPnlPage() {
                     <th className="px-4 py-3 text-right font-medium">
                       Price to Hit Target
                     </th>
+                    <th className="px-4 py-3 text-right font-medium">
+                      <span className="sr-only">Sell</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
@@ -647,6 +656,15 @@ export default function BusinessPnlPage() {
                           <span className="text-[var(--muted)]">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setSellToken(row.token)}
+                          className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        >
+                          Sell
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -670,6 +688,7 @@ export default function BusinessPnlPage() {
                     {/* No total: these are alternative single-token scenarios,
                         not parts of one sum — adding them would be meaningless. */}
                     <td className="px-4 py-3" />
+                    <td className="px-4 py-3" />
                   </tr>
                 </tfoot>
               </table>
@@ -679,6 +698,23 @@ export default function BusinessPnlPage() {
                 ⚠ Some unconverted claims have no recorded USD value, so their
                 cost basis is unknown and excluded from the totals above.
               </p>
+            )}
+            {sellToken !== null && (
+              <SellHoldingModal
+                token={sellToken}
+                availableQuantity={
+                  holdings.rows.find((r) => r.token === sellToken)?.quantity ?? 0
+                }
+                suggestedPrice={
+                  holdings.rows.find((r) => r.token === sellToken)?.price ?? null
+                }
+                claims={claims}
+                onCancel={() => setSellToken(null)}
+                onCommitted={(next) => {
+                  setClaims(next);
+                  setSellToken(null);
+                }}
+              />
             )}
           </>
         )}
