@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 
 export interface BreakdownRow {
   label: ReactNode;
@@ -9,6 +9,11 @@ export interface BreakdownRow {
   // reads as the card's headline number.
   isTotal?: boolean;
   valueClass?: string;
+  // Optional full-width detail rendered directly BENEATH this row while the
+  // breakdown is open. Used to nest a drill-down list under the single line it
+  // explains (Total P&L's closed-position Scalp list) without competing with
+  // this component's own toggle.
+  after?: ReactNode;
 }
 
 // A collapse/expand line-item breakdown, collapsed by default so a card that
@@ -47,17 +52,19 @@ export function Breakdown({
       {open && (
         <dl className="mt-1.5 space-y-0.5 text-[11px] tabular-nums text-[var(--muted)]">
           {rows.map((row, i) => (
-            <div
-              key={i}
-              className={`flex items-baseline justify-between gap-3 ${
-                row.isTotal
-                  ? "border-t border-[var(--border)] pt-0.5 font-medium text-[var(--foreground)]"
-                  : ""
-              }`}
-            >
-              <dt>{row.label}</dt>
-              <dd className={row.valueClass}>{row.value}</dd>
-            </div>
+            <Fragment key={i}>
+              <div
+                className={`flex items-baseline justify-between gap-3 ${
+                  row.isTotal
+                    ? "border-t border-[var(--border)] pt-0.5 font-medium text-[var(--foreground)]"
+                    : ""
+                }`}
+              >
+                <dt>{row.label}</dt>
+                <dd className={row.valueClass}>{row.value}</dd>
+              </div>
+              {row.after}
+            </Fragment>
           ))}
         </dl>
       )}
