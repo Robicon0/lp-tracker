@@ -16,6 +16,7 @@ import {
   calcConvertedFees,
   calcGrowthTarget,
   calcUnconvertedHoldings,
+  isStableSymbol,
 } from "../lib/calculations";
 import { SellHoldingModal } from "../components/SellHoldingModal";
 import { useHydrated } from "../lib/useHydrated";
@@ -209,14 +210,15 @@ export default function BusinessPnlPage() {
     [claims, effectivePrices],
   );
 
-  // Stablecoins are excluded HERE only: this table is about price exposure, and
-  // a stablecoin's value is already reported as realized in Converted Fees. The
-  // Dashboard and Total P&L "still held" notes keep the unfiltered figure.
+  // Stablecoin legs are LISTED here, as their own rows. Leaving them out made
+  // this table's total quietly disagree with the one Overall P&L quotes for the
+  // same thing ("excludes tokens you're still holding — $X"); listing them makes
+  // the total below literally that figure, checkable by eye. What a stablecoin
+  // genuinely has no meaningful answer for — unrealized P&L, and a price it
+  // would have to reach — reads "—" per row rather than a number that only
+  // looks informative (see the table).
   const holdings = useMemo(
-    () =>
-      calcUnconvertedHoldings(claims, effectivePrices, {
-        excludeStables: true,
-      }),
+    () => calcUnconvertedHoldings(claims, effectivePrices),
     [claims, effectivePrices],
   );
 
@@ -224,23 +226,24 @@ export default function BusinessPnlPage() {
   // count of realized fees (Invariant #6).
   const convertedFees = useMemo(() => calcConvertedFees(claims), [claims]);
 
-  // The SAME function as `holdings` above with the option flipped off, which is
-  // exactly how Overall P&L's "excludes tokens you're still holding — $X at
-  // today's value" note computes its figure. Shown here as a reference line so
-  // that sentence can be checked against this page instead of taken on trust;
-  // the table above stays excl-stables, which is the right basis for a PRICE
-  // EXPOSURE view.
-  const holdingsInclStables = useMemo(
-    () => calcUnconvertedHoldings(claims, effectivePrices).totalCurrentValue,
+  // The SAME function as `holdings` above with stables excluded, which is
+  // exactly what total-pnl's `feesForNetPnL` adds to Converted Fees. Net P&L
+  // must keep excluding them — a stablecoin's dollars are already inside the
+  // realized half, and counting them again would double-count real money — so
+  // the reference line below is computed from this, never from the table's own
+  // (stable-inclusive) total.
+  const holdingsExclStables = useMemo(
+    () =>
+      calcUnconvertedHoldings(claims, effectivePrices, {
+        excludeStables: true,
+      }).totalCurrentValue,
     [claims, effectivePrices],
   );
 
-  // Net P&L's fee term, composed from the SAME two values this page already
-  // computes — realized converted fees + still-held non-stable tokens at
-  // today's price. total-pnl's `feesForNetPnL` is this same sum from these same
-  // two functions, so the figure quoted here cannot drift from the one Net P&L
-  // adds (Invariant #6). Nothing is recomputed a third way.
-  const netPnlFeeBasis = convertedFees + holdings.totalCurrentValue;
+  // Net P&L's fee term, from the SAME two functions total-pnl composes it from,
+  // so the figure quoted here cannot drift from the one Net P&L adds
+  // (Invariant #6). Nothing is recomputed a third way.
+  const netPnlFeeBasis = convertedFees + holdingsExclStables;
 
   // How far short of the Growth Target the business currently is. Read from
   // calcGrowthTarget with the same inputs the Growth Target card uses (its fee
@@ -269,10 +272,28 @@ export default function BusinessPnlPage() {
 
   // Eligible = has a price to move from and a quantity to move. A token missing
   // either cannot be solved for, so it is left out of the split entirely rather
-  // than silently absorbing a share nothing can deliver.
+  // than silently absorbing a share nothing can deliver. STABLECOINS are out for
+  // the same reason in a stronger form: they cannot move at all, so counting one
+  // as an eligible token would shrink every real token's share of the gap and
+  // understate the price each actually has to reach.
   const eligibleHoldings = useMemo(
     () =>
-      holdings.rows.filter((r) => r.price !== null && r.quantity > 0),
+      holdings.rows.filter(
+        (r) => !isStableSymbol(r.token) && r.price !== null && r.quantity > 0,
+      ),
+    [holdings.rows],
+  );
+
+  // Unrealized P&L sums only the rows that report one. A stablecoin's cost basis
+  // and current value are both face value, so its "P&L" is rounding noise; the
+  // rows show "—" and the totals must agree with the rows they add up.
+  const totalPnlExStables = useMemo(
+    () =>
+      holdings.rows.reduce(
+        (sum, r) =>
+          isStableSymbol(r.token) || r.pnl === null ? sum : sum + r.pnl,
+        0,
+      ),
     [holdings.rows],
   );
 
@@ -369,8 +390,11 @@ export default function BusinessPnlPage() {
           hint="Actually cashed out — the same figure Overall P&L uses"
           note={
             <p className="mt-1 text-[11px] tabular-nums text-[var(--muted)]">
+              {/* The EXCL-stables figure, not the table's own total below —
+                  that one now includes stablecoin legs, which Net P&L must not
+                  add on top of Converted Fees. */}
               {formatUsd(convertedFees)} +{" "}
-              {formatUsd(holdings.totalCurrentValue)} held (excl. stables) ={" "}
+              {formatUsd(holdingsExclStables)} held (excl. stables) ={" "}
               <span className="font-medium text-[var(--foreground)]">
                 {formatUsd(netPnlFeeBasis)}
               </span>{" "}
@@ -559,8 +583,10 @@ export default function BusinessPnlPage() {
             still exposed to price. Cost basis is the claim-time USD value;
             P&amp;L is what you&apos;ve gained or lost by holding instead of
             converting. Uses the same prices entered above. Stablecoin legs are
-            not listed: they carry no price exposure and already count as
-            realized in Converted Fees.
+            listed too, so this total is the same figure Overall P&amp;L quotes
+            as excluded — but they carry no price exposure, so their P&amp;L and
+            target price read &quot;—&quot; and they take no share of the gap
+            below.
           </p>
         </div>
         {holdings.rows.length === 0 ? (
@@ -581,19 +607,11 @@ export default function BusinessPnlPage() {
               />
               <SummaryStat
                 label="Unrealized P&L"
-                value={formatUsd(holdings.totalPnl)}
-                valueClass={pnlColor(holdings.totalPnl)}
+                value={formatUsd(totalPnlExStables)}
+                valueClass={pnlColor(totalPnlExStables)}
+                hint="Volatile tokens only — a stablecoin cannot gain or lose against its own face value."
               />
             </div>
-            <p className="border-b border-[var(--border)] px-5 py-3 text-xs tabular-nums text-[var(--muted)]">
-              Including stablecoin legs:{" "}
-              <span className="font-medium text-[var(--foreground)]">
-                {formatUsd(holdingsInclStables)}
-              </span>{" "}
-              — the figure Overall P&amp;L&apos;s exclusion note uses. The table
-              below stays excl-stables: a stablecoin carries no price exposure
-              and its dollars are already realized in Converted Fees.
-            </p>
             <div className="border-b border-[var(--border)] px-5 py-4">
               {/* One line, not a caveat essay: the assumption is the whole point
                   of reading the column, so it has to be visible beside it. */}
@@ -645,65 +663,76 @@ export default function BusinessPnlPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {holdings.rows.map((row) => (
-                    <tr key={row.token}>
-                      <td className="px-4 py-3 font-medium">{row.token}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {formatToken(row.quantity)}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {row.currentValue === null ? (
-                          <span className="text-[var(--muted)]">
-                            — enter price
-                          </span>
-                        ) : (
-                          formatUsd(row.currentValue)
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {row.costBasis === null ? (
-                          <span className="text-[var(--muted)]">—</span>
-                        ) : (
-                          formatUsd(row.costBasis)
-                        )}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-right tabular-nums ${
-                          row.pnl === null ? "" : pnlColor(row.pnl)
-                        }`}
-                      >
-                        {row.pnl === null ? (
-                          <span className="text-[var(--muted)]">—</span>
-                        ) : (
-                          formatUsd(row.pnl)
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {gapToTarget <= 0 ? (
-                          <span className="text-emerald-400">
-                            target already met
-                          </span>
-                        ) : neededPrices.has(row.token) ? (
-                          <span className="text-[var(--foreground)]">
-                            {formatPrice(
-                              neededPrices.get(row.token) as number,
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-[var(--muted)]">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setSellToken(row.token)}
-                          className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  {holdings.rows.map((row) => {
+                    const isStable = isStableSymbol(row.token);
+                    return (
+                      <tr key={row.token}>
+                        <td className="px-4 py-3 font-medium">{row.token}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {formatToken(row.quantity)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {row.currentValue === null ? (
+                            <span className="text-[var(--muted)]">
+                              — enter price
+                            </span>
+                          ) : (
+                            formatUsd(row.currentValue)
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {row.costBasis === null ? (
+                            <span className="text-[var(--muted)]">—</span>
+                          ) : (
+                            formatUsd(row.costBasis)
+                          )}
+                        </td>
+                        <td
+                          className={`px-4 py-3 text-right tabular-nums ${
+                            isStable || row.pnl === null ? "" : pnlColor(row.pnl)
+                          }`}
                         >
-                          Sell
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          {/* A stablecoin's basis and value are both face value,
+                              so the difference is rounding noise, not a gain. */}
+                          {isStable || row.pnl === null ? (
+                            <span className="text-[var(--muted)]">—</span>
+                          ) : (
+                            formatUsd(row.pnl)
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {isStable ? (
+                            <span className="text-[var(--muted)]">—</span>
+                          ) : gapToTarget <= 0 ? (
+                            <span className="text-emerald-400">
+                              target already met
+                            </span>
+                          ) : neededPrices.has(row.token) ? (
+                            <span className="text-[var(--foreground)]">
+                              {formatPrice(
+                                neededPrices.get(row.token) as number,
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--muted)]">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {/* Nothing to sell a stablecoin INTO — it is already the
+                              thing the Sell tool converts to. */}
+                          {!isStable && (
+                            <button
+                              type="button"
+                              onClick={() => setSellToken(row.token)}
+                              className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                            >
+                              Sell
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot className="border-t border-[var(--border-strong)] bg-[var(--surface-2)]/60">
                   <tr className="font-semibold">
@@ -717,10 +746,10 @@ export default function BusinessPnlPage() {
                     </td>
                     <td
                       className={`px-4 py-3 text-right tabular-nums ${pnlColor(
-                        holdings.totalPnl,
+                        totalPnlExStables,
                       )}`}
                     >
-                      {formatUsd(holdings.totalPnl)}
+                      {formatUsd(totalPnlExStables)}
                     </td>
                     {/* No total: these are alternative single-token scenarios,
                         not parts of one sum — adding them would be meaningless. */}
