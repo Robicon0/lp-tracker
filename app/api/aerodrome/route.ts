@@ -4,6 +4,11 @@ import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
 import type { RouteTruncation } from '../../lib/enumerationTruncation';
+import {
+  resolveSugarSpanForFactory,
+  pageSugarPositions,
+  sugarCeilingTruncations,
+} from '../../lib/sugarPaging';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const BASE_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -42,16 +47,17 @@ const TOKENS: Record<string, { symbol: string; decimals: number; coingeckoId: st
   '0x940181a94a35a4569e4529a3cdfb74e38fd98631': { symbol: 'AERO', decimals: 18, coingeckoId: 'aerodrome-finance' },
 };
 
-// Queue item C Phase 1 — Sugar's `_limit` argument, named so the cap and the
-// saturation check below cannot drift apart.
+// Queue item C Phase 3 — the single `_limit = 100, _offset = 0` call is GONE.
+// The whole iteration space is now swept in parallel disjoint windows by the
+// shared helper in app/lib/sugarPaging.ts, which both this route and Velodrome
+// use so their paging behaviour cannot drift apart.
 //
-// ⚠️ Sugar's `_limit` counts POSITIONS but its `_offset` indexes POOLS, so the
-// two are NOT the same cursor and `offset += limit` would skip or duplicate.
-// That is why Phase 1 only DISCLOSES saturation and Phase 3 does the paging
-// properly (pool-cursor paging, after verifying the deployed contract's
-// semantics). Returning exactly `_limit` rows means the cap bound and there may
-// be more — Sugar reports no total, so `knownTotal` is honestly null.
-const SUGAR_LIMIT = 100;
+// CORRECTION to the Phase 1 comment that stood here: it claimed `_limit` counts
+// POSITIONS while `_offset` indexes POOLS, and that `offset += limit` would
+// skip or duplicate. The verified Vyper source says otherwise — `to_skip`
+// starts at `_offset` and `pools_done` counts every iteration of BOTH inner
+// loops, so the two share one monotone cursor and plain offset paging is
+// exactly right. See the header of sugarPaging.ts for the source excerpt.
 
 function padUint256(value: bigint): string {
   return value.toString(16).padStart(64, '0');
@@ -357,51 +363,59 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1. Fetch raw positions from Sugar contract
-    const calldata = '0x0d0154a9'
-      + padUint256(BigInt(SUGAR_LIMIT))
-      + padUint256(0n)
-      + padAddress(account)
-      + padAddress(CL_FACTORY);
-
-    const response = await fetch(BASE_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_call',
-        params: [{ to: SUGAR_ADDRESS, data: calldata }, 'latest'],
-        id: 1,
-      }),
+    // 1. Fetch raw positions from Sugar — the whole iteration space, paged.
+    //
+    // The span is measured first (balanceOf + allPoolsLength, 2 eth_calls), so
+    // every window is known before any is issued and they can fire in parallel.
+    const span = await resolveSugarSpanForFactory({
+      rpc: BASE_RPC,
+      account,
+      factory: CL_FACTORY,
+      nftManager: NFT_MANAGER,
     });
 
-    const rpcResult = await response.json();
+    const sweep = await pageSugarPositions<RawPosition>({
+      rpc: BASE_RPC,
+      sugar: SUGAR_ADDRESS,
+      span: span.span,
+      buildCalldata: (limit, offset) =>
+        '0x0d0154a9'
+        + padUint256(BigInt(limit))
+        + padUint256(BigInt(offset))
+        + padAddress(account)
+        + padAddress(CL_FACTORY),
+      decode: decodePositions,
+    });
 
-    if (rpcResult.error) {
-      return NextResponse.json({ error: 'RPC call failed', details: rpcResult.error }, { status: 500 });
+    // Windows are disjoint iteration ranges, so a duplicate id is not expected;
+    // dedupe anyway rather than let one ever reach the dashboard twice.
+    const seen = new Set<string>();
+    const rawPositions = sweep.rows.filter((p) => !seen.has(p.id) && seen.add(p.id));
+
+    // Truncation is derived from ITERATION COVERAGE against the contract's own
+    // ceilings, never from the row count — see sugarCeilingTruncations.
+    const truncated: RouteTruncation[] = sugarCeilingTruncations('Base', span, {
+      ...sweep,
+      rows: rawPositions,
+    });
+
+    if (truncated.length > 0 || sweep.failedWindows.length > 0) {
+      console.warn(
+        `[aerodrome] paged Sugar span=${span.span} calls=${sweep.calls} ms=${sweep.ms} `
+        + `rows=${rawPositions.length} truncated=${truncated.map((t) => t.reason).join(',') || 'none'} `
+        + `failedWindows=${sweep.failedWindows.length}`,
+      );
     }
-
-    const hex = rpcResult.result;
-    if (!hex || hex === '0x' || hex.length <= 130) {
-      return NextResponse.json({ positions: [], count: 0, account });
-    }
-
-    const rawPositions = decodePositions(hex);
 
     if (rawPositions.length === 0) {
-      return NextResponse.json({ positions: [], count: 0, account });
-    }
-
-    const truncated: RouteTruncation[] = [];
-    if (rawPositions.length >= SUGAR_LIMIT) {
-      truncated.push({
-        scope: 'Base',
-        cap: SUGAR_LIMIT,
-        returned: rawPositions.length,
-        knownTotal: null,
-        reason: 'sugar-enumeration-cap',
+      // Still disclose: a swept-but-truncated empty is NOT the same answer as a
+      // wallet that genuinely holds nothing (queue item B).
+      return NextResponse.json({
+        positions: [],
+        count: 0,
+        account,
+        ...(truncated.length > 0 ? { truncated } : {}),
       });
-      console.warn(`[aerodrome] Sugar positionsByFactory returned exactly ${SUGAR_LIMIT} positions — the cap bound; more may exist`);
     }
 
     // 2. Fetch token info for each unique pool

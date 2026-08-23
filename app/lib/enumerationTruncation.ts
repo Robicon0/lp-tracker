@@ -136,6 +136,19 @@ export function resetTruncationNotices(): void {
  */
 export function describeTruncation(n: TruncationNotice): string {
   const where = n.scope ? `${n.source} · ${n.scope}` : n.source;
+
+  // Queue item C Phase 3 — the Sugar reasons are not "position caps", and
+  // saying so would misdescribe what was missed. Each gets its own wording so
+  // the notice states the real limit the user ran into.
+  switch (n.reason) {
+    case 'pool-scan-ceiling':
+      return `${where}: this contract can only scan the first ${n.cap} pools — a position staked in a newer pool would not be listed`;
+    case 'page-revert-skipped':
+      return `${where}: one pool holds more staked positions than this contract can return at once — some are not listed`;
+    case 'page-budget':
+      return `${where}: the position scan stopped at its time budget — there may be more`;
+  }
+
   if (n.knownTotal != null && n.knownTotal > n.returned) {
     return `${where}: showing ${n.returned} of ${n.knownTotal} positions (cap ${n.cap})`;
   }
