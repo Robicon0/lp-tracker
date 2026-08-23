@@ -73,7 +73,60 @@ export interface EvmRpcOptions { timeoutMs?: number }
  */
 export async function evmRpcPost(url: string, body: object, opts: EvmRpcOptions = {}): Promise<EvmRpcEnvelope> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  return acquire(async () => {
+  return acquire(() => postWithRetry(url, body, timeoutMs)) as Promise<EvmRpcEnvelope>;
+}
+
+/**
+ * JSON-RPC BATCH (queue item C Phase 2a). Sends N calls as ONE array-bodied
+ * HTTP request and returns their envelopes IN THE ORDER GIVEN.
+ *
+ * Why this exists: removing the position-scan caps means enumerating every
+ * tokenId a wallet holds, and the routes did that with one sequential
+ * `await` per index — 300 positions was 300 serial round trips, which is
+ * exactly the "one giant blocking call" shape a cap was papering over.
+ * Batching collapses each chunk into a single request while the SAME global
+ * semaphore, timeout and 403/429 backoff as `evmRpcPost` still apply, so an
+ * uncapped scan cannot burst an endpoint into its throttle state.
+ *
+ * Responses are correlated BY ID, never by array position: the JSON-RPC spec
+ * explicitly permits a server to return batch results out of order, and
+ * matching by index would silently attribute one position's data to another —
+ * the same class of defect as the wallet-scope decimals bug (`78e80db`).
+ *
+ * A server that does not support batching (non-array body, HTTP error) yields
+ * one synthetic error envelope PER CALL, so callers fall back to individual
+ * `evmRpcPost`s instead of mistaking "no batch support" for "no positions".
+ */
+export async function evmRpcBatch(
+  url: string,
+  calls: Array<{ method: string; params: unknown[] }>,
+  opts: EvmRpcOptions = {},
+): Promise<EvmRpcEnvelope[]> {
+  if (calls.length === 0) return [];
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const body = calls.map((c, i) => ({ jsonrpc: '2.0', id: i + 1, method: c.method, params: c.params }));
+  const raw = await acquire(() => postWithRetry(url, body, timeoutMs));
+  const fail = (message: string): EvmRpcEnvelope[] =>
+    calls.map(() => ({ error: { code: -32000, message } }));
+
+  if (!Array.isArray(raw)) {
+    // Either an error envelope from the transport, or a server that answered a
+    // batch with a single object — both mean "this batch produced nothing
+    // usable", never "these calls returned empty".
+    const msg = (raw as EvmRpcEnvelope)?.error?.message ?? 'evm-rpc-batch-unsupported';
+    return fail(msg);
+  }
+  const byId = new Map<number, EvmRpcEnvelope>();
+  for (const item of raw as EvmRpcEnvelope[]) {
+    const id = typeof item?.id === 'number' ? item.id : null;
+    if (id != null) byId.set(id, item);
+  }
+  return calls.map((_, i) => byId.get(i + 1) ?? { error: { code: -32000, message: 'evm-rpc-batch-missing-id' } });
+}
+
+// Shared POST body for evmRpcPost and evmRpcBatch. Called INSIDE a semaphore
+// slot by both, so the 403/429 backoff below stays serial by construction.
+async function postWithRetry(url: string, body: object, timeoutMs: number): Promise<EvmRpcEnvelope | EvmRpcEnvelope[]> {
     // Throttle backoff (2026-07-18 Krishna/RAKA investigation): the public
     // Tenderly gateway hard-throttles CONCURRENT getLogs per IP (403 from
     // Vercel's shared IP, 429/drops elsewhere) but serves serial calls
@@ -85,7 +138,7 @@ export async function evmRpcPost(url: string, body: object, opts: EvmRpcOptions 
     for (let attempt = 0; ; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let out: EvmRpcEnvelope;
+      let out: EvmRpcEnvelope | EvmRpcEnvelope[];
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -98,7 +151,7 @@ export async function evmRpcPost(url: string, body: object, opts: EvmRpcOptions 
           // the caller fails over instead of trying to parse a non-JSON body.
           out = { error: { code: -32000, message: `evm-rpc-http-${res.status}` } };
         } else {
-          out = (await res.json()) as EvmRpcEnvelope;
+          out = (await res.json()) as EvmRpcEnvelope | EvmRpcEnvelope[];
         }
       } catch (err) {
         const isAbort = err instanceof Error && err.name === 'AbortError';
@@ -106,13 +159,12 @@ export async function evmRpcPost(url: string, body: object, opts: EvmRpcOptions 
       } finally {
         clearTimeout(timer);
       }
-      const msg = out.error?.message ?? '';
+      const msg = Array.isArray(out) ? '' : (out.error?.message ?? '');
       const throttled = msg === 'evm-rpc-http-403' || msg === 'evm-rpc-http-429';
       if (!throttled || attempt >= delays.length) return out;
       const jitter = Math.floor(Math.random() * 500);
       await new Promise((r) => setTimeout(r, delays[attempt] + jitter));
     }
-  });
 }
 
 // True when an evmRpcPost error message is an HTTP-level throttle (per-IP rate

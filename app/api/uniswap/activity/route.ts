@@ -8,6 +8,7 @@ import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
+import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -448,7 +449,17 @@ async function GET_impl(request: Request) {
     // INFLATION direction and never the (more dangerous, plausible-looking)
     // crushing direction. See app/lib/evmPoolContext.ts.
     if (walletScope) {
-      const MAX_WALLET_IDS = 30;  // unchanged bound for market-maker wallets
+      // Queue item C Phase 2c. Raised 30 -> 150. Unlike the Phase 2a open-position
+      // enumeration this fan-out is NOT cheap and NOT batchable: each id costs a
+      // full per-position sub-scan (archive eth_getLogs + claim-date pricing),
+      // run SERIALLY below, so an unbounded count here is the ITEM 0i shape.
+      // The count bound is therefore raised rather than removed, and paired with
+      // a wall-clock budget — the same "bound the WORK, disclose the remainder"
+      // shape Phase 2a settled on. In practice the budget usually binds first,
+      // which is the honest outcome: a wallet gets every position the time
+      // allows and is TOLD about the rest, instead of a silent 30.
+      const MAX_WALLET_IDS = 150;
+      const WALLET_SCOPE_BUDGET_MS = 120_000;
       const archiveRpc = TENDERLY_RPCS[chain];
       const nftManager = NFT_MANAGERS[chain];
       if (!archiveRpc || !nftManager) {
@@ -457,8 +468,23 @@ async function GET_impl(request: Request) {
           positions: [], excluded: [{ tokenId: 'all', reason: 'no-archive-rpc-for-chain' }],
         });
       }
+      // Anchored HERE, not at the loop: the ever-owned scan and the per-id
+      // context resolution below are themselves expensive (measured 83 s for
+      // 150 ids on a market-maker wallet), so a budget that started at the loop
+      // bounded only part of the work and let the request reach 203 s. One
+      // budget for the whole block keeps the route predictable.
+      const deadline = Date.now() + WALLET_SCOPE_BUDGET_MS;
       const allIds = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
       const ids = allIds.slice(0, MAX_WALLET_IDS);
+      // Queue item C Phase 1 — the dropped ids used to vanish without a trace,
+      // even though this route already had an `excluded[]` channel sitting right
+      // there. They now go into BOTH: `excluded[]` (so the existing per-position
+      // exclusion plumbing sees them) and `truncated` (so the wallet-level
+      // banner can say the Capital G/L below is computed over a partial set).
+      const overflowIds = allIds.slice(MAX_WALLET_IDS);
+      if (overflowIds.length > 0) {
+        console.warn(`[uniswap/activity] tokenId=all chain=${chain}: ${allIds.length} ever-owned ids, cap is ${MAX_WALLET_IDS} — ${overflowIds.length} not scanned`);
+      }
       const ctxs = await resolveEvmPositionContexts(ids, {
         chain: chain as Parameters<typeof resolveEvmPositionContexts>[1]['chain'],
         rpc: archiveRpc,
@@ -470,11 +496,18 @@ async function GET_impl(request: Request) {
 
       const origin = new URL(request.url).origin;
       const perPosition: Array<Record<string, unknown>> = [];
-      const excluded: Array<{ tokenId: string; reason: string }> = [];
+      const excluded: Array<{ tokenId: string; reason: string }> = overflowIds.map((tokenId) => ({
+        tokenId, reason: 'wallet-scope-id-cap',
+      }));
       const merged: ActivityEvent[] = [];
       let ni0 = 0, ni1 = 0, tf0 = 0, tf1 = 0;
 
+      const timedOutIds: string[] = [];
       for (const id of ids) {
+        // Stop cleanly at the budget rather than being killed mid-scan: an
+        // aborted invocation returns nothing at all, while stopping here returns
+        // every position scanned so far AND names the ones it could not reach.
+        if (Date.now() >= deadline) { timedOutIds.push(id); continue; }
         const ctx = ctxs.get(id) ?? null;
         if (!ctx) {
           // Honest degradation (Rule 11): excluded and surfaced, NEVER decoded
@@ -511,6 +544,34 @@ async function GET_impl(request: Request) {
         }
       }
 
+      // Both shortfalls ride the SAME disclosure channel Phase 1 built: named
+      // per id in `excluded[]`, summarised for the banner in `truncated`.
+      for (const tokenId of timedOutIds) excluded.push({ tokenId, reason: 'wallet-scope-time-budget' });
+      const truncated: RouteTruncation[] = [];
+      // Just the chain as scope: the client labels this source "<protocol>
+      // history scan", so repeating "wallet-scope closed scan" here would read
+      // as a stutter in the rendered notice.
+      const scopeName = chain.charAt(0).toUpperCase() + chain.slice(1);
+      if (overflowIds.length > 0) {
+        truncated.push({
+          scope: scopeName,
+          cap: MAX_WALLET_IDS,
+          returned: perPosition.length,
+          knownTotal: allIds.length,
+          reason: 'wallet-scope-id-cap',
+        });
+      }
+      if (timedOutIds.length > 0) {
+        truncated.push({
+          scope: scopeName,
+          cap: ids.length - timedOutIds.length,
+          returned: perPosition.length,
+          knownTotal: allIds.length,
+          reason: 'wallet-scope-time-budget',
+        });
+        console.warn(`[uniswap/activity] tokenId=all chain=${chain}: stopped at the ${WALLET_SCOPE_BUDGET_MS / 1000}s budget — ${timedOutIds.length} of ${ids.length} ids not scanned`);
+      }
+
       console.log(`[uniswap/activity] tokenId=all chain=${chain} account=${account} → ${ids.length} tokenIds, ${perPosition.length} resolved, ${excluded.length} excluded`);
 
       // Per-position breakdown so a WALLET-WIDE total is never attributed to
@@ -521,6 +582,7 @@ async function GET_impl(request: Request) {
         totalFees0: tf0, totalFees1: tf1,
         positions: perPosition,
         excluded,
+        ...(truncated.length > 0 ? { truncated } : {}),
       });
     }
 

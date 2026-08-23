@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { ActivityEvent } from "./useAllPositionsActivity";
+import { applyTruncationNotices, type RouteTruncation } from "../lib/enumerationTruncation";
 
 // Wallet-scope fee events. Captures fees from positions that no longer exist
 // as on-chain objects / NFTs — i.e. fully closed Bluefin positions on Sui
@@ -410,12 +411,22 @@ export function useWalletLevelFees(
 
     // Per-URL dedup helper (see urlCacheRef above): resolved/in-flight URLs are
     // reused across effect re-runs; a failed fetch is evicted so it retries.
-    const dedupFetch = (url: string, protocol: string, chain: string): Promise<TaggedFeeEvent[]> => {
+    const dedupFetch = (url: string, protocol: string, chain: string, account?: string): Promise<TaggedFeeEvent[]> => {
       const hit = urlCacheRef.current.get(url);
       if (hit) return hit;
       const p = fetch(url)
-        .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse>) : { events: [] }))
-        .then((j) => (j.events ?? []).map((e) => ({ event: e, protocol, chain })))
+        .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse & { truncated?: RouteTruncation[] }>) : { events: [] }))
+        .then((j) => {
+          // Queue item C Phase 1 — a wallet-scope scan that hit its id cap
+          // computed Capital G/L and Fee Income over a PARTIAL set of the
+          // wallet's ever-owned positions. Disclosed under a source label
+          // distinct from the positions fetchers', so the banner says the
+          // shortfall is in the HISTORY scan, not in the position list.
+          if (account) {
+            applyTruncationNotices(`${protocol} history scan`, account, (j as { truncated?: RouteTruncation[] }).truncated);
+          }
+          return (j.events ?? []).map((e) => ({ event: e, protocol, chain }));
+        })
         .catch((err) => {
           console.error(`[wallet-fees ${protocol.toLowerCase()}] fetch failed:`, err);
           urlCacheRef.current.delete(url);
@@ -530,7 +541,7 @@ export function useWalletLevelFees(
       // 14 fee claims under $0.50, one of which was truly $294). It would also
       // have discarded any legitimate very large claim. The route now resolves
       // each position's own pool context, so there are no artifacts to filter.
-      fetches.push(dedupFetch(uniUrl, "Uniswap V3", displayChain));
+      fetches.push(dedupFetch(uniUrl, "Uniswap V3", displayChain, ctx.account));
     }
 
     // Solana (Orca) CLOSED-position fee scan — recovers fee claims from

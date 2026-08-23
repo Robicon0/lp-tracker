@@ -1,4 +1,5 @@
 import { AerodromePosition } from './aerodrome';
+import { applyTruncationNotices, type RouteTruncation } from './enumerationTruncation';
 
 // Reuse the same interface — works for any protocol
 export type UniswapPosition = AerodromePosition;
@@ -8,6 +9,8 @@ interface UniswapResponse {
   count: number;
   account: string;
   chains: string[];
+  // Queue item C Phase 1 — present only when an enumeration cap bound.
+  truncated?: RouteTruncation[];
   error?: string;
 }
 
@@ -20,6 +23,10 @@ export async function fetchUniswapV3Positions(account: string): Promise<UniswapP
       console.error('Uniswap V3 API error:', data.error);
       return [];
     }
+
+    // Label MUST match PositionsContext's source label so the banner names the
+    // same source the user sees elsewhere.
+    applyTruncationNotices('Uniswap V3', account, data.truncated);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (data.positions || []).map((p: any): UniswapPosition => ({

@@ -715,9 +715,21 @@ activity-route cache must not store a non-complete empty. Complexity SMALL–MED
 **Verify by forcing the failure** (throttle or point at a dead RPC) and confirming the
 route reports incompleteness rather than a clean zero.
 
-**⚠️ C. BACKLOG (recorded, not fixed) — Sugar position enumeration is capped at 100 with
-no pagination, so wallets with >100 positions are SILENTLY TRUNCATED.**
-_(Found 2026-08-03 during Sprint GAUGE-STAKING. Recorded only — deliberately out of scope.)_
+**✅ C. PHASE 3 SHIPPED — Sugar enumeration now PAGES the whole iteration space.**
+_(Found 2026-08-03 during Sprint GAUGE-STAKING; Phase 1 disclosed `42bba40`, Phase 2
+`2134540`/`8a73537`, Phase 3 paging + correct detection this session.)_
+
+**What Phase 3 changed:** NEW `app/lib/sugarPaging.ts` sweeps the full span in parallel
+disjoint windows (page 500, adaptive halving on revert, call + wall-clock budget), shared by
+BOTH routes so they cannot drift. Saturation detection moved OFF the row count and ONTO
+iteration coverage against the contract's own ceilings. See Recent fixes for the numbers.
+
+**⚠️ ONE GAP REMAINS AND IS NOW ITS OWN PHASE — see queue item C2 below** (the
+`MAX_POOLS = 2000` pool-scan ceiling; census found 17 gauged pools and **180 real staked
+positions** past it). Until C2 ships, every Base wallet carries the honest but broad
+`pool-scan-ceiling` banner — owner-approved interim, NOT a bug.
+
+_(Original problem statement kept below — it is the baseline Phase 3 measured against.)_
 
 `app/api/aerodrome/route.ts` (and the Velodrome equivalent) calls Sugar as
 `positionsByFactory(limit=100, offset=0, account, factory)` and never pages. Observed live:
@@ -734,6 +746,37 @@ fixed, arriving by a different route.
 full-limit page as "there may be more" rather than "that's all". If pagination cannot be
 completed, surface incompleteness rather than returning a confident partial set — same
 principle as queue item B. Complexity SMALL.
+
+**⚠️ CORRECTION to the Phase 1 note that stood here** ("Sugar's `_limit` counts POSITIONS
+but its `_offset` indexes POOLS, so `offset += limit` would skip or duplicate"): that reading
+is WRONG and cost a phase of caution. The verified Vyper source (`_positions`, LP Sugar v3
+`0x68c1…db0a`, vyper 0.3.10) sets `to_skip = _offset` and increments ONE `pools_done` counter
+across BOTH inner loops, so the two share a single monotone cursor over a flat iteration
+space and plain offset paging is exactly right. Do not re-derive the pool-cursor design.
+
+**🔴 C2 — NEXT PHASE (approved, scoped, NOT built): enumerate gauged pools DIRECTLY so the
+`MAX_POOLS = 2000` ceiling stops hiding real positions.**
+
+Sugar's staked-position loop is `range(0, MAX_POOLS)` — a `range()` BOUND, not a cursor —
+so staked positions in pools at index >= 2000 are unreachable at ANY `_limit`/`_offset`.
+Paging cannot lift it; only a different enumeration can.
+
+**This is LIVE, not latent. Census pinned to Base block 50,366,744** (CL factory
+`0x5e7BB104…809A`, `allPoolsLength = 3498`, indices 2000-3497 = 1,498 pools, 0 RPC errors):
+**17 gauged pools past the ceiling** (15 `isAlive`, 2 dead) holding **180 position NFTs**
+right now — structurally invisible to every DefiDesh user. Largest: idx 2066 (38), idx 2196
+(30), idx 2020 (28), idx 2188 (16, dead gauge), idx 2040 (15), idx 2301 (13).
+
+**Shape:** enumerate via the VOTER's gauge set and call `gauge.stakedValues(account)`
+directly, bounded by the actual gauge count rather than by pool index — the gauge list is far
+shorter than `allPoolsLength` and is the real domain. Keep `sugarPaging.ts` for the unstaked
++ in-range-pool path; this is an additive second source unioned with it (dedupe by tokenId,
+which the routes already do). Complexity MEDIUM.
+**Acceptance:** a wallet whose only position is staked in a pool at index >= 2000 renders it;
+the `pool-scan-ceiling` notice then stops firing for ordinary Base wallets, which is the
+point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
+**Re-run the census before building** — `allPoolsLength` grows (3,487 at first measurement,
+3,498 a few days later), so the 17/180 figures are a snapshot, not a constant.
 
 0. _(DONE — **Sprint WRAPPER-PROTOCOLS Phase 2 Part 1**: wrapper position-detail page,
    SHIPPED `4a25c69` 2026-07-21. See Recent fixes.)_
@@ -866,6 +909,71 @@ principle as queue item B. Complexity SMALL.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **(this session)** — **Queue item C Phase 3: Sugar enumeration PAGES the full iteration
+  space, and saturation detection stops producing false negatives.** Aerodrome and Velodrome
+  each called Sugar exactly once at `_limit = 100, _offset = 0`; everything past the 100th
+  ITERATION was invisible, with a `count` computed after truncation confirming the wrong
+  number back to the user.
+  **The load-bearing correction is about the contract, not the code.** Phase 1 recorded that
+  `_limit` counts POSITIONS while `_offset` indexes POOLS, and that offset paging would skip
+  or duplicate. Reading the deployed Vyper (`_positions`) disproves it: `to_skip = _offset`
+  and a single `pools_done` counter advances across BOTH inner loops, so they share one
+  monotone cursor over a flat space — `offset += limit` is exactly right, and the span is
+  knowable up front as `min(balanceOf, 200) + min(allPoolsLength, 2000)` in two eth_calls.
+  Because the windows are known before any is issued and are disjoint, they fire in PARALLEL:
+  measured **4-6 calls, 270 ms - 1.3 s** for a whole wallet.
+  **NEW `app/lib/sugarPaging.ts`, shared by both routes so they cannot drift.** Page size 500
+  with adaptive halving on revert — the return type is `DynArray[Position, 200]`, so a revert
+  is DATA-dependent, not a static limit ceiling (`_limit` 250/500/2200 all return fine for an
+  ordinary wallet; the earlier "limit >= 250 reverts" note is not generally true). Halving
+  proven live: `[0,2000)` REVERT -> `[0,1000)` 196 OK, `[1000,2000)` REVERT -> 149 + 54 =
+  **399 unique, identical to the non-reverting sweep**, no gaps, no duplicates.
+  **PART 3 — detection moved OFF the row count.** `rawPositions.length >= SUGAR_LIMIT` was a
+  FALSE NEGATIVE on exactly the wallets that mattered: `_limit` bounds ITERATIONS EXAMINED,
+  so a wallet whose one staked position sits past pool index 100 exhausted the whole budget
+  and returned ZERO rows — `0 >= 100` is false, so it reported complete-and-empty. Truncation
+  is now derived from iteration coverage against the contract's own ceilings:
+  `unstaked-position-ceiling` (balanceOf > 200, knownTotal exact), `pool-scan-ceiling`
+  (allPoolsLength > 2000, knownTotal honestly null), `page-revert-skipped`, `page-budget`,
+  plus **`page-fetch-failed`** (owner-approved addition — a failed window silently drops its
+  whole range, the exact Rule 11 failure this item exists to end).
+  **THE PROOF WALLET: `0x844ebe8f151b4d420c88fcd3f2ccea461ecb7c97`** (one gauge-staked
+  position, tokenId `3387094`, cbBTC/UBTC, pool idx 134, `balanceOf = 0`). Live from the
+  route: BEFORE `{"positions":[],"count":0}` -> AFTER **count 66** (1 open $0.85 + 65 Closed).
+  The 65 closed rows are a second-order win: pre-fix Sugar returned 0, the route's early
+  return fired, and `buildClosedPositions` never ran (Empty-Sugar gate) — the wallet saw
+  literally NOTHING. Other measured gains: `0xebe9f59b…0384` **52 -> 399**; whales
+  `0x0521C507…B5A0` (balanceOf 11,048) and `0x0c1c448E…08B8` (2,366) both **100 -> 200**,
+  the whale emitting BOTH ceiling notices in one response.
+  **TWO DEFECTS IN THE NEW HELPER, CAUGHT IN VERIFICATION — both worth remembering:**
+  (1) a **429 was being read as a contract revert**, which sent the sweep halving a window
+  that was never too big, burned all 24 calls inside it, and disclosed it as "one pool holds
+  too many staked positions" — a confident WRONG explanation for a rate limit. Reverts and
+  transport failures now classify separately (only `execution reverted`-class halves;
+  transport retries with backoff then reports). Same wallet: 24 calls + budget-stop + false
+  notice -> **13 calls, sweep completes, honest `page-fetch-failed`**. (2) a **FALSE
+  `unstaked-position-ceiling` on Velodrome** — Sugar resolves its NFT manager per factory via
+  an internal `_fetch_nfpm`, so a caller-supplied `balanceOf` can count NFTs Sugar never
+  walks; it reported "showing 200 of 373" for a wallet Sugar legitimately returns 0 for. Now
+  gated on `balanceOfAuthoritative`, true only in the single-factory shape. **Lesson: erring
+  HIGH is right for a SPAN and wrong for a user-facing NOTICE.**
+  **RAKA control byte-clean**: count 8, 1 Out of Range + 7 Closed, identical id set, identical
+  values ($9,294.79 + seven zeros). A before/after field diff showed 56 differing
+  closed-metadata fields — running the SAME post-fix build twice reproduced the same churn in
+  the opposite direction, so it is pre-existing `buildClosedPositions` non-determinism
+  (ITEM 0c family), NOT this change.
+  **⚠️ RAKA now carries one truncation notice (`pool-scan-ceiling`), not zero** — owner-
+  approved interim (option a) because `allPoolsLength` 3,498 > 2,000 makes it fire for EVERY
+  Base wallet. It is TRUE (180 real staked positions are unreachable) but broad; **queue item
+  C2** removes the ceiling and with it the banner.
+  **⚠️ Velodrome STILL only exercised on its empty branch** — the standing caveat is NOT
+  lifted. The registry span resolves correctly (6 factories, span 2,975, `complete: true`),
+  but wallets holding 373 and even 530,988 Velodrome NFPM NFTs get 0 positions from Sugar
+  BEFORE and AFTER, which is its own thing to look at.
+  Build clean, `tsc --noEmit` clean, eslint byte-identical to pre-change (2 pre-existing
+  `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
+  changed — the routes simply see the positions that were always there.
 
 - **`dbcde99`** — **CLP Tracker now FOLLOWS the site theme toggle; Calculator nav arrow
   removed; the dropdown's hover-close gap fixed.** Three changes, no component logic,

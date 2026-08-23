@@ -3,6 +3,12 @@ import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
+import {
+  resolveSugarSpanForRegistry,
+  pageSugarPositions,
+  sugarCeilingTruncations,
+} from '../../lib/sugarPaging';
+import type { RouteTruncation } from '../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -44,6 +50,19 @@ const TOKENS: Record<string, { symbol: string; decimals: number; coingeckoId: st
   '0x1f32b1c2345538c0c6f582fcb022739c4a194ebb': { symbol: 'wstETH', decimals: 18, coingeckoId: 'wrapped-steth' },
   '0x9560e827af36c94d2ac33a39bce1fe78631088db': { symbol: 'VELO', decimals: 18, coingeckoId: 'velodrome-finance' },
 };
+
+// Queue item C Phase 3 — the single `_limit = 100, _offset = 0` call is GONE;
+// the iteration space is swept by the shared helper in app/lib/sugarPaging.ts,
+// the SAME one Aerodrome uses, so the two cannot drift apart.
+//
+// Velodrome's Sugar entry point is `positions(limit, offset, account)`, which
+// walks EVERY factory `registry.poolFactories()` returns rather than one named
+// factory — so the span is the sum across all of them. See sugarPaging.ts for
+// why that span deliberately errs HIGH.
+//
+// CORRECTION to the Phase 1 comment that stood here: `_offset` does not index
+// pools. It seeds `to_skip`, and `pools_done` counts iterations of both inner
+// loops, so offset paging is exactly right.
 
 function padUint256(value: bigint): string {
   return value.toString(16).padStart(64, '0');
@@ -350,40 +369,57 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1. Fetch raw positions from Sugar contract
-    // Velodrome Sugar V3 uses positions(uint256,uint256,address)
-    // selector = 0xedbd33bf (no factory parameter unlike Aerodrome's positionsByFactory)
-    const calldata = '0xedbd33bf'
-      + padUint256(100n)
-      + padUint256(0n)
-      + padAddress(account);
-
-    const response = await fetch(OPTIMISM_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_call',
-        params: [{ to: SUGAR_ADDRESS, data: calldata }, 'latest'],
-        id: 1,
-      }),
+    // 1. Fetch raw positions from Sugar — the whole iteration space, paged.
+    // Velodrome Sugar V3 uses positions(uint256,uint256,address), selector
+    // 0xedbd33bf (no factory parameter, unlike Aerodrome's positionsByFactory).
+    const span = await resolveSugarSpanForRegistry({
+      rpc: OPTIMISM_RPC,
+      account,
+      sugar: SUGAR_ADDRESS,
+      nftManager: NFT_MANAGER,
     });
 
-    const rpcResult = await response.json();
+    const sweep = await pageSugarPositions<RawPosition>({
+      rpc: OPTIMISM_RPC,
+      sugar: SUGAR_ADDRESS,
+      span: span.span,
+      buildCalldata: (limit, offset) =>
+        '0xedbd33bf'
+        + padUint256(BigInt(limit))
+        + padUint256(BigInt(offset))
+        + padAddress(account),
+      decode: decodePositions,
+    });
 
-    if (rpcResult.error) {
-      return NextResponse.json({ error: 'RPC call failed', details: rpcResult.error }, { status: 500 });
+    // Windows are disjoint iteration ranges, so a duplicate id is not expected;
+    // dedupe anyway rather than let one ever reach the dashboard twice.
+    const seen = new Set<string>();
+    const rawPositions = sweep.rows.filter((p) => !seen.has(p.id) && seen.add(p.id));
+
+    // Truncation is derived from ITERATION COVERAGE against the contract's own
+    // ceilings, never from the row count — see sugarCeilingTruncations.
+    const truncated: RouteTruncation[] = sugarCeilingTruncations('Optimism', span, {
+      ...sweep,
+      rows: rawPositions,
+    });
+
+    if (truncated.length > 0 || sweep.failedWindows.length > 0) {
+      console.warn(
+        `[velodrome] paged Sugar span=${span.span} calls=${sweep.calls} ms=${sweep.ms} `
+        + `rows=${rawPositions.length} truncated=${truncated.map((t) => t.reason).join(',') || 'none'} `
+        + `failedWindows=${sweep.failedWindows.length}`,
+      );
     }
-
-    const hex = rpcResult.result;
-    if (!hex || hex === '0x' || hex.length <= 130) {
-      return NextResponse.json({ positions: [], count: 0, account });
-    }
-
-    const rawPositions = decodePositions(hex);
 
     if (rawPositions.length === 0) {
-      return NextResponse.json({ positions: [], count: 0, account });
+      // Still disclose: a swept-but-truncated empty is NOT the same answer as a
+      // wallet that genuinely holds nothing (queue item B).
+      return NextResponse.json({
+        positions: [],
+        count: 0,
+        account,
+        ...(truncated.length > 0 ? { truncated } : {}),
+      });
     }
 
     // 2. Fetch token info for each unique pool
@@ -518,6 +554,8 @@ export async function GET(request: Request) {
       positions: [...positions, ...closedPositions],
       count: positions.length + closedPositions.length,
       account,
+      // Additive (queue item C Phase 1) — present ONLY when Sugar's cap bound.
+      ...(truncated.length > 0 ? { truncated } : {}),
     });
   } catch (error) {
     return NextResponse.json(

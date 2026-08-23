@@ -1,3 +1,4 @@
+import { applyTruncationNotices, type RouteTruncation } from './enumerationTruncation';
 export interface AerodromePosition {
   id: string;
   pair: string;
@@ -78,6 +79,8 @@ interface AerodromeResponse {
   positions: AerodromePosition[];
   count: number;
   account: string;
+  // Queue item C Phase 1 — present only when an enumeration cap bound.
+  truncated?: RouteTruncation[];
   error?: string;
 }
 
@@ -90,6 +93,11 @@ export async function fetchAerodromePositions(account: string): Promise<Aerodrom
       console.error('Aerodrome API error:', data.error);
       return [];
     }
+
+    // Record (or clear) the truncation notice for this source+wallet. Only
+    // reached on a SUCCESSFUL response — a failed fetch must never be read as
+    // evidence that the enumeration was complete.
+    applyTruncationNotices('Aerodrome', account, data.truncated);
 
     return (data.positions || []).map((p: AerodromePosition) => ({ ...p }));
   } catch (error) {

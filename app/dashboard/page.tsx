@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSProperties } from "react";
+import { TruncationBanner } from "../components/TruncationBanner";
 import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import TerminalNavbar from "../components/TerminalNavbar";
@@ -1755,6 +1756,11 @@ export default function Dashboard() {
                 as each protocol resolves. This subtle line names the sources
                 still scanning so late arrivals aren't mistaken for missing
                 positions. Fixed-height inline text, no layout shift. */}
+            {/* Queue item C Phase 1 — an enumeration cap that BOUND this load is
+                announced here, immediately above the table it truncated. Renders
+                nothing when every scan was complete. */}
+            {mounted && <TruncationBanner style={{ marginBottom: 12 }} />}
+
             {mounted && !isLoading && pendingSources.length > 0 && (
               <div style={{ fontSize: 11, color: C.text, opacity: 0.55, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
                 <span className="spin-icon" style={{ display: "inline-block", marginRight: 6 }}>↻</span>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { suiRpc } from '../../../lib/suiRpc';
+import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 // AlphaFi / AlphaLend on Sui — raw Sui RPC
 //
@@ -45,7 +46,19 @@ async function suiPost(method: string, params: unknown[]): Promise<unknown> {
   return result;
 }
 
-async function getOwnedObjects(account: string, structType: string): Promise<Record<string, unknown>[]> {
+// Queue item C Phase 1 — the 5-page bound below caps enumeration at 250 objects.
+// It is far above any realistic lending wallet, but a bound that can bind and
+// says nothing is exactly the defect being fixed, so it reports itself too.
+const MAX_PAGES = 5;
+const PAGE_SIZE = 50;
+
+// `notices` is passed IN, never module-level: a module-level accumulator on a
+// server route would leak one user's truncation into the next user's response.
+async function getOwnedObjects(
+  account: string,
+  structType: string,
+  notices: RouteTruncation[],
+): Promise<Record<string, unknown>[]> {
   const items: Record<string, unknown>[] = [];
   let cursor: string | null = null;
   let page = 0;
@@ -54,13 +67,23 @@ async function getOwnedObjects(account: string, structType: string): Promise<Rec
     const res = await suiPost('suix_getOwnedObjects', [
       account,
       { filter: { StructType: structType }, options: { showContent: true, showType: true } },
-      cursor, 50,
+      cursor, PAGE_SIZE,
     ]) as { data?: Array<{ data?: Record<string, unknown> }>; nextCursor?: string; hasNextPage?: boolean };
     console.log(`[alphafi/route] ${structType.split('::').pop()} page ${page}: ${res?.data?.length ?? 0} items`);
     if (page === 1) console.log(`[alphafi/route] page1 raw: ${JSON.stringify(res).slice(0, 300)}`);
     for (const item of res?.data ?? []) { if (item.data) items.push(item.data); }
     cursor = res?.hasNextPage ? (res.nextCursor ?? null) : null;
-  } while (cursor && page < 5);
+    if (cursor && page >= MAX_PAGES) {
+      notices.push({
+        scope: structType.split('::').pop() ?? structType,
+        cap: MAX_PAGES * PAGE_SIZE,
+        returned: items.length,
+        knownTotal: null,
+        reason: 'owned-object-page-cap',
+      });
+      console.warn(`[alphafi/route] ${structType}: stopped at the ${MAX_PAGES}-page cap with more pages available`);
+    }
+  } while (cursor && page < MAX_PAGES);
   return items;
 }
 
@@ -190,12 +213,14 @@ export async function GET(request: Request) {
 
   const supplies: AssetEntry[] = [];
   const borrows:  AssetEntry[] = [];
+  // Request-scoped (queue item C Phase 1).
+  const truncationNotices: RouteTruncation[] = [];
 
   // ── AlphaLend positions ─────────────────────────────────────────────────────
   await (async () => {
     const [capsOld, capsNew] = await Promise.all([
-      getOwnedObjects(account, POSITION_CAP_OLD),
-      getOwnedObjects(account, POSITION_CAP_NEW),
+      getOwnedObjects(account, POSITION_CAP_OLD, truncationNotices),
+      getOwnedObjects(account, POSITION_CAP_NEW, truncationNotices),
     ]);
     const caps = [...capsOld, ...capsNew];
     console.log(`[alphafi/route] PositionCap total: ${caps.length} (old=${capsOld.length}, new=${capsNew.length})`);
@@ -287,7 +312,7 @@ export async function GET(request: Request) {
 
   // ── AlphaFi Vault receipts ──────────────────────────────────────────────────
   await (async () => {
-    const receipts = await getOwnedObjects(account, VAULT_RECEIPT_TYPE);
+    const receipts = await getOwnedObjects(account, VAULT_RECEIPT_TYPE, truncationNotices);
     console.log(`[alphafi/route] Vault receipts: ${receipts.length}`);
     if (receipts.length === 0) {
       console.log(`[alphafi/route] No AlphaFi vault receipts for address: ${account}`);
@@ -327,5 +352,8 @@ export async function GET(request: Request) {
   })();
 
   console.log(`[alphafi/route] Final: ${supplies.length} supplies, ${borrows.length} borrows`);
-  return NextResponse.json({ supplies, borrows, protocol: 'AlphaFi', chain: 'Sui' });
+  return NextResponse.json({
+    supplies, borrows, protocol: 'AlphaFi', chain: 'Sui',
+    ...(truncationNotices.length > 0 ? { truncated: truncationNotices } : {}),
+  });
 }
