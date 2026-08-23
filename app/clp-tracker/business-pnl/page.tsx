@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   DEFAULT_SETTINGS,
   getBusinessPnLSettings,
@@ -224,6 +224,24 @@ export default function BusinessPnlPage() {
   // count of realized fees (Invariant #6).
   const convertedFees = useMemo(() => calcConvertedFees(claims), [claims]);
 
+  // The SAME function as `holdings` above with the option flipped off, which is
+  // exactly how Overall P&L's "excludes tokens you're still holding — $X at
+  // today's value" note computes its figure. Shown here as a reference line so
+  // that sentence can be checked against this page instead of taken on trust;
+  // the table above stays excl-stables, which is the right basis for a PRICE
+  // EXPOSURE view.
+  const holdingsInclStables = useMemo(
+    () => calcUnconvertedHoldings(claims, effectivePrices).totalCurrentValue,
+    [claims, effectivePrices],
+  );
+
+  // Net P&L's fee term, composed from the SAME two values this page already
+  // computes — realized converted fees + still-held non-stable tokens at
+  // today's price. total-pnl's `feesForNetPnL` is this same sum from these same
+  // two functions, so the figure quoted here cannot drift from the one Net P&L
+  // adds (Invariant #6). Nothing is recomputed a third way.
+  const netPnlFeeBasis = convertedFees + holdings.totalCurrentValue;
+
   // How far short of the Growth Target the business currently is. Read from
   // calcGrowthTarget with the same inputs the Growth Target card uses (its fee
   // half is business.allTotal), so the gap here and the "$X behind" there are
@@ -349,6 +367,16 @@ export default function BusinessPnlPage() {
           label="Converted Fees (Realized)"
           value={formatUsd(convertedFees)}
           hint="Actually cashed out — the same figure Overall P&L uses"
+          note={
+            <p className="mt-1 text-[11px] tabular-nums text-[var(--muted)]">
+              {formatUsd(convertedFees)} +{" "}
+              {formatUsd(holdings.totalCurrentValue)} held (excl. stables) ={" "}
+              <span className="font-medium text-[var(--foreground)]">
+                {formatUsd(netPnlFeeBasis)}
+              </span>{" "}
+              — the figure Net P&amp;L uses.
+            </p>
+          }
         />
         <SummaryStat
           label="P&L (Current − Converted)"
@@ -557,6 +585,15 @@ export default function BusinessPnlPage() {
                 valueClass={pnlColor(holdings.totalPnl)}
               />
             </div>
+            <p className="border-b border-[var(--border)] px-5 py-3 text-xs tabular-nums text-[var(--muted)]">
+              Including stablecoin legs:{" "}
+              <span className="font-medium text-[var(--foreground)]">
+                {formatUsd(holdingsInclStables)}
+              </span>{" "}
+              — the figure Overall P&amp;L&apos;s exclusion note uses. The table
+              below stays excl-stables: a stablecoin carries no price exposure
+              and its dollars are already realized in Converted Fees.
+            </p>
             <div className="border-b border-[var(--border)] px-5 py-4">
               {/* One line, not a caveat essay: the assumption is the whole point
                   of reading the column, so it has to be visible beside it. */}
@@ -819,9 +856,12 @@ interface SummaryStatProps {
   value: string;
   valueClass?: string;
   hint?: string;
+  // An extra reference line under the hint, for a card whose figure is also a
+  // term in a total shown on another page.
+  note?: ReactNode;
 }
 
-function SummaryStat({ label, value, valueClass, hint }: SummaryStatProps) {
+function SummaryStat({ label, value, valueClass, hint, note }: SummaryStatProps) {
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 py-4">
       <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
@@ -833,6 +873,7 @@ function SummaryStat({ label, value, valueClass, hint }: SummaryStatProps) {
         {value}
       </p>
       {hint && <p className="mt-1 text-xs text-[var(--muted)]">{hint}</p>}
+      {note}
     </div>
   );
 }
