@@ -975,6 +975,45 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: live USD preview for Undeployed Tokens transfers.**
+  Undeployed Tokens is the one transfer type whose Amount is a TOKEN COUNT rather than a dollar
+  figure, so "4.2 SUI" said nothing about how much money was sitting idle. The Add/Edit Transfer
+  modal now shows a `≈ $X,XXX.XX USD` line under Amount when Transfer Type = Undeployed Tokens.
+  **DISPLAY ONLY — verified, not asserted:** the saved record after using the preview is
+  `{token:"SUI", amount:250, transferType:"undeployed"}` with no price field and no `moneyStatus`,
+  byte-identical in shape to what the form wrote before.
+  **Reuses the existing price path, does NOT add one:** NEW `app/clp-tracker/lib/useSpotPreview.ts`
+  calls `/clp-tracker/api/prices?symbols=…` — the same route `useTokenPrices` (Business P&L,
+  Growth Target) already uses, so it inherits the CoinGecko-primary → DeFiLlama-backup tiering
+  and the curated `TOKEN_PRICE_IDS` map for free. A second fetch path would be a second set of
+  answers to the same question (Invariant #6) and would have missed the fallback tier.
+  **⚠️ Naming correction for the record:** this route is fallback-tiered but NOT Redis-backed —
+  `redisSpotCache.ts` / `cg_spot_v1` is the MAIN app's server-side spot LKG and is not reachable
+  from a CLP client route. The in-module 60 s symbol cache added here is what stops repeat
+  lookups; do not go looking for a Redis tier under `/clp-tracker/api/prices` that was never there.
+  **Stablecoins take no lookup AND render no line** — the Amount field already reads as dollars,
+  so "100 USDC ≈ $100.00" is a restatement, not information. Gated on the shared `isStableSymbol`.
+  **A token neither source can price renders "Price unavailable", never $0.00** — and the guard is
+  `p > 0`, not `Number.isFinite(p)`, because a zero from a price service is a failed lookup wearing
+  a number, which is exactly the "$0 for a real token" this must not do. A transient network
+  failure is deliberately NOT cached, so the next pause retries instead of pinning the field.
+  **Debounce 400 ms, proven by request count** rather than by timing: three fast keystrokes over
+  the Token field produced **1** request (`?symbols=ETH`), and an amount-only edit (100 SUI → 250
+  SUI) re-derived $71.96 → $179.90 with **0** extra requests, because the price is cached per
+  symbol and only the multiplication re-runs.
+  **The lint rule earned its keep:** the first version wrote `setPreview({status:"idle"})` and the
+  cache-hit result synchronously in the effect body and tripped `react-hooks/set-state-in-effect`.
+  Correct shape is the one it forced: everything knowable at render time (not ready, stablecoin,
+  cache hit) is DERIVED during render, and only the async answer lives in state — so the only
+  setState calls are inside the debounce timer's callback.
+  Verified on localhost (Playwright, clean profile): preview absent on Fees / Out of Range Upside,
+  appears on switching to Undeployed Tokens (100 SUI → ≈ $71.96), present on EDIT of an existing
+  undeployed transfer (400 SUI → ≈ $287.92, consistent), stablecoin renders nothing with 0
+  requests, `ZZZFAKE` renders "Price unavailable", 0 page errors. Previous session's save fix
+  re-verified unchanged (day-first date saves, normal saves, empty token still blocks with its
+  message). Build clean, `tsc --noEmit` clean, eslint clean. **No cache bumps** — nothing is
+  persisted and no stored value changes shape.
+
 - **(this session)** — **CLP Tracker: "Save Changes" on a transfer could do NOTHING — no error,
   modal stays open, nothing written.** Reported against a DRIFTED transfer (one that no longer
   matches its fee claim) being switched to Expense. **The drift is a red herring and so is the
