@@ -379,6 +379,18 @@ case widening the window or awaiting the prewarm for CLOSED positions only is en
 does. Complexity SMALL–MEDIUM. **Acceptance:** `node scripts/capgl-determinism.mjs --runs 3`
 on production → `VERDICT: deterministic ✓`.
 
+**🟡 CLP-TOTALS — the Transfers page shows TWO figures for the same transfers.** _(Created
+2026-09-13 when the chain list started valuing non-stable Undeployed Tokens rows at spot.)_ The
+chain list now reads SUI $729.95; **By Token**, **By Destination**, **Lifetime Earned**,
+**Transfers Net Total** and **Available Balance** still read $1,027.40 for the same two rows,
+because they sum `t.amount` raw in the `balance` memo and the GroupTable feeds. Deliberate scope
+boundary, not an oversight — but two money figures for the same records on one screen is a trust
+problem in its own right. **Shape:** move the totals onto the same `rowValueOf` decision the list
+uses, which means the memo needs the `priceOf` lookup threaded into it and an honest treatment of
+unpriced rows in a headline card (a card cannot carry a per-row footnote). **⚠️ Available Balance
+is read by other CLP pages**, so this is not display-local — check every consumer before moving
+it. Complexity MEDIUM.
+
 **🟠 ITEM 0i — A HUNG positions source renders a confident $0.00 total, with NO loading state,
 NO error, and NO banner — while the breakdown table below it still shows real positions.**
 _(Found 2026-08-10 on production during the ITEM 0g verification. Load-induced — see the
@@ -974,6 +986,48 @@ shorthand.
   Build clean, `tsc --noEmit` clean, eslint byte-identical to pre-change (2 pre-existing
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
+
+- **(this session)** — **CLP Tracker: Transfers-by-Chain values non-stable Undeployed Tokens rows
+  at spot instead of printing the token count with a $ sign.** A row holding 871 SUI rendered
+  **$871.00**, and the chain subtotal for two SUI transfers rendered **$1,027.40** — raw token
+  counts, formatted as money. That is a WRONG number, not a missing one, which is the worse of
+  the two failure modes this project cares about. Now: **$618.83** and **$729.95** at live spot,
+  with the count (`871 SUI`) kept on a second line so nothing the record actually stores is lost.
+  **Only Undeployed Tokens converts, and only when non-stable.** Every other transfer type
+  already records a USD figure (a claim's value, a close's upside) — `needsSpotValue` is the
+  single predicate, and stablecoins stay on the untouched path since they are already ~1:1.
+  **Row and subtotal cannot drift, BY CONSTRUCTION:** one `rowValueOf(t, priceOf)` returns a
+  `RowValue` that the row renders and the subtotal sums — the same discipline the Capital G/L
+  breakdown uses to make footer === cell. An unpriceable row shows **"Price unavailable"**, never
+  $0.00, contributes nothing to the subtotal, and the subtotal SAYS SO (`1 not priced —
+  excluded`) rather than quietly summing fewer rows than it lists (Rule 11).
+  **Same price path, extended not duplicated:** `useSpotPreview.ts` now exposes `useSpotPrices`
+  (many symbols, no debounce) alongside `useSpotPreview` (one symbol, debounced), sharing one
+  `spotCache` and one `fetchSpot`, so a symbol priced by the modal is free for the list and the
+  two can never show different figures for the same token. One request covers the whole list —
+  the route already takes a comma-separated set. Added an **in-flight dedup map** so concurrent
+  asks for a symbol share one request.
+  **⚠️ Correction to a measurement I made mid-work:** the "4 price requests per load" that
+  prompted the dedup was **2 page loads × 2 consumers**, and the second consumer is the
+  PRE-EXISTING `useLivePositionPrices` call behind the Sidebar's portfolio figure (documented as
+  an accepted cost in `Sidebar.tsx`) — not a dedup failure in this hook, which issues exactly
+  ONE request per load. The dedup is a correct guard (StrictMode double-effects, list+modal
+  overlap) but its benefit was NOT isolated by measurement; do not cite it as a 4→2 fix.
+  **🟠 KNOWN DIVERGENCE, DELIBERATELY NOT FIXED — the same screen now shows two figures for the
+  same transfers.** Scope was the chain list; the identical defect is still live in **By Token**
+  (`SUI 2 $1,027.40`, `ZZZFAKE 1 $99.00`), **By Destination**, and the summary cards
+  (**Lifetime Earned / Transfers Net Total $1,876.40**, Available Balance), all of which still
+  sum `t.amount` raw via the `balance` memo. Measured side by side on the same data: chain list
+  $729.95 + $750.00 vs By Token $1,876.40. **Extending the conversion to those totals is a
+  separate, larger change** (it moves Available Balance, which other pages read) and is the
+  owner's call — see the queue item.
+  Verified on localhost (Playwright, clean profile): 871 SUI → $618.83, 156.4 SUI → $111.12,
+  SUI subtotal $729.95 — all three reproduce `amount × spot` to the cent against the route's own
+  `SUI 0.709994`; stablecoin undeployed ($500) and an ordinary fees row ($250) byte-unchanged;
+  `ZZZFAKE` → "Price unavailable" + `1 not priced — excluded`; 0 page errors. Previous two
+  sessions' work re-verified unchanged (modal preview ≈ $71.03, day-first-date save, empty-token
+  block + message). Build clean, `tsc --noEmit` clean, eslint identical to baseline (3
+  pre-existing warnings in untouched files). **No cache bumps** — display only, nothing persisted.
 
 - **(this session)** — **CLP Tracker: live USD preview for Undeployed Tokens transfers.**
   Undeployed Tokens is the one transfer type whose Amount is a TOKEN COUNT rather than a dollar
