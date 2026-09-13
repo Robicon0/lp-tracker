@@ -176,12 +176,63 @@ const EMPTY_FORM: TransferFormState = {
   notes: "",
 };
 
+// A record's stored date rendered as an <input type="date"> value. The inputs
+// accept EXACTLY "YYYY-MM-DD" and silently show themselves EMPTY for anything
+// else — and an empty `required` input blocks form submission, which is how a
+// perfectly ordinary edit (changing Money Status to Expense, say) turned into
+// "Save Changes does nothing". The stored date is not always in that shape:
+// records created by automation, by CSV import, or before the date input
+// existed can carry a full ISO datetime, an unpadded "2026-7-1", or a
+// DD/MM/YYYY string. `.slice(0, 10)` — what every *ToForm did — only ever
+// handled the first of those, and turned the rest into a blank field.
+// Returns "" only when the value genuinely cannot be read as a date, which is
+// the one case the form should ask the user to fill in.
+function toDateInputValue(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim();
+  if (s === "") return "";
+  const iso = s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  // Unpadded ISO-ish: 2026-7-1
+  const loose = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (loose) {
+    return `${loose[1]}-${loose[2].padStart(2, "0")}-${loose[3].padStart(2, "0")}`;
+  }
+  // Day-first, the format this app DISPLAYS (formatDateDDMMYYYY), so it is the
+  // one a hand-edited or re-imported record is most likely to come back in.
+  const dmy = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})/.exec(s);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  return "";
+}
+
+// Same idea for the numeric input: String(NaN) is "NaN" and String(undefined)
+// is "undefined", neither of which an <input type="number"> will display — it
+// renders empty, and the required check then blocks the save. A record whose
+// amount is not a finite number is genuinely missing a figure, so it shows as
+// empty and the form says so rather than refusing in silence.
+function toAmountInputValue(raw: unknown): string {
+  if (typeof raw === "number") return Number.isFinite(raw) ? String(raw) : "";
+  // A numeric STRING is a legitimate stored shape (CSV import, hand-edited
+  // JSON) and round-trips fine — only reject what is not a number at all.
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    return s !== "" && Number.isFinite(Number(s)) ? s : "";
+  }
+  return "";
+}
+
 function transferToForm(t: Transfer): TransferFormState {
   return {
     positionId: t.positionId,
-    date: t.date.slice(0, 10),
+    date: toDateInputValue(t.date),
     token: t.token,
-    amount: String(t.amount),
+    amount: toAmountInputValue(t.amount),
     platform: t.platform,
     destination: t.destination,
     transferType: t.transferType,
@@ -223,8 +274,8 @@ interface ExpenseFormState {
 
 function expenseToForm(t: Transfer): ExpenseFormState {
   return {
-    date: t.date.slice(0, 10),
-    amount: String(t.amount),
+    date: toDateInputValue(t.date),
+    amount: toAmountInputValue(t.amount),
     notes: t.notes,
   };
 }
@@ -322,8 +373,8 @@ const EMPTY_WITHDRAWAL_FORM: WithdrawalFormState = {
 
 function withdrawalToForm(w: Withdrawal): WithdrawalFormState {
   return {
-    date: w.date.slice(0, 10),
-    amount: String(w.amount),
+    date: toDateInputValue(w.date),
+    amount: toAmountInputValue(w.amount),
     method: w.method,
     notes: w.notes,
   };
@@ -3204,14 +3255,36 @@ function TransferFormModal({
     (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       set(key, e.target.value.toUpperCase() as TransferFormState[typeof key]);
 
+  // Which required fields are empty, named the way the labels name them. The
+  // browser's own `required` handling is deliberately turned off below
+  // (noValidate) and replaced by this: a native validation bubble is transient
+  // — it fades after a few seconds and leaves nothing behind but a blank field
+  // — so a save blocked by one reads as "Save Changes did nothing". Same
+  // principle as architecture Rule 11: degrade VISIBLY, never silently.
+  const missing: string[] = [];
+  if (form.date.trim() === "") missing.push("Date");
+  if (form.token.trim() === "") missing.push("Token");
+  if (form.amount.trim() === "" || !Number.isFinite(Number(form.amount))) {
+    missing.push("Amount");
+  }
+  const [showErrors, setShowErrors] = useState(false);
+
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (missing.length > 0) {
+      setShowErrors(true);
+      return;
+    }
     onSubmit(form);
   };
 
   return (
     <ModalShell title={title} onCancel={onCancel}>
-      <form onSubmit={submit} className="divide-y divide-[var(--border)]">
+      <form
+        onSubmit={submit}
+        noValidate
+        className="divide-y divide-[var(--border)]"
+      >
         <Section title="Transfer Details">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <PositionCombobox
@@ -3318,6 +3391,18 @@ function TransferFormModal({
             </Field>
           </div>
         </Section>
+        {showErrors && missing.length > 0 && (
+          <div
+            role="alert"
+            className="px-5 py-3 text-[12px] text-rose-300"
+          >
+            Can&rsquo;t save yet — {missing.join(" and ")}{" "}
+            {missing.length === 1 ? "is" : "are"} empty. This record was stored
+            without {missing.length === 1 ? "a value" : "values"} the form could
+            read, so fill {missing.length === 1 ? "it" : "them"} in above and
+            save again.
+          </div>
+        )}
         <FormActions
           onCancel={onCancel}
           submitLabel={submitLabel}

@@ -975,6 +975,47 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: "Save Changes" on a transfer could do NOTHING — no error,
+  modal stays open, nothing written.** Reported against a DRIFTED transfer (one that no longer
+  matches its fee claim) being switched to Expense. **The drift is a red herring and so is the
+  Money Status change**: `handleEdit` was never reached at all. The modal's `<form>` relies on
+  BROWSER-NATIVE `required` validation on Date / Token / Amount, and those inputs are populated
+  from the stored record by `transferToForm` — which did `t.date.slice(0, 10)` and
+  `String(t.amount)`. An `<input type="date">` accepts EXACTLY `YYYY-MM-DD` and renders EMPTY
+  for anything else, so a record carrying `01/07/2026`, `2026-7-1`, or an amount that is not a
+  finite number presented as a BLANK required field → submit blocked → `onSubmit` never fires.
+  **Measured, not guessed:** a 13-case fuzz over stored field shapes, reading
+  `form.checkValidity()` and each control's `validationMessage` at the moment of the click.
+  `date-slashes` / `date-unpadded` / `date-empty` / `amount-null` / `amount-nan` /
+  `amount-undefined` / `token-empty` all showed `BLOCKED status=redeployed`; the baseline saved.
+  **NOT drift-specific — verified explicitly**, because the queue asked: a plain hand-logged
+  transfer with no `sourceClaimId` and a day-first date reproduced identically. Drifted rows just
+  over-represent because they are MACHINE-created (automation / CSV import); this form is the only
+  thing that normalises these fields, so records that never passed through it are the ones that
+  carry a shape it cannot read.
+  **Two fixes, and the second is the one that matters long-term.** (1) NEW `toDateInputValue` /
+  `toAmountInputValue` normalise on the way IN — day-first, unpadded ISO, full ISO datetime, and
+  numeric strings all resolve; `""` is returned only when a value genuinely cannot be read.
+  Applied to all three loaders (`transferToForm`, `expenseToForm`, `withdrawalToForm`) since they
+  shared the identical `.slice(0, 10)` / `String(amount)` line. (2) The form is now `noValidate`
+  with EXPLICIT validation: a blocked save renders a persistent in-modal line naming the empty
+  field. **A native validation bubble is transient** — it fades after a few seconds and leaves
+  nothing but a blank input, which is exactly why a blocked save reads as "Save Changes did
+  nothing". Architecture Rule 11 applied to a form: degrade VISIBLY, never silently.
+  **⚠️ Caught in verification: the first `toAmountInputValue` was too strict** — it accepted only
+  `typeof raw === "number"`, which BROKE the previously-working `amount-string` case (a numeric
+  string is a legitimate stored shape). The fuzz flagged it as a regression on the same run that
+  confirmed the date fixes. Narrowing a coercion is as dangerous as widening one.
+  **Verified on localhost** (Playwright, clean profile): drifted transfer with `01/07/2026` now
+  loads its Date input as `2026-07-01`, Save Changes closes the modal, the row carries the
+  EXPENSE pill, **Expenses (USD) $0.00 → $200.00**, Breakdown-by-type Expense 0 → 1, and the
+  Expenses & Withdrawals ledger gains the row at Total Out of Business $200.00. Non-drifted edit
+  unchanged (`plain-good-date` saves, notes-only edit saves); Add Transfer unaffected (same
+  component); a genuinely value-less record still blocks — but now SAYS so, message still on
+  screen 6 s after the click, long past the native bubble's lifetime. 0 page errors.
+  Build clean, `tsc --noEmit` clean, eslint clean. **No cache bumps** — display/identity layer
+  only, no valuation, pricing or position-discovery logic touched.
+
 - **`dbcde99`** — **CLP Tracker now FOLLOWS the site theme toggle; Calculator nav arrow
   removed; the dropdown's hover-close gap fixed.** Three changes, no component logic,
   calculation or behaviour touched.
