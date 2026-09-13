@@ -43,7 +43,11 @@ import {
   IDLE_UPSIDE_DAYS,
   type TransferSymbolMismatchRow,
 } from "../lib/dataHealth";
-import { calcExpensesAfter, calcYieldAfter } from "../lib/calculations";
+import {
+  calcExpensesAfter,
+  calcYieldAfter,
+  isStableSymbol,
+} from "../lib/calculations";
 import { OutlierBanner } from "../components/OutlierBanner";
 import {
   PositionCombobox,
@@ -72,7 +76,11 @@ import {
   type UndoSplitPlan,
 } from "../lib/transferAutomation";
 import { useHydrated } from "../lib/useHydrated";
-import { useSpotPreview } from "../lib/useSpotPreview";
+import {
+  useSpotPreview,
+  useSpotPrices,
+  type SpotPriceLookup,
+} from "../lib/useSpotPreview";
 import {
   isDeployedTransfer,
   isExpensedTransfer,
@@ -120,6 +128,18 @@ const usdFormatter = new Intl.NumberFormat("en-US", {
 
 function formatUsd(value: number): string {
   return usdFormatter.format(Number.isFinite(value) ? value : 0);
+}
+
+// Token counts, not dollars: a count can legitimately be 0.0042 or 871, so a
+// fixed 2dp would print "0.00" for a real holding. Up to 6 significant
+// decimals, trailing zeros dropped.
+const tokenFormatter = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 6,
+});
+
+function formatTokenAmount(value: number): string {
+  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
 }
 
 function pad(n: number): string {
@@ -391,6 +411,42 @@ function buildWithdrawal(id: string, form: WithdrawalFormState): Withdrawal {
   };
 }
 
+// What a transfer row is WORTH, as opposed to what it stores.
+//
+// Every transfer type except Undeployed Tokens already records a USD figure —
+// a fee claim's value, a close's upside — so its amount IS the money and is
+// shown unchanged. Undeployed Tokens is the exception: its amount is a TOKEN
+// COUNT, so rendering it with a $ sign said "871 SUI = $871.00", which is a
+// wrong number rather than a missing one. A non-stable Undeployed row is
+// therefore valued at CURRENT SPOT. (A stablecoin one needs no lookup — it is
+// already ~1:1 — so it stays on the untouched path.)
+//
+// DISPLAY ONLY, and deliberately so: the stored record keeps its token count,
+// and spot moves, so this value is true at read time and nowhere else. That is
+// also why it does not feed Capital G/L or any lifetime total.
+//
+// ONE function decides this for both the row and its chain subtotal, so the
+// two cannot drift — the same construction the Capital G/L breakdown uses to
+// make footer === cell by construction.
+type RowValue =
+  | { kind: "usd"; usd: number }
+  | { kind: "converted"; usd: number; price: number }
+  | { kind: "loading" }
+  | { kind: "unavailable" };
+
+function needsSpotValue(t: Transfer): boolean {
+  return t.transferType === "undeployed" && !isStableSymbol(t.token);
+}
+
+function rowValueOf(t: Transfer, priceOf: SpotPriceLookup): RowValue {
+  if (!needsSpotValue(t)) return { kind: "usd", usd: t.amount };
+  const price = priceOf(t.token);
+  if (price === undefined) return { kind: "loading" };
+  // Never $0.00 for a real token: unpriceable is unknown, not worthless.
+  if (price === null) return { kind: "unavailable" };
+  return { kind: "converted", usd: t.amount * price, price };
+}
+
 // Compact transfer row: a select box and the facts that identify the record —
 // Pair, Amount, Date(s), Type, Money Status and any settled badge. It does NOT
 // expand any more. Everything you can DO to a transfer moved into the toolbar,
@@ -399,6 +455,7 @@ function buildWithdrawal(id: string, form: WithdrawalFormState): Withdrawal {
 // Edit. One selection gesture now does what selecting and expanding used to.
 function TransferListRow({
   transfer: t,
+  value,
   pairLabel,
   deployedLabel,
   datesLabel,
@@ -406,6 +463,9 @@ function TransferListRow({
   onToggleSelect,
 }: {
   transfer: Transfer;
+  // What this row is worth, decided once by rowValueOf so the figure here and
+  // the chain subtotal are the same number by construction.
+  value: RowValue;
   pairLabel: string;
   deployedLabel: string | null;
   // Replaces the row's single bare date when one date can't tell the whole
@@ -445,8 +505,32 @@ function TransferListRow({
           <span className="truncate text-sm font-medium text-[var(--foreground)]">
             {pairLabel}
           </span>
-          <span className="shrink-0 text-sm font-medium tabular-nums text-[var(--foreground)]">
-            {formatUsd(t.amount)}
+          <span className="shrink-0 text-right">
+            {value.kind === "unavailable" ? (
+              /* Never $0.00 — that would read as "worthless" rather than
+                 "unknown". The token count is still shown below, so the row
+                 keeps the fact it actually stores. */
+              <span className="text-sm font-medium text-[var(--muted)]">
+                Price unavailable
+              </span>
+            ) : value.kind === "loading" ? (
+              <span className="text-sm font-medium text-[var(--muted)]">
+                Pricing…
+              </span>
+            ) : (
+              <span className="text-sm font-medium tabular-nums text-[var(--foreground)]">
+                {formatUsd(value.usd)}
+              </span>
+            )}
+            {/* A converted row shows BOTH: the USD value it is worth now and
+                the token count the record actually holds. Dropping the count
+                would hide what was stored; showing only the count was the bug.
+                An unpriceable row still shows its count for the same reason. */}
+            {needsSpotValue(t) && (
+              <span className="block text-[11px] font-normal tabular-nums text-[var(--muted)]">
+                {formatTokenAmount(t.amount)} {t.token}
+              </span>
+            )}
           </span>
         </span>
         <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--muted)]">
@@ -1548,20 +1632,47 @@ export default function TransfersPage() {
     return map;
   }, [positions]);
 
+  // Spot prices for the non-stable Undeployed Tokens rows currently on screen.
+  // Only those symbols are requested — every other transfer type already
+  // stores a USD figure and needs no lookup — so an all-stablecoin list makes
+  // no request at all. Shares its cache with the edit modal's preview.
+  const spotSymbols = useMemo(
+    () => searchedFiltered.filter(needsSpotValue).map((t) => t.token),
+    [searchedFiltered],
+  );
+  const priceOf = useSpotPrices(spotSymbols);
+
   const byChain = useMemo(() => {
-    const map = new Map<string, Transfer[]>();
+    const map = new Map<string, { transfer: Transfer; value: RowValue }[]>();
     for (const t of searchedFiltered) {
       const chain = positionChainById.get(t.positionId) ?? "UNLINKED";
+      const entry = { transfer: t, value: rowValueOf(t, priceOf) };
       const list = map.get(chain);
-      if (list) list.push(t);
-      else map.set(chain, [t]);
+      if (list) list.push(entry);
+      else map.set(chain, [entry]);
     }
-    const amountOf = (list: Transfer[]) =>
-      list.reduce((sum, t) => sum + t.amount, 0);
     return [...map.entries()]
-      .map(([chain, list]) => ({ chain, list, amount: amountOf(list) }))
+      .map(([chain, list]) => {
+        // The subtotal sums EXACTLY the figures its rows display, so the two
+        // cannot disagree. A row that could not be priced contributes nothing
+        // and is counted instead — silently dropping it would understate the
+        // total with no sign that anything was missing (architecture Rule 11).
+        let amount = 0;
+        let unpriced = 0;
+        let pricing = 0;
+        for (const { value } of list) {
+          if (value.kind === "usd" || value.kind === "converted") {
+            amount += value.usd;
+          } else if (value.kind === "unavailable") {
+            unpriced += 1;
+          } else {
+            pricing += 1;
+          }
+        }
+        return { chain, list, amount, unpriced, pricing };
+      })
       .sort((a, b) => b.amount - a.amount);
-  }, [searchedFiltered, positionChainById]);
+  }, [searchedFiltered, positionChainById, priceOf]);
 
   // Bulk-select over the currently-visible (searched + filtered) rows. Selecting
   // ids that scroll out of view is avoided by intersecting with visibleIds on
@@ -2434,9 +2545,9 @@ export default function TransfersPage() {
                 </div>
 
                 <div className="divide-y divide-[var(--border)]">
-                  {byChain.map(({ chain, list, amount }) => (
+                  {byChain.map(({ chain, list, amount, unpriced, pricing }) => (
                     <div key={chain}>
-                      <div className="flex items-center justify-between bg-[var(--surface-2)]/40 px-5 py-2.5">
+                      <div className="flex items-center justify-between gap-3 bg-[var(--surface-2)]/40 px-5 py-2.5">
                         <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
                           {chain}
                           <span className="ml-2 font-normal text-[var(--muted)]/70">
@@ -2444,16 +2555,28 @@ export default function TransfersPage() {
                             {list.length === 1 ? "transfer" : "transfers"}
                           </span>
                         </span>
-                        <span className="text-[12px] font-semibold tabular-nums text-[var(--foreground)]">
-                          {formatUsd(amount)}
+                        <span className="flex items-baseline gap-2 text-right">
+                          {/* The subtotal states what it LEFT OUT rather than
+                              quietly summing fewer rows than it lists. */}
+                          {(unpriced > 0 || pricing > 0) && (
+                            <span className="text-[10px] font-normal normal-case tracking-normal text-[var(--muted)]">
+                              {unpriced > 0
+                                ? `${unpriced} not priced — excluded`
+                                : `pricing ${pricing}…`}
+                            </span>
+                          )}
+                          <span className="text-[12px] font-semibold tabular-nums text-[var(--foreground)]">
+                            {formatUsd(amount)}
+                          </span>
                         </span>
                       </div>
                       <div className="divide-y divide-[var(--border)]">
-                        {list.map((t) => (
+                        {list.map(({ transfer: t, value }) => (
                           <TransferListRow
                             key={t.id}
                             datesLabel={upsideDatesLabel(t)}
                             transfer={t}
+                            value={value}
                             pairLabel={
                               t.transferType === "expense"
                                 ? "Expense"
