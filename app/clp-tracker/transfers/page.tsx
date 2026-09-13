@@ -72,6 +72,7 @@ import {
   type UndoSplitPlan,
 } from "../lib/transferAutomation";
 import { useHydrated } from "../lib/useHydrated";
+import { useSpotPreview } from "../lib/useSpotPreview";
 import {
   isDeployedTransfer,
   isExpensedTransfer,
@@ -3255,6 +3256,16 @@ function TransferFormModal({
     (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       set(key, e.target.value.toUpperCase() as TransferFormState[typeof key]);
 
+  // Live USD value of what is being typed, for Undeployed Tokens only — that
+  // is the one transfer type whose Amount is a TOKEN COUNT rather than a
+  // dollar figure, so it is the one where the field alone doesn't say how much
+  // money is involved. Display-only: nothing here is read by submit().
+  const spot = useSpotPreview(
+    form.token,
+    form.amount,
+    form.transferType === "undeployed",
+  );
+
   // Which required fields are empty, named the way the labels name them. The
   // browser's own `required` handling is deliberately turned off below
   // (noValidate) and replaced by this: a native validation bubble is transient
@@ -3323,6 +3334,27 @@ function TransferFormModal({
                 value={form.amount}
                 onChange={(e) => set("amount", e.target.value)}
               />
+              {/* Preview only — never saved. The record stores the token and
+                  the count exactly as before; this just says what they are
+                  worth right now. Height is reserved by the wrapper so the
+                  grid doesn't jump as the value resolves. */}
+              {spot.status !== "idle" && (
+                <p
+                  aria-live="polite"
+                  className={`text-[11px] tabular-nums ${
+                    spot.status === "ok"
+                      ? "text-[var(--foreground)]"
+                      : "text-[var(--muted)]"
+                  }`}
+                >
+                  {spot.status === "loading" && "Checking price…"}
+                  {spot.status === "ok" &&
+                    `\u2248 ${formatUsd(spot.usd)} USD`}
+                  {/* Never "$0.00" — a token we cannot price is unknown, not
+                      worthless (pricing-invariants Rule 1a's principle). */}
+                  {spot.status === "unavailable" && "Price unavailable"}
+                </p>
+              )}
             </Field>
             {/* Platform is OPTIONAL. It used to be `required`, which blocked
                 saving any unrelated edit (a typo in the notes, a money-status
