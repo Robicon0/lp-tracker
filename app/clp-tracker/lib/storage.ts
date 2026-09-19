@@ -52,12 +52,50 @@ function readArray<T>(key: string): T[] {
   }
 }
 
+// A write that could not be made must never look like one that was. This used
+// to swallow every failure, so a full quota, a disabled store, or a private
+// window turned "your edit is saved" into a no-op with nothing on screen —
+// the silent-failure class architecture Rule 11 exists to end. It now THROWS,
+// and the callers on the Transfers page turn that into an on-screen message.
+export class StorageWriteError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = "StorageWriteError";
+  }
+}
+
 function writeValue<T>(key: string, value: T): void {
   if (!isBrowser()) return;
+  let serialized: string;
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Quota exceeded or storage disabled — fail silently.
+    serialized = JSON.stringify(value);
+  } catch (err) {
+    throw new StorageWriteError(
+      "the record could not be encoded for storage",
+      err,
+    );
+  }
+  try {
+    window.localStorage.setItem(key, serialized);
+  } catch (err) {
+    const quota =
+      err instanceof DOMException &&
+      (err.name === "QuotaExceededError" ||
+        err.name === "NS_ERROR_DOM_QUOTA_REACHED");
+    throw new StorageWriteError(
+      quota
+        ? "this browser's storage for the site is full, so nothing was written"
+        : "this browser refused to write to storage (private window, or site data blocked)",
+      err,
+    );
+  }
+  // Read it straight back. setItem can resolve without the value landing (an
+  // evicted or racing store), and a write that did not land must be reported,
+  // never assumed.
+  if (window.localStorage.getItem(key) !== serialized) {
+    throw new StorageWriteError(
+      "the write did not land — storage read back a different value",
+    );
   }
 }
 

@@ -26,6 +26,7 @@ import {
   saveTransfers,
   saveWithdrawals,
   softDeleteTransfer,
+  StorageWriteError,
   type BusinessPnLSettings,
 } from "../lib/storage";
 import {
@@ -349,6 +350,33 @@ function canPlaceTransfer(t: Transfer): boolean {
 // kept, never replacing it — so the original wording survives and repeated
 // edits read as a trail rather than one value clobbering the last.
 // Scoped to amount on purpose; stamping every field would bury the note.
+// Two records compared by CONTENT, not by key order. The stored shape and the
+// rebuilt shape list their keys in different orders (an auto-created transfer
+// writes sourceClaimId before notes; buildTransfer + the carry-over spread
+// writes them after), so a plain JSON.stringify comparison reports every
+// untouched record as changed. Sorting the keys is what makes "did this save
+// actually alter anything?" answerable.
+function transferFingerprint(t: Transfer): string {
+  const bag = t as unknown as Record<string, unknown>;
+  const keys = Object.keys(bag)
+    .filter((k) => bag[k] !== undefined)
+    .sort();
+  return JSON.stringify(t, keys);
+}
+
+// What a save attempt produced. null means it was written and verified; a
+// string is the reason it was NOT, and is shown to the user on screen. No save
+// path on this page may return silently without one of the two.
+type SaveOutcome = string | null;
+
+function saveFailureMessage(err: unknown): string {
+  if (err instanceof StorageWriteError) {
+    return `Couldn’t save — ${err.message}. Nothing was changed.`;
+  }
+  const detail = err instanceof Error ? err.message : String(err);
+  return `Couldn’t save — ${detail}. Nothing was changed.`;
+}
+
 function withAmountEditNote(
   notes: string,
   previous: number,
@@ -1238,6 +1266,26 @@ export default function TransfersPage() {
   const [deletedTransfers, setDeletedTransfers] = useState<Transfer[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
   const [pendingPurge, setPendingPurge] = useState<string | null>(null);
+  // Why the last NON-MODAL write failed (mark-as-expense in bulk, deploy-link,
+  // split, delete, restore, purge, revert-to-auto...). Those actions have no
+  // modal to report into, so they report here, at the top of the page. Nothing
+  // that writes may fail without setting this.
+  const [pageSaveError, setPageSaveError] = useState<string | null>(null);
+
+  // Every non-modal write goes through this: it runs the write, and on failure
+  // puts the reason on screen instead of letting the action end as a no-op (or
+  // as an uncaught throw with nothing but a console line). Returns whether the
+  // write went through, so callers can skip their follow-up steps.
+  const commit = (write: () => void): boolean => {
+    try {
+      write();
+    } catch (err) {
+      setPageSaveError(saveFailureMessage(err));
+      return false;
+    }
+    setPageSaveError(null);
+    return true;
+  };
 
   // Yield checkpoints live in the Business P&L settings key and stay there —
   // this page only reads and writes that one field, so nothing migrates.
@@ -1261,7 +1309,14 @@ export default function TransfersPage() {
     // Retire "Needs Review": persist an explicit moneyStatus on any legacy
     // transfer that never had one (no-op for totals — unset already behaved as
     // redeployed). Runs once; idempotent thereafter.
-    migrateTransferMoneyStatus();
+    // The one write that runs at hydration rather than from a click. It is a
+    // no-op for every total, so a storage failure here must report itself
+    // without taking the page down with it.
+    try {
+      migrateTransferMoneyStatus();
+    } catch (err) {
+      setPageSaveError(saveFailureMessage(err));
+    }
     refresh();
   });
 
@@ -1736,59 +1791,100 @@ export default function TransfersPage() {
         : visibleIds.filter((id) => selectedIds.has(id)),
     );
     if (targetIds.size === 0) return;
-    saveTransfers(
-      getTransfers().map((t) =>
-        targetIds.has(t.id) ? { ...t, moneyStatus: status } : t,
+    const ok = commit(() =>
+      saveTransfers(
+        getTransfers().map((t) =>
+          targetIds.has(t.id) ? { ...t, moneyStatus: status } : t,
+        ),
       ),
     );
+    if (!ok) return;
     clearSelection();
     refresh();
   };
 
   const handleConfirmOutlier = (row: OutlierRow) => {
-    saveOutlierDismissals([...getOutlierDismissals(), dismissalFor(row)]);
+    if (!commit(() =>
+      saveOutlierDismissals([...getOutlierDismissals(), dismissalFor(row)]),
+    )) return;
     setDismissals(getOutlierDismissals());
   };
 
-  const handleEditExpense = (target: Transfer, form: ExpenseFormState) => {
+  const handleEditExpense = (
+    target: Transfer,
+    form: ExpenseFormState,
+  ): SaveOutcome => {
     const updated = buildExpense(target.id, form);
-    saveTransfers(
-      getTransfers().map((t) => (t.id === target.id ? updated : t)),
-    );
+    if (transferFingerprint(updated) === transferFingerprint(target)) {
+      return (
+        "Nothing to save — every field here already matches the stored " +
+        "record. Close this, or edit a field first."
+      );
+    }
+    try {
+      saveTransfers(
+        getTransfers().map((t) => (t.id === target.id ? updated : t)),
+      );
+    } catch (err) {
+      return saveFailureMessage(err);
+    }
+    const stored = getTransfers().find((t) => t.id === target.id);
+    if (!stored || transferFingerprint(stored) !== transferFingerprint(updated)) {
+      return (
+        "Couldn’t save — the record read back different from what " +
+        "was written, so it has not been changed reliably. Try again."
+      );
+    }
     refresh();
     setModal({ kind: "none" });
+    return null;
   };
 
   // Two new rows in, original soft-deleted — all inside applyTransferSplit, so
   // the write order (save the pieces, THEN soft-delete) lives in one place.
   const handleSplit = (target: Transfer, plan: TransferSplitPlan) => {
-    applyTransferSplit(target, plan);
+    if (!commit(() => applyTransferSplit(target, plan))) return;
     clearSelection();
     refresh();
     setModal({ kind: "none" });
   };
 
   const handleBulkSplit = (plan: BulkSplitPlan) => {
-    applyBulkSplit(plan);
+    if (!commit(() => applyBulkSplit(plan))) return;
     clearSelection();
     refresh();
     setModal({ kind: "none" });
   };
 
   const handleUndoSplit = (plan: UndoSplitPlan) => {
-    applyUndoSplit(plan);
+    if (!commit(() => applyUndoSplit(plan))) return;
     clearSelection();
     refresh();
     setModal({ kind: "none" });
   };
 
-  const handleAdd = (form: TransferFormState) => {
-    saveTransfers([...getTransfers(), buildTransfer(newId(), form)]);
+  const handleAdd = (form: TransferFormState): SaveOutcome => {
+    const created = buildTransfer(newId(), form);
+    try {
+      saveTransfers([...getTransfers(), created]);
+    } catch (err) {
+      return saveFailureMessage(err);
+    }
+    if (!getTransfers().some((t) => t.id === created.id)) {
+      return (
+        "Couldn’t save — the new transfer was not there when read " +
+        "back, so it has not been added."
+      );
+    }
     refresh();
     setModal({ kind: "none" });
+    return null;
   };
 
-  const handleEdit = (target: Transfer, form: TransferFormState) => {
+  const handleEdit = (
+    target: Transfer,
+    form: TransferFormState,
+  ): SaveOutcome => {
     // buildTransfer only knows the form's fields, so the record's out-of-form
     // links have to be carried across by hand: the automation idempotency ids
     // and the deploy-link. Without this, editing a deployed transfer (e.g. to
@@ -1827,18 +1923,58 @@ export default function TransfersPage() {
       target.amount,
       updated.amount,
     );
-    saveTransfers(
-      getTransfers().map((t) => (t.id === target.id ? updated : t)),
-    );
+
+    // A save that would change nothing is the single most confusing outcome
+    // this form can produce: the modal closes, every figure stays put, and the
+    // banner that prompted the edit is still there — indistinguishable from a
+    // save that failed. Say so instead of closing. (A drifted auto-created
+    // transfer reaches this often: the money status it is being "changed" to
+    // is frequently the one it already holds.)
+    if (transferFingerprint(updated) === transferFingerprint(target)) {
+      return (
+        "Nothing to save — every field here already matches the stored " +
+        "record, so there is no change to write. Close this, or edit a field " +
+        "first."
+      );
+    }
+
+    try {
+      saveTransfers(
+        getTransfers().map((t) => (t.id === target.id ? updated : t)),
+      );
+    } catch (err) {
+      return saveFailureMessage(err);
+    }
+
+    // Read the record back and check it is the one we meant to write. A write
+    // that reports success but stores something else must never be presented
+    // as saved.
+    const stored = getTransfers().find((t) => t.id === target.id);
+    if (!stored) {
+      return (
+        "Couldn’t save — the record was not there when read back. " +
+        "Nothing was changed."
+      );
+    }
+    if (transferFingerprint(stored) !== transferFingerprint(updated)) {
+      return (
+        "Couldn’t save — the record read back different from what " +
+        "was written, so it has not been changed reliably. Try again."
+      );
+    }
+
     refresh();
     setModal({ kind: "none" });
+    return null;
   };
 
   // Deleting is now reversible: the record keeps every field and simply drops
   // out of the live list (and therefore out of every total and balance) until
   // it is restored or explicitly purged.
   const handleDelete = (ids: string[]) => {
-    for (const id of ids) softDeleteTransfer(id);
+    if (!commit(() => {
+      for (const id of ids) softDeleteTransfer(id);
+    })) return;
     clearSelection();
     refresh();
     setPendingDelete(false);
@@ -1847,19 +1983,19 @@ export default function TransfersPage() {
   // Delete from inside an Edit modal: the same soft delete, then close the
   // modal (the record it was editing is no longer in the live list).
   const handleDeleteFromModal = (id: string) => {
-    softDeleteTransfer(id);
+    if (!commit(() => softDeleteTransfer(id))) return;
     refresh();
     setModal({ kind: "none" });
   };
 
   const handleRestore = (id: string) => {
-    restoreTransfer(id);
+    if (!commit(() => restoreTransfer(id))) return;
     refresh();
   };
 
   // The only irreversible action on this page. Gated by its own confirm.
   const handlePurge = (id: string) => {
-    purgeTransfer(id);
+    if (!commit(() => purgeTransfer(id))) return;
     refresh();
     setPendingPurge(null);
   };
@@ -1873,32 +2009,36 @@ export default function TransfersPage() {
   const handleMarkDeployed = (targets: Transfer[], positionId: string) => {
     const ids = new Set(targets.filter(canPlaceTransfer).map((t) => t.id));
     if (ids.size === 0) return;
-    saveTransfers(
-      getTransfers().map((t) =>
-        ids.has(t.id)
-          ? {
-              ...t,
-              deployedToPositionId: positionId,
-              deployedAt: todayDateInput(),
-            }
-          : t,
+    if (!commit(() =>
+      saveTransfers(
+        getTransfers().map((t) =>
+          ids.has(t.id)
+            ? {
+                ...t,
+                deployedToPositionId: positionId,
+                deployedAt: todayDateInput(),
+              }
+            : t,
+        ),
       ),
-    );
+    )) return;
     refresh();
     setModal({ kind: "none" });
   };
 
   // Undo the link — clears both fields, returning the amount to Available.
   const handleUnlinkDeployed = (target: Transfer) => {
-    saveTransfers(
-      getTransfers().map((t) => {
-        if (t.id !== target.id) return t;
-        const { deployedToPositionId: _p, deployedAt: _a, ...rest } = t;
-        void _p;
-        void _a;
-        return rest;
-      }),
-    );
+    if (!commit(() =>
+      saveTransfers(
+        getTransfers().map((t) => {
+          if (t.id !== target.id) return t;
+          const { deployedToPositionId: _p, deployedAt: _a, ...rest } = t;
+          void _p;
+          void _a;
+          return rest;
+        }),
+      ),
+    )) return;
     refresh();
   };
 
@@ -1910,20 +2050,26 @@ export default function TransfersPage() {
     if (value === "") return;
     const ids = new Set(targets.filter(canPlaceTransfer).map((t) => t.id));
     if (ids.size === 0) return;
-    saveTransfers(
-      getTransfers().map((t) => (ids.has(t.id) ? { ...t, platform: value } : t)),
-    );
+    if (!commit(() =>
+      saveTransfers(
+        getTransfers().map((t) =>
+          ids.has(t.id) ? { ...t, platform: value } : t,
+        ),
+      ),
+    )) return;
     refresh();
     setModal({ kind: "none" });
   };
 
   // Undo — clearing the platform returns the amount to Available Balance.
   const handleRemovePlatform = (target: Transfer) => {
-    saveTransfers(
-      getTransfers().map((t) =>
-        t.id === target.id ? { ...t, platform: "" } : t,
+    if (!commit(() =>
+      saveTransfers(
+        getTransfers().map((t) =>
+          t.id === target.id ? { ...t, platform: "" } : t,
+        ),
       ),
-    );
+    )) return;
     refresh();
   };
 
@@ -1937,7 +2083,9 @@ export default function TransfersPage() {
         .map((r) => [r.transfer.id, correctTransferSymbol(r)]),
     );
     if (fixes.size === 0) return;
-    saveTransfers(getTransfers().map((t) => fixes.get(t.id) ?? t));
+    if (!commit(() =>
+      saveTransfers(getTransfers().map((t) => fixes.get(t.id) ?? t)),
+    )) return;
     refresh();
   };
 
@@ -2079,31 +2227,63 @@ export default function TransfersPage() {
     [ledgerRows],
   );
 
-  const handleAddWithdrawal = (form: WithdrawalFormState) => {
-    saveWithdrawals([...getWithdrawals(), buildWithdrawal(newId(), form)]);
+  const handleAddWithdrawal = (form: WithdrawalFormState): SaveOutcome => {
+    const created = buildWithdrawal(newId(), form);
+    try {
+      saveWithdrawals([...getWithdrawals(), created]);
+    } catch (err) {
+      return saveFailureMessage(err);
+    }
+    if (!getWithdrawals().some((w) => w.id === created.id)) {
+      return (
+        "Couldn’t save — the new withdrawal was not there when read " +
+        "back, so it has not been added."
+      );
+    }
     refresh();
     setModal({ kind: "none" });
+    return null;
   };
 
   const handleEditWithdrawal = (
     target: Withdrawal,
     form: WithdrawalFormState,
-  ) => {
+  ): SaveOutcome => {
     const updated = buildWithdrawal(target.id, form);
     updated.notes = withAmountEditNote(
       updated.notes,
       target.amount,
       updated.amount,
     );
-    saveWithdrawals(
-      getWithdrawals().map((w) => (w.id === target.id ? updated : w)),
-    );
+    if (JSON.stringify(updated) === JSON.stringify(target)) {
+      return (
+        "Nothing to save — every field here already matches the stored " +
+        "record. Close this, or edit a field first."
+      );
+    }
+    try {
+      saveWithdrawals(
+        getWithdrawals().map((w) => (w.id === target.id ? updated : w)),
+      );
+    } catch (err) {
+      return saveFailureMessage(err);
+    }
+    const stored = getWithdrawals().find((w) => w.id === target.id);
+    if (!stored || JSON.stringify(stored) !== JSON.stringify(updated)) {
+      return (
+        "Couldn’t save — the record read back different from what " +
+        "was written, so it has not been changed reliably. Try again."
+      );
+    }
     refresh();
     setModal({ kind: "none" });
+    return null;
   };
 
   const handleDeleteWithdrawal = (id: string) => {
-    saveWithdrawals(getWithdrawals().filter((w) => w.id !== id));
+    if (!commit(() =>
+      saveWithdrawals(getWithdrawals().filter((w) => w.id !== id)),
+    )) return;
     refresh();
     setPendingWithdrawalDelete(null);
   };
@@ -2118,6 +2298,26 @@ export default function TransfersPage() {
           Track where you send your claimed fees.
         </p>
       </header>
+
+      {/* A write that could not be made says so here and STAYS until the next
+          successful write — the actions that reach this have no modal of their
+          own, and a transient toast would leave the same "nothing happened"
+          screen the whole fix exists to end. */}
+      {pageSaveError && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-5 py-3 text-[12px] text-rose-300"
+        >
+          <span>{pageSaveError}</span>
+          <button
+            type="button"
+            onClick={() => setPageSaveError(null)}
+            className="shrink-0 text-[11px] underline underline-offset-2 hover:no-underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {hydrated && !transfersEnabled ? (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-6 py-12 text-center">
@@ -3354,7 +3554,10 @@ interface TransferFormModalProps {
   initial: TransferFormState;
   positions: Position[];
   onCancel: () => void;
-  onSubmit: (form: TransferFormState) => void;
+  // Returns null when the save was written AND verified, or the reason it was
+  // not. The modal stays open and shows that reason — a save can never end
+  // with nothing on screen.
+  onSubmit: (form: TransferFormState) => SaveOutcome;
   onDelete?: () => void;
 }
 
@@ -3402,14 +3605,29 @@ function TransferFormModal({
     missing.push("Amount");
   }
   const [showErrors, setShowErrors] = useState(false);
+  // Why the last Save attempt did not go through. Every path out of submit()
+  // that does not close the modal sets one of these two — there is no exit
+  // that leaves the user looking at an unchanged screen with no explanation.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setSaveError(null);
     if (missing.length > 0) {
       setShowErrors(true);
       return;
     }
-    onSubmit(form);
+    setShowErrors(false);
+    let outcome: SaveOutcome;
+    try {
+      outcome = onSubmit(form);
+    } catch (err) {
+      // A throw anywhere in the save path used to leave the modal open with
+      // nothing on screen and the reason only in the console. It is now the
+      // user's to see.
+      outcome = saveFailureMessage(err);
+    }
+    if (outcome !== null) setSaveError(outcome);
   };
 
   return (
@@ -3558,6 +3776,11 @@ function TransferFormModal({
             save again.
           </div>
         )}
+        {saveError && (
+          <div role="alert" className="px-5 py-3 text-[12px] text-rose-300">
+            {saveError}
+          </div>
+        )}
         <FormActions
           onCancel={onCancel}
           submitLabel={submitLabel}
@@ -3573,7 +3796,7 @@ interface WithdrawalFormModalProps {
   submitLabel: string;
   initial: WithdrawalFormState;
   onCancel: () => void;
-  onSubmit: (form: WithdrawalFormState) => void;
+  onSubmit: (form: WithdrawalFormState) => SaveOutcome;
 }
 
 function WithdrawalFormModal({
@@ -3590,9 +3813,18 @@ function WithdrawalFormModal({
     value: WithdrawalFormState[K],
   ) => setForm((prev) => ({ ...prev, [key]: value }));
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onSubmit(form);
+    setSaveError(null);
+    let outcome: SaveOutcome;
+    try {
+      outcome = onSubmit(form);
+    } catch (err) {
+      outcome = saveFailureMessage(err);
+    }
+    if (outcome !== null) setSaveError(outcome);
   };
 
   return (
@@ -3651,6 +3883,11 @@ function WithdrawalFormModal({
             </Field>
           </div>
         </Section>
+        {saveError && (
+          <div role="alert" className="px-5 py-3 text-[12px] text-rose-300">
+            {saveError}
+          </div>
+        )}
         <FormActions onCancel={onCancel} submitLabel={submitLabel} />
       </form>
     </ModalShell>
@@ -4213,6 +4450,7 @@ function RevertToAutoModal({
 }) {
   const [plans, setPlans] = useState<AutoRevertPlan[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const eligible = useMemo(
     () => transfers.filter(isAutoCreated),
@@ -4323,6 +4561,11 @@ function RevertToAutoModal({
           </>
         )}
       </Section>
+      {saveError && (
+        <div role="alert" className="px-5 pt-3 text-[12px] text-rose-300">
+          {saveError}
+        </div>
+      )}
       <div className="flex justify-end gap-2 px-5 py-4">
         <button
           type="button"
@@ -4335,9 +4578,17 @@ function RevertToAutoModal({
           type="button"
           disabled={usable.length === 0}
           onClick={() => {
-            // Applied one group at a time; each write re-reads storage, so the
-            // groups cannot clobber one another.
-            for (const plan of usable) applyRevertToAuto(plan);
+            setSaveError(null);
+            try {
+              // Applied one group at a time; each write re-reads storage, so
+              // the groups cannot clobber one another.
+              for (const plan of usable) applyRevertToAuto(plan);
+            } catch (err) {
+              // A write that could not be made must say so here rather than
+              // closing the modal as though the revert had happened.
+              setSaveError(saveFailureMessage(err));
+              return;
+            }
             onApplied();
           }}
           className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--accent-solid)]/90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -4362,7 +4613,7 @@ function ExpenseFormModal({
   submitLabel: string;
   initial: ExpenseFormState;
   onCancel: () => void;
-  onSubmit: (form: ExpenseFormState) => void;
+  onSubmit: (form: ExpenseFormState) => SaveOutcome;
   onDelete?: () => void;
 }) {
   const [form, setForm] = useState<ExpenseFormState>(initial);
@@ -4372,9 +4623,18 @@ function ExpenseFormModal({
     value: ExpenseFormState[K],
   ) => setForm((prev) => ({ ...prev, [key]: value }));
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onSubmit(form);
+    setSaveError(null);
+    let outcome: SaveOutcome;
+    try {
+      outcome = onSubmit(form);
+    } catch (err) {
+      outcome = saveFailureMessage(err);
+    }
+    if (outcome !== null) setSaveError(outcome);
   };
 
   return (
@@ -4427,6 +4687,11 @@ function ExpenseFormModal({
             </Field>
           </div>
         </Section>
+        {saveError && (
+          <div role="alert" className="px-5 py-3 text-[12px] text-rose-300">
+            {saveError}
+          </div>
+        )}
         <FormActions
           onCancel={onCancel}
           submitLabel={submitLabel}
