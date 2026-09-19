@@ -987,6 +987,60 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: the reported "Save Changes does nothing" was NOT a blocked
+  save — the record was ALREADY saved, and the form had no way to say so. Every save path on the
+  Transfers page now reports its outcome on screen, without exception.**
+  **The real record was pulled from production, not reconstructed.** `defidesh.com` CLP data lives
+  in browser localStorage, and the Claude-in-Chrome extension was unavailable, so it was read
+  straight off disk from Chrome's LevelDB store
+  (`~/Library/Application Support/Google/Chrome/Profile 6/Local Storage/leveldb`, opened with
+  `classic-level`; localStorage values carry a 1-byte encoding tag — `0x00` UTF-16LE, `0x01`
+  UTF-8 — and the keys live in compressed blocks, so a raw `grep` finds nothing and is NOT
+  evidence of absence). **That technique is the reusable part of this session.**
+  **What it showed, and it inverts the report:** transfer `ccd1afa5-fa5e-4b30-a6cf-80d2b26a601c`
+  (2026-06-10, ZEC, 517, JUPITER, `transferType:"fees"`, `sourceClaimId` set) is stored on
+  `https://www.defidesh.com` as **`moneyStatus: "expense"` — the save had already landed**, with
+  the key order (`moneyStatus` before `notes`) that only `handleEdit` produces. Driving the real
+  drift-banner → Edit path against this exact record on `41ecac2` saved correctly and survived a
+  reload. **The previous fix was not failing; there was nothing left to save.**
+  **⚠️ Two OTHER origins hold a stale 153-record copy of the same dataset** —
+  `clp-tracker-two.vercel.app` and a `lp-tracker-git-fix-clp-tracker-theme-sync-…` preview — where
+  the same record IS still `redeployed`. localStorage is per-origin, so a test on a preview URL
+  reads different money from a test on the live site. Check the origin before trusting a CLP repro.
+  **The defect, precisely:** clicking the already-active Expense button and pressing Save produced
+  a write identical to what was stored, the modal closed, no figure moved, and the drift banner
+  (which tracks the AMOUNT, not the money status) still listed the row. Indistinguishable from a
+  failed save — and the honest answer, "nothing here differs from what is stored", was the one
+  thing the UI could not say.
+  **Fix, in two layers.** (1) `storage.ts`'s `writeValue` no longer swallows failures: it throws a
+  new exported `StorageWriteError` on a quota/blocked-storage/serialisation failure **and reads
+  the value straight back**, because `setItem` can resolve without the value landing. A write that
+  could not be made must never look like one that was. (2) Every save path on the Transfers page
+  returns a `SaveOutcome` (`null` = written AND verified by reading the record back; a string =
+  the reason it was not) which the modal renders and which keeps the modal OPEN. `handleEdit`,
+  `handleEditExpense`, `handleAdd`, `handleAddWithdrawal`, `handleEditWithdrawal` all report:
+  no-change, write-threw, record-missing-on-readback, and readback-mismatch. The three form modals
+  also wrap `onSubmit` in try/catch, so a throw anywhere in the save path lands on screen instead
+  of in the console. Non-modal writes (bulk mark, deploy-link, send-to-platform, split, undo-split,
+  delete, restore, purge, symbol fixes, revert-to-auto, the hydration-time `migrateTransferMoneyStatus`)
+  go through a new `commit()` helper feeding a **persistent page-level banner** — they have no
+  modal to report into, and a transient toast would leave the same blank screen.
+  **The no-change check needed key-order-independent comparison:** an auto-created transfer stores
+  `sourceClaimId` before `notes`; `buildTransfer` + the carry-over spread writes them after. A
+  plain `JSON.stringify` diff reports every untouched record as changed, so `transferFingerprint`
+  sorts keys and drops `undefined` (which also makes a stored-omitted key and an explicit
+  `undefined` compare equal — the `moneyStatus` shape for Undeployed Tokens).
+  **Verified against THAT record, four ways** (Playwright, clean profile, real production
+  `clp_transfers`/`clp_positions`/`clp_claims` seeded): redeployed → Expense **saves and survives
+  reload**; the real `expense` state + Save shows **"Nothing to save — every field here already
+  matches the stored record…"**, modal stays open, still on screen 6 s later; a forced
+  `QuotaExceededError` shows **"Couldn't save — this browser's storage for the site is full, so
+  nothing was written"** with the record provably unchanged; a genuine amount edit (517 → 818.61)
+  still saves and stamps the amount-edit note. 0 page errors. All 8 CLP pages re-loaded clean
+  (0 errors each) — the throwing `writeValue` does not regress them.
+  Build clean, `tsc --noEmit` clean, eslint identical to baseline (3 pre-existing warnings in
+  untouched files). **No cache bumps** — no valuation, pricing or position-discovery logic changed.
+
 - **(this session)** — **CLP Tracker: Transfers-by-Chain values non-stable Undeployed Tokens rows
   at spot instead of printing the token count with a $ sign.** A row holding 871 SUI rendered
   **$871.00**, and the chain subtotal for two SUI transfers rendered **$1,027.40** — raw token
