@@ -71,16 +71,25 @@ export interface Transfer {
   // "expense", and is created only via the dedicated Log Expense flow — the
   // position-linked automation (fees/undeployed/outOfRangeUpside) never uses it.
   transferType: "fees" | "undeployed" | "outOfRangeUpside" | "expense";
-  // Whether the money is still working in the LP business ("redeployed", e.g.
-  // moved to AAVE) or has genuinely left it ("expense", e.g. rent). Only
-  // expenses reduce Overall P&L.
+  // Whether the money is still working in the LP business ("redeployed"), is
+  // parked on an exchange/platform rather than deployed or spent ("platform"),
+  // or has genuinely left it ("expense", e.g. rent). Only expenses reduce
+  // Overall P&L.
+  //
+  // "platform" is the EXPLICIT form of a state the data could already express
+  // implicitly: a non-blank `platform` field has always meant "this money is
+  // sitting at X" (isTransferredToPlatform). The status exists because that was
+  // only reachable by naming a platform, so money parked somewhere unnamed had
+  // no honest option — Redeployed overstates it as working, Expense wrongly
+  // books it as gone. Both routes feed ONE predicate and ONE total, so they can
+  // never double-count; see lib/transferState.ts.
   //
   // Deliberately optional rather than backfilled: undefined means "logged
   // before expense tracking existed and never reviewed". It is treated
   // exactly as "redeployed" by every calculation, so legacy data can never
   // manufacture a loss, while still being countable for the review prompt.
   // Saving a transfer through the form always writes an explicit value.
-  moneyStatus?: "redeployed" | "expense";
+  moneyStatus?: "redeployed" | "expense" | "platform";
   // Idempotency links back to the event that auto-created this Transfer, so a
   // future save/backfill can tell "this claim/close already has an auto
   // transfer" without the fragile position+day+type heuristic. Both optional

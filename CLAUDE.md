@@ -987,6 +987,50 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: "Sent to Platform" is a third Money Status, reconciled into
+  the EXISTING Transferred-to-Platforms total rather than given a second one.**
+  **Investigation first, and it changed the design.** "Transferred to Platforms (USD)" was already
+  driven ENTIRELY by the Platform (From) field, independent of Money Status: `transferState.ts`
+  defines four mutually-exclusive states in strict precedence — **Expense > Deployed > Transferred
+  (non-blank platform) > Idle** — and the balance memo reduces over those predicates, with
+  `available = lifetimeEarned − (withdrawalTotal + expensed) − deployed − transferredToPlatform`.
+  So the state already existed; it was only reachable by NAMING a platform.
+  **The fix is therefore one predicate, not a parallel mechanism.** `isTransferredToPlatform` now
+  ORs the explicit status into the derived test
+  (`platform !== "" || moneyStatus === "platform"`). Because that ONE predicate is the ONE thing
+  the ledger reduces over, a row satisfying BOTH routes still counts exactly once — verified live:
+  setting `moneyStatus:"platform"` on a row that ALREADY had `platform:"HYPERLEND"` left
+  Transferred at **$1,133.08, unchanged**. A second `platformed` accumulator would have
+  double-counted here; this cannot.
+  **⚠️ THE FINDING THAT MATTERS MORE THAN THE FEATURE — 61 of the 142 live Expense rows
+  ($5,332.87) ALREADY carry a platform** (ALPHAFI $3,018.67, JUPITER $1,789.86, AAVE $524.34).
+  Expense OUTRANKS platform in the precedence chain, so those rows count as money GONE from the
+  business even though they name where it is parked. They are exactly the rows this feature is
+  for, and they do NOT migrate themselves. **Reclassifying them is Available-Balance-NEUTRAL**
+  (both Expense and Transferred are subtracted from Available), but it would move **$5,332.87 out
+  of Expenses (USD) into Transferred to Platforms**, and change `calcExpensesAfter` — the Business
+  P&L per-checkpoint "taken out" figure. Left UNTOUCHED pending the owner's decision; nothing was
+  migrated.
+  **Scope correction, reported rather than invented:** the ask was to apply this to all three form
+  modals. Money Status exists on only ONE of them. `ExpenseFormModal` hardcodes
+  `moneyStatus:"expense"` via `buildExpense` (a position-less expense that is "sent to a platform"
+  is a contradiction — the category IS the state), and `Withdrawal` has no `moneyStatus` field at
+  all (`{id,date,amount,method,notes}`). Adding the control to those two would have meant
+  inventing fields. The never-silent save contract DOES apply to all three and already did.
+  Other touches: `canPlaceTransfer` accepts `platform` (parked money can still be named, renamed,
+  or pulled back into a position — only an Expense is genuinely unplaceable); **"Remove platform"
+  now clears the explicit status too**, or a row would stay Transferred with the name blanked and
+  the button would read as doing nothing; the row badge falls back to a "Sent to Platform" pill
+  when there is no name, instead of rendering `Sent → ` with a dangling arrow.
+  **Verified on real production data** (Playwright, clean profile, live `clp_transfers`): baseline
+  Lifetime $14,899.37 / Expenses $9,668.43 / Deployed $3,390.05 / Transferred $1,133.08 /
+  Available $707.81. Marking one redeployed, platform-less row (ZEC 42.90) Sent to Platform →
+  **Expenses +0.00, Deployed +0.00, Lifetime +0.00, Transferred +42.90, Available −42.90**;
+  switching it back to Redeployed restored **$1,133.08 / $707.81 exactly**. Never-silent holds for
+  the new status ("Nothing to save…", modal stays open). 0 page errors; all 8 CLP pages clean.
+  Build clean, `tsc --noEmit` clean, eslint identical to baseline. **No cache bumps** — `moneyStatus`
+  gains a value, no existing record changes shape, and no valuation or pricing logic moved.
+
 - **(this session)** — **CLP Tracker: the reported "Save Changes does nothing" was NOT a blocked
   save — the record was ALREADY saved, and the form had no way to say so. Every save path on the
   Transfers page now reports its outcome on screen, without exception.**

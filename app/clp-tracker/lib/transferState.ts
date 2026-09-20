@@ -13,13 +13,21 @@
 //
 //   1. Expense     — moneyStatus "expense": the money has left the business.
 //   2. Deployed    — deployedToPositionId set: it now lives inside a position.
-//   3. Transferred — a non-blank Platform: sent somewhere for yield (AAVE …).
+//   3. Transferred — a non-blank Platform, OR moneyStatus "platform": sent
+//                    somewhere for yield / parked on an exchange (AAVE …).
 //   4. Idle        — none of the above: still sitting in Available Balance.
 //
-// "Transferred" is DERIVED from platform rather than stored as a new flag: the
-// Platform field already means "this money is sitting at X", the Edit form has
-// always written it, and a derived state needs no schema change and no
-// migration.
+// "Transferred" was originally DERIVED from platform alone rather than stored:
+// the Platform field already means "this money is sitting at X", the Edit form
+// has always written it, and a derived state needed no schema change.
+//
+// The explicit moneyStatus "platform" was added alongside it (NOT instead of
+// it) because the derived route could only be reached by naming a platform, so
+// money parked somewhere the user didn't want to name had no honest option.
+// The two routes are ORed into this ONE predicate, which is the ONE thing the
+// balance ledger reduces over — so a row satisfying both still counts exactly
+// once, and there is no second definition of "transferred" to drift from this
+// one (Invariant #6).
 //
 // Note the states are keyed off platform/deploy-link, NOT off moneyStatus
 // "redeployed" specifically: an idle Undeployed Tokens transfer carries an
@@ -39,7 +47,7 @@ export function isTransferredToPlatform(t: Transfer): boolean {
   return (
     !isExpensedTransfer(t) &&
     !isDeployedTransfer(t) &&
-    (t.platform ?? "").trim() !== ""
+    ((t.platform ?? "").trim() !== "" || t.moneyStatus === "platform")
   );
 }
 
