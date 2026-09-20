@@ -339,7 +339,12 @@ const UNKNOWN_POSITION_ID = "__unknown_position__";
 function canPlaceTransfer(t: Transfer): boolean {
   return (
     t.transferType !== "expense" &&
-    (t.moneyStatus === "redeployed" || t.moneyStatus === undefined)
+    // "platform" money is parked, not gone: it can still be named, renamed, or
+    // pulled back into a position later. Only an Expense is genuinely out of
+    // the business and therefore unplaceable.
+    (t.moneyStatus === "redeployed" ||
+      t.moneyStatus === "platform" ||
+      t.moneyStatus === undefined)
   );
 }
 
@@ -587,11 +592,18 @@ function TransferListRow({
           {/* The Transferred badge supersedes the Money Status pill for an
               idle Undeployed row, which would otherwise still read "Idle"
               after its money was sent to a platform. */}
-          {isTransferred && (
-            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-300">
-              Sent → {t.platform}
-            </span>
-          )}
+          {/* A row reaches this by naming a platform OR by the explicit "Sent
+              to Platform" status. Without a name there is nothing to point at,
+              so it says the state plainly rather than rendering "Sent → " with
+              a dangling arrow. */}
+          {isTransferred &&
+            ((t.platform ?? "").trim() !== "" ? (
+              <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-300">
+                Sent → {t.platform}
+              </span>
+            ) : (
+              <MoneyStatusPill status="platform" />
+            ))}
         </span>
       </span>
     </label>
@@ -2061,12 +2073,23 @@ export default function TransfersPage() {
     setModal({ kind: "none" });
   };
 
-  // Undo — clearing the platform returns the amount to Available Balance.
+  // Undo — clearing the platform returns the amount to Available Balance. It
+  // must clear the EXPLICIT "platform" status too: a row can be Transferred by
+  // either route, so blanking only the name would leave it transferred with
+  // nothing on screen explaining why, and the button would appear to do
+  // nothing (the silent-no-op class the save fix exists to end).
   const handleRemovePlatform = (target: Transfer) => {
     if (!commit(() =>
       saveTransfers(
         getTransfers().map((t) =>
-          t.id === target.id ? { ...t, platform: "" } : t,
+          t.id === target.id
+            ? {
+                ...t,
+                platform: "",
+                moneyStatus:
+                  t.moneyStatus === "platform" ? "redeployed" : t.moneyStatus,
+              }
+            : t,
         ),
       ),
     )) return;
@@ -3742,7 +3765,7 @@ function TransferFormModal({
               <Field
                 label="Money Status"
                 htmlFor="moneyStatus"
-                hint="Redeployed is the normal state every transfer starts in — money still working in the business. Switch to Expense only when the money has genuinely left the business; setting it back to Redeployed is how you undo that."
+                hint="Redeployed is the normal state every transfer starts in — money still working in the business. Sent to Platform is money parked on an exchange or protocol: it leaves Available Balance and joins Transferred to Platforms, but is NOT an expense (naming a Platform above does the same thing). Switch to Expense only when the money has genuinely left the business; setting it back to Redeployed is how you undo either."
               >
                 <MoneyStatusToggle
                   value={form.moneyStatus}
@@ -4711,6 +4734,7 @@ function MoneyStatusToggle({
 }) {
   const options: Array<{ value: MoneyStatus; label: string }> = [
     { value: "redeployed", label: "Redeployed" },
+    { value: "platform", label: "Sent to Platform" },
     { value: "expense", label: "Expense" },
   ];
   return (
@@ -4724,7 +4748,11 @@ function MoneyStatusToggle({
         const selectedClass =
           opt.value === "expense"
             ? "bg-rose-600 text-white"
-            : "bg-[var(--accent-solid)] text-white";
+            : opt.value === "platform"
+              ? // Amber, matching the "Sent → X" row badge this status produces,
+                // so the button and the resulting pill read as the same state.
+                "bg-amber-500 text-white"
+              : "bg-[var(--accent-solid)] text-white";
         return (
           <button
             key={opt.value}
@@ -4749,6 +4777,16 @@ function MoneyStatusToggle({
 }
 
 function MoneyStatusPill({ status }: { status: Transfer["moneyStatus"] }) {
+  // Only reached for a row with NO platform name (a named one renders the
+  // "Sent → X" badge instead, which says strictly more). Same amber as that
+  // badge so the two read as one state.
+  if (status === "platform") {
+    return (
+      <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-300">
+        Sent to Platform
+      </span>
+    );
+  }
   if (status === "expense") {
     return (
       <span className="inline-flex items-center rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-rose-300">
