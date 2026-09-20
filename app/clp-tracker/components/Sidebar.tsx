@@ -51,12 +51,18 @@ interface PortfolioStatus {
 // P&L across every position ever opened, closed included — so this must not
 // filter, or the two numbers drift apart.
 //
-// The FEE half is Business P&L's All Total, i.e. every reward token valued at
-// TODAY's price, matching 6da8f43. It is one global figure, not a per-position
-// sum: getEffectiveTotalFees would give the claim-TIME value, which is what
-// Total P&L's separate "Total Fees Earned" card shows and is deliberately a
-// different number. That is why this takes `prices` and why the Sidebar fetches
-// them at all (see the note in the component).
+// The FEE half is calcBusinessPnL's `feeBasis` — realized dollars from claims
+// already converted, plus TODAY's value of the tokens still held. It used to be
+// All Total, which repriced every reward token ever claimed at today's rate
+// INCLUDING ones sold long ago, so a token that had since risen inflated Net
+// P&L by money the business never received. Total P&L fixed that for itself;
+// this was left behind, and the two disagreed.
+//
+// It is one global figure, not a per-position sum: getEffectiveTotalFees would
+// give the claim-TIME value, which is what Total P&L's separate "Total Fees
+// Earned" card shows and is deliberately a different number. That is why this
+// takes `prices` and why the Sidebar fetches them at all (see the note in the
+// component).
 //
 // LP P&L (currentBalance − deposited) and Short P&L are untouched.
 function computePortfolioStatus(
@@ -67,7 +73,7 @@ function computePortfolioStatus(
   if (positions.length === 0) {
     return { state: "neutral", netPnl: 0, hasData: false };
   }
-  let netPnl = calcBusinessPnL(allClaims, prices).allTotal;
+  let netPnl = calcBusinessPnL(allClaims, prices).feeBasis;
   for (const p of positions) {
     netPnl += p.currentBalance - getEffectiveDeposited(p);
     if (p.shortTotal !== null && Number.isFinite(p.shortTotal)) {
@@ -158,7 +164,7 @@ export function Sidebar() {
   );
 
   // While prices are still in flight, fetchedPrices is empty and unpriced
-  // tokens simply contribute 0 to All Total — the figure starts low and settles
+  // tokens simply contribute 0 to the held half — the figure starts low and settles
   // upward rather than flickering or blanking, and the colour follows it.
   // Active positions at live market value, same helper and same price
   // resolution as the Positions page and Dashboard (Invariant #6 — the Sidebar

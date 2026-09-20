@@ -68,7 +68,10 @@ export function GrowthTargetSection({
   targetMonthlyPercent,
   onSaveTarget,
 }: GrowthTargetSectionProps) {
-  // The fee half of Combined Earnings is Business P&L's "All Total", read from
+  // The fee half of Combined Earnings is calcBusinessPnL's `feeBasis`: realized
+  // dollars from converted claims + today's value of what is still held. It was
+  // "All Total", which repriced tokens already sold at today's rate and so
+  // counted money the business never received — see calcFeeBasis. Read from
   // that exact calculation rather than re-summed here.
   const business = useMemo(
     () => calcBusinessPnL(claims, prices),
@@ -79,11 +82,11 @@ export function GrowthTargetSection({
     () =>
       calcGrowthTarget(
         positions,
-        business.allTotal,
+        business.feeBasis,
         initialCapital,
         targetMonthlyPercent,
       ),
-    [positions, business.allTotal, initialCapital, targetMonthlyPercent],
+    [positions, business.feeBasis, initialCapital, targetMonthlyPercent],
   );
 
   const ahead = growth.difference >= 0;
@@ -172,8 +175,8 @@ export function GrowthTargetSection({
             {/* The two halves the total is made of, so the number is auditable
                 rather than a lump sum (North Star) — collapsed by default so
                 this card stays the same height as the other three. The fees
-                half is Business P&L's All Total verbatim (growth.feeEarnings is
-                that exact value, passed into calcGrowthTarget). */}
+                half is calcBusinessPnL's feeBasis verbatim (growth.feeEarnings
+                is that exact value, passed into calcGrowthTarget). */}
             <Breakdown
               rows={[
                 {
@@ -181,7 +184,9 @@ export function GrowthTargetSection({
                   value: formatUsd(growth.positionEarnings),
                 },
                 {
-                  label: "+ Fees earned, all-time (= Business P&L All Total)",
+                  // NOT "All Total" any more, and the label must not say so:
+                  // All Total reprices tokens already sold at today's rate.
+                  label: "+ Fees: realized + still held",
                   value: formatUsd(growth.feeEarnings),
                 },
                 {
@@ -228,8 +233,11 @@ export function GrowthTargetSection({
           </p>
         )}
 
+        {/* Half of the fee figure is fixed and half is live, and saying only
+            "current token prices" would misdescribe the fixed half. */}
         <p className="mt-3 text-[11px] text-[var(--muted)]">
-          Fee value uses current token prices, the same ones the{" "}
+          Fees already converted count at what they actually fetched; fees still
+          held use current token prices, the same ones the{" "}
           <Link
             href="/clp-tracker/business-pnl"
             className="text-[var(--accent)] hover:underline"

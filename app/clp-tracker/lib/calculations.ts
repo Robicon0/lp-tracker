@@ -421,6 +421,13 @@ export interface BusinessPnL {
   unpricedTokens: string[];
   usdcConverted: number;
   pnl: number;
+  // What the business actually holds in fee money: realized dollars from
+  // converted claims + today's value of tokens still held. Use THIS wherever a
+  // figure means "fee money we have"; `allTotal` answers the different
+  // question "what would everything ever claimed be worth if held to today",
+  // which is what the Business P&L page's lifetime table and its
+  // hold-vs-cash-out P&L compare against.
+  feeBasis: number;
 }
 
 const STABLE_SYMBOLS = new Set(["USDC", "USDT", "DAI", "USD"]);
@@ -431,6 +438,40 @@ const STABLE_SYMBOLS = new Set(["USDC", "USDT", "DAI", "USD"]);
 // another would value the same close two different ways (Invariant #6).
 export function isStableSymbol(symbol: string): boolean {
   return STABLE_SYMBOLS.has(symbol.trim().toUpperCase());
+}
+
+// The fee money the business ACTUALLY has, each half on its own honest basis:
+//
+//   realized   = calcConvertedFees — converted claims at their FIXED value
+//                (claim-time value + any sale gain, i.e. what was really
+//                received). Not repriced, because those tokens are gone.
+//   still held = calcUnconvertedHoldings(excludeStables) — the tokens still in
+//                hand, at today's live price, because their value really does
+//                move.
+//
+// Deliberately NOT `allTotal`. That prices EVERY reward token ever claimed at
+// TODAY's rate, including tokens converted and sold long ago — so a token that
+// has since doubled inflates the figure by money the business never received.
+// Total P&L worked this out first and fixed its own Net P&L; the Sidebar and
+// Growth Target were left behind on allTotal, which is the bug this function
+// exists to end. Stablecoins are excluded from the held half because their
+// dollars are already inside the realized half — counting them twice would
+// double-count real money.
+//
+// ONE definition, so the four surfaces that need this figure cannot drift
+// apart (Invariant #6). Before this existed, Business P&L computed it inline,
+// Total P&L computed it inline, and the Sidebar/Growth Target used a different
+// number entirely while the Business P&L page's own reference line claimed
+// they matched.
+export function calcFeeBasis(
+  claims: FeeClaim[],
+  prices: Record<string, number>,
+): number {
+  return (
+    calcConvertedFees(claims) +
+    calcUnconvertedHoldings(claims, prices, { excludeStables: true })
+      .totalCurrentValue
+  );
 }
 
 export function calcBusinessPnL(
@@ -485,6 +526,7 @@ export function calcBusinessPnL(
     // (red). The Sprint 7 sheet subtracted the other way round, which inverted
     // the colour against its own meaning.
     pnl: allTotal - usdcConverted,
+    feeBasis: calcFeeBasis(claims, prices),
   };
 }
 
@@ -1451,9 +1493,10 @@ export interface GrowthTarget {
   // Price P&L across every position ever: scalp when closed, current − deposited
   // when open.
   positionEarnings: number;
-  // Business P&L's "All Total" — every fee ever claimed, all tokens, valued at
-  // today's price. Passed in rather than recomputed so the two surfaces can
-  // never disagree (Invariant #6).
+  // calcBusinessPnL's `feeBasis` — realized dollars from converted claims plus
+  // today's value of what is still held. Passed in rather than recomputed so
+  // the surfaces can never disagree (Invariant #6). It was All Total, which
+  // repriced already-sold tokens at today's rate; see calcFeeBasis.
   feeEarnings: number;
   combinedEarnings: number;
   initialCapital: number;
@@ -1476,7 +1519,7 @@ export interface GrowthTarget {
 // measured as a running average since the very first position was opened.
 //
 //   Combined Earnings = Σ (closed ? scalp : currentBalance − deposited)
-//                     + Business P&L All Total (all fees, valued today)
+//                     + calcFeeBasis (fees realized + fees still held)
 //   Cumulative Target = Initial Capital × (Target % / 100) × Months Elapsed
 //   Average Monthly Rate = (Combined Earnings / Initial Capital) / Months × 100
 //

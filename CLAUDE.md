@@ -987,6 +987,56 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: Sidebar Net P&L and Growth Target counted money the business
+  never received. NEW `calcFeeBasis` is the one definition of "fee money we actually have".**
+  `calcBusinessPnL.allTotal` prices EVERY reward token ever claimed at TODAY's rate — including
+  tokens converted and sold long ago. Sidebar Net P&L and Growth Target's Combined Earnings both
+  used it as their fee half, so a token that had since risen inflated both by money that was never
+  received.
+  **The decisive finding: this bug was already diagnosed and fixed ONCE, on Total P&L, and the fix
+  was never propagated.** `total-pnl/page.tsx` carries the whole explanation verbatim —
+  *"Deliberately NOT Business P&L's All Total, which this used to be. All Total prices EVERY reward
+  token ever claimed at TODAY's rate, including tokens that were converted and sold long ago"* —
+  and composes `calcConvertedFees + calcUnconvertedHoldings(excludeStables)` instead. Sidebar and
+  Growth Target were left on `allTotal`. **Worse, the Business P&L page printed a reference line
+  claiming its `convertedFees + heldExclStables` figure was "the figure Net P&L uses" — which was
+  FALSE for the Sidebar.** Three inline compositions, two different answers, one false claim.
+  **Fix: `calcFeeBasis(claims, prices)` is now the single definition** (realized fixed value +
+  still-held at today's price, stables excluded from the held half since their dollars are already
+  in the realized half). `calcBusinessPnL` exposes it as `feeBasis`, and **four surfaces now read
+  that one function**: Sidebar, Growth Target, the Business P&L reference line, and Total P&L's
+  `feesForNetPnL` (whose inline composition was deleted — the formula is byte-identical, it just
+  moved). Two duplicate compositions removed.
+  **⚠️ `allTotal` and `tokenRows` are deliberately NOT changed, and this is load-bearing.** The
+  Business P&L page has TWO tables: "Total Tokens" (documented as *lifetime* quantities, whose
+  `tfoot` prints `allTotal` and must therefore equal its own rows) and "Unconverted Holdings"
+  (still held). `allTotal` also feeds `pnl = allTotal − usdcConverted`, the explicit hold-vs-cash-out
+  comparison. Repurposing it would have broken the footer==rows invariant and collapsed the
+  lifetime table into a duplicate of the holdings table. The bug was never that `allTotal` is
+  wrong — it answers a different question — but that two surfaces used it to answer *this* one.
+  **Measured on production data, before → after:** Sidebar Net P&L **$8,110.70 → $6,936.74** while
+  Total P&L's Net P&L stayed **$6,936.98 → $6,936.76** (live-price jitter). **The gap between the
+  two Net P&L figures went $1,173.72 → $0.02** — the Sidebar's own comment claiming it "mirrors
+  the Total P&L page's Net P&L (Invariant #6)" is now true for the first time. Growth Target
+  Combined Earnings $8,266.59 → $7,091.43.
+  **The bug's SIZE tracked the ZEC price**, which is the tell: an offline run at ZEC $1,440.35
+  measured the overstatement at $964.23, the browser run hours later at $1,173.72. 1.739764 ZEC
+  sold for **$1,673.53** was being counted at **$2,505.87**, so a 10% ZEC move alone shifted
+  Sidebar Net P&L by ~$250 — money that never existed.
+  **Proven immune, not just changed:** re-running `calcBusinessPnL` with ZEC at 0.5×, 1×, 2× moves
+  `feeBasis` by only **$14.92** (from the ONE still-held claim containing ZEC), while `allTotal`
+  swings $12,184 → $15,965. Doubling SUI's price moves `feeBasis` by exactly **$2,547.85**, equal
+  to the SUI holdings row to the cent — still-held tokens keep tracking live price, as required.
+  Overall P&L / Converted Fees unchanged at any ZEC price ($37,764.10 / $9,058.95).
+  **Stale copy fixed, because the number moved out from under it:** Growth Target's breakdown row
+  read *"+ Fees earned, all-time (= Business P&L All Total)"* → **"+ Fees: realized + still held"**,
+  and its footnote *"Fee value uses current token prices"* → *"Fees already converted count at what
+  they actually fetched; fees still held use current token prices"*. Half that figure is fixed and
+  half is live; saying only "current prices" misdescribed the fixed half.
+  Verified: breakdown reconciles on screen (−$5,594.99 + $12,690.96 = $7,095.97). 0 page errors
+  across all 8 CLP pages. Build clean, `tsc --noEmit` clean, eslint identical to baseline.
+  **No cache bumps** — no stored value changes; this is a read-side definition only.
+
 - **(this session)** — **CLP Tracker: claim-time fee income and later sale price are now two
   separate stored facts. `stableAmount` is IMMUTABLE; a sale is recorded in a new `sale` field.**
   Selling reward tokens used to overwrite the claim's claim-time USD value with the sale price, so
