@@ -306,6 +306,19 @@ export function getEffectiveClaimed(
   return toFinite(position.claimed);
 }
 
+// What this position's claimed fees gained (or lost) by selling the reward
+// tokens LATER, rather than at claim-time value. Zero for every position whose
+// claims were never sold, which is what keeps this additive: a surface only
+// shows the second number when there genuinely is one.
+export function getPositionSaleGain(
+  position: Position,
+  allClaims: FeeClaim[],
+): number {
+  return allClaims
+    .filter((c) => c.positionId === position.id)
+    .reduce((sum, c) => sum + claimSaleGain(c), 0);
+}
+
 // newFees (unclaimed accrued fees) stays manual by definition — those fees
 // don't exist as claim records yet. Only claimed is derived.
 export function getEffectiveTotalFees(
@@ -1085,6 +1098,55 @@ export function claimStableRealized(claim: FeeClaim): number {
   return Math.max(0, Math.min(face, cap));
 }
 
+// ---------------------------------------------------------------------------
+// Claim-time value vs realized value
+// ---------------------------------------------------------------------------
+//
+// Two different, both-real numbers, and the ONE place the app is allowed to
+// tell them apart:
+//
+//   claim-time  = claim.stableAmount           — what the fees were worth when
+//                                                earned. Fee income. Immutable.
+//   realized    = claim-time + claimSaleGain   — what the money actually became
+//                                                after selling the tokens later.
+//
+// Before this split, selling rewrote stableAmount with the sale price, so every
+// consumer got the realized figure whether it wanted it or not — which is how
+// "Total Fees Earned" and per-position APR came to include trading gains.
+//
+// The gain is DERIVED, never stored, so it cannot drift from the two figures it
+// sits between (Invariant #6).
+
+// What the sold tokens were worth AT CLAIM TIME. `sale.quantity` is always the
+// record's own volatile quantity — a full sale converts the whole record, and
+// applyTokenSale's split path puts the sold quantity on its own new record with
+// the other side zeroed — so the record's non-stable value IS the basis.
+function claimTimeValueOfSoldSide(claim: FeeClaim): number {
+  const total = claim.stableAmount;
+  if (total === null || !Number.isFinite(total)) return 0;
+  return Math.max(0, total - claimStableFace(claim));
+}
+
+// Gain (or loss) from selling this claim's reward tokens after the claim date.
+// 0 for every claim that was never sold — which is what keeps every untouched
+// record behaving exactly as before.
+export function claimSaleGain(claim: FeeClaim): number {
+  const sale = claim.sale;
+  if (!sale || !Number.isFinite(sale.proceeds)) return 0;
+  const basis = claimTimeValueOfSoldSide(claim);
+  const gain = sale.proceeds - basis;
+  return Number.isFinite(gain) ? gain : 0;
+}
+
+// The dollars this claim actually ended up as. Use ONLY where the figure is
+// explicitly realized/banked (Overall P&L's Converted Fees). Anything that
+// means "fee income" must read stableAmount directly instead.
+export function claimRealizedValue(claim: FeeClaim): number {
+  const total = claim.stableAmount;
+  if (total === null || !Number.isFinite(total)) return 0;
+  return total + claimSaleGain(claim);
+}
+
 export interface MixedStableClaimRow {
   claim: FeeClaim;
   stableFace: number;
@@ -1178,8 +1240,13 @@ export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
         unvaluedConvertedClaims += 1;
         continue;
       }
-      convertedFees += c.stableAmount as number;
-      convertedFromTokens += c.stableAmount as number;
+      // REALIZED, deliberately: this figure is "money actually banked", so a
+      // claim whose tokens were later sold contributes what they SOLD for, not
+      // what they were worth at claim time. claimRealizedValue is
+      // stableAmount + sale gain, so a claim that was never sold is unchanged
+      // and Overall P&L holds its existing value through the split.
+      convertedFees += claimRealizedValue(c);
+      convertedFromTokens += claimRealizedValue(c);
       continue;
     }
     // Not converted overall — but any stablecoin leg is already realized.
@@ -1577,6 +1644,12 @@ export interface SaleClaimPlan {
   // True when the remainder keeps the original figure verbatim because it could
   // not be apportioned (multi-volatile claim, or no volatile residual).
   remainderStableUnchanged: boolean;
+  // What the SOLD quantity was worth at claim time. It becomes the sold
+  // record's stableAmount, so fee income stays claim-time on both halves of a
+  // split. 0 when the value could not be apportioned — exactly the case where
+  // the remainder keeps the WHOLE claim-time value, so the two halves can
+  // never double-count it.
+  soldClaimTimeValue: number;
 }
 
 export interface TokenSalePlan {
@@ -1587,6 +1660,10 @@ export interface TokenSalePlan {
   availableQuantity: number;
   claims: SaleClaimPlan[];
   error: string | null;
+  // Recorded onto each claim's `sale` so the sale is dateable later. Supplied
+  // by the caller (the modal passes today) rather than derived here, so the
+  // planner stays pure and testable.
+  saleDate: string;
 }
 
 // Quantities are compared with a tolerance: a holding is a sum of stored
@@ -1599,11 +1676,13 @@ export function planTokenSale(
   token: string,
   amountSold: number,
   pricePerToken: number,
+  saleDate: string = new Date().toISOString().slice(0, 10),
 ): TokenSalePlan {
   const empty = (error: string | null, available = 0): TokenSalePlan => ({
     token,
     amountSold,
     pricePerToken,
+    saleDate,
     totalProceeds: 0,
     availableQuantity: available,
     claims: [],
@@ -1698,6 +1777,7 @@ export function planTokenSale(
 
     let remainderStableAmount: number | null = null;
     let remainderStableUnchanged = false;
+    let soldClaimTimeValue = 0;
     if (isSplit) {
       const basis = c.claim.stableAmount;
       if (basis === null || !Number.isFinite(basis)) {
@@ -1716,6 +1796,7 @@ export function planTokenSale(
         if (residual > 0 && volatileSides.length === 1) {
           remainderStableAmount =
             face + residual * (remainingQuantity / c.quantity);
+          soldClaimTimeValue = residual * (soldQuantity / c.quantity);
         } else {
           remainderStableAmount = basis;
           remainderStableUnchanged = true;
@@ -1739,6 +1820,7 @@ export function planTokenSale(
       stableAmount: proceedsShare + stableAlreadyRealized,
       remainderStableAmount,
       remainderStableUnchanged,
+      soldClaimTimeValue,
     });
   }
 
@@ -1746,6 +1828,7 @@ export function planTokenSale(
     token,
     amountSold,
     pricePerToken,
+    saleDate,
     totalProceeds,
     availableQuantity,
     claims: out,
@@ -1786,11 +1869,19 @@ export function applyTokenSale(
           : "USDC");
 
     if (!p.isSplit) {
+      // stableAmount is NOT touched: it stays this claim's claim-time value.
+      // What the tokens fetched is recorded as the sale, and the two are added
+      // back together only by claimRealizedValue.
       out.push({
         ...claim,
         convertedToStable: true,
         stableSymbol,
-        stableAmount: p.stableAmount,
+        sale: {
+          date: plan.saleDate,
+          pricePerToken: plan.pricePerToken,
+          quantity: p.soldQuantity,
+          proceeds: p.proceedsShare,
+        },
       });
       continue;
     }
@@ -1815,7 +1906,16 @@ export function applyTokenSale(
       [otherField]: 0,
       convertedToStable: true,
       stableSymbol,
-      stableAmount: p.stableAmount,
+      // CLAIM-TIME value of the sold quantity, not the sale price. The sale
+      // price lives in `sale` and the two are recombined only by
+      // claimRealizedValue, exactly as on the non-split path.
+      stableAmount: p.soldClaimTimeValue,
+      sale: {
+        date: plan.saleDate,
+        pricePerToken: plan.pricePerToken,
+        quantity: p.soldQuantity,
+        proceeds: p.proceedsShare,
+      },
     } as FeeClaim);
   }
 

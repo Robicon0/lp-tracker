@@ -51,6 +51,7 @@ import {
   entryPriceFromDeposited,
   entryPriceFromTokens,
   getEffectiveClaimed,
+  getPositionSaleGain,
   getEffectiveDeposited,
   withLiveValues,
   getEffectiveTotalFees,
@@ -590,6 +591,9 @@ interface DerivedRow {
   apr: number;
   priceDiff: number;
   profit: number;
+  // Gain from selling this position's reward tokens after the claim. 0 when
+  // nothing was sold, which is every position until it is.
+  saleGain: number;
 }
 
 function derive(positions: Position[], allClaims: FeeClaim[]): DerivedRow[] {
@@ -601,7 +605,10 @@ function derive(positions: Position[], allClaims: FeeClaim[]): DerivedRow[] {
     const apr = calcFeeAPR(fees, deposited, days);
     const priceDiff = calcPriceDiff(position.currentBalance, deposited);
     const profit = calcPositionProfit(position, fees, priceDiff);
-    return { position, deposited, claimed, fees, days, apr, priceDiff, profit };
+    const saleGain = getPositionSaleGain(position, allClaims);
+    return {
+      position, deposited, claimed, fees, days, apr, priceDiff, profit, saleGain,
+    };
   });
 }
 
@@ -2030,7 +2037,9 @@ function PositionCard({
   onClaim?: (p: Position) => void;
   onDelete?: (p: Position) => void;
 }) {
-  const { position, deposited, claimed, fees, days, apr, priceDiff, profit } = row;
+  const {
+    position, deposited, claimed, fees, days, apr, priceDiff, profit, saleGain,
+  } = row;
   const [showDetails, setShowDetails] = useState(false);
   const wideRange = calcWideRangePercent(position.bottomRange, position.topRange);
   const isActive = variant === "active";
@@ -2126,7 +2135,17 @@ function PositionCard({
       {showDetails && (
         <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-[var(--border)] pt-3 sm:grid-cols-3">
           <Metric label="New Fees" value={formatUsd(position.newFees)} />
-          <Metric label="Claimed" value={formatUsd(claimed)} />
+          {/* Claim-time fee income, and — only when the reward tokens were
+              actually sold later — what that money became. Two real numbers;
+              the second is absent on a position that never sold. */}
+          <Metric label="Fees Earned" value={formatUsd(claimed)} />
+          {Math.abs(saleGain) >= 0.005 && (
+            <Metric
+              label="After Selling"
+              value={formatUsd(claimed + saleGain)}
+              tone={`font-medium ${pnlColor(saleGain)}`}
+            />
+          )}
           <Metric
             label="Price Diff"
             value={formatUsd(priceDiff)}
@@ -2335,8 +2354,9 @@ function PositionListRow({
   onClaim?: (p: Position) => void;
   onDelete?: (p: Position) => void;
 }) {
-  const { position, deposited, claimed, fees, days, apr, priceDiff, profit } =
-    row;
+  const {
+    position, deposited, claimed, fees, days, apr, priceDiff, profit, saleGain,
+  } = row;
   const [open, setOpen] = useState(false);
   const isActive = variant === "active";
   const wideRange = calcWideRangePercent(position.bottomRange, position.topRange);
@@ -2389,7 +2409,18 @@ function PositionListRow({
               />
             )}
             <Metric label="New Fees" value={formatUsd(position.newFees)} />
-            <Metric label="Claimed" value={formatUsd(claimed)} />
+            {/* Fees Earned is ALWAYS claim-time: what these fees were worth
+                when they were earned. "After Selling" appears only when the
+                reward tokens were actually sold later, so an ordinary position
+                still shows exactly one figure. */}
+            <Metric label="Fees Earned" value={formatUsd(claimed)} />
+            {Math.abs(saleGain) >= 0.005 && (
+              <Metric
+                label="After Selling"
+                value={formatUsd(claimed + saleGain)}
+                tone={`font-medium ${pnlColor(saleGain)}`}
+              />
+            )}
             <Metric
               label="Price Diff"
               value={formatUsd(priceDiff)}

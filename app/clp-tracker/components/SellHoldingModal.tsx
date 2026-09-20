@@ -77,9 +77,14 @@ export function SellHoldingModal({
   const liveProceeds =
     amountEntered && priceEntered ? amountNum * priceNum : null;
 
+  // The sale happens now, so "today" is the sale date recorded on each claim.
+  // Held in state rather than recomputed in the memo so a render on either side
+  // of midnight cannot stamp two different dates onto one sale.
+  const [saleDate] = useState(() => new Date().toISOString().slice(0, 10));
+
   const plan = useMemo(
-    () => planTokenSale(claims, token, amountNum, priceNum),
-    [claims, token, amountNum, priceNum],
+    () => planTokenSale(claims, token, amountNum, priceNum, saleDate),
+    [claims, token, amountNum, priceNum, saleDate],
   );
 
   // Only surface a validation message once there is something to validate, so
