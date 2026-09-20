@@ -240,10 +240,13 @@ export default function BusinessPnlPage() {
     [claims, effectivePrices],
   );
 
-  // Net P&L's fee term, from the SAME two functions total-pnl composes it from,
-  // so the figure quoted here cannot drift from the one Net P&L adds
-  // (Invariant #6). Nothing is recomputed a third way.
-  const netPnlFeeBasis = convertedFees + holdingsExclStables;
+  // Net P&L's fee term, read from the ONE function that owns the definition
+  // (calcFeeBasis, surfaced as business.feeBasis) instead of being re-composed
+  // here. This line used to add the two halves itself and claim it matched what
+  // Net P&L adds — but the Sidebar's Net P&L was on business.allTotal, a
+  // different number, so the claim was false. There is now a single definition
+  // and the reference line cannot drift from it (Invariant #6).
+  const netPnlFeeBasis = business.feeBasis;
 
   // How far short of the Growth Target the business currently is. Read from
   // calcGrowthTarget with the same inputs the Growth Target card uses (its fee

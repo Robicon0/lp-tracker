@@ -11,7 +11,7 @@ import {
   saveSettings,
 } from "../lib/storage";
 import {
-  calcConvertedFees,
+  calcFeeBasis,
   calcDaysActive,
   calcFeeAPR,
   calcOverallPnL,
@@ -385,13 +385,11 @@ export default function TotalPnlPage() {
   // Both halves come from the functions that already own those definitions, so
   // Net P&L cannot drift from Overall P&L's Converted Fees or Business P&L's
   // Unconverted Holdings (Invariant #6).
+  // Composed by calcFeeBasis now, rather than inline here: the Sidebar and
+  // Growth Target needed the same figure and were using a different one, so the
+  // definition moved to one shared place. The formula is unchanged.
   const feesForNetPnL = useMemo(
-    () =>
-      hydrated
-        ? calcConvertedFees(claims) +
-          calcUnconvertedHoldings(claims, prices, { excludeStables: true })
-            .totalCurrentValue
-        : 0,
+    () => (hydrated ? calcFeeBasis(claims, prices) : 0),
     [hydrated, claims, prices],
   );
 
