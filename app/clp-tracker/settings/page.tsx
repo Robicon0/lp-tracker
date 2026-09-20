@@ -3,14 +3,21 @@
 import { type ChangeEvent, useRef, useState } from "react";
 import {
   DEFAULT_SETTINGS,
+  getAllTransfers,
   getClaims,
   getPositions,
   getSettings,
   getTransfers,
+  saveClaims,
   savePositions,
   saveSettings,
 } from "../lib/storage";
 import { exportCSV, parseCSV } from "../lib/csv";
+import {
+  applyClaimSaleMigration,
+  planClaimSaleMigration,
+  type ClaimSaleMigrationPlan,
+} from "../lib/claimSaleMigration";
 import {
   calcTotalFees,
   getEffectiveClaimed,
@@ -231,6 +238,16 @@ function todayDate(): string {
   return `${y}-${m}-${day}`;
 }
 
+const usdFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+function formatUsd(value: number): string {
+  return usdFormatter.format(Number.isFinite(value) ? value : 0);
+}
+
 function readKey(key: string): unknown {
   if (typeof window === "undefined") return null;
   try {
@@ -248,6 +265,12 @@ export default function SettingsPage() {
     kind: "idle",
   });
   const [pendingClear, setPendingClear] = useState(false);
+  // One-time correction: claims sold before `sale` existed had their
+  // claim-time value overwritten with the sale price. The plan is computed
+  // from live data and SHOWN before anything is written — this is a one-way
+  // change to money records, so it is never applied on load.
+  const [salePlan, setSalePlan] = useState<ClaimSaleMigrationPlan | null>(null);
+  const [saleFixState, setSaleFixState] = useState<ImportState>({ kind: "idle" });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -259,6 +282,41 @@ export default function SettingsPage() {
     const updated: AppSettings = { ...settings, transfersEnabled: next };
     setSettings(updated);
     saveSettings(updated);
+  };
+
+  const runSaleFixDryRun = () => {
+    setSaleFixState({ kind: "idle" });
+    setSalePlan(planClaimSaleMigration(getClaims(), getAllTransfers()));
+  };
+
+  const applySaleFix = () => {
+    if (salePlan === null || salePlan.fixes.length === 0) return;
+    try {
+      const claims = getClaims();
+      // Pre-flight backup under its own key, BEFORE the write. One-way change,
+      // so the previous state has to survive somewhere the app can restore it
+      // from even if the user never exported a JSON backup.
+      window.localStorage.setItem(
+        "clp_claims_backup_pre_sale_split",
+        JSON.stringify(claims),
+      );
+      saveClaims(applyClaimSaleMigration(claims, salePlan));
+      setSaleFixState({
+        kind: "success",
+        message:
+          `Corrected ${salePlan.fixes.length} claims across ` +
+          `${salePlan.positionsAffected} positions. Fee income is now ` +
+          `${formatUsd(salePlan.claimTimeTotal)} at claim-time value, with ` +
+          `${formatUsd(salePlan.gainTotal)} recorded separately as sale gain. ` +
+          `Previous claims saved to clp_claims_backup_pre_sale_split.`,
+      });
+      setSalePlan(planClaimSaleMigration(getClaims(), getAllTransfers()));
+    } catch (err) {
+      setSaleFixState({
+        kind: "error",
+        message: `Nothing was written — ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   };
 
   const handleExport = () => {
@@ -456,6 +514,124 @@ export default function SettingsPage() {
         )}
 
         <Divider />
+
+        <SettingRow
+          label="Separate Sale Gains From Fee Income"
+          description="Selling reward tokens used to overwrite a claim's claim-time USD value with the sale price, so Total Fees Earned and APR included trading gains. This restores each affected claim's true fee value and records what it sold for separately. Both numbers are kept — nothing is lost. Preview first; nothing is written until you apply."
+          control={
+            <button
+              type="button"
+              onClick={runSaleFixDryRun}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--surface-2)]/70"
+            >
+              Preview changes
+            </button>
+          }
+        />
+        {salePlan !== null && (
+          <div className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)]/40 px-3 py-3 text-xs">
+            {salePlan.fixes.length === 0 ? (
+              <p className="text-[var(--muted)]">
+                Nothing to correct — no claim shows the signature of a sale that
+                overwrote its claim-time value. (Already applied, or none of
+                your sales predate this fix.)
+              </p>
+            ) : (
+              <>
+                <p className="text-[var(--foreground)]">
+                  <span className="font-medium">
+                    {salePlan.fixes.length} claims across{" "}
+                    {salePlan.positionsAffected} positions
+                  </span>{" "}
+                  would change. Fee income{" "}
+                  <span className="tabular-nums">
+                    {formatUsd(salePlan.currentTotal)}
+                  </span>{" "}
+                  →{" "}
+                  <span className="tabular-nums font-medium">
+                    {formatUsd(salePlan.claimTimeTotal)}
+                  </span>
+                  , with{" "}
+                  <span className="tabular-nums font-medium text-emerald-300">
+                    {formatUsd(salePlan.gainTotal)}
+                  </span>{" "}
+                  moved to sale gain. Realized totals (Overall P&amp;L) do not
+                  move.
+                </p>
+                <p className="mt-2 text-[11px] text-[var(--muted)]">
+                  Evidence — a sale re-values claims from many dates at one
+                  price:{" "}
+                  {salePlan.clusters
+                    .map(
+                      (c) =>
+                        `${c.token} at ${formatUsd(c.pricePerToken)} (${c.claims} claims, ${c.dates} dates)`,
+                    )
+                    .join("; ")}
+                </p>
+                <div className="mt-3 max-h-60 overflow-auto rounded border border-[var(--border)]">
+                  <table className="w-full text-left text-[11px] tabular-nums">
+                    <thead className="sticky top-0 bg-[var(--surface-2)] text-[var(--muted)]">
+                      <tr>
+                        <th className="px-2 py-1.5 font-medium">Claim</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Now</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Fee value</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Sold for</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Gain</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {salePlan.fixes.map((f) => (
+                        <tr key={f.claim.id}>
+                          <td className="px-2 py-1.5 text-[var(--muted)]">
+                            {String(f.claim.date).slice(0, 10)} · {f.claim.pair}
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-[var(--muted)] line-through">
+                            {formatUsd(f.currentStableAmount)}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-medium text-[var(--foreground)]">
+                            {formatUsd(f.claimTimeValue)}
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-[var(--muted)]">
+                            {formatUsd(f.proceeds)}
+                          </td>
+                          <td
+                            className={`px-2 py-1.5 text-right ${f.gain >= 0 ? "text-emerald-300" : "text-rose-300"}`}
+                          >
+                            {formatUsd(f.gain)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  type="button"
+                  onClick={applySaleFix}
+                  className="mt-3 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white hover:bg-[var(--accent-solid)]/90"
+                >
+                  Apply to {salePlan.fixes.length} claims
+                </button>
+                <p className="mt-2 text-[11px] text-[var(--muted)]">
+                  Your current claims are copied to{" "}
+                  <code>clp_claims_backup_pre_sale_split</code> before the write.
+                  Export a JSON backup first if you want a file copy too.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+        {saleFixState.kind !== "idle" && (
+          <div
+            role="status"
+            className={`rounded-md border px-3 py-2 text-xs ${
+              saleFixState.kind === "success"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {saleFixState.message}
+          </div>
+        )}
 
         <SettingRow
           label="Clear All Data"

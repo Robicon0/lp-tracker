@@ -987,6 +987,69 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: claim-time fee income and later sale price are now two
+  separate stored facts. `stableAmount` is IMMUTABLE; a sale is recorded in a new `sale` field.**
+  Selling reward tokens used to overwrite the claim's claim-time USD value with the sale price, so
+  "Total Fees Earned" and per-position **APR** silently included trading gains — 5.48% overstated
+  on this dataset, and 12.6–37.7% on individual positions.
+  **The invariant already existed in the code and was being violated:** `Sidebar.tsx` documents
+  `getEffectiveTotalFees` as giving "the claim-TIME value", deliberately distinct from Business
+  P&L's today's-price figure. This restores that, rather than inventing a new rule.
+  **Schema:** `FeeClaim.sale?: { date, pricePerToken, quantity, proceeds }`, additive and absent on
+  every claim that was never sold. The gain is **DERIVED, never stored** (`claimSaleGain` =
+  `sale.proceeds − (stableAmount − claimStableFace)`), so it cannot drift from the two figures it
+  sits between. `claimRealizedValue` = claim-time + gain.
+  **Consumer classification was the real work, and it landed smaller than scoped:** exactly ONE
+  consumer needed changing — `calcConvertedFeesDetail`, which feeds Overall P&L's "Converted Fees
+  (Realized)". Everything else reads `stableAmount` directly and becomes correct *for free* once
+  it holds claim-time value again (`getEffectiveClaimed`/`TotalFees`, `calcFeeAPR` on all 4 pages,
+  `calcPortfolioSummary`, `calcTokenPnL`, Total P&L buckets, `calcBusinessPnL.usdcConverted` —
+  whose own comment already called it "claim-time value").
+  **⚠️ CORRECTION to the scoping doc: Sidebar Net P&L and Growth Target do NOT read
+  `stableAmount` at all.** Both take `calcBusinessPnL(...).allTotal`, which is reward-token
+  QUANTITIES priced at today's spot. They were never affected and needed no wiring.
+  **`applyTokenSale` fixed on both paths.** Plain: writes `sale`, leaves `stableAmount`. Split: the
+  new sold record gets the CLAIM-TIME value of the sold quantity (new `SaleClaimPlan.soldClaimTimeValue`)
+  plus its own `sale`; the remainder is untouched as before. Unit-proven: a 4-of-10 partial sale
+  conserves claim-time at exactly $150.00 across both records while realized reads $230.00.
+  **Migration is REVIEWABLE and opt-in, in Settings → "Separate Sale Gains From Fee Income".** It
+  is a one-way change to money records, so it is never applied on load: Preview renders the full
+  per-claim before/after table plus the evidence, and only then does Apply write — copying the
+  previous claims to `clp_claims_backup_pre_sale_split` first. `planClaimSaleMigration` /
+  `applyClaimSaleMigration` are pure and share ONE planner, so the preview and the write cannot
+  disagree. Idempotent (a second run finds 0).
+  **How claim-time value is recovered:** from the linked transfer, which was auto-created at the
+  old value and never updated — the reason those rows drift in the first place. **Independently
+  corroborated: the 12 Sep RAKA backup agrees to the cent on all 14 of the 17 it contains** (the
+  other 3 post-date it). A claim with no linked transfer is LEFT ALONE, not guessed at.
+  **Detection requires a DISTINCT-DATE test, and this is the load-bearing detail.** A sale
+  re-values claims from many dates at ONE price; two claims on the SAME date sharing a price is
+  just that day's price. A first cut flagged 36 claims (17 ZEC + 19 SUI) — the SUI ones were
+  same-date pairs, i.e. ordinary claim-time pricing. Threshold is 3+ distinct dates. (Sanity: 26
+  SUI claims over ~58 cent-buckets predicts ~5.6 coincidental collisions by chance.)
+  **`sale.date` is `""` on migrated records** — the sale date was never stored and cannot be
+  recovered. An invented date in a money record is worse than an absent one; the UI says "date not
+  recorded". Going forward the modal stamps today, held in state so a render either side of
+  midnight cannot write two dates for one sale.
+  **UI:** claims page gains **Fees Earned** + **After Selling** columns (the latter "—" unless
+  sold); position detail (both `PositionCard` and `PositionListRow`) shows **Fees Earned** and,
+  only when a sale exists, **After Selling**. Dashboard and the collapsed positions list keep ONE
+  figure — verified: 0 occurrences collapsed, 41 "Fees Earned" + exactly **10** "After Selling"
+  expanded, matching the 10 affected positions.
+  **Verified on real production data** (Playwright, clean profile): dry run **17 claims / 10
+  positions, claim-time $1,842.55, gain $670.23** — matching the scoped expectation exactly.
+  Total Fees Earned **$12,235.38 → $11,565.15 (−$670.23)** on both Claims and Total P&L; dashboard
+  Overall P&L **$2,678.87 unchanged**; Converted Fees delta **$0.00** (pure-function check); the
+  **drift banner went 17 rows → gone**, with `clp_transfers` byte-identical (no transfer edited).
+  0 page errors across all 8 CLP pages.
+  **⚠️ Harness notes worth keeping:** (1) Total P&L's Net P&L / Overall P&L move ~$170 between
+  loads from LIVE token prices — a no-change control proved it, so small deltas there are noise,
+  not regressions; measure fee figures, which are deterministic. (2) `Metric` labels are
+  CSS-uppercased, so `innerText` returns "FEES EARNED" — a case-sensitive regex silently reports
+  the UI as missing.
+  Build clean, `tsc --noEmit` clean, eslint identical to baseline. **No cache bumps** — `sale` is
+  additive and no existing record changes shape until the user applies the migration.
+
 - **(this session)** — **CLP Tracker: "Sent to Platform" is a third Money Status, reconciled into
   the EXISTING Transferred-to-Platforms total rather than given a second one.**
   **Investigation first, and it changed the design.** "Transferred to Platforms (USD)" was already

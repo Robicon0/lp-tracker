@@ -50,7 +50,29 @@ export interface FeeClaim {
   token2Amount: number;
   convertedToStable: boolean;
   stableSymbol: string | null;
+  // The CLAIM-TIME USD value of this claim, and nothing else. IMMUTABLE once
+  // written: selling the reward tokens later does NOT rewrite it (that was the
+  // old behaviour, and it blended fee income with trading gains so "Total Fees
+  // Earned" reported money the position never earned as fees). A sale is
+  // recorded in `sale` below instead, and the two are added back together only
+  // where the figure is explicitly REALIZED — see claimRealizedValue().
   stableAmount: number | null;
+  // Present only when the reward tokens on this record were sold for stable
+  // AFTER the claim. Additive and absent on every claim that was already
+  // stablecoin, or is still held, or was logged as converted at claim time —
+  // so a claim with no `sale` behaves exactly as it always has.
+  //
+  // `proceeds` is what the sold quantity actually fetched; the gain over what
+  // those same tokens were worth at claim time is derived, never stored twice
+  // (claimSaleGain). `date: ""` means the sale date is not known — records
+  // corrected by the one-time migration have no way to recover it, and an
+  // invented date would be worse than an absent one.
+  sale?: {
+    date: string;
+    pricePerToken: number;
+    quantity: number;
+    proceeds: number;
+  };
   currentPositionValue: number | null;
   txId: string | null;
   notes: string;

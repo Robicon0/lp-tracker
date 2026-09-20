@@ -12,6 +12,8 @@ import { useHydrated } from "../lib/useHydrated";
 import {
   calcDaysActive,
   calcFeeAPR,
+  claimRealizedValue,
+  claimSaleGain,
   calcPortfolioSummary,
   correctClaimSymbols,
   findClaimSymbolMismatches,
@@ -675,7 +677,12 @@ export default function ClaimsPage() {
                   <th className="px-4 py-3 text-right font-medium">Token 2</th>
                   <th className="px-4 py-3 text-left font-medium">Converted</th>
                   <th className="px-4 py-3 text-right font-medium">
-                    USD Value
+                    Fees Earned
+                  </th>
+                  {/* Only meaningful once something has been sold; the column
+                      reads "—" for every claim that never was. */}
+                  <th className="px-4 py-3 text-right font-medium">
+                    After Selling
                   </th>
                   <th className="px-4 py-3 text-left font-medium">Tx</th>
                   <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -724,10 +731,33 @@ export default function ClaimsPage() {
                         ? `Yes — ${claim.stableSymbol ?? ""}`.trim()
                         : "No"}
                     </td>
+                    {/* Claim-time value: what these fees were worth when
+                        earned. Never changes when the tokens are sold later. */}
                     <td className="px-4 py-3 text-right tabular-nums">
                       {claim.stableAmount !== null
                         ? formatUsd(claim.stableAmount)
                         : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {claim.sale === undefined ? (
+                        <span className="text-[var(--muted)]">—</span>
+                      ) : (
+                        <span
+                          title={
+                            `Sold ${claim.sale.quantity} at ` +
+                            `${formatUsd(claim.sale.pricePerToken)}` +
+                            (claim.sale.date ? ` on ${claim.sale.date}` : " (date not recorded)")
+                          }
+                        >
+                          {formatUsd(claimRealizedValue(claim))}
+                          <span
+                            className={`ml-1 text-[10px] ${claimSaleGain(claim) >= 0 ? "text-emerald-300" : "text-rose-300"}`}
+                          >
+                            {claimSaleGain(claim) >= 0 ? "+" : ""}
+                            {formatUsd(claimSaleGain(claim))}
+                          </span>
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-[var(--muted)]">
                       <TxCell value={claim.txId ?? null} />
