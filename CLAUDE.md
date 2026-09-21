@@ -987,6 +987,40 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: Confirm Close no longer accepts a HALF-FILLED fee claim.**
+  The Close Position modal's "Claim Fees at Close (Optional)" section is optional as a whole but
+  ALL-OR-NOTHING once touched. It had no validation at all: `shouldCreateClaim` fired on any ONE
+  of the three fields, and the blanks were written as `0` (or a null USD value), producing a claim
+  that under-reports fee income and then surfaces on the Claims page as an "incomplete claim" the
+  user has to chase — with nothing on screen having said so at close time.
+  **Now:** any non-empty value among Token-1 Amount / Token-2 Amount / Claim USD Value marks the
+  section in use and requires all three; an untouched section still closes normally with no claim
+  created; **Transaction ID stays optional in every case** (excluded from the check by design, it
+  is labelled optional).
+  **"Touched" is a NON-EMPTY FIELD, not `num(x) > 0`, and that distinction is the point.** A
+  literal `0` is a real answer ("no fees on this side"), so testing for a positive number would
+  read it as untouched and let a half-filled section through — the exact hole being closed.
+  Verified: typing `0` into one field blocks and names the other two.
+  **The blocked message names the fields as the UI labels them**, which is dynamic — the labels are
+  `${position.token1Symbol} Amount`, so a SUI/USDC position reads *"USDC Amount and Claim USD Value
+  are still empty"*, not "Token 2". The claim section is also force-opened on a block, since a
+  message about fields hidden inside a collapsed section explains nothing. Same never-silent
+  standard as the transfer-save fix: blocked, with the reason on screen, never a dead button.
+  **⚠️ INVESTIGATED AND DELIBERATELY NOT CHANGED — the standalone Claim modal already validates.**
+  `ClaimFormModal` hard-blocks two cases with on-screen messages (no position selected → *"Please
+  select which position this claim is for"*; nothing entered at all → *"Nothing to record — enter a
+  token amount or a Claim USD Value"*) and renders a visible `aria-live` warning for exactly the
+  partial case — *"No USD value entered — this claim will contribute $0 to Total Fees and Fee APR
+  until a value is added."* That is a deliberate SOFT warn, not a gap: the standalone flow is where
+  a claim is logged when the USD value may genuinely not be known yet, and Data Health tracks
+  incomplete claims from there. It never saves silently, so it was left alone.
+  Verified on localhost (Playwright, real production data), 5 cases: none touched + Tx ID filled →
+  closes, no claim, no alert; only Token-1 → blocked, names the other two, position NOT closed and
+  no claim written; two of three → blocked, names only Claim USD Value; all three with Tx ID EMPTY
+  → closes and writes `{t1:1.5, t2:20, usd:35.5, tx:null}`; literal `0` → blocked. 0 page errors
+  across all 8 CLP pages. Build clean, `tsc --noEmit` clean, eslint identical to baseline.
+  **No cache bumps** — validation only, no stored value or calculation changed.
+
 - **(this session)** — **CLP Tracker: Sidebar Net P&L and Growth Target counted money the business
   never received. NEW `calcFeeBasis` is the one definition of "fee money we actually have".**
   `calcBusinessPnL.allTotal` prices EVERY reward token ever claimed at TODAY's rate — including

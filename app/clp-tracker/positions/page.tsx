@@ -4118,6 +4118,28 @@ function ClosePositionModal({
   const shouldCreateClaim =
     num(claimTokens1) > 0 || num(claimTokens2) > 0 || num(claimUsdValue) > 0;
 
+  // The claim section is OPTIONAL as a whole but ALL-OR-NOTHING once touched.
+  // Partially filled, it used to submit anyway: the blank fields became 0 (or a
+  // null USD value), producing a claim that under-reports fee income and lands
+  // on the Claims page as an "incomplete claim" the user then has to chase.
+  // Nothing on screen said so.
+  //
+  // "Touched" is a non-empty FIELD, not a positive number — an explicit "0" is
+  // a real answer ("no fees on this side") and must count as filled, while
+  // testing `num(x) > 0` would read it as untouched and let a half-filled
+  // section through. Transaction ID is excluded on purpose: it is labelled
+  // optional and stays optional.
+  const claimFieldState: { label: string; value: string }[] = [
+    { label: `${position.token1Symbol || "Token 1"} Amount`, value: claimTokens1 },
+    { label: `${position.token2Symbol || "Token 2"} Amount`, value: claimTokens2 },
+    { label: "Claim USD Value", value: claimUsdValue },
+  ];
+  const claimSectionInUse = claimFieldState.some((f) => f.value.trim() !== "");
+  const missingClaimFields = claimSectionInUse
+    ? claimFieldState.filter((f) => f.value.trim() === "").map((f) => f.label)
+    : [];
+  const [showClaimError, setShowClaimError] = useState(false);
+
   const deposited = getEffectiveDeposited(position);
 
   // Manual mode: Scalp is the price difference and is always knowable once
@@ -4212,6 +4234,15 @@ function ClosePositionModal({
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (missingClaimFields.length > 0) {
+      // Blocked, and the reason goes on screen — never a dead button. The
+      // section auto-opens so the named fields are actually visible; a message
+      // about fields hidden inside a collapsed section explains nothing.
+      setShowClaimError(true);
+      setClaimSectionOpen(true);
+      return;
+    }
+    setShowClaimError(false);
     onSubmit({
       exitDatetime: new Date(exitDatetime).toISOString(),
       currentBalance: usingTokens ? tokensBalance : num(currentBalance),
@@ -4587,6 +4618,16 @@ function ClosePositionModal({
             </div>
           )}
         </Section>
+        {showClaimError && missingClaimFields.length > 0 && (
+          <div role="alert" className="px-5 py-3 text-[12px] text-rose-300">
+            Can&rsquo;t close yet — you&rsquo;ve started a fee claim, so{" "}
+            {missingClaimFields.join(" and ")}{" "}
+            {missingClaimFields.length === 1 ? "is" : "are"} still empty. Fill{" "}
+            {missingClaimFields.length === 1 ? "it" : "them"} in, or clear the
+            claim fields to close without recording a claim. (Transaction ID
+            stays optional.)
+          </div>
+        )}
         <FormActions
           onCancel={onCancel}
           submitLabel="Confirm Close"
