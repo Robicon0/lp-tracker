@@ -890,7 +890,11 @@ function TxCell({ value }: TxCellProps) {
         href={value}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[var(--accent)] hover:underline"
+        // The arrow is part of the label, not a separate word: without this the
+        // Tx column breaks "Open" and "↗" onto two lines the moment the table
+        // is at all tight, which reads as a clipped cell. Costs ~16px of column
+        // min-width and keeps the label intact at every width.
+        className="whitespace-nowrap text-[var(--accent)] hover:underline"
         onClick={(e) => e.stopPropagation()}
       >
         Open ↗

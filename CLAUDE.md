@@ -987,6 +987,45 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: the shared content container goes 1152px → 1600px, and the
+  Fee Claims table stops clipping its own columns.** Layout/width only — **no font size changed
+  anywhere**, verified by fingerprint, not by eye.
+  **One shared place:** `app/clp-tracker/layout.tsx`'s `<main>` + `max-w-6xl` wrapper is the only
+  width container in the section, so Dashboard, Positions, Fee Claims, Transfers, Total P&L,
+  Pool P&L, Business P&L and Settings all pick the change up at once. Now `max-w-[1600px]` with
+  `2xl:pr-16`. Measured on Fee Claims at 1920: container **1152 → 1560px**, and the table finally
+  renders its full 1558px with **Actions (Edit/Delete) visible at all** — that column was
+  previously cut off entirely, not merely cramped.
+  **The "decorative graphic" is not decoration and not CLP's:** it is the global `FeedbackTab`
+  (`app/components/FeedbackTab.tsx`, mounted in the ROOT `app/layout.tsx` for every DefiDesh page)
+  — a rotated button fixed to the viewport's right edge, ~31px wide, `top:50%`, z-index 1000, so it
+  sits directly over table rows. It does not reflow. Moving it would change every page in the app,
+  so CLP reserves a right gutter for it instead (`2xl:pr-16`); content now ends at 1856 with the
+  tab at 1890.
+  **⚠️ THE TRAP, and the reason a code-read would have shipped a regression: widening the cap
+  introduced PAGE-WIDE horizontal scroll at laptop widths.** `<main>` is a flex child, so its
+  default `min-width:auto` lets the table's 1268px min-content push it past its flex basis. The old
+  `max-w-6xl` masked this by clamping BELOW the table's width. First measurement after widening:
+  container **1270px on a 1280px viewport**. Fixed with **`min-w-0` on `<main>`** — load-bearing,
+  not tidying — which restores the table wrapper's own internal scroll.
+  **⚠️ AND the old layout was ALREADY broken at laptop widths, which the before/after proves:** at
+  1280 and 1440 it had **`PAGE-OVERFLOW: true`** (document scrollWidth 1488) and the feedback tab
+  overlapped the content by **−198px / −38px**. After: overflow **false** at every width and a
+  **+10px** gap. So 1440's container reading 1104 vs the old 1152 is a CORRECTNESS fix — the old
+  1152 extended 8px past the viewport and under the tab; it was never legitimately usable width.
+  **`Open ↗` wrapped to TWO LINES at every width** because the arrow broke as a separate word in a
+  66px column. `whitespace-nowrap` on the Tx anchor keeps it intact — one line at 1280/1440/1600/1920,
+  and the column widens to 82px where there is room. Costs ~14px of table min-content (1268 → 1282).
+  **Font-size proof:** a fingerprint of every leaf element's computed `fontSize` in `<main>` —
+  distinct sizes AND element count per size — is **identical before and after at all four widths**
+  (`{9,11,12,14,24}px`). Not "looks similar".
+  **Honest limit:** the table needs 1268–1282px and the sidebar takes 256px, so below ~1620px
+  viewport it still scrolls inside its wrapper — 42px at 1600, more at 1440/1280. That is
+  unavoidable without shrinking fonts (forbidden) or the sidebar (out of scope), and is down from
+  118px at EVERY width before. Verified at 1280/1440/1600/1920 on Fee Claims, Transfers and
+  Total P&L. 0 page errors across all 8 CLP pages. Build clean, `tsc --noEmit` clean, eslint
+  identical to baseline. **No cache bumps** — layout only.
+
 - **(this session)** — **CLP Tracker: Confirm Close no longer accepts a HALF-FILLED fee claim.**
   The Close Position modal's "Claim Fees at Close (Optional)" section is optional as a whole but
   ALL-OR-NOTHING once touched. It had no validation at all: `shouldCreateClaim` fired on any ONE
