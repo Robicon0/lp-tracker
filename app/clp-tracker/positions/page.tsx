@@ -4,7 +4,6 @@ import {
   type FormEvent,
   type ReactNode,
   useCallback,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -73,6 +72,7 @@ import {
   HYPOTHETICAL_DIM,
   HypotheticalNotice,
 } from "../components/Hypothetical";
+import { ModalShell } from "../components/ClaimFormModal";
 import { useHydrated } from "../lib/useHydrated";
 import type { FeeClaim } from "../lib/types";
 import type {
@@ -2627,51 +2627,6 @@ function DeletePositionModal({
         </button>
       </div>
     </ModalShell>
-  );
-}
-
-interface ModalShellProps {
-  title: string;
-  onCancel: () => void;
-  children: ReactNode;
-}
-
-function ModalShell({ title, onCancel, children }: ModalShellProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-4 py-8"
-      onClick={onCancel}
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-2xl rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md p-1 text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
   );
 }
 
