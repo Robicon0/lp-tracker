@@ -4,7 +4,6 @@ import {
   type ChangeEvent,
   type FormEvent,
   type ReactNode,
-  useEffect,
   useState,
 } from "react";
 import {
@@ -217,24 +216,36 @@ interface ModalShellProps {
   children: ReactNode;
 }
 
+// THE modal shell for every CLP Tracker dialog — Add/Edit Position, Close
+// Position, Add/Edit Claim, Add/Edit Transfer, Sell Holdings, the split/deploy/
+// platform/revert flows and the Settings dialogs all render through this one
+// component. (It was three byte-identical copies until this change; the two
+// page-local ones were deleted in favour of importing this.)
+//
+// A modal here is dismissed ONLY by an explicit Close / Cancel / ✕. Both
+// accidental exits are deliberately absent:
+//
+//   - NO backdrop click. These forms hold typed, unsaved money records; a
+//     stray click on the overlay used to discard the lot with no warning and
+//     no undo.
+//   - NO Escape key. Same risk, and worse mid-form — Escape is also what a
+//     browser's autofill/IME dropdown swallows, so users press it without
+//     meaning to dismiss anything.
+//
+// ⚠️ This is a DELIBERATE, owner-directed departure from the ARIA dialog
+// pattern, which expects Escape to close a modal that sets aria-modal="true".
+// The trade was made knowingly: losing a half-filled claim is a worse outcome
+// here than the missing shortcut. Every dialog keeps a visible ✕ plus a Cancel
+// button, so there is always an obvious, reachable way out — do not "restore"
+// Escape as an accessibility fix without checking back.
 export function ModalShell({ title, onCancel, children }: ModalShellProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-4 py-8"
-      onClick={onCancel}
       role="presentation"
     >
       <div
         className="w-full max-w-2xl rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={title}

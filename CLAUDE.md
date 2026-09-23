@@ -1026,6 +1026,42 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker modals close ONLY on an explicit Close/Cancel/✕ — backdrop
+  click and Escape are both gone. Three duplicate `ModalShell` copies collapsed into one.**
+  **Investigation first, and it changed the shape of the fix:** there was NO single shared modal.
+  `ModalShell` existed **three times** — exported from `components/ClaimFormModal.tsx` and copied
+  verbatim into `transfers/page.tsx` and `positions/page.tsx`. Verified **byte-identical** (38
+  lines, same md5) before touching anything, so the two page-local copies were DELETED and both
+  pages now import the exported one. A `fixed inset-0` sweep confirms exactly 3 overlays existed
+  and **no modal bypassed ModalShell**, so one edit genuinely covers every dialog: Add/Edit
+  Position, Close Position, Add/Edit Claim, Add/Edit Transfer, Sell Holdings, deploy/platform/
+  split/revert/undo-split, withdrawals and the Settings dialogs.
+  **Both accidental exits removed:** the overlay's `onClick={onCancel}` (and the inner
+  `stopPropagation` that only existed to support it) and the `useEffect` keydown listener that
+  called `onCancel` on Escape. Every ✕ and Cancel is untouched.
+  **⚠️ Recorded as a DELIBERATE, owner-directed departure from the ARIA dialog pattern**, which
+  expects Escape to dismiss a modal carrying `aria-modal="true"`. The trade was made knowingly —
+  losing a half-typed money record is worse here than the missing shortcut — and every dialog keeps
+  a visible ✕ plus Cancel, so there is always a reachable way out. The comment on `ModalShell` says
+  so explicitly: do not "restore" Escape as an accessibility fix without checking back.
+  **Verified with a real BEFORE/AFTER control, not just an after-state:** on stashed pre-change code
+  the Add Position dialog **closes on the backdrop click** (`still open: false`); after, backdrop
+  and Escape both leave it **open**. The first control run actually crashed with
+  `locator('button[aria-label="Close"]') timeout` precisely because the dialog had already been
+  dismissed — that failure was the evidence.
+  All 9 dialogs across all four source files pass: backdrop → open, Escape → open, typed text
+  (`ZZTEST123` / `4321`) still present afterwards, explicit Cancel/✕ still closes. 0 page errors
+  across all 8 CLP pages. Build clean, `tsc --noEmit` clean, eslint back to the 3 pre-existing
+  warnings (two `useEffect` imports went unused once the Escape listeners were deleted, and were
+  removed). **No cache bumps** — interaction layer only.
+  **⚠️ UNRELATED WORK WAS FOUND UNCOMMITTED IN THE TREE THIS SESSION** (13 files: queue item B /
+  ITEM 0i `LOOKUP_FAILED` / `LOOKUP_UNAVAILABLE` enumeration-failure disclosure across
+  `enumerationTruncation.ts`, `evmEverOwnedNftIds.ts`, the aerodrome/uniswap/velodrome routes,
+  `useLpPnl`, `PositionsContext`, analytics, dashboard — comments dated "measured live
+  2026-09-19"). It is NOT from this session's work and was left untouched and uncommitted; every
+  commit here staged explicit paths only. `git stash` was used for the control run with an explicit
+  pathspec (`git stash push -- <my three files>`) precisely so that work was never swept up.
+
 - **(this session)** — **CLP Tracker: the Transfers selection toolbar is now a fixed bottom bar
   instead of living in the list-card header.** Position only — same markup, same handlers, same
   show/hide rule. On a 167-row list you previously had to scroll back to the top to reach the
