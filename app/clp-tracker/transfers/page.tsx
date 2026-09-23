@@ -85,6 +85,7 @@ import {
 import {
   isDeployedTransfer,
   isExpensedTransfer,
+  isIdleTransfer,
   isTransferredToPlatform,
 } from "../lib/transferState";
 import type {
@@ -409,7 +410,29 @@ type ModalState =
   | { kind: "addWithdrawal" }
   | { kind: "editWithdrawal"; withdrawal: Withdrawal };
 
-type TypeFilter = "all" | TransferType;
+// "needsAction" is NOT a transferType — it is a STATE filter that cuts across
+// types (Money Status isn't specific to Fees). It shares this union, and the
+// same single-select tab row, because to the user these are one question:
+// "which subset of transfers am I looking at?"
+type TypeFilter = "all" | "needsAction" | TransferType;
+
+// A transfer "needs action" when it is still in its untouched default state:
+// Redeployed (or legacy-unset) with no Platform (from), not expensed, and not
+// already linked to a position via Mark as deployed.
+//
+// This is deliberately `isIdleTransfer` from lib/transferState rather than a
+// fresh `moneyStatus === "redeployed" && !platform` test. That module is the
+// single source of truth for the four money states and is what Available
+// Balance reduces over, so re-deriving the same question here would be a second
+// definition free to drift from the balance itself (Invariant #6). It also
+// already handles the two cases a hand-rolled test would get wrong: a legacy
+// record with moneyStatus UNSET (treated as redeployed everywhere else, and
+// genuinely un-reviewed), and a transfer that has been Marked as deployed —
+// which carries no platform and stays "redeployed", but has plainly had its
+// decision made and must not be presented as outstanding.
+function needsActionTransfer(t: Transfer): boolean {
+  return isIdleTransfer(t);
+}
 
 interface WithdrawalFormState {
   date: string;
@@ -1602,7 +1625,11 @@ export default function TransfersPage() {
     if (!hydrated) return [];
     const filtered = transfers.filter(
       (t) =>
-        (typeFilter === "all" ? true : t.transferType === typeFilter) &&
+        (typeFilter === "all"
+          ? true
+          : typeFilter === "needsAction"
+            ? needsActionTransfer(t)
+            : t.transferType === typeFilter) &&
         (positionFilter === "" ? true : t.positionId === positionFilter),
     );
     return [...filtered].sort((a, b) => {
@@ -1709,11 +1736,38 @@ export default function TransfersPage() {
   );
   const priceOf = useSpotPrices(spotSymbols);
 
+  // Row values are computed ONCE here and consumed by both the grouped view and
+  // the flat Needs Action view. Computing them twice would be a second answer to
+  // the same question (Invariant #6) — the two views would be free to price the
+  // same transfer differently.
+  const rows = useMemo(
+    () =>
+      searchedFiltered.map((t) => ({
+        transfer: t,
+        value: rowValueOf(t, priceOf),
+      })),
+    [searchedFiltered, priceOf],
+  );
+
+  // Totals over whatever is on screen, stated the same way the per-chain
+  // subtotals are: an unpriceable row contributes nothing and is COUNTED, never
+  // silently dropped (architecture Rule 11).
+  const rowsTotal = useMemo(() => {
+    let amount = 0;
+    let unpriced = 0;
+    let pricing = 0;
+    for (const { value } of rows) {
+      if (value.kind === "usd" || value.kind === "converted") amount += value.usd;
+      else if (value.kind === "unavailable") unpriced += 1;
+      else pricing += 1;
+    }
+    return { amount, unpriced, pricing };
+  }, [rows]);
+
   const byChain = useMemo(() => {
     const map = new Map<string, { transfer: Transfer; value: RowValue }[]>();
-    for (const t of searchedFiltered) {
-      const chain = positionChainById.get(t.positionId) ?? "UNLINKED";
-      const entry = { transfer: t, value: rowValueOf(t, priceOf) };
+    for (const entry of rows) {
+      const chain = positionChainById.get(entry.transfer.positionId) ?? "UNLINKED";
       const list = map.get(chain);
       if (list) list.push(entry);
       else map.set(chain, [entry]);
@@ -1739,7 +1793,7 @@ export default function TransfersPage() {
         return { chain, list, amount, unpriced, pricing };
       })
       .sort((a, b) => b.amount - a.amount);
-  }, [searchedFiltered, positionChainById, priceOf]);
+  }, [rows, positionChainById]);
 
   // Bulk-select over the currently-visible (searched + filtered) rows. Selecting
   // ids that scroll out of view is avoided by intersecting with visibleIds on
@@ -2528,8 +2582,11 @@ export default function TransfersPage() {
 
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]">
             <div className="flex flex-col gap-3 border-b border-[var(--border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              {/* The heading has to follow the view. Needs Action renders a
+                  FLAT list, so leaving "by Chain" up would describe grouping
+                  that isn't on screen. */}
               <h2 className="text-sm font-semibold tracking-tight">
-                Transfers by Chain
+                {typeFilter === "needsAction" ? "Transfers Needing Action" : "Transfers by Chain"}
               </h2>
               <TypeFilterToggle value={typeFilter} onChange={setTypeFilter} />
             </div>
@@ -2580,7 +2637,12 @@ export default function TransfersPage() {
                 </div>
               ) : (
                 <div className="px-5 py-10 text-center text-sm text-[var(--muted)]">
-                  No transfers match the current filter.
+                  {/* An empty Needs Action list is a RESULT, not a dead end —
+                      it means every transfer has had its decision made. Saying
+                      "no matches" would read as though something were missing. */}
+                  {typeFilter === "needsAction" && search.trim() === "" && positionFilter === ""
+                    ? "Nothing needs action — every transfer has a money status and destination set."
+                    : "No transfers match the current filter."}
                 </div>
               )
             ) : (
@@ -2663,6 +2725,57 @@ export default function TransfersPage() {
                   )}
                 </div>
 
+                {/* Needs Action renders FLAT — every matching transfer from every
+                    token together. Grouping by chain is exactly the thing this
+                    filter exists to avoid: the point is to stop scrolling
+                    per-position hunting for untouched rows. One header states
+                    the count and total in the same shape a chain group does, so
+                    the view is not silently total-less. The rows themselves are
+                    the SAME TransferListRow the grouped view uses — no second
+                    row renderer to keep in sync. */}
+                {typeFilter === "needsAction" ? (
+                  <div className="divide-y divide-[var(--border)]">
+                    <div className="flex items-center justify-between gap-3 bg-[var(--surface-2)]/40 px-5 py-2.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+                        Needs Action
+                        <span className="ml-2 font-normal text-[var(--muted)]/70">
+                          {rows.length} {rows.length === 1 ? "transfer" : "transfers"}
+                          {" · all tokens"}
+                        </span>
+                      </span>
+                      <span className="flex items-baseline gap-2 text-right">
+                        {(rowsTotal.unpriced > 0 || rowsTotal.pricing > 0) && (
+                          <span className="text-[10px] font-normal normal-case tracking-normal text-[var(--muted)]">
+                            {rowsTotal.unpriced > 0
+                              ? `${rowsTotal.unpriced} not priced — excluded`
+                              : `pricing ${rowsTotal.pricing}…`}
+                          </span>
+                        )}
+                        <span className="text-[12px] font-semibold tabular-nums text-[var(--foreground)]">
+                          {formatUsd(rowsTotal.amount)}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="divide-y divide-[var(--border)]">
+                      {rows.map(({ transfer: t, value }) => (
+                        <TransferListRow
+                          key={t.id}
+                          datesLabel={upsideDatesLabel(t)}
+                          transfer={t}
+                          value={value}
+                          pairLabel={
+                            t.transferType === "expense"
+                              ? "Expense"
+                              : positionPairById.get(t.positionId) ?? "—"
+                          }
+                          deployedLabel={deployedLabelOf(t)}
+                          selected={selectedIds.has(t.id)}
+                          onToggleSelect={toggleSelect}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
                 <div className="divide-y divide-[var(--border)]">
                   {byChain.map(({ chain, list, amount, unpriced, pricing }) => (
                     <div key={chain}>
@@ -2710,6 +2823,7 @@ export default function TransfersPage() {
                     </div>
                   ))}
                 </div>
+                )}
               </>
             )}
           </div>
@@ -3417,6 +3531,7 @@ interface TypeFilterToggleProps {
 function TypeFilterToggle({ value, onChange }: TypeFilterToggleProps) {
   const options: Array<{ value: TypeFilter; label: string }> = [
     { value: "all", label: "All" },
+    { value: "needsAction", label: "Needs Action" },
     { value: "fees", label: "Fees" },
     { value: "undeployed", label: "Undeployed Tokens" },
     { value: "outOfRangeUpside", label: "Out of Range Upside" },
