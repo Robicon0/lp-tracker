@@ -987,6 +987,37 @@ shorthand.
   `no-explicit-any`). No cache bumps: no valuation, pricing or position-discovery LOGIC
   changed — the routes simply see the positions that were always there.
 
+- **(this session)** — **CLP Tracker: the Transfers selection toolbar is now a fixed bottom bar
+  instead of living in the list-card header.** Position only — same markup, same handlers, same
+  show/hide rule. On a 167-row list you previously had to scroll back to the top to reach the
+  actions for a row you had just ticked at the bottom.
+  **What it holds (unchanged):** the count + bulk money-status row (`Undo Expense`, `Mark as
+  Expense`, `Clear`) and `SelectionActions` (`Edit`, `Mark as deployed`, `Send to Platform`,
+  `Remove platform`, `Revert to auto-created`, `Split`, `Delete`, with the pending-delete confirm
+  rendering in place). Which buttons appear is still conditional per selection — `Edit` and the two
+  "remove" undos stay single-only, placement verbs need `canPlaceTransfer` — and none of that moved.
+  **Positioning specifics that matter:** `fixed bottom-0 left-0 right-0 md:left-64` — the `md:left-64`
+  tracks the sidebar (`md:w-64`) so the bar starts where the content does rather than running under
+  it; inner `max-w-[1600px] mx-auto` aligns it with the page container from the previous session;
+  `z-40` sits under the modals it opens (`z-50`). The global FeedbackTab is vertically centred, so a
+  BOTTOM bar never collides with it — no gutter needed.
+  **Breathing room:** `pb-56` on the page section, applied ONLY while something is selected so
+  nothing shifts when nothing is. Measured at full scroll with a selection active: bar top 802,
+  lowest page content 586 → **216px clearance, nothing covered**.
+  **⚠️ Measurement trap worth keeping: the bar renders INSIDE `<main>`, so a "what is the lowest
+  element on the page" probe picks up the bar's OWN buttons and reports the content as covered.**
+  First run said `gap -86px COVERED` because it found the bar's own `Edit`. Excluding the bar's
+  subtree gives the true +216px. Any future overlap check on a fixed element must exclude that
+  element's own descendants.
+  Verified at 1440 and 1920 (900px tall, so the list genuinely needs scrolling): bar absent with no
+  selection; select row #120 of 167 at scrollY≈10,560 → bar `position:fixed`, `bottom === innerHeight`,
+  `x === 256`, in viewport; still pinned after scrolling 1,200px further; count on the bar reads
+  "3 selected" against **3** actually-checked boxes; `Clear` removes the bar. Actions re-tested
+  through the bar: `Edit` opens the modal, `Delete` enters the in-bar confirm **without** deleting
+  (count unchanged) and the bar stays pinned, `Mark as Expense` → Confirm applies (141 → 142
+  expensed) and clears the selection. 0 page errors across all 8 CLP pages. Build clean,
+  `tsc --noEmit` clean, eslint identical to baseline. **No cache bumps** — layout only.
+
 - **(this session)** — **CLP Tracker: the shared content container goes 1152px → 1600px, and the
   Fee Claims table stops clipping its own columns.** Layout/width only — **no font size changed
   anywhere**, verified by fingerprint, not by eye.
