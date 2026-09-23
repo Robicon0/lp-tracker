@@ -2314,7 +2314,12 @@ export default function TransfersPage() {
   const transfersEnabled = !hydrated ? true : settings?.transfersEnabled !== false;
 
   return (
-    <section className="space-y-8">
+    // Breathing room for the fixed selection bar, applied ONLY while it is on
+    // screen so nothing changes when nothing is selected. Without it the bar
+    // covers the last rows of the list — the very rows you are most likely to
+    // have just ticked. Sized above the bar's tallest measured state (it wraps
+    // to more rows on a narrow viewport).
+    <section className={`space-y-8 ${selectedIds.size > 0 ? "pb-56" : ""}`}>
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Transfers</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
@@ -2656,115 +2661,6 @@ export default function TransfersPage() {
                       )}
                     </div>
                   )}
-                  {selectedIds.size > 0 && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[12px] font-medium text-[var(--foreground)]">
-                        {selectedIds.size} selected
-                      </span>
-                      {pendingBulk?.scope === "selected" ? (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] text-[var(--foreground)]">
-                            {pendingBulk.status === "expense"
-                              ? `Mark ${
-                                  visibleIds.filter((id) => selectedIds.has(id))
-                                    .length
-                                } as Expense?`
-                              : `Undo Expense on ${
-                                  visibleIds.filter((id) => selectedIds.has(id))
-                                    .length
-                                }?`}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              applyBulkMark(pendingBulk.status, "selected")
-                            }
-                            className="rounded-md bg-[var(--accent-solid)] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[var(--accent-solid)]/90"
-                          >
-                            Confirm
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPendingBulk(null)}
-                            className="rounded-md border border-[var(--border-strong)] px-2.5 py-1 text-[12px] font-medium text-[var(--muted)] hover:bg-[var(--surface-2)]"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPendingBulk({
-                                status: "redeployed",
-                                scope: "selected",
-                              })
-                            }
-                            className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1 text-[12px] font-medium text-[var(--foreground)] hover:border-[var(--accent)]"
-                          >
-                            Undo Expense
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPendingBulk({
-                                status: "expense",
-                                scope: "selected",
-                              })
-                            }
-                            className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[12px] font-medium text-rose-300 hover:bg-rose-500/20"
-                          >
-                            Mark as Expense
-                          </button>
-                          <button
-                            type="button"
-                            onClick={clearSelection}
-                            className="text-[12px] text-[var(--muted)] hover:text-[var(--foreground)]"
-                          >
-                            Clear
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {/* Actions for whatever is selected — one row or a hundred.
-                      Only Edit and the two "remove" undos are single-only; the
-                      rest take the whole selection, which is the same list the
-                      bulk money-status buttons above use. One selection model,
-                      reached either by individual checkboxes or Select all
-                      visible. */}
-                  <SelectionActions
-                    selected={selectedTransfers}
-                    pendingDelete={pendingDelete}
-                    onEdit={(tr) =>
-                      setModal(
-                        tr.transferType === "expense"
-                          ? { kind: "editExpense", transfer: tr }
-                          : { kind: "edit", transfer: tr },
-                      )
-                    }
-                    onMarkDeployed={(list) =>
-                      setModal({ kind: "deploy", transfers: list })
-                    }
-                    onUnlinkDeployed={handleUnlinkDeployed}
-                    onSendToPlatform={(list) =>
-                      setModal({ kind: "platform", transfers: list })
-                    }
-                    onRemovePlatform={handleRemovePlatform}
-                    onRevertToAuto={(list) =>
-                      setModal({ kind: "revert", transfers: list })
-                    }
-                    onSplit={(list) => setModal({ kind: "split", transfers: list })}
-                    onUndoSplit={(tr) =>
-                      setModal({ kind: "undoSplit", transfer: tr })
-                    }
-                    onDeleteRequest={() => setPendingDelete(true)}
-                    onDeleteConfirm={() =>
-                      handleDelete(selectedTransfers.map((t) => t.id))
-                    }
-                    onDeleteCancel={() => setPendingDelete(false)}
-                  />
                 </div>
 
                 <div className="divide-y divide-[var(--border)]">
@@ -3198,6 +3094,138 @@ export default function TransfersPage() {
             />
           )}
         </>
+      )}
+
+      {/* STICKY SELECTION BAR.
+       *
+       * Same markup, same handlers, same show/hide rule as before — it renders
+       * only while something is selected and vanishes the moment the selection
+       * is cleared. ONLY its position changed: it used to live in the list
+       * card's header, so on a long list you had to scroll back to the top to
+       * reach the actions for a row you had just ticked at the bottom.
+       *
+       * left-0 md:left-64 tracks the sidebar (md:w-64) so the bar starts where
+       * the content does instead of running underneath it, and the inner
+       * max-w-[1600px] keeps it aligned with the page container. z-40 sits
+       * under the modals it opens (z-50). The FeedbackTab is vertically
+       * centred, so a bottom bar never collides with it.
+       */}
+      {selectedIds.size > 0 && (
+        <div
+          className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--border-strong)] bg-[var(--surface)]/95 px-5 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.18)] backdrop-blur md:left-64"
+          role="region"
+          aria-label="Selected transfers"
+        >
+          <div className="mx-auto w-full max-w-[1600px] space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] font-medium text-[var(--foreground)]">
+              {selectedIds.size} selected
+            </span>
+            {pendingBulk?.scope === "selected" ? (
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] text-[var(--foreground)]">
+                  {pendingBulk.status === "expense"
+                    ? `Mark ${
+                        visibleIds.filter((id) => selectedIds.has(id))
+                          .length
+                      } as Expense?`
+                    : `Undo Expense on ${
+                        visibleIds.filter((id) => selectedIds.has(id))
+                          .length
+                      }?`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    applyBulkMark(pendingBulk.status, "selected")
+                  }
+                  className="rounded-md bg-[var(--accent-solid)] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[var(--accent-solid)]/90"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingBulk(null)}
+                  className="rounded-md border border-[var(--border-strong)] px-2.5 py-1 text-[12px] font-medium text-[var(--muted)] hover:bg-[var(--surface-2)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPendingBulk({
+                      status: "redeployed",
+                      scope: "selected",
+                    })
+                  }
+                  className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1 text-[12px] font-medium text-[var(--foreground)] hover:border-[var(--accent)]"
+                >
+                  Undo Expense
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPendingBulk({
+                      status: "expense",
+                      scope: "selected",
+                    })
+                  }
+                  className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[12px] font-medium text-rose-300 hover:bg-rose-500/20"
+                >
+                  Mark as Expense
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="text-[12px] text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+            {/* Actions for whatever is selected — one row or a hundred.
+            Only Edit and the two "remove" undos are single-only; the
+            rest take the whole selection, which is the same list the
+            bulk money-status buttons above use. One selection model,
+            reached either by individual checkboxes or Select all
+            visible. */}
+        <SelectionActions
+          selected={selectedTransfers}
+          pendingDelete={pendingDelete}
+          onEdit={(tr) =>
+            setModal(
+              tr.transferType === "expense"
+                ? { kind: "editExpense", transfer: tr }
+                : { kind: "edit", transfer: tr },
+            )
+          }
+          onMarkDeployed={(list) =>
+            setModal({ kind: "deploy", transfers: list })
+          }
+          onUnlinkDeployed={handleUnlinkDeployed}
+          onSendToPlatform={(list) =>
+            setModal({ kind: "platform", transfers: list })
+          }
+          onRemovePlatform={handleRemovePlatform}
+          onRevertToAuto={(list) =>
+            setModal({ kind: "revert", transfers: list })
+          }
+          onSplit={(list) => setModal({ kind: "split", transfers: list })}
+          onUndoSplit={(tr) =>
+            setModal({ kind: "undoSplit", transfer: tr })
+          }
+          onDeleteRequest={() => setPendingDelete(true)}
+          onDeleteConfirm={() =>
+            handleDelete(selectedTransfers.map((t) => t.id))
+          }
+          onDeleteCancel={() => setPendingDelete(false)}
+        />
+          </div>
+        </div>
       )}
     </section>
   );
