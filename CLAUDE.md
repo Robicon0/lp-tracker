@@ -922,6 +922,45 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`f50d6a7`** — **CLP Tracker: "Needs Action" filter — a FLAT list of transfers still in
+  their untouched default state.** Freshly-claimed fees land on Redeployed with no platform
+  set, and finding the ones still needing a decision meant scrolling every token's group
+  separately (SUI's 53, ETH's, ZEC's…). New sixth tab beside All / Fees / Undeployed Tokens /
+  Out of Range Upside / Expenses, same single-select row.
+  **Flatness IS the feature, not a style choice** — grouping by chain is precisely the thing
+  being escaped, so this view renders every match from every token together with one header
+  stating count + total in the same shape a chain group does.
+  **The predicate is `isIdleTransfer()` from `lib/transferState`, NOT a fresh
+  `moneyStatus === "redeployed" && !platform` test.** That module is the single source of
+  truth for the four money states and is what Available Balance reduces over; a second
+  definition here would be free to drift from the balance itself (Invariant #6). It also
+  already handles the two cases a hand-rolled test gets wrong: a legacy record with
+  moneyStatus **UNSET** (treated as redeployed everywhere else and genuinely un-reviewed — it
+  appears, tagged IDLE), and a transfer **Marked as deployed**, which carries no platform and
+  stays "redeployed" but has plainly had its decision made and must not read as outstanding.
+  **Row values are computed ONCE** in a shared `rows` memo consumed by BOTH the flat view and
+  `byChain`, so the same transfer can never be priced differently in the two views; the flat
+  header counts unpriceable rows rather than dropping them (architecture Rule 11).
+  Everything downstream needed **zero edits by construction** — select-all, the sticky action
+  bar, Search and the Position combobox all derive from `searchedFiltered`, and the rows are
+  the same `TransferListRow` (no second row renderer to keep in sync). The section heading
+  follows the view ("Transfers Needing Action"), since "by Chain" would describe grouping that
+  isn't on screen; an empty result reads **"Nothing needs action"**, because that is a result,
+  not a dead end.
+  Verified on localhost (Playwright, clean profile, seeded fixtures across SUI/ETH/ZEC
+  covering all four exclusion routes): Needs Action shows **4 of 8**, flat, no chain headers,
+  date-descending; the Expense / Sent-to-Platform / platform-filled / Marked-as-deployed rows
+  are each absent (all four visible under All with their distinguishing pills); selecting a row
+  and marking it Expense drops it from the filter (**4 → 3**, $200 gone); Select all visible
+  reads (4), and (2) once narrowed; Position combobox narrows **4 → 2**, Search "ETH" narrows
+  **4 → 1**; All still groups ZEC/SUI/ETH/UNLINKED with subtotals and Select all visible (8).
+  **0 page errors across all 8 CLP pages.** Build clean, `tsc --noEmit` clean, eslint identical
+  to baseline. **No cache bumps** — display/filter layer only, nothing persisted.
+  ⚠️ **Testing note:** the Position control is a custom `PositionCombobox`, **not a native
+  `<select>`** — a `selectOption()`-based test silently passes while changing nothing (it
+  reported "no narrowing" against a control it never touched). Drive it by clicking
+  "All positions" then the option.
+
 - **(this session)** — **Queue item C Phase 3: Sugar enumeration PAGES the full iteration
   space, and saturation detection stops producing false negatives.** Aerodrome and Velodrome
   each called Sugar exactly once at `_limit = 100, _offset = 0`; everything past the 100th
