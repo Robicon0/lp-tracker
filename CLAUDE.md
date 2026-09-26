@@ -922,6 +922,27 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **CLP Tracker: Confirm Close now REQUIRES "Position closed" and a Close
+  Transaction Link.** Both were skippable: in "Enter manually" mode nothing derives the exit
+  side, so a position could be closed with `rangeExit: ""`; the tx link was labelled
+  "(Optional)" and saved as null. Now `missingCloseFields` is checked on submit (never a
+  disabled button) and a `role="alert"` line names exactly what is missing.
+  **The link check is non-blank ONLY — a literal `-` passes by design** (the point is a
+  deliberate entry, not a real URL; no URL validation). The label drops "(Optional)" and the
+  hint tells the user to type "-" if they have no link.
+  **Token mode is unchanged:** the range still pre-fills from the received split; the check
+  applies uniformly (`rangeExit === ""`), so it only fires in token mode if the split gave no
+  signal (e.g. both amounts zero) — the same "nothing picked" state as manual mode.
+  **Fee-claim validation is untouched** — its logic and message are the same; submit now runs
+  both checks in one pass, so one click names EVERYTHING missing (both alerts render together).
+  Verified on localhost (Playwright, clean profile, seeded position): manual + nothing →
+  blocked, names both; range only → names the link; link only → names the range; link `-` →
+  closes, `closeTxLink:"-"`; token mode (0 SUI / 1100 USDC) → Above range auto-selected,
+  closes with no new blocking; partial claim → same claim message as before, and alongside
+  the link message when both are missing; all filled → closes (balance 1100, scalp 100, link
+  saved, claim written). 0 page errors across all 8 CLP pages. Build clean, `tsc --noEmit`
+  clean, eslint clean. **No cache bumps** — validation only.
+
 - **`f50d6a7`** — **CLP Tracker: "Needs Action" filter — a FLAT list of transfers still in
   their untouched default state.** Freshly-claimed fees land on Redeployed with no platform
   set, and finding the ones still needing a decision meant scrolling every token's group

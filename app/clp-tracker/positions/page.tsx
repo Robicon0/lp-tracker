@@ -4132,6 +4132,19 @@ function ClosePositionModal({
   })();
   const rangeExit = rangeExitOverride || suggestedRange;
 
+  // Two REQUIRED close fields, checked on submit rather than by disabling the
+  // button — a disabled button says nothing about why. Position closed: in
+  // token mode it usually pre-fills from the received split (untouched here);
+  // in manual mode nothing derives it, so it could be left unpicked and the
+  // close saved with no exit side. Close Transaction Link: only non-blank is
+  // required — a literal "-" is a deliberate answer and passes. Not validated
+  // as a URL on purpose; the point is a conscious entry, not a real link.
+  const missingCloseFields: string[] = [
+    ...(rangeExit === "" ? ["Position closed (Above / Below / Still in range)"] : []),
+    ...(closeTxLink.trim() === "" ? ["Close Transaction Link"] : []),
+  ];
+  const [showCloseError, setShowCloseError] = useState(false);
+
   // The datetime-local input holds LOCAL wall-clock time. new Date() parses it
   // in the device's zone, so getTime() is already the correct absolute moment
   // — no manual offset arithmetic, which is where this usually goes wrong.
@@ -4189,14 +4202,19 @@ function ClosePositionModal({
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (missingClaimFields.length > 0) {
+    const closeBlocked = missingCloseFields.length > 0;
+    const claimBlocked = missingClaimFields.length > 0;
+    // Both checks run together so one click names EVERYTHING missing, rather
+    // than revealing the next problem only after the first is fixed.
+    setShowCloseError(closeBlocked);
+    if (claimBlocked) {
       // Blocked, and the reason goes on screen — never a dead button. The
       // section auto-opens so the named fields are actually visible; a message
       // about fields hidden inside a collapsed section explains nothing.
       setShowClaimError(true);
       setClaimSectionOpen(true);
-      return;
     }
+    if (closeBlocked || claimBlocked) return;
     setShowClaimError(false);
     onSubmit({
       exitDatetime: new Date(exitDatetime).toISOString(),
@@ -4401,14 +4419,15 @@ function ClosePositionModal({
               </>
             )}
             <Field
-              label="Close Transaction Link (Optional)"
+              label="Close Transaction Link"
               htmlFor="c_txLink"
-              hint="From your blockchain explorer e.g. hyperliquid.xyz, suiscan.xyz, basescan.org"
+              hint="From your blockchain explorer e.g. hyperliquid.xyz, suiscan.xyz, basescan.org — or type “-” if you don’t have one"
             >
               <input
                 id="c_txLink"
                 className={inputClass}
                 placeholder="Paste transaction hash or explorer URL"
+                aria-required="true"
                 value={closeTxLink}
                 onChange={(e) => setCloseTxLink(e.target.value)}
               />
@@ -4573,6 +4592,14 @@ function ClosePositionModal({
             </div>
           )}
         </Section>
+        {showCloseError && missingCloseFields.length > 0 && (
+          <div role="alert" className="px-5 py-3 text-[12px] text-rose-300">
+            Can&rsquo;t close yet — {missingCloseFields.join(" and ")}{" "}
+            {missingCloseFields.length === 1 ? "is" : "are"} still missing.
+            {closeTxLink.trim() === "" &&
+              " If you don’t have a transaction link, type “-” to confirm there isn’t one."}
+          </div>
+        )}
         {showClaimError && missingClaimFields.length > 0 && (
           <div role="alert" className="px-5 py-3 text-[12px] text-rose-300">
             Can&rsquo;t close yet — you&rsquo;ve started a fee claim, so{" "}
