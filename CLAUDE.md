@@ -914,6 +914,23 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **CLP Tracker Fee Claims footer: converted vs still-held QUANTITY per
+  token.** `ClaimTokenTotal` gains `convertedQuantity` (non-stable side's amount over every claim
+  attributed to the token with `convertedToStable`, **valued OR unvalued** — unlike the dollar
+  lines), `convertedClaimCount` (= Σ `converted[].claimCount` + `unvaluedConverted`, proven by
+  fixture) and `unconvertedQuantity` (`claimed − convertedQuantity`, floored at 0 — "still held per
+  the claim history", NOT a wallet balance: it knows conversions only, not transfers/redeployment).
+  Additive: `converted[]`, `claimConvertedProceeds` and `claimed` untouched. Counted at the exact
+  point a claim is attributed to ONE token, so two-volatile claims (`unattributableConverted`) stay
+  excluded by construction. Footer shows "Converted: X · N claims" + "Still held (not yet
+  converted): Y" above the dollar lines, non-stable rows only.
+  **Real production data** (before → after; before had no quantity lines): SUI 4,405.415394
+  claimed → **converted 1,000.895524 (26 claims) + held 3,404.51987**; ZEC 1.831758 → **1.739764
+  (17) + 0.091994**; ETH 0.48987 → **0.257728 (26) + 0.232141**. Dollar lines unchanged ($992.02 /
+  $1,673.53 / $552.21). Matched an independent raw-record Node sum AND the rendered-row sum under
+  every Chain / Platform / Status / Converted option plus a Position (combobox) selection. 0 page
+  errors across all 8 CLP pages. No cache bumps — display only.
+
 - **(this session)** — **CLP Tracker: "Totals by token" footer under the Fee Claims table,
   following every active filter.** Per token: **Total X claimed** (raw quantity, converted or not
   — never reduced by later conversions) and, ONLY when some of that token's claims are converted,
