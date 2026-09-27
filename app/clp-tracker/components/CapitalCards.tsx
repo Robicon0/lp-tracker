@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import type { OverallPnL } from "../lib/calculations";
 import { DisclosureToggle } from "./Breakdown";
@@ -135,8 +136,38 @@ export function OverallPnLCard({
         {formatUsd(result.overall)}
       </div>
 
+      {/* Unvalued converted claims are counted as $0 in the figure above, so
+          the warning sits OUTSIDE the disclosure, always visible. It used to
+          live behind the collapsed toggle, which meant a figure silently
+          missing money looked exactly like a complete one — and Total P&L,
+          which also renders this card, has no Data Health list to catch it.
+          The count is calcOverallPnL's own (isUnvaluedConvertedClaim), the
+          same predicate as the Claims banner the link lands on, so the three
+          surfaces cannot disagree. No value is guessed: the gap is shown, not
+          filled. */}
+      {result.unvaluedConvertedClaims > 0 && (
+        <div
+          role="alert"
+          className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/[0.08] px-2.5 py-2 text-[11px] text-amber-300"
+        >
+          <span className="font-medium">
+            {result.unvaluedConvertedClaims} converted{" "}
+            {result.unvaluedConvertedClaims === 1 ? "claim has" : "claims have"}{" "}
+            no USD value
+          </span>{" "}
+          and {result.unvaluedConvertedClaims === 1 ? "is" : "are"} counted as
+          $0 in this figure.{" "}
+          <Link
+            href="/clp-tracker/claims#incomplete-claims"
+            className="underline underline-offset-2 hover:text-amber-200"
+          >
+            Add {result.unvaluedConvertedClaims === 1 ? "its value" : "their values"}
+          </Link>
+        </div>
+      )}
+
       {/* Everything that explains the number — the hint, the Converted Fees
-          split, the numeric formula and the unvalued-claims warning — sits
+          split and the numeric formula — sits
           behind ONE toggle, collapsed by default, in the order it has always
           been rendered. Four always-on blocks made this card several times the
           height of its neighbours in the same grid for a figure most visits
@@ -171,17 +202,6 @@ export function OverallPnLCard({
             </p>
           )}
           {breakdown}
-          {result.unvaluedConvertedClaims > 0 && (
-            <p className="mt-2 text-[11px] text-amber-300">
-              {result.unvaluedConvertedClaims} converted{" "}
-              {result.unvaluedConvertedClaims === 1
-                ? "claim has"
-                : "claims have"}{" "}
-              no USD value recorded and{" "}
-              {result.unvaluedConvertedClaims === 1 ? "is" : "are"} counted as
-              $0 here.
-            </p>
-          )}
         </>
       )}
     </div>
