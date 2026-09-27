@@ -914,6 +914,33 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **CLP Tracker: "Totals by token" footer under the Fee Claims table,
+  following every active filter.** Per token: **Total X claimed** (raw quantity, converted or not
+  — never reduced by later conversions) and, ONLY when some of that token's claims are converted,
+  **"Converted to <STABLE>: $X"** per target stablecoin (grouped by `stableSymbol`, not assumed).
+  **Investigation findings (real production data):** all 99 converted claims have exactly ONE
+  non-stable side, and all 99 also carry a native stable leg; `stableSymbol` is always USDC today.
+  So `convertedToStable` is claim-level and the converted token is the claim's non-stable side —
+  decided per claim, Token 1 OR Token 2, never assumed.
+  **One calculation path:** NEW `claimConvertedProceeds` = the existing private
+  `claimTimeValueOfSoldSide` + `claimSaleGain`, i.e. exactly `claimRealizedValue` (the After
+  Selling figure) minus the native stable leg — the stable leg was earned as USDC, not converted.
+  NEW pure `calcClaimTokenTotals(claims)` aggregates; the page feeds it the SAME `filteredSorted`
+  list the table rows render, so no filter can drift. A pool's **native stablecoin gets its own
+  card** ("Earned directly as USDC in the pool") and never absorbs conversion proceeds, which sit
+  under the token that was sold. Unvalued converted claims and two-volatile converted claims are
+  **counted and flagged, never guessed or split**. Symbols are kept as recorded (WETH ≠ ETH — no
+  Business-P&L-style merge).
+  **Verified on real production data** (localhost, clean profile): every token quantity and
+  converted line matches an independent Node sum with no filter, chain=SUI, chain=BASE and
+  Not-converted (the last shows no converted lines at all); footer converted total **$3,717.31 ==
+  the table's own Fees Earned/After Selling columns minus native legs**; lines + native legs ==
+  Overall P&L `convertedFromTokens` **$6,380.08** to the cent; 99 converted claims == the "Total
+  Converted to Stable" card. Fixtures proved USDT kept separate from USDC, SUI-as-Token-2 with a
+  sale ($8 basis + $4 gain = $12), unvalued (flagged) and two-volatile (unattributable). 0 page
+  errors across all 8 CLP pages. Build clean, `tsc --noEmit` clean, eslint clean. **No cache
+  bumps** — display only.
+
 - **`dcb0d67` + `c019b47` + `eaaeb06`** — **CLP Tracker, three separate fixes (one commit each).**
   **(1) `dcb0d67` — reviewable Expense → Sent to Platform reclassification** (Settings → "Move
   Parked Expenses to Sent to Platform"). Resolves the "61 Expense rows carry a platform" finding
