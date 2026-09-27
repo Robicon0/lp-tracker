@@ -11,7 +11,13 @@ import {
   saveClaims,
   savePositions,
   saveSettings,
+  saveTransfers,
 } from "../lib/storage";
+import {
+  applyPlatformReclass,
+  planPlatformReclass,
+  type PlatformReclassPlan,
+} from "../lib/platformReclassMigration";
 import { exportCSV, parseCSV } from "../lib/csv";
 import {
   applyClaimSaleMigration,
@@ -271,6 +277,10 @@ export default function SettingsPage() {
   // change to money records, so it is never applied on load.
   const [salePlan, setSalePlan] = useState<ClaimSaleMigrationPlan | null>(null);
   const [saleFixState, setSaleFixState] = useState<ImportState>({ kind: "idle" });
+  // Expense → Sent to Platform reclassification: same preview-then-apply
+  // contract as the sale split above. Never applied on load.
+  const [reclassPlan, setReclassPlan] = useState<PlatformReclassPlan | null>(null);
+  const [reclassState, setReclassState] = useState<ImportState>({ kind: "idle" });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -313,6 +323,39 @@ export default function SettingsPage() {
       setSalePlan(planClaimSaleMigration(getClaims(), getAllTransfers()));
     } catch (err) {
       setSaleFixState({
+        kind: "error",
+        message: `Nothing was written — ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  };
+
+  const runReclassDryRun = () => {
+    setReclassState({ kind: "idle" });
+    setReclassPlan(planPlatformReclass(getTransfers()));
+  };
+
+  const applyReclass = () => {
+    if (reclassPlan === null || reclassPlan.transfers.length === 0) return;
+    try {
+      // Back up EVERY stored transfer (soft-deleted included) before the write,
+      // so the previous state can be restored exactly.
+      window.localStorage.setItem(
+        "clp_transfers_backup_pre_platform_reclass",
+        JSON.stringify(getAllTransfers()),
+      );
+      saveTransfers(applyPlatformReclass(getTransfers(), reclassPlan));
+      setReclassState({
+        kind: "success",
+        message:
+          `Reclassified ${reclassPlan.transfers.length} transfers ` +
+          `(${formatUsd(reclassPlan.total)}) from Expense to Sent to Platform. ` +
+          `Expenses (USD) drops and Transferred to Platforms (USD) rises by that ` +
+          `amount; Available Balance is unchanged. Previous transfers saved to ` +
+          `clp_transfers_backup_pre_platform_reclass.`,
+      });
+      setReclassPlan(planPlatformReclass(getTransfers()));
+    } catch (err) {
+      setReclassState({
         kind: "error",
         message: `Nothing was written — ${err instanceof Error ? err.message : String(err)}`,
       });
@@ -630,6 +673,106 @@ export default function SettingsPage() {
             }`}
           >
             {saleFixState.message}
+          </div>
+        )}
+
+        <Divider />
+
+        <SettingRow
+          label="Move Parked Expenses to Sent to Platform"
+          description="Before “Sent to Platform” existed, money parked on a platform could only be taken out of Available Balance by marking it Expense. Transfers that are marked Expense but still name a Platform (From) were parked, not spent. This moves them from Expenses (USD) to Transferred to Platforms (USD). Available Balance does not change. Preview first; nothing is written until you apply."
+          control={
+            <button
+              type="button"
+              onClick={runReclassDryRun}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--surface-2)]/70"
+            >
+              Preview changes
+            </button>
+          }
+        />
+        {reclassPlan !== null && (
+          <div className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)]/40 px-3 py-3 text-xs">
+            {reclassPlan.transfers.length === 0 ? (
+              <p className="text-[var(--muted)]">
+                Nothing to move — no transfer is marked Expense while naming a
+                platform. (Already applied, or there were none.)
+              </p>
+            ) : (
+              <>
+                <p className="text-[var(--foreground)]">
+                  <span className="font-medium">
+                    {reclassPlan.transfers.length} transfers ·{" "}
+                    <span className="tabular-nums">
+                      {formatUsd(reclassPlan.total)}
+                    </span>
+                  </span>{" "}
+                  would move from Expenses (USD) to Transferred to Platforms
+                  (USD). Available Balance does not change.
+                </p>
+                <p className="mt-2 text-[11px] text-[var(--muted)]">
+                  By platform:{" "}
+                  {reclassPlan.byPlatform
+                    .map((g) => `${g.platform} ${formatUsd(g.total)} (${g.count})`)
+                    .join("; ")}
+                </p>
+                <div className="mt-3 max-h-60 overflow-auto rounded border border-[var(--border)]">
+                  <table className="w-full text-left text-[11px] tabular-nums">
+                    <thead className="sticky top-0 bg-[var(--surface-2)] text-[var(--muted)]">
+                      <tr>
+                        <th className="px-2 py-1.5 font-medium">Date</th>
+                        <th className="px-2 py-1.5 font-medium">Token</th>
+                        <th className="px-2 py-1.5 font-medium">Platform</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Amount</th>
+                        <th className="px-2 py-1.5 font-medium">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {reclassPlan.transfers.map((t) => (
+                        <tr key={t.id}>
+                          <td className="px-2 py-1.5 text-[var(--muted)]">
+                            {String(t.date).slice(0, 10)}
+                          </td>
+                          <td className="px-2 py-1.5 text-[var(--muted)]">{t.token}</td>
+                          <td className="px-2 py-1.5 text-[var(--muted)]">{t.platform}</td>
+                          <td className="px-2 py-1.5 text-right font-medium text-[var(--foreground)]">
+                            {formatUsd(Number(t.amount) || 0)}
+                          </td>
+                          <td className="px-2 py-1.5 text-[var(--muted)]">
+                            Expense → Sent to Platform
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  type="button"
+                  onClick={applyReclass}
+                  className="mt-3 inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent-solid)] px-4 text-sm font-medium text-white hover:bg-[var(--accent-solid)]/90"
+                >
+                  Apply to {reclassPlan.transfers.length} transfers
+                </button>
+                <p className="mt-2 text-[11px] text-[var(--muted)]">
+                  All current transfers are copied to{" "}
+                  <code>clp_transfers_backup_pre_platform_reclass</code> before
+                  the write. Export a JSON backup first if you want a file copy
+                  too.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+        {reclassState.kind !== "idle" && (
+          <div
+            role="status"
+            className={`rounded-md border px-3 py-2 text-xs ${
+              reclassState.kind === "success"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {reclassState.message}
           </div>
         )}
 
