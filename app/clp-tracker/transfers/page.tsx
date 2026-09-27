@@ -5,6 +5,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -502,6 +503,35 @@ function rowValueOf(t: Transfer, priceOf: SpotPriceLookup): RowValue {
   // Never $0.00 for a real token: unpriceable is unknown, not worthless.
   if (price === null) return { kind: "unavailable" };
   return { kind: "converted", usd: t.amount * price, price };
+}
+
+// Running total over RowValues, used by EVERY surface that sums transfers — the
+// chain subtotals, the list total, By Token, By Destination and the summary
+// cards — so none of them can sum a token count as dollars again. A row that
+// could not be priced adds nothing and is COUNTED; one still loading is
+// counted separately, so a total can say which of the two it is waiting on
+// rather than quietly summing fewer rows than it covers (architecture Rule 11).
+interface ValuedSum {
+  amount: number;
+  unpriced: number;
+  pricing: number;
+}
+
+function emptySum(): ValuedSum {
+  return { amount: 0, unpriced: 0, pricing: 0 };
+}
+
+function addValue(sum: ValuedSum, value: RowValue): void {
+  if (value.kind === "usd" || value.kind === "converted") sum.amount += value.usd;
+  else if (value.kind === "unavailable") sum.unpriced += 1;
+  else sum.pricing += 1;
+}
+
+// The caveat a total carries, or null when every row it covers is priced.
+function sumNote(sum: ValuedSum): string | null {
+  if (sum.unpriced > 0) return `${sum.unpriced} not priced — excluded`;
+  if (sum.pricing > 0) return `pricing ${sum.pricing}…`;
+  return null;
 }
 
 // Compact transfer row: a select box and the facts that identify the record —
@@ -1661,8 +1691,32 @@ export default function TransfersPage() {
     });
   }, [sortedFiltered, search, positionPairById]);
 
+  // Spot prices for every live non-stable Undeployed Tokens transfer — the
+  // summary cards and breakdown tables cover ALL transfers, not just the rows on
+  // screen, so the lookup does too. Still ONE request (the route takes a
+  // comma-separated set), and an all-stablecoin ledger makes none. Shares its
+  // cache with the edit modal's preview, so a symbol is fetched once.
+  const spotSymbols = useMemo(
+    () => transfers.filter(needsSpotValue).map((t) => t.token),
+    [transfers],
+  );
+  const priceOf = useSpotPrices(spotSymbols);
+
+  // Every transfer's value, decided ONCE. The list rows, chain subtotals, By
+  // Token, By Destination and the summary cards all read this map, so the same
+  // transfer cannot be worth one figure in the list and another in a card
+  // (Invariant #6).
+  const valueById = useMemo(
+    () => new Map(transfers.map((t) => [t.id, rowValueOf(t, priceOf)])),
+    [transfers, priceOf],
+  );
+  const valueOf = useCallback(
+    (t: Transfer): RowValue => valueById.get(t.id) ?? rowValueOf(t, priceOf),
+    [valueById, priceOf],
+  );
+
   const totals = useMemo(() => {
-    let amount = 0;
+    const sum = emptySum();
     const breakdown: Record<TransferType, number> = {
       fees: 0,
       undeployed: 0,
@@ -1670,7 +1724,7 @@ export default function TransfersPage() {
       expense: 0,
     };
     for (const t of transfers) {
-      amount += t.amount;
+      addValue(sum, valueOf(t));
       // Fees / Undeployed / Out-of-Range-Upside are TYPES and keep counting by
       // transferType. Expense is not a type — it is a money STATUS that any of
       // those three can carry. Counting it by transferType only ever matched
@@ -1684,39 +1738,39 @@ export default function TransfersPage() {
     // transfer marked as an Expense is counted in BOTH Fees and Expense,
     // because it genuinely is both. The tile answers "how many of each", not
     // "how does the total split".
-    return { count: transfers.length, amount, breakdown };
-  }, [transfers]);
+    return { count: transfers.length, sum, breakdown };
+  }, [transfers, valueOf]);
 
   // Per-token NET TOTAL (Σ amount moved out of that token), mirroring the
   // sheet's per-token blocks. Sorted by amount so the biggest movers lead.
   const byToken = useMemo(() => {
-    const map = new Map<string, { token: string; count: number; amount: number }>();
+    const map = new Map<string, { token: string; count: number; sum: ValuedSum }>();
     for (const t of transfers) {
       const token = t.token ? normalizeToken(t.token) : "—";
-      const row = map.get(token) ?? { token, count: 0, amount: 0 };
+      const row = map.get(token) ?? { token, count: 0, sum: emptySum() };
       row.count += 1;
-      row.amount += t.amount;
+      addValue(row.sum, valueOf(t));
       map.set(token, row);
     }
-    return [...map.values()].sort((a, b) => b.amount - a.amount);
-  }, [transfers]);
+    return [...map.values()].sort((a, b) => b.sum.amount - a.sum.amount);
+  }, [transfers, valueOf]);
 
   // Per-destination breakdown (where the money went — RAKA, AAVE, …).
   // Transfers with no destination yet are grouped under "Unspecified".
   const byDestination = useMemo(() => {
     const map = new Map<
       string,
-      { destination: string; count: number; amount: number }
+      { destination: string; count: number; sum: ValuedSum }
     >();
     for (const t of transfers) {
       const destination = t.destination || "Unspecified";
-      const row = map.get(destination) ?? { destination, count: 0, amount: 0 };
+      const row = map.get(destination) ?? { destination, count: 0, sum: emptySum() };
       row.count += 1;
-      row.amount += t.amount;
+      addValue(row.sum, valueOf(t));
       map.set(destination, row);
     }
-    return [...map.values()].sort((a, b) => b.amount - a.amount);
-  }, [transfers]);
+    return [...map.values()].sort((a, b) => b.sum.amount - a.sum.amount);
+  }, [transfers, valueOf]);
 
   // Chain of a transfer = its linked position's chain (transfers store no chain
   // of their own). Expenses and any unlinked rows fall under "Unlinked". Sorted
@@ -1727,16 +1781,6 @@ export default function TransfersPage() {
     return map;
   }, [positions]);
 
-  // Spot prices for the non-stable Undeployed Tokens rows currently on screen.
-  // Only those symbols are requested — every other transfer type already
-  // stores a USD figure and needs no lookup — so an all-stablecoin list makes
-  // no request at all. Shares its cache with the edit modal's preview.
-  const spotSymbols = useMemo(
-    () => searchedFiltered.filter(needsSpotValue).map((t) => t.token),
-    [searchedFiltered],
-  );
-  const priceOf = useSpotPrices(spotSymbols);
-
   // Row values are computed ONCE here and consumed by both the grouped view and
   // the flat Needs Action view. Computing them twice would be a second answer to
   // the same question (Invariant #6) — the two views would be free to price the
@@ -1745,24 +1789,18 @@ export default function TransfersPage() {
     () =>
       searchedFiltered.map((t) => ({
         transfer: t,
-        value: rowValueOf(t, priceOf),
+        value: valueOf(t),
       })),
-    [searchedFiltered, priceOf],
+    [searchedFiltered, valueOf],
   );
 
   // Totals over whatever is on screen, stated the same way the per-chain
   // subtotals are: an unpriceable row contributes nothing and is COUNTED, never
   // silently dropped (architecture Rule 11).
   const rowsTotal = useMemo(() => {
-    let amount = 0;
-    let unpriced = 0;
-    let pricing = 0;
-    for (const { value } of rows) {
-      if (value.kind === "usd" || value.kind === "converted") amount += value.usd;
-      else if (value.kind === "unavailable") unpriced += 1;
-      else pricing += 1;
-    }
-    return { amount, unpriced, pricing };
+    const sum = emptySum();
+    for (const { value } of rows) addValue(sum, value);
+    return sum;
   }, [rows]);
 
   const byChain = useMemo(() => {
@@ -1779,19 +1817,9 @@ export default function TransfersPage() {
         // cannot disagree. A row that could not be priced contributes nothing
         // and is counted instead — silently dropping it would understate the
         // total with no sign that anything was missing (architecture Rule 11).
-        let amount = 0;
-        let unpriced = 0;
-        let pricing = 0;
-        for (const { value } of list) {
-          if (value.kind === "usd" || value.kind === "converted") {
-            amount += value.usd;
-          } else if (value.kind === "unavailable") {
-            unpriced += 1;
-          } else {
-            pricing += 1;
-          }
-        }
-        return { chain, list, amount, unpriced, pricing };
+        const sum = emptySum();
+        for (const { value } of list) addValue(sum, value);
+        return { chain, list, ...sum };
       })
       .sort((a, b) => b.amount - a.amount);
   }, [rows, positionChainById]);
@@ -2172,26 +2200,30 @@ export default function TransfersPage() {
   // for personal use, Available Balance = the difference. Withdrawals never
   // reduce Lifetime Earned — only what's still available.
   const balance = useMemo(() => {
-    const lifetimeEarned = transfers.reduce((sum, t) => sum + t.amount, 0);
+    // Every bucket sums the transfer's VALUE (valueOf), not its raw amount — an
+    // Undeployed Tokens row stores a token count, and adding 871 SUI to a
+    // dollar total as $871 was a wrong number, not a missing one. Each bucket
+    // also counts what it could not price, so its card can say so.
+    const earned = emptySum();
+    for (const t of transfers) addValue(earned, valueOf(t));
+    const lifetimeEarned = earned.amount;
     const withdrawalTotal = withdrawals.reduce((sum, w) => sum + w.amount, 0);
     // A transfer marked "expense" is money that has left the business, so it
     // must leave Available Balance exactly like a logged withdrawal does. Until
     // now nothing read moneyStatus here, so marking a transfer as an Expense
     // changed a pill and nothing else — the balance still counted the money as
     // idle. Fixed 2026-07-30 (applies to every transfer type equally).
-    const expensed = transfers.reduce(
-      (sum, t) => (isExpensedTransfer(t) ? sum + t.amount : sum),
-      0,
-    );
+    const expensedSum = emptySum();
+    for (const t of transfers) if (isExpensedTransfer(t)) addValue(expensedSum, valueOf(t));
+    const expensed = expensedSum.amount;
     // Money linked to a position ("Mark as deployed") is no longer idle — it
     // now lives inside that position's Deposited (entered separately), so it is
     // excluded from Available. Undoing the link adds it straight back. The
     // expense guard keeps the two subtractions mutually exclusive, so a row
     // that is somehow both can never be deducted twice.
-    const deployed = transfers.reduce(
-      (sum, t) => (isDeployedTransfer(t) ? sum + t.amount : sum),
-      0,
-    );
+    const deployedSum = emptySum();
+    for (const t of transfers) if (isDeployedTransfer(t)) addValue(deployedSum, valueOf(t));
+    const deployed = deployedSum.amount;
     // Money sent to a platform for yield (AAVE …) is no longer idle either: it
     // is working somewhere else. Excluded from Available from this release on
     // — a deliberate, user-confirmed change (Redeployed money WITH a platform
@@ -2208,11 +2240,20 @@ export default function TransfersPage() {
       outOfRangeUpside: 0,
       expense: 0,
     };
-    const transferredToPlatform = transfers.reduce((sum, t) => {
-      if (!isTransferredToPlatform(t)) return sum;
-      transferredByType[t.transferType] += t.amount;
-      return sum + t.amount;
-    }, 0);
+    const transferredSum = emptySum();
+    for (const t of transfers) {
+      if (!isTransferredToPlatform(t)) continue;
+      const v = valueOf(t);
+      addValue(transferredSum, v);
+      if (v.kind === "usd" || v.kind === "converted") {
+        transferredByType[t.transferType] += v.usd;
+      }
+    }
+    const transferredToPlatform = transferredSum.amount;
+    // Idle rows are what Available Balance is made of, so ITS caveat is the
+    // idle rows it could not price — not every unpriced row in the ledger.
+    const idleSum = emptySum();
+    for (const t of transfers) if (isIdleTransfer(t)) addValue(idleSum, valueOf(t));
     const withdrawn = withdrawalTotal + expensed;
     return {
       lifetimeEarned,
@@ -2224,8 +2265,15 @@ export default function TransfersPage() {
       transferredByType,
       available:
         lifetimeEarned - withdrawn - deployed - transferredToPlatform,
+      notes: {
+        earned: sumNote(earned),
+        expensed: sumNote(expensedSum),
+        deployed: sumNote(deployedSum),
+        transferred: sumNote(transferredSum),
+        available: sumNote(idleSum),
+      },
     };
-  }, [transfers, withdrawals]);
+  }, [transfers, withdrawals, valueOf]);
 
   // "Expenses & Withdrawals" is the ledger of money out of the business, so it
   // lists BOTH logged withdrawals and any transfer marked as an Expense — the
@@ -2506,21 +2554,25 @@ export default function TransfersPage() {
             <SummaryStat
               label="Lifetime Earned (USD)"
               value={formatUsd(balance.lifetimeEarned)}
+              note={balance.notes.earned}
               hint="Everything ever moved to a destination — never decreases."
             />
             <SummaryStat
               label="Expenses (USD)"
               value={formatUsd(balance.withdrawn)}
+              note={balance.notes.expensed}
               hint="Money out of the business: logged expenses plus any transfer marked as an Expense. Reduces Available Balance."
             />
             <SummaryStat
               label="Deployed into Positions (USD)"
               value={formatUsd(balance.deployed)}
+              note={balance.notes.deployed}
               hint="Redeployed money you've linked to a position — now inside its Deposited, no longer idle."
             />
             <SummaryStat
               label="Transferred to Platforms (USD)"
               value={formatUsd(balance.transferredToPlatform)}
+              note={balance.notes.transferred}
               hint="Money sent somewhere for yield (a transfer with a Platform assigned, e.g. AAVE) — working elsewhere, so no longer idle."
               // Where that money came from. Built by the same predicate as the
               // total above, so the parts always add up to it.
@@ -2539,6 +2591,7 @@ export default function TransfersPage() {
             <SummaryStat
               label="Available Balance (USD)"
               value={formatUsd(balance.available)}
+              note={balance.notes.available}
               hint="Lifetime Earned − Expenses − Deployed − Transferred = what's still idle."
             />
           </div>
@@ -2547,7 +2600,8 @@ export default function TransfersPage() {
             <SummaryStat label="Total Transfers" value={String(totals.count)} />
             <SummaryStat
               label="Transfers Net Total (USD)"
-              value={formatUsd(totals.amount)}
+              value={formatUsd(totals.sum.amount)}
+              note={sumNote(totals.sum)}
             />
             <BreakdownStat breakdown={totals.breakdown} />
           </div>
@@ -2562,9 +2616,9 @@ export default function TransfersPage() {
                   key: r.token,
                   label: r.token,
                   count: r.count,
-                  amount: r.amount,
+                  sum: r.sum,
                 }))}
-                total={totals.amount}
+                total={totals.sum}
               />
               <GroupTable
                 title="By Destination"
@@ -2574,9 +2628,9 @@ export default function TransfersPage() {
                   key: r.destination,
                   label: r.destination,
                   count: r.count,
-                  amount: r.amount,
+                  sum: r.sum,
                 }))}
-                total={totals.amount}
+                total={totals.sum}
               />
             </div>
           )}
@@ -3350,7 +3404,7 @@ interface GroupRow {
   key: string;
   label: string;
   count: number;
-  amount: number;
+  sum: ValuedSum;
 }
 
 interface GroupTableProps {
@@ -3358,7 +3412,28 @@ interface GroupTableProps {
   subtitle: string;
   columnLabel: string;
   rows: GroupRow[];
-  total: number;
+  total: ValuedSum;
+}
+
+// A group's Net Total cell. A group with NOTHING priced reads "Price
+// unavailable" — never $0.00, which would say the tokens are worthless. A
+// partly-priced group shows what it could price plus the count it left out.
+function ValuedSumCell({ sum, count }: { sum: ValuedSum; count?: number }) {
+  if (count !== undefined && sum.unpriced === count) {
+    return <span className="text-amber-300">Price unavailable</span>;
+  }
+  if (count !== undefined && sum.pricing === count) {
+    return <span className="text-[var(--muted)]">Pricing…</span>;
+  }
+  const note = sumNote(sum);
+  return (
+    <>
+      {formatUsd(sum.amount)}
+      {note && (
+        <div className="text-[10px] font-normal text-amber-300">{note}</div>
+      )}
+    </>
+  );
 }
 
 function GroupTable({
@@ -3391,7 +3466,7 @@ function GroupTable({
                   {row.count}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  {formatUsd(row.amount)}
+                  <ValuedSumCell sum={row.sum} count={row.count} />
                 </td>
               </tr>
             ))}
@@ -3401,7 +3476,7 @@ function GroupTable({
               <td className="px-4 py-3">Net Total</td>
               <td className="px-4 py-3" />
               <td className="px-4 py-3 text-right tabular-nums">
-                {formatUsd(total)}
+                <ValuedSumCell sum={total} />
               </td>
             </tr>
           </tfoot>
@@ -3419,9 +3494,12 @@ interface SummaryStatProps {
   // figure. Zero-value parts are dropped so a card never lists an empty
   // category; if every part is zero the whole line disappears.
   parts?: { label: string; value: number }[];
+  // A caveat on the figure itself (e.g. "1 not priced — excluded"). Always
+  // visible, never behind Details: it changes what the number means.
+  note?: string | null;
 }
 
-function SummaryStat({ label, value, hint, parts }: SummaryStatProps) {
+function SummaryStat({ label, value, hint, parts, note }: SummaryStatProps) {
   const [open, setOpen] = useState(false);
   const shown = (parts ?? []).filter((p) => p.value !== 0);
   // Explanatory text is hidden until asked for, so every card reads as label +
@@ -3445,6 +3523,9 @@ function SummaryStat({ label, value, hint, parts }: SummaryStatProps) {
       <div className="mt-2 text-2xl font-semibold tracking-tight text-[var(--foreground)]">
         {value}
       </div>
+      {note && (
+        <div className="mt-1 text-[11px] font-medium text-amber-300">{note}</div>
+      )}
       {/* A card with nothing to explain gets no toggle — there is nothing
           behind it to open. */}
       {hasDetails && (
