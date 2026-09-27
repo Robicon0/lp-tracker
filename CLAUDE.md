@@ -379,17 +379,9 @@ case widening the window or awaiting the prewarm for CLOSED positions only is en
 does. Complexity SMALL–MEDIUM. **Acceptance:** `node scripts/capgl-determinism.mjs --runs 3`
 on production → `VERDICT: deterministic ✓`.
 
-**🟡 CLP-TOTALS — the Transfers page shows TWO figures for the same transfers.** _(Created
-2026-09-13 when the chain list started valuing non-stable Undeployed Tokens rows at spot.)_ The
-chain list now reads SUI $729.95; **By Token**, **By Destination**, **Lifetime Earned**,
-**Transfers Net Total** and **Available Balance** still read $1,027.40 for the same two rows,
-because they sum `t.amount` raw in the `balance` memo and the GroupTable feeds. Deliberate scope
-boundary, not an oversight — but two money figures for the same records on one screen is a trust
-problem in its own right. **Shape:** move the totals onto the same `rowValueOf` decision the list
-uses, which means the memo needs the `priceOf` lookup threaded into it and an honest treatment of
-unpriced rows in a headline card (a card cannot carry a per-row footnote). **⚠️ Available Balance
-is read by other CLP pages**, so this is not display-local — check every consumer before moving
-it. Complexity MEDIUM.
+**✅ CLP-TOTALS — SHIPPED `c019b47`.** By Token, By Destination, Transfers Net Total and all five
+ledger cards now read the same per-transfer value as the chain list; see Recent fixes. Kept here
+only so the old "two figures for the same transfers" item is not re-opened.
 
 **🟠 ITEM 0i — A HUNG positions source renders a confident $0.00 total, with NO loading state,
 NO error, and NO banner — while the breakdown table below it still shows real positions.**
@@ -921,6 +913,46 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`dcb0d67` + `c019b47` + `eaaeb06`** — **CLP Tracker, three separate fixes (one commit each).**
+  **(1) `dcb0d67` — reviewable Expense → Sent to Platform reclassification** (Settings → "Move
+  Parked Expenses to Sent to Platform"). Resolves the "61 Expense rows carry a platform" finding
+  from the Sent-to-Platform session. Same contract as the sale-split migration: NEW pure
+  `lib/platformReclassMigration.ts` (one planner shared by Preview and Apply, idempotent), Preview
+  lists every row + per-platform totals, Apply backs up ALL transfers (soft-deleted included) to
+  `clp_transfers_backup_pre_platform_reclass` then sets only `moneyStatus: "platform"`.
+  Standalone expenses (`transferType: "expense"`) are excluded — spending by definition.
+  **⚠️ The count is now 60 / $5,310.29, not 61 / $5,332.87** — the missing $22.58 (ZEC, ALPHAFI,
+  2026-08-26) was already reclassified by hand in production; verified in the real record.
+  Verified on real production data (read offline from Chrome's LevelDB, seeded into a clean
+  localhost profile): Expenses **$9,645.85 → $4,335.56**, Transferred **$3,572.88 → $8,883.17**,
+  Available **$571.00 unchanged**; exactly 60 records changed, only `moneyStatus`; re-preview → 0.
+  **NOT applied to production** — the owner runs it from Settings. Knock-on (correct):
+  Business P&L's per-checkpoint "taken out" (`calcExpensesAfter`) drops for reclassified rows
+  after the checkpoint, since parked money was never taken out.
+  **(2) `c019b47` — CLP-TOTALS closed.** By Token, By Destination, Transfers Net Total and the
+  five ledger cards (Lifetime Earned / Expenses / Deployed / Transferred / Available) summed
+  Undeployed Tokens' raw token counts as dollars. Now ONE `valueById` map (the same
+  `rowValueOf` + `useSpotPrices` path as the chain list — no second fetch; the lookup now covers
+  all live transfers, still one request) feeds every surface through one `ValuedSum`
+  accumulator. A fully unpriceable group reads "Price unavailable" (never $0.00); every total
+  covering an unpriced row says "N not priced — excluded" (card notes are always visible, not
+  behind Details). Available Balance's caveat counts only IDLE unpriced rows. Checked every
+  consumer first: no other page reads the Available Balance dollar figure (Data Health uses the
+  predicate only), so the change is display-local. Verified: real data **byte-identical**
+  ($17,614.91 — production only holds stablecoin undeployed rows); with SUI/ETH/ZZZFAKE fixtures
+  the list row, By Token delta and By Destination row agree **to the cent in one load** (SUI
+  $1,092.19, ETH $1,355.83), ledger reconciles. Figures move between loads with live spot.
+  **(3) `eaaeb06` — unvalued converted claims visible on Overall P&L.** Investigation: the count
+  already existed (`calcOverallPnL.unvaluedConvertedClaims`, predicate `isUnvaluedConvertedClaim`)
+  and the Claims banner + Dashboard Data Health list it — but the Overall P&L card's own warning
+  sat inside its collapsed-by-default Details, and **Total P&L renders that card with no Data
+  Health list**, so there the $0 claims were effectively invisible. The warning now sits under the
+  figure, always shown, with count + link to `claims#incomplete-claims`. No value guessed.
+  Production has **0** such claims today (latent). Verified 0 / 1 / 3 fixtures on Dashboard and
+  Total P&L; link lands on the banner with the same count.
+  All three: build clean, `tsc --noEmit` clean, eslint clean, **0 page errors across all 8 CLP
+  pages** (empty and real data). **No cache bumps** — CLP is local data only.
 
 - **(this session)** — **CLP Tracker: Confirm Close now REQUIRES "Position closed" and a Close
   Transaction Link.** Both were skippable: in "Enter manually" mode nothing derives the exit
