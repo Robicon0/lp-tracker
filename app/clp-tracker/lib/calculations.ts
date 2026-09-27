@@ -1189,6 +1189,118 @@ export function claimRealizedValue(claim: FeeClaim): number {
   return total + claimSaleGain(claim);
 }
 
+// The stablecoin a CONVERTED claim's non-stable token actually became: its
+// claim-time value plus any later sale gain, i.e. claimRealizedValue minus the
+// claim's native stable leg (the USDC side of a SUI/USDC claim was never
+// converted — it was already stablecoin). Built from the same two pieces as
+// claimRealizedValue / claimSaleGain, so it cannot disagree with the "After
+// Selling" figure. 0 for an unconverted or unvalued claim.
+export function claimConvertedProceeds(claim: FeeClaim): number {
+  if (!claim.convertedToStable || isUnvaluedConvertedClaim(claim)) return 0;
+  return claimTimeValueOfSoldSide(claim) + claimSaleGain(claim);
+}
+
+export interface ClaimTokenTotal {
+  symbol: string;
+  isStable: boolean;
+  // Raw token quantity across every claim that names this token on either
+  // side — the full historical amount, NOT reduced by later conversions.
+  claimed: number;
+  claimCount: number;
+  // Stablecoin proceeds of converting THIS token, one entry per target
+  // stablecoin. Never populated for a stablecoin row: a pool's native USDC
+  // was earned as USDC, not converted into it.
+  converted: { stableSymbol: string; value: number; claimCount: number }[];
+  // Converted claims for this token saved with no USD value — counted, never
+  // guessed, so the converted line can say what it leaves out.
+  unvaluedConverted: number;
+}
+
+export interface ClaimTokenTotals {
+  tokens: ClaimTokenTotal[];
+  // Converted claims whose proceeds cannot be attributed to ONE token because
+  // both sides are non-stable. Reported instead of split by a guess.
+  unattributableConverted: number;
+}
+
+// Per-token totals for the Claims table footer. Which side a claim's
+// "Converted" flag refers to is decided per claim from the data, not assumed:
+// the converted token is the claim's non-stable side, whether Token 1 or
+// Token 2.
+export function calcClaimTokenTotals(claims: FeeClaim[]): ClaimTokenTotals {
+  const bySymbol = new Map<
+    string,
+    ClaimTokenTotal & { convertedBy: Map<string, { value: number; claimCount: number }> }
+  >();
+  const row = (symbol: string) => {
+    let r = bySymbol.get(symbol);
+    if (!r) {
+      r = {
+        symbol,
+        isStable: isStableSymbol(symbol),
+        claimed: 0,
+        claimCount: 0,
+        converted: [],
+        unvaluedConverted: 0,
+        convertedBy: new Map(),
+      };
+      bySymbol.set(symbol, r);
+    }
+    return r;
+  };
+  let unattributableConverted = 0;
+
+  for (const c of claims) {
+    const sides = [
+      { symbol: (c.token1Symbol ?? "").trim().toUpperCase(), amount: Number(c.token1Amount) },
+      { symbol: (c.token2Symbol ?? "").trim().toUpperCase(), amount: Number(c.token2Amount) },
+    ].filter((s) => s.symbol !== "");
+    const seen = new Set<string>();
+    for (const s of sides) {
+      const r = row(s.symbol);
+      if (Number.isFinite(s.amount)) r.claimed += s.amount;
+      if (!seen.has(s.symbol)) {
+        r.claimCount += 1;
+        seen.add(s.symbol);
+      }
+    }
+    if (!c.convertedToStable) continue;
+    const volatile = sides.filter(
+      (s) => !isStableSymbol(s.symbol) && Number.isFinite(s.amount) && s.amount > 0,
+    );
+    if (volatile.length === 0) continue; // all-stable claim: nothing was converted
+    if (volatile.length > 1) {
+      unattributableConverted += 1;
+      continue;
+    }
+    const r = row(volatile[0].symbol);
+    if (isUnvaluedConvertedClaim(c)) {
+      r.unvaluedConverted += 1;
+      continue;
+    }
+    const target = (c.stableSymbol ?? "").trim().toUpperCase() || "STABLECOIN";
+    const g = r.convertedBy.get(target) ?? { value: 0, claimCount: 0 };
+    g.value += claimConvertedProceeds(c);
+    g.claimCount += 1;
+    r.convertedBy.set(target, g);
+  }
+
+  const tokens = [...bySymbol.values()]
+    .map(({ convertedBy, ...r }) => ({
+      ...r,
+      converted: [...convertedBy.entries()]
+        .map(([stableSymbol, g]) => ({ stableSymbol, ...g }))
+        .sort((a, b) => b.value - a.value),
+    }))
+    // Non-stable tokens first (they carry the conversion lines), then the
+    // pools' native stablecoins; busiest first within each.
+    .sort(
+      (a, b) =>
+        Number(a.isStable) - Number(b.isStable) || b.claimCount - a.claimCount,
+    );
+  return { tokens, unattributableConverted };
+}
+
 export interface MixedStableClaimRow {
   claim: FeeClaim;
   stableFace: number;

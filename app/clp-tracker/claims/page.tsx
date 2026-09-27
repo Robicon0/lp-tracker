@@ -10,6 +10,7 @@ import {
 } from "../lib/storage";
 import { useHydrated } from "../lib/useHydrated";
 import {
+  calcClaimTokenTotals,
   calcDaysActive,
   calcFeeAPR,
   claimRealizedValue,
@@ -53,6 +54,87 @@ const tokenFormatter = new Intl.NumberFormat("en-US", {
 
 function formatUsd(value: number): string {
   return usdFormatter.format(Number.isFinite(value) ? value : 0);
+}
+
+// Totals by token for the visible claims. Two things are kept visibly apart:
+// a token's raw claimed quantity (never reduced by conversions) and the
+// stablecoin its CONVERTED claims became. A pool's native stablecoin (the USDC
+// side of SUI/USDC) gets its own row labelled as earned-as-stablecoin, and
+// never absorbs conversion proceeds — those sit under the token that was sold.
+function ClaimTokenTotalsFooter({
+  totals,
+  claimCount,
+}: {
+  totals: ReturnType<typeof calcClaimTokenTotals>;
+  claimCount: number;
+}) {
+  return (
+    <div className="border-t border-[var(--border-strong)] bg-[var(--surface-2)]/40 px-5 py-4">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+          Totals by token
+        </h3>
+        <span className="text-[11px] text-[var(--muted)]">
+          Across the {claimCount} {claimCount === 1 ? "claim" : "claims"} shown
+          above
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {totals.tokens.map((t) => (
+          <div
+            key={t.symbol}
+            data-token-total={t.symbol}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5"
+          >
+            <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+              Total {t.symbol} claimed
+            </div>
+            <div className="mt-0.5 text-base font-semibold tabular-nums text-[var(--foreground)]">
+              {formatToken(t.claimed)} {t.symbol}
+            </div>
+            <div className="text-[11px] text-[var(--muted)]">
+              {t.isStable
+                ? `Earned directly as ${t.symbol} in the pool · ${t.claimCount} ${t.claimCount === 1 ? "claim" : "claims"}`
+                : `${t.claimCount} ${t.claimCount === 1 ? "claim" : "claims"} · before any conversion`}
+            </div>
+            {t.converted.map((g) => (
+              <div
+                key={g.stableSymbol}
+                data-converted-to={g.stableSymbol}
+                className="mt-2 border-t border-[var(--border)] pt-2 text-[12px]"
+              >
+                <span className="text-[var(--muted)]">
+                  Converted to {g.stableSymbol}:
+                </span>{" "}
+                <span className="font-semibold tabular-nums text-[var(--foreground)]">
+                  {formatUsd(g.value)}
+                </span>
+                <div className="text-[10px] text-[var(--muted)]">
+                  Actual amount received from {g.claimCount} converted{" "}
+                  {t.symbol} {g.claimCount === 1 ? "claim" : "claims"}
+                </div>
+              </div>
+            ))}
+            {t.unvaluedConverted > 0 && (
+              <div className="mt-2 text-[10px] text-amber-300">
+                {t.unvaluedConverted} converted{" "}
+                {t.unvaluedConverted === 1 ? "claim has" : "claims have"} no USD
+                value — not included above
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {totals.unattributableConverted > 0 && (
+        <p className="mt-3 text-[11px] text-amber-300">
+          {totals.unattributableConverted} converted{" "}
+          {totals.unattributableConverted === 1 ? "claim has" : "claims have"} two
+          non-stable tokens, so the proceeds can&apos;t be assigned to one token
+          and are left out of the converted lines.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function formatToken(value: number): string {
@@ -395,6 +477,14 @@ export default function ClaimsPage() {
       converted: convertedCount,
     };
   }, [filteredSorted]);
+
+  // Per-token totals for the footer. Reads the SAME filteredSorted list the
+  // table rows render, so every filter (Position, Platform, Chain, Status,
+  // Converted, needs-value) applies to it with no second query to drift.
+  const tokenTotals = useMemo(
+    () => calcClaimTokenTotals(filteredSorted),
+    [filteredSorted],
+  );
 
   const positionById = useMemo(() => {
     const map = new Map<string, Position>();
@@ -808,6 +898,12 @@ export default function ClaimsPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {filteredSorted.length > 0 && (
+          <ClaimTokenTotalsFooter
+            totals={tokenTotals}
+            claimCount={filteredSorted.length}
+          />
         )}
       </div>
 
