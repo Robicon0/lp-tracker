@@ -1214,6 +1214,16 @@ export interface ClaimTokenTotal {
   // Converted claims for this token saved with no USD value — counted, never
   // guessed, so the converted line can say what it leaves out.
   unvaluedConverted: number;
+  // QUANTITY of this token converted away, from every claim attributed to it
+  // with convertedToStable — valued OR unvalued (a sale happened whether or
+  // not its dollars were typed in, unlike the dollar lines above).
+  convertedQuantity: number;
+  // Claims that quantity comes from: Σ converted[].claimCount + unvaluedConverted.
+  convertedClaimCount: number;
+  // claimed − convertedQuantity, floored at 0. "Still held per the claim
+  // history" — NOT a wallet balance: it knows about conversions only, not
+  // later transfers or redeployment.
+  unconvertedQuantity: number;
 }
 
 export interface ClaimTokenTotals {
@@ -1242,6 +1252,9 @@ export function calcClaimTokenTotals(claims: FeeClaim[]): ClaimTokenTotals {
         claimCount: 0,
         converted: [],
         unvaluedConverted: 0,
+        convertedQuantity: 0,
+        convertedClaimCount: 0,
+        unconvertedQuantity: 0,
         convertedBy: new Map(),
       };
       bySymbol.set(symbol, r);
@@ -1274,6 +1287,11 @@ export function calcClaimTokenTotals(claims: FeeClaim[]): ClaimTokenTotals {
       continue;
     }
     const r = row(volatile[0].symbol);
+    // Counted BEFORE the unvalued early-exit on purpose: the tokens left the
+    // position either way. Only reached for single-volatile claims, so a
+    // two-volatile claim (unattributableConverted above) never lands here.
+    r.convertedQuantity += volatile[0].amount;
+    r.convertedClaimCount += 1;
     if (isUnvaluedConvertedClaim(c)) {
       r.unvaluedConverted += 1;
       continue;
@@ -1288,6 +1306,7 @@ export function calcClaimTokenTotals(claims: FeeClaim[]): ClaimTokenTotals {
   const tokens = [...bySymbol.values()]
     .map(({ convertedBy, ...r }) => ({
       ...r,
+      unconvertedQuantity: Math.max(0, r.claimed - r.convertedQuantity),
       converted: [...convertedBy.entries()]
         .map(([stableSymbol, g]) => ({ stableSymbol, ...g }))
         .sort((a, b) => b.value - a.value),

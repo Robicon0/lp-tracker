@@ -97,6 +97,31 @@ function ClaimTokenTotalsFooter({
                 ? `Earned directly as ${t.symbol} in the pool · ${t.claimCount} ${t.claimCount === 1 ? "claim" : "claims"}`
                 : `${t.claimCount} ${t.claimCount === 1 ? "claim" : "claims"} · before any conversion`}
             </div>
+            {!t.isStable && t.convertedQuantity > 0 && (
+              <div
+                data-converted-qty={t.symbol}
+                className="mt-2 border-t border-[var(--border)] pt-2 text-[12px]"
+              >
+                <div>
+                  <span className="text-[var(--muted)]">Converted:</span>{" "}
+                  <span className="font-semibold tabular-nums text-[var(--foreground)]">
+                    {formatToken(t.convertedQuantity)} {t.symbol}
+                  </span>{" "}
+                  <span className="text-[var(--muted)]">
+                    · {t.convertedClaimCount}{" "}
+                    {t.convertedClaimCount === 1 ? "claim" : "claims"}
+                  </span>
+                </div>
+                <div data-still-held={t.symbol}>
+                  <span className="text-[var(--muted)]">
+                    Still held (not yet converted):
+                  </span>{" "}
+                  <span className="font-semibold tabular-nums text-[var(--foreground)]">
+                    {formatToken(t.unconvertedQuantity)} {t.symbol}
+                  </span>
+                </div>
+              </div>
+            )}
             {t.converted.map((g) => (
               <div
                 key={g.stableSymbol}
