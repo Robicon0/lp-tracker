@@ -914,6 +914,22 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **CLP Tracker Fee Claims footer: a stablecoin card now shows the total
+  converted INTO it from other tokens.** Optional `ClaimTokenTotal.convertedIn { value,
+  claimCount, fromTokens }` on stablecoin rows, computed as a SECOND PASS over the finished
+  `tokens` array — a pure rollup of the non-stable rows' `converted[]` entries whose
+  `stableSymbol` matches. Rendered as "Converted from other tokens: $X / From N converted claims
+  across …", **never added into the pool-earned `claimed` figure**. Additive only.
+  **⚠️ Rounding detail worth keeping:** summing the UNROUNDED per-token values gave $3,717.30
+  while the seven visible lines add to $3,717.31 (raw total $3,717.2997; Solana filter likewise
+  $1,894.05 vs $1,894.06). The rollup now sums each line at display precision (cents), so the card
+  always equals what a reader adds up by hand; the difference is sub-cent.
+  **Real production data:** USDC card before → after: Total USDC claimed **5,741.232488 → 5,741.232488
+  (unchanged)**; new line **$3,717.31 from 99 claims across SUI, ETH, SOL, ZEC, BTC, HYPE, WETH**,
+  == Σ visible "Converted to USDC" lines to the cent. Tracks the filter: BASE $717.84, HYPEEVM
+  $113.39, SOLANA $1,894.06, SUI $992.02 — each equal to its visible lines, `claimed` unchanged in
+  every state. 0 page errors across all 8 CLP pages. No cache bumps — display only.
+
 - **(this session)** — **CLP Tracker Fee Claims footer: converted vs still-held QUANTITY per
   token.** `ClaimTokenTotal` gains `convertedQuantity` (non-stable side's amount over every claim
   attributed to the token with `convertedToStable`, **valued OR unvalued** — unlike the dollar
