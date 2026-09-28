@@ -97,6 +97,27 @@ function ClaimTokenTotalsFooter({
                 ? `Earned directly as ${t.symbol} in the pool · ${t.claimCount} ${t.claimCount === 1 ? "claim" : "claims"}`
                 : `${t.claimCount} ${t.claimCount === 1 ? "claim" : "claims"} · before any conversion`}
             </div>
+            {/* Proceeds of converting OTHER tokens into this stablecoin. A
+                separate figure from the pool-earned total above — never
+                summed into it. */}
+            {t.isStable && t.convertedIn && t.convertedIn.value > 0 && (
+              <div
+                data-converted-in={t.symbol}
+                className="mt-2 border-t border-[var(--border)] pt-2 text-[12px]"
+              >
+                <span className="text-[var(--muted)]">
+                  Converted from other tokens:
+                </span>{" "}
+                <span className="font-semibold tabular-nums text-[var(--foreground)]">
+                  {formatUsd(t.convertedIn.value)}
+                </span>
+                <div className="text-[10px] text-[var(--muted)]">
+                  From {t.convertedIn.claimCount} converted{" "}
+                  {t.convertedIn.claimCount === 1 ? "claim" : "claims"} across{" "}
+                  {t.convertedIn.fromTokens.join(", ")}
+                </div>
+              </div>
+            )}
             {!t.isStable && t.convertedQuantity > 0 && (
               <div
                 data-converted-qty={t.symbol}

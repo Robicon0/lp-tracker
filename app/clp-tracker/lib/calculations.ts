@@ -1224,6 +1224,11 @@ export interface ClaimTokenTotal {
   // history" — NOT a wallet balance: it knows about conversions only, not
   // later transfers or redeployment.
   unconvertedQuantity: number;
+  // Stablecoin rows only: everything CONVERTED INTO this stablecoin from other
+  // tokens — a rollup of the matching converted[] entries on the non-stable
+  // rows, never added into `claimed` (which stays pool-earned only). Absent
+  // when nothing converted into this stablecoin.
+  convertedIn?: { value: number; claimCount: number; fromTokens: string[] };
 }
 
 export interface ClaimTokenTotals {
@@ -1317,6 +1322,29 @@ export function calcClaimTokenTotals(claims: FeeClaim[]): ClaimTokenTotals {
       (a, b) =>
         Number(a.isStable) - Number(b.isStable) || b.claimCount - a.claimCount,
     );
+  // Second pass: roll each non-stable row's converted[] up onto the
+  // stablecoin it went into. Purely a sum of figures already on those rows, so
+  // the stablecoin card can never disagree with the cards it summarises.
+  for (const stable of tokens) {
+    if (!stable.isStable) continue;
+    let value = 0;
+    let claimCount = 0;
+    const fromTokens: string[] = [];
+    for (const t of tokens) {
+      if (t.isStable) continue;
+      for (const g of t.converted) {
+        if (g.stableSymbol !== stable.symbol) continue;
+        // Each line is summed AS DISPLAYED (to the cent), so this total equals
+        // what a reader gets adding up the visible "Converted to" lines. Summing
+        // the unrounded values drifted by a cent (measured: raw $3,717.2997 vs
+        // lines that read $3,717.31); the difference is sub-cent rounding only.
+        value += Math.round(g.value * 100) / 100;
+        claimCount += g.claimCount;
+        if (!fromTokens.includes(t.symbol)) fromTokens.push(t.symbol);
+      }
+    }
+    if (claimCount > 0) stable.convertedIn = { value, claimCount, fromTokens };
+  }
   return { tokens, unattributableConverted };
 }
 
