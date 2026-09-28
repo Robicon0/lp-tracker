@@ -914,6 +914,49 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`8878d63`** — **CLP Tracker: position detail page (`/clp-tracker/positions/[id]`) + the
+  position modals/actions extracted into shared components.** Clicking a card's background (or
+  a List-view row's expanded panel, or its new "View details →" link) opens a full page: header
+  with Open/Closed + **opening AND closing tx icons** (closeTxLink was stored but never rendered
+  anywhere before), every card + Details figure plus the never-shown **token1Count/token2Count**
+  and **Notes**, a Closed section (exit date, scalp, full closing-tx link, hedge fields only where
+  set), the position's Fee Claims (same `c.positionId === id` filter + the Fee Claims page's date
+  sort, sale details, tx link or copyable hash) with the Totals-by-token footer, and the full
+  action row. Unknown id → "Position not found" + link back.
+  **Pure extraction, proven lossless:** `positions/page.tsx` 4,798 → ~1,330 lines; a line-multiset
+  diff shows all **4,523 code lines** present exactly once across the new files. New:
+  `components/PositionFormModal.tsx`, `components/ClosePositionModal.tsx`,
+  `components/PositionFormParts.tsx` (Field/DateTimeFields/Section/FormActions/inputClass),
+  `components/PositionDisplay.tsx` (TxLinkBadge — now exported — RangeBadge/RangeBar/Metric),
+  `lib/positionFormUtils.ts` (formatters, form build/parse, `derive`, `linkedRecords`), and
+  `components/PositionActions.tsx` whose **`PositionActionHost` is the ONE implementation of
+  Add/Edit/Update/Claim/Close/Delete** for both pages (handlers moved verbatim; only
+  `refresh()`→`onChanged()`, `setModal(none)`→`onDismiss()`, plus `onDeleted` so the detail page
+  leaves after a delete). `components/ClaimDisplay.tsx` takes the Fee Claims footer, `TxCell`,
+  token/date formatters and `compareClaimsByDateDesc` (Next pages can't export helpers).
+  **Navigation rule:** every existing control (Edit/Update/Claim/Close/Delete, Details toggle,
+  price input incl. Enter, tx icon) stops propagation; only the card's own background navigates.
+  The List view's collapsed row IS its expand toggle, so it keeps expanding — hence the explicit
+  "View details →" link.
+  **⚠️ Correction to the brief: out-of-range values are NOT "absent on most positions" — all 52
+  carry `outOfRangeUpside/Downside`**, because `buildRecords` writes them on every save. Their own
+  comment calls them stale caches, so the detail page recomputes via `computePositionIL` (stored
+  value only as fallback, the Pool P&L contract) and presents them as hypothetical, exactly as the
+  Edit form does for a closed position. No real position has short/hedge fields or notes today
+  (verified by fixture).
+  **Verified on real production data** (prices pinned to one response so live values can't drift
+  between loads): active SUI/USDC `fb9fe2af`, closed ZEC/USDC `36fdae0b` (3 sold claims) and closed
+  WETH/USDC `e2b835d4` (16 claims) — every card figure identical on the detail page; claim rows and
+  totals footer identical to the Fee Claims page filtered to the same position; closing-tx opens a
+  new tab. 36/36 list interactions unchanged (modals open with no navigation, toggles, price input
+  still saves on blur). **Modal equivalence: 20/20 identical across ORIGINAL code, new list and new
+  detail page** — Close validation messages, every modal's prefill, and the stored diff of Edit,
+  Update, Claim, Close (+claim +upside transfer) and Delete (1 + 16 claims + 16 transfers).
+  0 page errors across all 8 CLP pages + detail (empty and real data). No cache bumps.
+  **Pre-existing, reproduced identically, NOT changed:** saving Edit on an ACTIVE position persists
+  its live-priced Current Balance (the list hands Edit the `withLiveValues` object), despite
+  `withLiveValues`'s "nothing is persisted" comment — worth a look on its own.
+
 - **(this session)** — **CLP Tracker Fee Claims footer: a stablecoin card now shows the total
   converted INTO it from other tokens.** Optional `ClaimTokenTotal.convertedIn { value,
   claimCount, fromTokens }` on stablecoin rows, computed as a SECOND PASS over the finished
