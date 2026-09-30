@@ -914,6 +914,26 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **CLP Tracker: Edit on an ACTIVE position no longer overwrites the stored
+  Current Balance with the live price.** `PositionActionHost.handleEdit` passed the caller's
+  position as `buildRecords`' `base`; for an active position that is `withLiveValues`' display copy
+  (live `currentBalance`), and `buildRecords` falls back to `base.currentBalance`, so an Edit that
+  only touched Notes persisted the live price. `base` is now read FRESH from storage.
+  `withLiveValues` overrides only `currentBalance` (`{ ...p, currentBalance: live }`), so
+  status/exitDatetime/newFees/claimed/totalFees/closeTxLink fallbacks are unchanged. Update, Close
+  and the `currentBalanceOverride` path untouched. One fix covers the list AND the detail page.
+  **Verified with a real before/after control** (SUI/USDC `fb9fe2af`, price route pinned so live
+  $12,143.04 ≠ stored): pre-fix, Edit-only-Notes wrote **11985.311560351118 → 12143.044461048048**
+  from both pages; fixed, **11985.311560351118 → 11985.311560351118** (only `notes` changed) from
+  both. Update still refreshes to live. **⚠️ Testing trap:** an unpinned first run "passed" on the
+  PRE-FIX code because the live price hadn't resolved yet (live == stored), so the bug couldn't
+  show — always assert live ≠ stored before trusting this test.
+  **Adjacent, NOT changed (owner said leave the recalc path):** the Edit modal's
+  `savedCurrentBalance` is still the live figure, so the "Recalculate from token amounts" panel can
+  DISPLAY the live value as the balance "left untouched" and use it for its
+  balance-tracks-Deposited check. The SAVE is correct either way (explicit override wins, else the
+  stored value is kept); it is a display/classification inaccuracy worth its own fix.
+
 - **`8878d63`** — **CLP Tracker: position detail page (`/clp-tracker/positions/[id]`) + the
   position modals/actions extracted into shared components.** Clicking a card's background (or
   a List-view row's expanded panel, or its new "View details →" link) opens a full page: header
