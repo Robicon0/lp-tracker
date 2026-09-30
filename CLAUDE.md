@@ -914,6 +914,19 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **CLP Tracker Fee Claims: "Pair" filter that groups a pair ACROSS fee
+  tiers.** Stored pairs carry the tier (`"SUI/USDC (0.25%)"`, from `buildRecords`), so there was no
+  way to see one pair across pools. NEW `normalizePair` in `lib/nameNormalization.ts` (trim +
+  uppercase, then strip any trailing parenthetical) — grouping/label only like the other three,
+  never written back; the table's Pair column still shows the full stored pair. Wired exactly like
+  Platform/Chain: `pairOptions` over ALL claims, `pair` in `FilterState`/`EMPTY_FILTERS`, predicate
+  beside the others, dropdown between Position and Platform (filter grid 5 → 6 columns).
+  **Real production data:** SUI/USDC **160 → 55** claims (== independent count) spanning **16
+  positions and 4 tiers** (0.25% ×26, 0.175% ×27, 0.05% ×1, 0.16% ×1); WETH/USDC **160 → 42** across
+  **6 tiers**. Totals-by-token footer equals the visible rows under every Chain/Platform/Status/
+  Converted option and a Position selection combined with the pair (BLUEFIN 27 + CETUS 28 = 55;
+  converted 26 + not 29 = 55). 0 page errors across all 8 CLP pages. No cache bumps.
+
 - **(this session)** — **CLP Tracker: Edit on an ACTIVE position no longer overwrites the stored
   Current Balance with the live price.** `PositionActionHost.handleEdit` passed the caller's
   position as `buildRecords`' `base`; for an active position that is `withLiveValues`' display copy
