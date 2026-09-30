@@ -275,8 +275,15 @@ export function PositionActionHost({
     persistFull(buildRecords(newId(), form, null), "add");
   };
 
+  // `base` is read FRESH from storage, never taken from the object the caller
+  // passed in. For an active position that object is withLiveValues' display
+  // copy, whose currentBalance is the live market value — and buildRecords
+  // falls back to base.currentBalance, so using it silently persisted the live
+  // price on an edit that only touched Notes. withLiveValues overrides nothing
+  // but currentBalance, so every other fallback field reads the same either way.
   const handleEdit = (target: Position, form: PositionFormState) => {
-    persistFull(buildRecords(target.id, form, target), "edit");
+    const stored = getPositions().find((p) => p.id === target.id) ?? target;
+    persistFull(buildRecords(target.id, form, stored), "edit");
   };
 
   // Claimed is no longer part of the payload — it is derived from claim
