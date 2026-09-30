@@ -32,7 +32,11 @@ import {
 import { cleanupClaimTransfers } from "../lib/transferAutomation";
 import { OutlierBanner } from "../components/OutlierBanner";
 import { PositionCombobox } from "../components/PositionCombobox";
-import { normalizeChain, normalizePlatform } from "../lib/nameNormalization";
+import {
+  normalizeChain,
+  normalizePair,
+  normalizePlatform,
+} from "../lib/nameNormalization";
 import {
   ClaimFormModal,
   persistNewClaim,
@@ -250,6 +254,9 @@ type ConvertedFilter = "all" | "converted" | "not-converted";
 
 interface FilterState {
   positionId: string;
+  // Token pair with the fee tier dropped (normalizePair), so one pair traded
+  // across several tiers/positions filters as one.
+  pair: string;
   platform: string;
   chain: string;
   // Filter claims by whether their linked position is active or closed.
@@ -263,6 +270,7 @@ interface FilterState {
 const ALL = "__all__";
 const EMPTY_FILTERS: FilterState = {
   positionId: ALL,
+  pair: ALL,
   platform: ALL,
   chain: ALL,
   positionStatus: "all",
@@ -289,6 +297,12 @@ export default function ClaimsPage() {
 
   // Options normalized so synonyms merge into one entry (Part 5). Grouping/
   // label only — stored claim.chain/platform are never modified.
+  const pairOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of claims) if (c.pair) set.add(normalizePair(c.pair));
+    return Array.from(set).sort();
+  }, [claims]);
+
   const platformOptions = useMemo(() => {
     const set = new Set<string>();
     for (const c of claims) if (c.platform) set.add(normalizePlatform(c.platform));
@@ -339,6 +353,7 @@ export default function ClaimsPage() {
     if (!hydrated) return [];
     const filtered = claims.filter((c) => {
       if (filters.positionId !== ALL && c.positionId !== filters.positionId) return false;
+      if (filters.pair !== ALL && normalizePair(c.pair) !== filters.pair) return false;
       if (filters.platform !== ALL && normalizePlatform(c.platform) !== filters.platform) return false;
       if (filters.chain !== ALL && normalizeChain(c.chain) !== filters.chain) return false;
       if (filters.positionStatus !== "all") {
@@ -561,7 +576,7 @@ export default function ClaimsPage() {
             </button>
           </div>
         )}
-        <div className="grid grid-cols-1 gap-3 border-b border-[var(--border)] px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 border-b border-[var(--border)] px-5 py-4 sm:grid-cols-3 lg:grid-cols-6">
           <PositionCombobox
             positions={positions}
             value={filters.positionId}
@@ -569,6 +584,15 @@ export default function ClaimsPage() {
               setFilters((prev) => ({ ...prev, positionId: v }))
             }
             allValue={ALL}
+          />
+          <FilterSelect
+            label="Pair"
+            value={filters.pair}
+            onChange={(v) => setFilters((prev) => ({ ...prev, pair: v }))}
+            options={[
+              { value: ALL, label: "All pairs" },
+              ...pairOptions.map((p) => ({ value: p, label: p })),
+            ]}
           />
           <FilterSelect
             label="Platform"

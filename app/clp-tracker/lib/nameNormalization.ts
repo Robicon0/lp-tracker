@@ -1,4 +1,4 @@
-// Display/grouping normalization for Chain, Token Symbol, and Platform names.
+// Display/grouping normalization for Chain, Token Symbol, Platform and Pair names.
 //
 // Purpose: merge equivalent spellings so grouping/filters don't split one
 // real-world thing across several buckets ("SOL" vs "Solana", "ETH" vs "WETH",
@@ -61,4 +61,14 @@ export function normalizeToken(raw: string): string {
 export function normalizePlatform(raw: string): string {
   const key = baseNormalize(raw);
   return PLATFORM_ALIASES[key] ?? key;
+}
+
+// Pair grouping key with the fee tier dropped: "sui/usdc (0.25%)" and
+// "SUI/USDC (0.175%)" both → "SUI/USDC". A stored pair is "TOKEN1/TOKEN2
+// (FEE_TIER)" (buildRecords), and the tier is incidental when grouping claims
+// by what was traded — so any trailing parenthetical is stripped. Same
+// guarantee as the rest of this file: grouping/label only, the stored pair
+// (tier included) is never modified.
+export function normalizePair(raw: string): string {
+  return baseNormalize(raw).replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
