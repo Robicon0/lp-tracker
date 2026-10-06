@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
-import type { WalletName } from "@solana/wallet-adapter-base";
 import {
   useCurrentAccount,
   useWallets,
@@ -13,6 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { setDisconnected } from "../lib/walletDisconnectFlag";
+import { useSolanaConnect } from "../hooks/useSolanaConnect";
 import { detectChain } from "../lib/detectChain";
 
 const EVM_DISPLAY: { id: string; name: string }[] = [
@@ -53,16 +53,9 @@ export default function HeroWalletConnect() {
   const [showEvmModal, setShowEvmModal] = useState(false);
 
   // Solana
-  const {
-    select,
-    connect: connectSolana,
-    disconnect: disconnectSolana,
-    connected: adapterSolanaConnected,
-    publicKey: adapterPublicKey,
-    wallets: solanaWallets,
-  } = useWallet();
+  const { disconnect: disconnectSolana, wallets: solanaWallets } = useWallet();
   const [showSolanaModal, setShowSolanaModal] = useState(false);
-  const awaitingSolanaConnect = useRef(false);
+  const connectSolanaByName = useSolanaConnect();
 
   // Sui
   const adapterSuiAccount = useCurrentAccount();
@@ -75,13 +68,6 @@ export default function HeroWalletConnect() {
   const { evmAddress, setEvmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
   const address = evmAddress;
   const isConnected = !!evmAddress;
-
-  useEffect(() => {
-    if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
-      setSolanaAddress(adapterPublicKey.toBase58());
-      awaitingSolanaConnect.current = false;
-    }
-  }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
 
   useEffect(() => {
     if (awaitingSuiConnect.current && adapterSuiAccount) {
@@ -103,24 +89,9 @@ export default function HeroWalletConnect() {
     disconnect();
   };
 
-  const handleSolanaConnect = async (walletName: string) => {
+  const handleSolanaConnect = (walletName: string) => {
     setShowSolanaModal(false);
-    try {
-      if (adapterSolanaConnected && adapterPublicKey) {
-        setSolanaAddress(adapterPublicKey.toBase58());
-        return;
-      }
-      select(walletName as WalletName);
-      awaitingSolanaConnect.current = true;
-      await connectSolana();
-    } catch (err) {
-      if (adapterSolanaConnected && adapterPublicKey) {
-        setSolanaAddress(adapterPublicKey.toBase58());
-      } else {
-        console.error("Solana connect error:", err);
-      }
-      awaitingSolanaConnect.current = false;
-    }
+    connectSolanaByName(walletName);
   };
 
   const handleSolanaDisconnect = () => {

@@ -3,10 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
-import type { WalletName } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "./contexts/WalletAuthContext";
 import { setDisconnected } from "./lib/walletDisconnectFlag";
+import { useSolanaConnect } from "./hooks/useSolanaConnect";
 import Link from "next/link";
 import CalculatorMenu from "./components/CalculatorMenu";
 import { CALCULATOR_LINKS, CALCULATOR_MENU_LABEL } from "./config/calculatorLinks";
@@ -38,15 +38,7 @@ export default function Navbar() {
   // Solana adapter — used ONLY for mechanics: wallet list, select, connect, disconnect.
   // Never read connected or publicKey from the adapter for display: a locked Phantom
   // wallet keeps those truthy via Wallet Standard silent reconnect.
-  const {
-    wallet: currentSolanaWallet,
-    select,
-    connect: connectSolana,
-    disconnect: disconnectSolana,
-    connected: adapterSolanaConnected,
-    publicKey: adapterPublicKey,
-    wallets: solanaWallets,
-  } = useWallet();
+  const { disconnect: disconnectSolana, wallets: solanaWallets } = useWallet();
 
   // Sui adapter — used ONLY for mechanics: wallet list, connect, disconnect.
   // @mysten/dapp-kit persists the last connected wallet; useCurrentAccount() can
@@ -75,9 +67,7 @@ export default function Navbar() {
   useEffect(() => setMounted(true), []);
 
   // --- Solana connection tracking ---
-  // Set to true during an in-progress explicit connect so the effect below
-  // knows to capture publicKey once the adapter state updates.
-  const awaitingSolanaConnect = useRef(false);
+  const connectSolanaByName = useSolanaConnect();
 
   // NOTE (2026-08-02): the Solana restore / persist / stale-clear effects that
   // used to live here were REMOVED. They were a duplicate of the ones in
@@ -86,16 +76,9 @@ export default function Navbar() {
   // the same localStorage keys was an aggravating factor in the "wallet
   // disconnects by itself" bug. Do not reintroduce them here.
   //
-  // What remains below is CONNECT MECHANICS, which genuinely belong to the
-  // Navbar: capturing the address once an explicit user-initiated connect
-  // completes, gated by the `awaitingSolanaConnect` ref.
-  useEffect(() => {
-    if (awaitingSolanaConnect.current && adapterSolanaConnected && adapterPublicKey) {
-      setSolanaAddress(adapterPublicKey.toBase58());
-      awaitingSolanaConnect.current = false;
-    }
-  }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
-
+  // Connect mechanics (select → deferred connect → capture the address of an
+  // explicit user-initiated connect) now live in the shared useSolanaConnect
+  // hook, so the three connect surfaces cannot drift apart again.
   // --- Sui connection tracking ---
   const awaitingSuiConnect = useRef(false);
 
@@ -145,33 +128,9 @@ export default function Navbar() {
     disconnect();
   };
 
-  const handleSolanaConnect = async (walletName: string) => {
+  const handleSolanaConnect = (walletName: string) => {
     setShowSolanaModal(false);
-    try {
-      // Fast path: adapter already connected to this wallet via autoConnect/Wallet Standard.
-      // In that case connectSolana() would throw "Wallet already connected" and the
-      // useEffect that captures publicKey would never fire (deps unchanged). Just set directly.
-      if (
-        adapterSolanaConnected &&
-        adapterPublicKey &&
-        currentSolanaWallet?.adapter.name === walletName
-      ) {
-        setSolanaAddress(adapterPublicKey.toBase58());
-        return;
-      }
-      select(walletName as WalletName);
-      awaitingSolanaConnect.current = true;
-      await connectSolana();
-      // Address captured by the useEffect above once adapterSolanaConnected/publicKey update.
-    } catch (err) {
-      // Fallback: if connect() still throws but adapter is now connected, capture address.
-      if (adapterSolanaConnected && adapterPublicKey) {
-        setSolanaAddress(adapterPublicKey.toBase58());
-      } else {
-        console.error("Solana connect error:", err);
-      }
-      awaitingSolanaConnect.current = false;
-    }
+    connectSolanaByName(walletName);
   };
 
   const handleSolanaDisconnect = () => {

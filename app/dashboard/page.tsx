@@ -12,10 +12,10 @@ import { useLendingPositions } from "../hooks/useLendingPositions";
 import { usePositions } from "../contexts/PositionsContext";
 import { useAccount, useConnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
-import type { WalletName } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets, useConnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWalletDisconnect } from "../hooks/useWalletDisconnect";
+import { useSolanaConnect } from "../hooks/useSolanaConnect";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useLpPnl } from "../hooks/useLpPnl";
@@ -265,7 +265,7 @@ export default function Dashboard() {
   // activity fetch + computePositionPnL() resolves; rows for positions that
   // haven't landed yet (or were excluded by computePositionPnL) fall back to
   // the existing fees-only / "—" placeholders.
-  const { evmAddress: address, setEvmAddress, solanaAddress, suiAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress: address, setEvmAddress, solanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
   const { watchedWallets, addWallet, removeWallet, updateLabel, scanAddress, setScanAddress } = useWatchedWallets();
   // Sprint 4: pass the Sui/Solana wallet sets so this hook instance fetches
   // CLOSED (reconstructed) positions too — required for the Closed-tab rows.
@@ -293,31 +293,15 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const { wallet: currentSolanaWallet, select: solanaSelect, connect: connectSolanaWallet,
-    connected: adapterSolanaConnected, publicKey: adapterPublicKey, wallets: solanaWallets } = useWallet();
-  const awaitingSolanaConnectModal = useRef(false);
-  const pendingSolanaWalletName = useRef<string | null>(null);
-  useEffect(() => {
-    const pending = pendingSolanaWalletName.current;
-    if (!pending || currentSolanaWallet?.adapter.name !== pending) return;
-    pendingSolanaWalletName.current = null;
-    connectSolanaWallet().catch((err) => {
-      awaitingSolanaConnectModal.current = false;
-      console.error("Solana connect error:", err);
-    });
-  }, [currentSolanaWallet, connectSolanaWallet]);
+  const { wallets: solanaWallets } = useWallet();
+  // Solana connect (select → deferred connect → address capture) lives in the
+  // shared hook; the modal's own copy could never connect a fresh selection.
+  const connectSolanaByName = useSolanaConnect();
 
   const adapterSuiAccount = useCurrentAccount();
   const modalSuiWallets = useWallets();
   const { mutateAsync: connectSuiAsync } = useConnectWallet();
   const awaitingSuiConnectModal = useRef(false);
-
-  useEffect(() => {
-    if (awaitingSolanaConnectModal.current && adapterSolanaConnected && adapterPublicKey) {
-      setSolanaAddress(adapterPublicKey.toBase58());
-      awaitingSolanaConnectModal.current = false;
-    }
-  }, [adapterSolanaConnected, adapterPublicKey, setSolanaAddress]);
 
   useEffect(() => {
     if (awaitingSuiConnectModal.current && adapterSuiAccount) {
@@ -596,35 +580,9 @@ export default function Dashboard() {
     setAddWalletError("");
   }
 
-  // select() only QUEUES the wallet — the adapter's `wallet` updates on the next
-  // render. Calling connect() in the same tick threw WalletNotSelectedError for
-  // any wallet that was not already selected (i.e. every first connect, and
-  // every reconnect after an explicit disconnect, which clears the selection),
-  // and the catch then dropped the awaiting flag, so the address was never
-  // captured. Found 2026-10-07 while verifying disconnect → reconnect. Now the
-  // connect is deferred to the effect below, which runs once the selection has
-  // actually landed.
-  async function handleSolanaConnectFromModal(walletName: string) {
+  function handleSolanaConnectFromModal(walletName: string) {
     setShowSolanaWalletList(false);
-    const alreadySelected = currentSolanaWallet?.adapter.name === walletName;
-    // Adapter already holds a live session for this wallet: connect() would be
-    // a no-op and the capture effect would never re-fire, so adopt it directly.
-    if (alreadySelected && adapterSolanaConnected && adapterPublicKey) {
-      setSolanaAddress(adapterPublicKey.toBase58());
-      return;
-    }
-    awaitingSolanaConnectModal.current = true;
-    if (!alreadySelected) {
-      pendingSolanaWalletName.current = walletName;
-      solanaSelect(walletName as WalletName);
-      return;
-    }
-    try {
-      await connectSolanaWallet();
-    } catch (err) {
-      awaitingSolanaConnectModal.current = false;
-      console.error("Solana connect error:", err);
-    }
+    connectSolanaByName(walletName);
   }
 
   async function handleSuiConnectFromModal(wallet: (typeof modalSuiWallets)[0]) {
