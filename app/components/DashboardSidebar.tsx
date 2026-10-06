@@ -2,9 +2,7 @@
 
 import { type CSSProperties } from "react";
 import Link from "next/link";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletAuth } from "../contexts/WalletAuthContext";
-import { setDisconnected } from "../lib/walletDisconnectFlag";
+import { useWalletDisconnect } from "../hooks/useWalletDisconnect";
 import { truncateAddr } from "../lib/truncateAddr";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { WatchedWalletChain } from "../contexts/WatchedWalletsContext";
@@ -78,16 +76,8 @@ export default function DashboardSidebar({
   // (HeroWalletConnect). The sidebar only shows already-connected wallets and
   // the "+ Add Wallet" entry for watched addresses. Clicking the connected
   // SOL row disconnects (matching the existing chip-as-disconnect-target
-  // pattern); useWallet() is destructured for that single mechanic.
-  const { disconnect: disconnectSolana } = useWallet();
-  const { setSolanaAddress } = useWalletAuth();
-
-  const handleSolanaDisconnect = () => {
-    setDisconnected("solana");
-    setSolanaAddress(null);
-    if (typeof window !== "undefined") localStorage.removeItem("defidesh-solana-addr");
-    disconnectSolana();
-  };
+  // pattern) via the shared useWalletDisconnect hook.
+  const { disconnectSolana: handleSolanaDisconnect } = useWalletDisconnect();
 
   const lpProtocolPresence = (keys: string[]) =>
     positions.some((p) => p.value > 0 && keys.some((k) => p.protocol.includes(k)));

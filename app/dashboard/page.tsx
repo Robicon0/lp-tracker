@@ -10,11 +10,12 @@ import { getTokenLogo } from "../lib/tokenLogos";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useLendingPositions } from "../hooks/useLendingPositions";
 import { usePositions } from "../contexts/PositionsContext";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useAccount, useConnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { WalletName } from "@solana/wallet-adapter-base";
-import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
+import { useCurrentAccount, useWallets, useConnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { useWalletDisconnect } from "../hooks/useWalletDisconnect";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { useLpPnl } from "../hooks/useLpPnl";
@@ -285,18 +286,30 @@ export default function Dashboard() {
   }, [scanAddress, solanaAddress, watchedWallets]);
   const lpPnl = useLpPnl(allPositions, dashSuiWallets, dashSolanaWallets);
   const { connect: evmConnect, connectors } = useConnect();
-  const { disconnect: evmDisconnect } = useDisconnect();
+  // Explicit disconnect goes through the ONE shared implementation — the
+  // modal's old inline handlers only called the adapter and left the wallet
+  // on screen (see useWalletDisconnect).
+  const { disconnectEvm, disconnectSolana, disconnectSui } = useWalletDisconnect();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const { select: solanaSelect, connect: connectSolanaWallet, disconnect: disconnectSolanaWallet,
+  const { wallet: currentSolanaWallet, select: solanaSelect, connect: connectSolanaWallet,
     connected: adapterSolanaConnected, publicKey: adapterPublicKey, wallets: solanaWallets } = useWallet();
   const awaitingSolanaConnectModal = useRef(false);
+  const pendingSolanaWalletName = useRef<string | null>(null);
+  useEffect(() => {
+    const pending = pendingSolanaWalletName.current;
+    if (!pending || currentSolanaWallet?.adapter.name !== pending) return;
+    pendingSolanaWalletName.current = null;
+    connectSolanaWallet().catch((err) => {
+      awaitingSolanaConnectModal.current = false;
+      console.error("Solana connect error:", err);
+    });
+  }, [currentSolanaWallet, connectSolanaWallet]);
 
   const adapterSuiAccount = useCurrentAccount();
   const modalSuiWallets = useWallets();
   const { mutateAsync: connectSuiAsync } = useConnectWallet();
-  const { mutate: disconnectSuiWallet } = useDisconnectWallet();
   const awaitingSuiConnectModal = useRef(false);
 
   useEffect(() => {
@@ -583,16 +596,35 @@ export default function Dashboard() {
     setAddWalletError("");
   }
 
+  // select() only QUEUES the wallet — the adapter's `wallet` updates on the next
+  // render. Calling connect() in the same tick threw WalletNotSelectedError for
+  // any wallet that was not already selected (i.e. every first connect, and
+  // every reconnect after an explicit disconnect, which clears the selection),
+  // and the catch then dropped the awaiting flag, so the address was never
+  // captured. Found 2026-10-07 while verifying disconnect → reconnect. Now the
+  // connect is deferred to the effect below, which runs once the selection has
+  // actually landed.
   async function handleSolanaConnectFromModal(walletName: string) {
-    try {
+    setShowSolanaWalletList(false);
+    const alreadySelected = currentSolanaWallet?.adapter.name === walletName;
+    // Adapter already holds a live session for this wallet: connect() would be
+    // a no-op and the capture effect would never re-fire, so adopt it directly.
+    if (alreadySelected && adapterSolanaConnected && adapterPublicKey) {
+      setSolanaAddress(adapterPublicKey.toBase58());
+      return;
+    }
+    awaitingSolanaConnectModal.current = true;
+    if (!alreadySelected) {
+      pendingSolanaWalletName.current = walletName;
       solanaSelect(walletName as WalletName);
-      awaitingSolanaConnectModal.current = true;
+      return;
+    }
+    try {
       await connectSolanaWallet();
     } catch (err) {
       awaitingSolanaConnectModal.current = false;
       console.error("Solana connect error:", err);
     }
-    setShowSolanaWalletList(false);
   }
 
   async function handleSuiConnectFromModal(wallet: (typeof modalSuiWallets)[0]) {
@@ -2468,17 +2500,17 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {address ? (
-                    <ConnectedRow tagColor={C.cyan} tagLabel="EVM" addr={address} onDisconnect={() => evmDisconnect()} />
+                    <ConnectedRow tagColor={C.cyan} tagLabel="EVM" addr={address} onDisconnect={disconnectEvm} />
                   ) : (
                     <ConnectButton onClick={() => setShowEvmConnectors(true)} label="Connect EVM Wallet" tagColor={C.cyan} tagLabel="EVM" />
                   )}
                   {solanaAddress ? (
-                    <ConnectedRow tagColor={C.purple} tagLabel="SOL" addr={solanaAddress} onDisconnect={() => { setSolanaAddress(null); disconnectSolanaWallet(); }} />
+                    <ConnectedRow tagColor={C.purple} tagLabel="SOL" addr={solanaAddress} onDisconnect={disconnectSolana} />
                   ) : (
                     <ConnectButton onClick={() => setShowSolanaWalletList(true)} label="Connect Solana Wallet" tagColor={C.purple} tagLabel="SOL" />
                   )}
                   {suiAddress ? (
-                    <ConnectedRow tagColor={C.blue} tagLabel="SUI" addr={suiAddress} onDisconnect={() => { setSuiAddress(null); disconnectSuiWallet(); }} />
+                    <ConnectedRow tagColor={C.blue} tagLabel="SUI" addr={suiAddress} onDisconnect={disconnectSui} />
                   ) : (
                     <ConnectButton onClick={() => setShowSuiWalletList(true)} label="Connect Sui Wallet" tagColor={C.blue} tagLabel="SUI" />
                   )}
@@ -2655,9 +2687,9 @@ export default function Dashboard() {
                                   ) : (
                                     <button
                                       onClick={() => {
-                                        if (w.addr === address) evmDisconnect();
-                                        else if (w.addr === solanaAddress) { setSolanaAddress(null); disconnectSolanaWallet(); }
-                                        else if (w.addr === suiAddress) { setSuiAddress(null); disconnectSuiWallet(); }
+                                        if (w.addr === address) disconnectEvm();
+                                        else if (w.addr === solanaAddress) disconnectSolana();
+                                        else if (w.addr === suiAddress) disconnectSui();
                                       }}
                                       title="Disconnect wallet"
                                       style={{

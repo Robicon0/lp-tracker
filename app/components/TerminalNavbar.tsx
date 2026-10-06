@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Fragment, useEffect, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import CalculatorMenu from "./CalculatorMenu";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import MobileNavMenu from "./MobileNavMenu";
+import { useWalletDisconnect } from "../hooks/useWalletDisconnect";
+import type { WalletChain } from "../lib/walletDisconnectFlag";
 
 const NAV_LINKS = [
   { href: "/",          label: "Home"      },
@@ -33,6 +35,7 @@ const C = {
   purple:    "var(--chain-solana)",
   blue:      "var(--info)",
   warn:      "var(--warn)",
+  red:       "var(--neg)",
 } as const;
 
 const FONT = "'JetBrains Mono','Courier New',monospace";
@@ -47,7 +50,28 @@ export default function TerminalNavbar() {
   useEffect(() => setMounted(true), []);
 
   const { evmAddress: address, evmIdentitySource, solanaAddress, suiAddress } = useWalletAuth();
-  const { watchedWallets, scanAddress } = useWatchedWallets();
+  const { watchedWallets, scanAddress, removeWallet } = useWatchedWallets();
+  const { disconnectChain } = useWalletDisconnect();
+
+  // Which chip's menu is open (key = `${chain}:${addr}`), or null. Clicking a
+  // chip used to do nothing visible — it silently copied the address — so there
+  // was no way to disconnect from the bar at all. Closes on outside click / Esc.
+  const [openChip, setOpenChip] = useState<string | null>(null);
+  const [copiedChip, setCopiedChip] = useState<string | null>(null);
+  const chipsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!openChip) return;
+    const onDown = (e: MouseEvent) => {
+      if (chipsRef.current && !chipsRef.current.contains(e.target as Node)) setOpenChip(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenChip(null); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [openChip]);
 
   // Wallet chips show EVERY wallet the pages are computing over — connected,
   // watched (Manage Wallets), or the pasted scan address — not just connected.
@@ -101,39 +125,121 @@ export default function TerminalNavbar() {
     color: C.textBright,
   };
 
-  type ChipProps = { color: string; chain: string; addr: string; restored?: boolean };
-  function Chip({ color, chain, addr, restored }: ChipProps) {
+  const menuItem: CSSProperties = {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "8px 12px",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    fontSize: 11,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    fontFamily: FONT,
+    color: C.textBright,
+    whiteSpace: "nowrap",
+  };
+
+  // A render function, not a nested component: a component declared inside
+  // this one would be a NEW type every render and remount, dropping focus.
+  const renderChip = (c: ChipEntry) => {
+    const key = `${c.chain}:${c.addr}`;
+    const color = CHAIN_COLOR[c.chain] ?? C.text;
+    const label = CHAIN_LABEL[c.chain] ?? c.chain;
+    const chain = c.kind === "scan" ? `${label}·SCAN` : label;
+    const restored = c.restored;
+    const open = openChip === key;
     return (
-      <button
-        type="button"
-        onClick={() => navigator.clipboard.writeText(addr)}
-        title={restored
-          ? `${addr}\n\nLAST USED address — your wallet is locked or not connected, so this may not be your current account. Unlock it and this updates automatically.`
-          : `Copy ${chain} address`}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "5px 10px",
-          border: restored ? `1px dashed ${C.warn}` : `1px solid ${C.border}`,
-          background: restored ? "transparent" : C.bg2,
-          cursor: "pointer",
-          fontSize: 10,
-          letterSpacing: "0.04em",
-          fontFamily: FONT,
-        }}
-      >
-        <span style={{ width: 5, height: 5, background: restored ? "transparent" : color, border: restored ? `1px solid ${color}` : undefined, flexShrink: 0 }} />
-        <span style={{ color: C.text, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          {chain}
-        </span>
-        <span style={{ color: C.textMid }}>{truncate(addr)}</span>
-        {restored && (
-          <span style={{ color: C.warn, fontSize: 8, letterSpacing: "0.1em" }}>LAST USED</span>
+      <div key={key} style={{ position: "relative" }}>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpenChip(open ? null : key)}
+          title={restored
+            ? `${c.addr}\n\nLAST USED address — your wallet is locked or not connected, so this may not be your current account. Unlock it and this updates automatically.`
+            : `${chain} wallet options`}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "5px 10px",
+            border: restored ? `1px dashed ${C.warn}` : `1px solid ${open ? C.borderHi : C.border}`,
+            background: restored ? "transparent" : C.bg2,
+            cursor: "pointer",
+            fontSize: 10,
+            letterSpacing: "0.04em",
+            fontFamily: FONT,
+          }}
+        >
+          <span style={{ width: 5, height: 5, background: restored ? "transparent" : color, border: restored ? `1px solid ${color}` : undefined, flexShrink: 0 }} />
+          <span style={{ color: C.text, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {chain}
+          </span>
+          <span style={{ color: C.textMid }}>{truncate(c.addr)}</span>
+          {restored && (
+            <span style={{ color: C.warn, fontSize: 8, letterSpacing: "0.1em" }}>LAST USED</span>
+          )}
+        </button>
+        {open && (
+          <div
+            role="menu"
+            aria-label={`${chain} wallet options`}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: 0,
+              minWidth: 170,
+              background: C.bg,
+              border: `1px solid ${C.borderHi}`,
+              boxShadow: "var(--shadow-md)",
+              zIndex: 60,
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              style={menuItem}
+              onClick={() => {
+                void navigator.clipboard?.writeText(c.addr);
+                setCopiedChip(key);
+                setTimeout(() => setCopiedChip((k) => (k === key ? null : k)), 1500);
+              }}
+            >
+              {copiedChip === key ? "Copied ✓" : "Copy address"}
+            </button>
+            {c.kind === "connected" && (
+              <button
+                type="button"
+                role="menuitem"
+                style={{ ...menuItem, color: C.red, borderTop: `1px solid ${C.border}` }}
+                onClick={() => {
+                  disconnectChain(c.chain as WalletChain);
+                  setOpenChip(null);
+                }}
+              >
+                Disconnect {label} wallet
+              </button>
+            )}
+            {c.kind === "watched" && (
+              <button
+                type="button"
+                role="menuitem"
+                style={{ ...menuItem, color: C.red, borderTop: `1px solid ${C.border}` }}
+                onClick={() => {
+                  removeWallet(c.addr, c.chain as WalletChain);
+                  setOpenChip(null);
+                }}
+              >
+                Remove watched wallet
+              </button>
+            )}
+          </div>
         )}
-      </button>
+      </div>
     );
-  }
+  };
 
   return (
     <nav
@@ -219,6 +325,7 @@ export default function TerminalNavbar() {
 
       {/* Wallet chips */}
       <div
+        ref={chipsRef}
         className="hidden md:flex"
         style={{
           alignItems: "center",
@@ -227,15 +334,7 @@ export default function TerminalNavbar() {
           borderRight: `1px solid ${C.border}`,
         }}
       >
-        {mounted && visibleChips.map((c) => (
-          <Chip
-            key={`${c.chain}:${c.addr}`}
-            color={CHAIN_COLOR[c.chain] ?? C.text}
-            chain={c.kind === "scan" ? `${CHAIN_LABEL[c.chain] ?? c.chain}·SCAN` : (CHAIN_LABEL[c.chain] ?? c.chain)}
-            addr={c.addr}
-            restored={c.restored}
-          />
-        ))}
+        {mounted && visibleChips.map(renderChip)}
         {mounted && overflowCount > 0 && (
           <span
             title={chips.slice(MAX_CHIPS).map((c) => `${CHAIN_LABEL[c.chain] ?? c.chain} ${c.addr}`).join("\n")}

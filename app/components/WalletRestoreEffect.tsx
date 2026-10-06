@@ -6,6 +6,7 @@ import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useCurrentAccount, useWallets } from "@mysten/dapp-kit";
 import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { isDisconnected } from "../lib/walletDisconnectFlag";
 
 // Restores `solanaAddress` / `suiAddress` in WalletAuthContext after a page
 // refresh. Mounted once at the root in `app/layout.tsx`, so it is the SINGLE
@@ -142,6 +143,10 @@ export default function WalletRestoreEffect() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!adapterSolanaConnected || !adapterPublicKey || solanaAddress) return;
+    // An explicit disconnect always wins (wallet-security Rule 1). The adapter
+    // stays "connected" for a moment while it tears down; without this guard
+    // that window re-adopted the wallet the user had just disconnected.
+    if (isDisconnected("solana")) return;
     const hasInstalled = solanaWallets.some((w) => w.readyState === WalletReadyState.Installed);
     if (!hasInstalled) return; // not yet announced — say nothing, delete nothing
     const saved = localStorage.getItem(SOLANA_KEY);
@@ -192,6 +197,7 @@ export default function WalletRestoreEffect() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!adapterSuiAccount || suiAddress) return;
+    if (isDisconnected("sui")) return; // explicit disconnect wins — see Solana above
     if (suiWallets.length === 0) return; // not yet announced — delete nothing
     const saved = localStorage.getItem(SUI_KEY);
     if (saved && sameSuiAddress(saved, adapterSuiAccount.address)) {

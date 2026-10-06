@@ -914,6 +914,35 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(this session)** — **Wallet disconnect actually disconnects, on all three chains, from both
+  the navbar chip and Manage Wallets.** Two reported bugs plus one found in testing.
+  **(A) Navbar chip:** the click handler only copied the address silently — no menu, no disconnect
+  had ever existed. Chips now open a menu (Copy address + Disconnect {chain} wallet, or Remove
+  watched wallet). **(B) Manage Wallets Disconnect:** the modal's handlers were a weaker hand-copy
+  of the correct ones in `Navbar.tsx` / `HeroWalletConnect.tsx`. EVM called ONLY wagmi's
+  `disconnect()` — since `f64da31`/`866ead0` the displayed identity lives in WalletAuthContext +
+  `defidesh-evm-addr`, which nothing cleared, so the button was a no-op (a total no-op for a
+  `LAST USED` address, where wagmi isn't connected at all). Solana/Sui cleared the context but NOT
+  the persisted key, so `WalletRestoreEffect` re-adopted the wallet while the adapter was still
+  tearing down, and it lingered until the 15 s settle gate + 2 s debounce (`5bec9df` — whose old
+  instant clear had been masking the gap). None of the three set the disconnected flag.
+  **Fix:** NEW `app/hooks/useWalletDisconnect.ts` is the ONE explicit-disconnect implementation
+  (flag FIRST → clear context → remove OUR key → adapter disconnect), used by the modal, the
+  sidebar SOL row and the chip menu; `WalletRestoreEffect` restore now refuses when the flag is
+  set. **(C) found in testing:** `handleSolanaConnectFromModal` called `select()` then `connect()`
+  in the same tick → `WalletNotSelectedError` for any not-yet-selected wallet, and the catch
+  dropped the awaiting flag, so Solana could NEVER be connected from the modal on a fresh
+  selection (including after any disconnect). Connect is now deferred to an effect that runs once
+  the selection lands. **Verified with a before/after control** (Playwright, simulated EIP-1193 +
+  Wallet Standard wallets, `/api/**` stubbed): before **22/43**, after **62/62**, incl. no silent
+  reconnect on reload with the wallet still unlocked, and reconnect-after-disconnect persisting.
+  **⚠️ Simulated wallets, not real extensions — worth one manual pass per chain.**
+  **⚠️ NOT changed:** `Navbar.tsx` and `HeroWalletConnect.tsx` carry the same Solana
+  `select()`+`connect()` pattern (with a fallback the modal lacked); untested — follow-up.
+  **Harness note:** an already-authorized simulated EVM provider is silently reconnected on mount
+  by wagmi `reconnect()` even with no stored recent connector, so "Connect EVM Wallet" may not be
+  on screen to click. Report: `reports/wallet-disconnect-fix-report.md`. No cache bumps.
+
 - **(this session)** — **CLP Tracker Fee Claims: "Pair" filter that groups a pair ACROSS fee
   tiers.** Stored pairs carry the tier (`"SUI/USDC (0.25%)"`, from `buildRecords`), so there was no
   way to see one pair across pools. NEW `normalizePair` in `lib/nameNormalization.ts` (trim +
