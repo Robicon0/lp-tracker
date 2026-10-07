@@ -936,9 +936,32 @@ shorthand.
   the selection lands. **Verified with a before/after control** (Playwright, simulated EIP-1193 +
   Wallet Standard wallets, `/api/**` stubbed): before **22/43**, after **62/62**, incl. no silent
   reconnect on reload with the wallet still unlocked, and reconnect-after-disconnect persisting.
-  **⚠️ Simulated wallets, not real extensions — worth one manual pass per chain.**
-  **⚠️ NOT changed:** `Navbar.tsx` and `HeroWalletConnect.tsx` carry the same Solana
-  `select()`+`connect()` pattern (with a fallback the modal lacked); untested — follow-up.
+  **FOLLOW-UP VERIFICATION, same day (`e98c13c`, `1b285f0`, `1376058`) — all green on
+  PRODUCTION at `1376058`: desktop simulated 62/62, hero+navbar Solana connect 6/6,
+  phone/tablet 72/72 (emulated iPhone 14 + iPad on WebKit, Pixel 7), REAL extension 19/19.**
+  - `e98c13c`: the hero and top Navbar had the same Solana bug (first click failed silently,
+    second connected). NEW `app/hooks/useSolanaConnect.ts` is the ONE Solana connect
+    implementation for hero, Navbar and modal.
+  - `1b285f0` — **two bugs ONLY a real extension showed** (real Phantom 26.32 + throwaway wallet
+    in an isolated Playwright profile; 16/20 before, 19/19 after). **(i)** a wallet that already
+    trusts the site connects with NO prompt, i.e. instantly — and our deferred `connect()` ran in
+    an effect that fires BEFORE WalletProvider subscribes to the newly selected adapter (effects
+    run child-first), so the `connect` event was lost: adapter connected, page showed nothing.
+    `connect()` now runs one macrotask later. **(ii)** an explicitly disconnected EVM wallet CAME
+    BACK on reload: wagmi's reconnect-on-mount tries EVERY connector, one wallet is reachable
+    through two (named injected + EIP-6963), `disconnect()` marks only the one in use, wagmi
+    reconnected via the other and `useClearOnConfirmedConnect` then cleared the flag.
+    `WagmiProvider reconnectOnMount` is now gated on the flag. **LESSON: a simulated wallet is too
+    slow and too simple to show these — any wallet-flow change needs `scripts/wallet-e2e/
+    real-extension.cjs` before it is called done.**
+  - `1376058`: on phones the Manage Wallets Disconnect button overflowed its row and was 25px
+    tall; row now wraps, button 35px. Found in a SCREENSHOT — the pass/fail checks had passed.
+  **⚠️ Still open:** Sui has simulated coverage only (the extension offered no Sui wallet); no
+  PHYSICAL phone/tablet was tested; connecting only Solana with a multi-chain wallet also brings
+  in its EVM account on the next reload (silent reconnect from `866ead0` — product decision);
+  Manage Wallets labels a restored `LAST USED` EVM address "● CONNECTED" (wallet-security Rule 1
+  gap in the modal). Harness: `scripts/wallet-e2e/` (README covers the real-extension setup and
+  the `SHARE` env for protected deployments).
   **Harness note:** an already-authorized simulated EVM provider is silently reconnected on mount
   by wagmi `reconnect()` even with no stored recent connector, so "Connect EVM Wallet" may not be
   on screen to click. Report: `reports/wallet-disconnect-fix-report.md`. No cache bumps.
