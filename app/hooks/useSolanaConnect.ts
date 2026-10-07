@@ -26,6 +26,8 @@ export function useSolanaConnect() {
   const { setSolanaAddress } = useWalletAuth();
   const awaiting = useRef(false);
   const pendingName = useRef<string | null>(null);
+  const connectRef = useRef(connect);
+  useEffect(() => { connectRef.current = connect; }, [connect]);
 
   // Capture the address once a user-initiated connect completes.
   useEffect(() => {
@@ -38,15 +40,30 @@ export function useSolanaConnect() {
   // Deferred connect: fires when the queued selection becomes the adapter's
   // current wallet. connect() is a no-op if the provider's own autoConnect got
   // there first; either way the capture effect above sees the result.
+  //
+  // The setTimeout is LOAD-BEARING. Effects run child-first, so this effect
+  // fires BEFORE WalletProvider's own effect has subscribed to the newly
+  // selected adapter's `connect` event. A wallet that already trusts the site
+  // connects with no prompt, i.e. immediately — its event fired into nothing,
+  // the provider's `connected` state stayed false, and the address was never
+  // captured. Measured with a real extension 2026-10-07: connect() resolved,
+  // adapter.connected was true, and the page still showed no wallet. A prompt
+  // (first-ever connect) or a slow simulated wallet hides the race. One
+  // macrotask later every effect of this commit has run and the listener exists.
   useEffect(() => {
     const pending = pendingName.current;
     if (!pending || wallet?.adapter.name !== pending) return;
     pendingName.current = null;
-    connect().catch((err) => {
-      awaiting.current = false;
-      console.error("Solana connect error:", err);
-    });
-  }, [wallet, connect]);
+    // No cleanup on purpose: `connect` gets a new identity on re-render, and
+    // cancelling here would drop the one queued connect. The ref always holds
+    // the current function.
+    setTimeout(() => {
+      connectRef.current().catch((err) => {
+        awaiting.current = false;
+        console.error("Solana connect error:", err);
+      });
+    }, 0);
+  }, [wallet]);
 
   return useCallback((walletName: string) => {
     const alreadySelected = wallet?.adapter.name === walletName;

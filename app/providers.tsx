@@ -190,13 +190,22 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   // (no flag, first visit) = autoConnect ON; flag set = autoConnect OFF.
   const [solanaAutoConnect] = useState(() => !isDisconnected("solana"));
   const [suiAutoConnect] = useState(() => !isDisconnected("sui"));
+  // EVM needs the same gate. wagmi's reconnect-on-mount tries EVERY connector,
+  // and one wallet is usually reachable through several (its named injected
+  // connector AND its EIP-6963 announcement). disconnect() only marks the one
+  // connector that was in use, so on the next load wagmi silently reconnected
+  // through another, the confirmed-connect watcher cleared the flag, and an
+  // explicitly disconnected wallet came back. Measured with a real extension
+  // 2026-10-07. An explicit disconnect must never be overridden by a silent
+  // restore (wallet-security Rule 1).
+  const [evmReconnectOnMount] = useState(() => !isDisconnected("evm"));
 
   return (
     <ConnectionProvider endpoint={SOLANA_RPC}>
       <WalletProvider wallets={solanaWallets} autoConnect={solanaAutoConnect}>
         <SolanaConnectionWatcher />
         <WalletAuthProvider>
-          <WagmiProvider config={config}>
+          <WagmiProvider config={config} reconnectOnMount={evmReconnectOnMount}>
             <QueryClientProvider client={queryClient}>
               <EvmDisconnectGate />
               <EvmConnectionWatcher />
