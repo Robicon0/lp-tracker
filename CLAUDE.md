@@ -947,7 +947,7 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Base history restored — hash added at commit)** — **Aerodrome closed positions and fee
+- **`0294937`** (Base history restored) — **Aerodrome closed positions and fee
   history are back for every Base user, without the archive `eth_getLogs` the public gateway
   stopped serving.** Account 1 (EVM alone): 14 Aerodrome positions (13 closed + 1 open, was 1),
   Aerodrome Capital G/L −$1,644.47, wallet Capital G/L **−$3,524.86**, Aerodrome fees
@@ -996,9 +996,26 @@ shorthand.
   in and came out entirely in USDC.
   **The remaining `≈ approximate — 1 position priced from estimates` on Account 1 is ProjectX
   HYPE/USDC tokenId 435568 on HyperEVM (closed 2026-05-06) — ITEM 0h, not Base.**
-  **Timings, LOCAL production build (each RPC round trip costs 0.4–1.9 s from the dev machine,
-  so these overstate production):** `scope=open` 2.3–4.8 s alone, `scope=closed` 4–6 s warm
-  and 18–28 s on a wallet's first-ever scan (82 receipts). Production not yet measured.
+  **PRODUCTION, measured 2026-10-07 on `0294937` (deployment `dpl_2bi4M4RA…`), Account 1 full
+  wallet set (EVM + Solana + Sui), desktop + emulated iPhone + iPad:** Capital G/L
+  **≈ −$12,106.70** (90 closed rows) on all three; Fees Collected **$7,183.38**; Current Value
+  = dashboard to the cent on desktop ($27,584.87) and iPad; 14 Aerodrome breakdown rows;
+  Aerodrome in Fee Income by protocol; no Base history banner lines; 0 page errors.
+  `/api/aerodrome` open half median **1.95 s** (1.39–2.29, 5 calls), closed half **1.41 s**
+  warm (1.20–1.96); first position row desktop 5.1 s (first load after the deploy), iPhone
+  2.0 s, iPad 2.1 s (was 3.0 s). The marker now reads "approximate — 3 positions priced from
+  estimates": ProjectX 435568 (ITEM 0h) plus the two OPEN Orca positions `2Lz5pXUu…` and
+  `Hdzq35PC…`, whose deposit events carry an estimate basis. (The `~` on Total Deposited is NOT explained
+  by these alone — it also showed locally with Orca absent; still queue item d.)
+  **⚠️ 20 back-to-back loads throttled the shared providers (again — same lesson as ITEM 0i).**
+  Vercel logs for the window show Alchemy "exceeded its compute units per second", "Sui RPC
+  failed (all endpoints)" and empty RPC bodies across aerodrome, uniswap, pancakeswap, cetus,
+  aave and the lending routes. All 20 loads settled (median 26.6 s, 6.9–84.0 s); two took over
+  60 s (68 s, 84 s) while Aerodrome activity requests ran 26–52 s; none hung. Two loads (9 and
+  12) ended on LOWER totals — Total Deposited $16,444.76 and Current Value $15,852.47 with no
+  marker, Capital G/L −$10,115.22 marked "incomplete — some history couldn't be loaded".
+  Base history now runs on the same Alchemy key as the open sweep and the lending rates, so
+  it shares their per-second budget. **Do not repeat a 20-load run on production.**
   **Still open:** the Uniswap / Velodrome transfer-index fallback was never checked
   against known figures (their gateways still serve logs; a cache entry for Account 1 on
   Arbitrum shows it has run at least once); the empty-Sugar gate still hides closed positions for a
