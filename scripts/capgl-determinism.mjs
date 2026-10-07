@@ -121,6 +121,15 @@ for (let r = 1; r <= RUNS; r++) {
       localStorage.setItem("lp-watched-wallets", JSON.stringify([{ address: a, chain: "evm", label: "det" }]));
     } catch (e) {}
   }, WALLET);
+  // A test load must not WRITE to the analytics snapshot store: it is one Redis
+  // database shared by production, so a snapshot saved from a test build
+  // becomes what real visitors to the same wallet set see first. Reads still go
+  // through. The page is told the write succeeded so its own flow is unchanged.
+  await ctx.route("**/api/analytics-snapshot", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, testNoWrite: true }) })
+      : route.continue(),
+  );
   const page = await ctx.newPage();
 
   const api = [];
