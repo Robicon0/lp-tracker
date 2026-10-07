@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
+import { getEverOwnedTokenIds, type EverOwnedResult } from '../../lib/evmEverOwnedNftIds';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
-import type { RouteTruncation } from '../../lib/enumerationTruncation';
+import {
+  type RouteTruncation,
+  lookupFailureNotice,
+  LOOKUP_FAILED,
+} from '../../lib/enumerationTruncation';
 import {
   resolveSugarSpanForFactory,
   pageSugarPositions,
@@ -134,19 +138,28 @@ function toInt24Topic(topicHex: string): number {
 // any failure a minimal Closed record is still returned so the position appears
 // in the dashboard Closed tab. Display-only: fees are recovered separately via
 // /api/aerodrome/activity?positionId=all (wallet-scope), so value/fees are 0.
+// Queue item B: returns a NOTICE alongside the positions. A failed ever-owned
+// enumeration used to `return []`, which the route then published as a confident
+// `count` — so every closed position (and its Capital G/L) silently vanished.
+// The notice is the honest alternative: the positions we DID resolve, plus an
+// explicit statement that the set may be short.
 async function buildClosedPositions(
   account: string,
   heldIds: Set<string>,
   prices: Record<string, number>,
-): Promise<Record<string, unknown>[]> {
-  let everOwned: string[] = [];
+): Promise<{ positions: Record<string, unknown>[]; notice: RouteTruncation | null }> {
+  let enumeration: EverOwnedResult;
   try {
-    everOwned = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
+    enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
   } catch {
-    return [];
+    // A throw is as uninformative as an error response — same disclosure.
+    return { positions: [], notice: lookupFailureNotice('Base closed-position recovery') };
   }
-  const closedIds = everOwned.filter((id) => !heldIds.has(id));
-  if (closedIds.length === 0) return [];
+  const notice = enumeration.complete
+    ? null
+    : lookupFailureNotice('Base closed-position recovery', enumeration.reason ?? LOOKUP_FAILED);
+  const closedIds = enumeration.ids.filter((id) => !heldIds.has(id));
+  if (closedIds.length === 0) return { positions: [], notice };
 
   // ── Sprint GAUGE-STAKING ─────────────────────────────────────────────
   // "Not returned by Sugar" is NOT the same as "closed". Staking a Slipstream
@@ -285,7 +298,7 @@ async function buildClosedPositions(
 
   // Genuinely-burned positions keep their existing Closed behaviour; staked
   // ones ride along in the OPEN shape.
-  return [...closedBuilt, ...stakedOut];
+  return { positions: [...closedBuilt, ...stakedOut], notice };
 }
 
 // Fetch prices from CoinGecko
@@ -545,13 +558,20 @@ export async function GET(request: Request) {
     // exit). Returned as Closed records so they appear in the dashboard Closed
     // tab; their fees are recovered via /api/aerodrome/activity?positionId=all.
     const heldIds = new Set(rawPositions.map((p) => p.id));
-    const closedPositions = await buildClosedPositions(account, heldIds, prices);
+    const closed = await buildClosedPositions(account, heldIds, prices);
+    const closedPositions = closed.positions;
+    // Queue item B — a failed closed-position enumeration now travels on the
+    // SAME channel as a bound cap, because it has the same meaning for the user:
+    // this list is not necessarily everything. Pushed here (not inside the
+    // helper) so the one response carries every reason it may be short.
+    if (closed.notice) truncated.push(closed.notice);
 
     return NextResponse.json({
       positions: [...positions, ...closedPositions],
       count: positions.length + closedPositions.length,
       account,
-      // Additive (queue item C Phase 1) — present ONLY when Sugar's cap bound.
+      // Additive (queue item C Phase 1) — present ONLY when a cap bound or a
+      // lookup failed (queue item B).
       ...(truncated.length > 0 ? { truncated } : {}),
     });
   } catch (error) {

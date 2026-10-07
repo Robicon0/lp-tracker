@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
+import { hasLookupFailure } from "../lib/enumerationTruncation";
+import { useTruncationNotices } from "./useTruncationNotices";
 
 // ── Result shape ────────────────────────────────────────────────────────────
 
@@ -165,6 +167,57 @@ export interface LpPnlResult {
   // analytics UI as "N claims pending price resolution" so the user knows a
   // fee figure is incomplete (vs. silently understated). 0 in the happy path.
   pendingClaimCount: number;
+  /**
+   * ITEM 0i STRUCTURAL INVARIANT — true when this aggregate CONTRADICTS ITSELF:
+   * every headline total is zero while the breakdown it summarises is non-empty.
+   *
+   * The two are computed from the SAME `perPosition` data, so they cannot
+   * honestly disagree: if there are closed rows carrying real dollar figures,
+   * the totals over them are not zero. When they do disagree, something upstream
+   * failed to resolve and the zeros are an artifact, not a measurement.
+   *
+   * This is a cheap, cause-agnostic tripwire. It does not need to know WHY (a
+   * hung positions source, a throttled upstream, a cold instance) — it catches
+   * the whole class by checking an identity that must always hold. Observed live
+   * on production 2026-09-19 (determinism harness, run 2): TOTAL DEPOSITED $0.00
+   * / CAPITAL G/L +$0.00 with `pricingIncomplete:false`, no exclusion notice,
+   * zero page errors — and 4 real closed rows rendered directly below it.
+   *
+   * The UI MUST NOT present the totals as authoritative while this is true.
+   */
+  aggregateSelfContradictory: boolean;
+  /**
+   * True while any position/history LOOKUP for this session reported itself
+   * failed or unavailable (`lookup-failed` / `lookup-unavailable` on the
+   * enumeration-truncation channel). A closed position the lookup could not
+   * find is absent from `closedRows` and from Capital G/L, so the figure is a
+   * partial sum however cleanly the positions we DID find were priced.
+   *
+   * When true, `capitalGLComplete` is forced false. It is deliberately a
+   * SEPARATE flag from `capitalGLPricingPending` / `capitalGLApproximate`:
+   * those describe how the known rows were priced; this says rows are missing.
+   * Measured 2026-10-07: with Base history lookups refused upstream, a wallet's
+   * Capital G/L read −$1,880.39 against −$4,635.37 with its Aerodrome closed
+   * positions present, and the only reason it carried a `≈` was an unrelated
+   * estimate-priced position.
+   */
+  historyLookupFailed: boolean;
+}
+
+/**
+ * ITEM 0i — the ONE definition of "this aggregate contradicts its own
+ * breakdown": every headline total is zero while closed rows exist. Exported
+ * because the analytics page can render headline totals from a SAVED SNAPSHOT
+ * above a LIVE breakdown, and that combination needs the same check — the first
+ * version tested only the live aggregate and missed exactly that case.
+ */
+export function isAggregateSelfContradictory(
+  totals: { initialValue: number; currentValue: number; capitalGL: number; feesCollected: number; netPnl: number },
+  closedRowCount: number,
+): boolean {
+  return closedRowCount > 0 &&
+    totals.initialValue === 0 && totals.currentValue === 0 && totals.capitalGL === 0 &&
+    totals.feesCollected === 0 && totals.netPnl === 0;
 }
 
 const EMPTY: LpPnlResult = {
@@ -178,6 +231,8 @@ const EMPTY: LpPnlResult = {
   capitalGLPricingPending: 0,
   capitalGLApproximate: 0,
   capitalGLComplete: true,
+  aggregateSelfContradictory: false,
+  historyLookupFailed: false,
   stalePositions: [],
   estimatedPositionCount: 0,
   pendingClaimCount: 0,
@@ -1377,6 +1432,24 @@ function aggregate(
   // `≈` marker still applies to both — only the explanation differs.
   const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0;
 
+  // ITEM 0i — the self-contradiction check. Every headline zero AND a non-empty
+  // breakdown is impossible from consistent data, so it means the aggregate is
+  // an artifact of something that failed to resolve. Deliberately requires the
+  // breakdown to be non-empty: a genuinely empty wallet has all-zero totals and
+  // no rows, which is consistent and must stay silent.
+  const aggregateSelfContradictory = isAggregateSelfContradictory(
+    { initialValue, currentValue, capitalGL, feesCollected, netPnl },
+    closedRows.length,
+  );
+  if (aggregateSelfContradictory) {
+    console.warn(
+      `[useLpPnl] ITEM 0i INVARIANT VIOLATED — all headline totals are $0.00 but the ` +
+        `breakdown has ${closedRows.length} closed row(s). The totals are an artifact, ` +
+        `not a measurement; the UI must not present them as final. ` +
+        `included=${included} excluded=${excluded} errored=${errored} inflight=${inflight}`,
+    );
+  }
+
   return {
     initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
     ilUSD, capitalGL, netPnl, netPnlPct, included, excluded,
@@ -1393,6 +1466,10 @@ function aggregate(
     stalePositions,
     estimatedPositionCount,
     pendingClaimCount,
+    aggregateSelfContradictory,
+    // Set by the hook, not here: it comes from the truncation registry, which
+    // aggregate() (a pure function of per-position results) does not read.
+    historyLookupFailed: false,
   };
 }
 
@@ -1771,5 +1848,15 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result.capitalGLPricingPending, pricingRetry]);
 
-  return result;
+  // A failed history lookup means closed positions may be missing altogether,
+  // so Capital G/L cannot be called complete whatever the pricing state is.
+  // Read from the same registry the banner renders, so the marker and the
+  // banner can never disagree about whether a lookup failed.
+  const historyLookupFailed = hasLookupFailure(useTruncationNotices());
+  return useMemo(
+    () => (historyLookupFailed
+      ? { ...result, historyLookupFailed: true, capitalGLComplete: false }
+      : result),
+    [result, historyLookupFailed],
+  );
 }

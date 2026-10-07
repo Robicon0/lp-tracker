@@ -38,6 +38,7 @@
 
 import { NextResponse } from 'next/server';
 import { logPrice } from './priceLogger';
+import { isLookupFailureReason } from './enumerationTruncation';
 
 const SUCCESS_TTL_MS = 5 * 60_000; // cache-versioning Rule 3 — success
 const EMPTY_TTL_MS = 60_000;       // cache-versioning Rule 3 — empty result
@@ -83,6 +84,24 @@ function isEmptyPayload(body: unknown): boolean {
     return Array.isArray(ev) && ev.length === 0;
   }
   return false;
+}
+
+// Queue item B — a result that DISCLOSED its own incompleteness must never be
+// cached either. It is not an error (status 200, well-formed, and honest about
+// being short), so `isErrorPayload` lets it through; but caching it pins the
+// shortfall for the whole TTL, and the next request — which might have succeeded
+// — is never made. That is the Sprint 1.14 "a transient failure must not freeze
+// in" rule, applied to the in-process tier.
+//
+// A `lookup-*` reason means "we could not see everything". A CAP reason
+// (pool-scan-ceiling, wallet-scope-id-cap, …) is deliberately NOT treated this
+// way: a cap binds deterministically, so re-computing returns the identical
+// answer and caching it costs nothing.
+function isIncompletePayload(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || !('truncated' in body)) return false;
+  const t = (body as { truncated?: unknown }).truncated;
+  if (!Array.isArray(t)) return false;
+  return t.some((n) => isLookupFailureReason((n as { reason?: unknown })?.reason));
 }
 
 // An error result must NEVER be cached (cache-versioning Rule 3): a transient RPC
@@ -158,12 +177,19 @@ export function withActivityRouteCache(
       inFlight.delete(key);
     }
 
-    if (!isErrorPayload(result.status, result.body)) {
+    const incomplete = isIncompletePayload(result.body);
+    if (!isErrorPayload(result.status, result.body) && !incomplete) {
       const ttl = isEmptyPayload(result.body) ? EMPTY_TTL_MS : SUCCESS_TTL_MS;
       cache.set(key, { res: result, expiresAt: Date.now() + ttl });
       prune();
     }
-    logPrice({ event: 'activity_cache', route, status: 'miss', ms: Date.now() - t0 });
+    logPrice({
+      event: 'activity_cache',
+      route,
+      status: 'miss',
+      ms: Date.now() - t0,
+      ...(incomplete ? { notCached: 'incomplete' } : {}),
+    });
     return NextResponse.json(result.body, { status: result.status });
   };
 }

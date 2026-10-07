@@ -11,7 +11,7 @@ import { useLendingPositions, type ExternalLendingPosition } from "../hooks/useL
 import { useAllPositionsActivity } from "../hooks/useAllPositionsActivity";
 import InfoTooltip from "../components/InfoTooltip";
 import { useWalletLevelFees } from "../hooks/useWalletLevelFees";
-import { useLpPnl, seedLkgFromSnapshot, collectLkgEntries } from "../hooks/useLpPnl";
+import { useLpPnl, seedLkgFromSnapshot, collectLkgEntries, isAggregateSelfContradictory } from "../hooks/useLpPnl";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 // Type-only import — erased at compile time, never pulls the server lib
@@ -497,7 +497,7 @@ function Skel({ w = 80, h = 20, r = 3, style }: { w?: number | string; h?: numbe
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function Analytics() {
-  const { positions, isLoading } = usePositions();
+  const { positions, isLoading, pendingSources, failedSources } = usePositions();
   const { positions: externalLendingPositions } = useLendingPositions();
   const { tokens: rawWalletTokens } = useWalletTokens();
   const { rates: aaveRates, prices: aavePrices } = useAaveV3Rates(rawWalletTokens);
@@ -1044,11 +1044,31 @@ export default function Analytics() {
   // a ≤24h snapshot renders every aggregate instantly; once the pipeline settles
   // CLEANLY the same-named selectors below flip to the live values in place (no
   // flicker, no blanking — a failed refresh keeps the snapshot displayed).
+  //
+  // `pendingSources.length === 0` is load-bearing. `isLoading` drops as soon as
+  // ANY position source answers (progressive rendering), and a source that
+  // answers "no positions here" first leaves every downstream hook idle for a
+  // moment — nothing loading, nothing errored — while the sources that DO hold
+  // this wallet's positions are still in flight. Without this term that moment
+  // counted as "settled": the page flipped to an all-zero live aggregate and,
+  // worse, SAVED it as the wallet's snapshot. Measured 2026-10-07: a load that
+  // went on to show Capital G/L −$1,880.39 had already written a snapshot with
+  // every LP total at 0.
   const pipelineSettled =
-    !isLoading && !activityLoading && !walletFeesLoading &&
+    !isLoading && pendingSources.length === 0 && !activityLoading && !walletFeesLoading &&
     !lpPnlLive.isLoading && !lpPnlLive.suiClosedLoading && !lpPnlLive.solanaClosedLoading;
   const liveTrustworthy = pipelineSettled && lpPnlLive.errored === 0;
-  const useSnap = !!snapshot && !liveTrustworthy;
+  // ITEM 0i, snapshot side. A saved snapshot is only as good as the compute that
+  // wrote it, and it is rendered ABOVE a breakdown that is always live. If the
+  // snapshot's LP totals are all zero while live closed rows exist, or it
+  // counted no LP positions while live positions exist, it contradicts what is
+  // on screen beneath it and must not be shown as the wallet's figures — the
+  // live (progressive, self-checking) values render instead.
+  const snapshotContradictsLive = !!snapshot && (
+    isAggregateSelfContradictory(snapshot.lpPnl, lpPnlLive.closedRows.length) ||
+    (snapshot.lpPnl.included + snapshot.lpPnl.excluded === 0 && filteredPositions.length > 0)
+  );
+  const useSnap = !!snapshot && !liveTrustworthy && !snapshotContradictsLive;
 
   const feeIncome = useSnap && snapshot ? snapshot.feeIncome : feeIncomeLive;
   const lpPnl = useSnap && snapshot
@@ -1066,6 +1086,14 @@ export default function Analytics() {
         // Sprint 4: breakdown rows are live-only detail (snapshots don't store
         // them) — same contract as perPosition above.
         closedRows: lpPnlLive.closedRows,
+        // The snapshot's totals sit above the LIVE breakdown, so the invariant
+        // is evaluated on exactly that pairing (lpPnlLive's own flag describes
+        // the live totals, which are not the ones on screen here).
+        aggregateSelfContradictory: isAggregateSelfContradictory(snapshot.lpPnl, lpPnlLive.closedRows.length),
+        // Incomplete if EITHER the compute that wrote the snapshot had a failed
+        // history lookup or this session's live lookups have reported one.
+        historyLookupFailed: lpPnlLive.historyLookupFailed || snapshot.lpPnl.historyLookupFailed === true,
+        capitalGLComplete: lpPnlLive.capitalGLComplete && snapshot.lpPnl.historyLookupFailed !== true,
       }
     : lpPnlLive;
   const totalPortfolioValue = useSnap && snapshot ? snapshot.header.totalPortfolioValue : totalPortfolioValueLive;
@@ -1106,6 +1134,20 @@ export default function Analytics() {
     if (!liveTrustworthy || !hasWallet || !walletSetKey || !snapshotChecked) return;
     if (lpPnlLive.stalePositions.length > 0) return;
     if (positions.length === 0 && lendingPositions.length === 0) return;
+    // Never save a compute that is missing a whole source, or whose LP totals
+    // contradict what it found. Each of these used to be saved as the wallet's
+    // "last complete compute" and then served back as confident zeros:
+    //   • a position source FAILED — its positions are absent, not nonexistent;
+    //   • an LP position has arrived but has no result yet. Every position ends
+    //     as included, excluded or errored, so fewer results than positions
+    //     means one is still to come. This closes a one-render gap: a position
+    //     arrives, and for that render the P&L hook has not yet marked itself
+    //     loading — measured 2026-10-07 as a snapshot saved with 4 of 5
+    //     positions and Total Deposited 0;
+    //   • every LP total is zero while closed rows exist (ITEM 0i).
+    if (failedSources.length > 0) return;
+    if (lpPnlLive.included + lpPnlLive.excluded + lpPnlLive.errored < filteredPositions.length) return;
+    if (lpPnlLive.aggregateSelfContradictory) return;
     if (snapshotWrittenForRef.current === walletSetKey) return;
     snapshotWrittenForRef.current = walletSetKey;
     const adjustedNetPnl =
@@ -1138,6 +1180,7 @@ export default function Analytics() {
         excluded: lpPnlLive.excluded,
         pendingClaimCount: lpPnlLive.pendingClaimCount,
         estimatedPositionCount: lpPnlLive.estimatedPositionCount,
+        ...(lpPnlLive.historyLookupFailed ? { historyLookupFailed: true } : {}),
       },
       // Sprint SPOT-RESILIENCE-V2: per-position last-known-good, read from the
       // client LKG cache (written ONLY from genuine successful computes — never
@@ -1155,7 +1198,7 @@ export default function Analytics() {
       .then((r) => { if (r.ok) setSnapshot(payload); }) // status line → "updated just now"
       .catch(() => { /* quiet — next visit recomputes as usual */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveTrustworthy, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length]);
+  }, [liveTrustworthy, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory]);
 
   // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {
@@ -2052,7 +2095,7 @@ export default function Analytics() {
                           color: c.color,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                           textShadow: c.color === C.green ? "0 0 12px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
-                          opacity: (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete)) ? 0.6 : 1,
+                          opacity: (lpPnl.aggregateSelfContradictory || (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete))) ? 0.6 : 1,
                         }}
                       >
                         {/* An incompletely-priced Capital G/L is a PARTIAL sum,
@@ -2061,12 +2104,26 @@ export default function Analytics() {
                             -$2,274.08 / -$3,652.87 across three identical loads,
                             each looking final. The "≈" plus the sub-note below
                             say so until every position is priced. */}
-                        {c.pendingClosed && !lpPnl.capitalGLComplete ? `≈ ${c.val}` : c.val}
+                        {/* ITEM 0i — the aggregate contradicts its own
+                            breakdown (all headlines $0.00 while closed rows
+                            exist below). A zero here is an artifact of
+                            something that failed to resolve, not a measurement,
+                            so it must not be shown AS a measurement. An em-dash
+                            is the honest render: we do not know this number. */}
+                        {lpPnl.aggregateSelfContradictory
+                          ? "—"
+                          : c.pendingClosed && !lpPnl.capitalGLComplete ? `≈ ${c.val}` : c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
                       {(lpPnl.included === 0 && lpPnl.isLoading)
                         ? "calculating…"
+                        // ITEM 0i — takes precedence over every other sub-note:
+                        // while the aggregate disagrees with its own breakdown,
+                        // no explanation of HOW the number was priced is
+                        // meaningful, because the number is not being shown.
+                        : lpPnl.aggregateSelfContradictory
+                        ? "couldn't verify — see breakdown below"
                         : (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading))
                           ? "scanning closed positions…"
                           // ITEM 0g (G3) — two DIFFERENT reasons a Capital G/L
@@ -2079,6 +2136,11 @@ export default function Analytics() {
                           // change it, so the copy must not imply it might.
                           // Pending wins when both apply: it is the part that
                           // is still moving.
+                          // A failed history lookup outranks both: rows are
+                          // MISSING, which no amount of pricing detail about
+                          // the rows we do have can describe.
+                          : (c.pendingClosed && lpPnl.historyLookupFailed)
+                            ? "incomplete — some history couldn't be loaded"
                           : (c.pendingClosed && lpPnl.capitalGLPricingPending > 0)
                             ? `incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`
                             : (c.pendingClosed && lpPnl.capitalGLApproximate > 0)

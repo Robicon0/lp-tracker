@@ -8,6 +8,11 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import {
+  type RouteTruncation,
+  lookupFailureNotice,
+  LOOKUP_FAILED,
+} from '../../../lib/enumerationTruncation';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
@@ -282,7 +287,14 @@ async function GET_impl(request: Request) {
     // the original Slipstream architecture, so the bug and fix are the same.
     // See app/lib/evmPoolContext.ts for the measured evidence.
     if (walletScope) {
-      const ids = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK);
+      const enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK);
+      const ids = enumeration.ids;
+      // Queue item B — wallet-scope fees are summed over THIS id set. If the
+      // enumeration was short, every total below is short too, and saying
+      // nothing renders a confident partial as the wallet's lifetime fees.
+      const scanNotices: RouteTruncation[] = enumeration.complete
+        ? []
+        : [lookupFailureNotice('Optimism history scan', enumeration.reason ?? LOOKUP_FAILED)];
       const ctxs = await resolveEvmPositionContexts(ids, {
         chain: 'optimism',
         rpc: TENDERLY_RPC,
@@ -345,6 +357,9 @@ async function GET_impl(request: Request) {
         totalFees0: tf0, totalFees1: tf1,
         positions: perPosition,
         excluded,
+        // Additive — read by useWalletLevelFees's applyTruncationNotices, the
+        // same channel the Sugar caps already travel on.
+        ...(scanNotices.length > 0 ? { truncated: scanNotices } : {}),
       });
     }
 

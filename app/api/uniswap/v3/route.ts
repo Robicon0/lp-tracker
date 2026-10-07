@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
-import type { RouteTruncation } from '../../../lib/enumerationTruncation';
+import {
+  type RouteTruncation,
+  lookupFailureNotice,
+  LOOKUP_FAILED,
+  LOOKUP_UNAVAILABLE,
+} from '../../../lib/enumerationTruncation';
 import { ethCallMany } from '../../../lib/evmBatchCall';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
@@ -734,11 +739,19 @@ async function fetchPositionsForChain(
     try {
       const heldIds = new Set(positions.map((p) => String(p.tokenId)));
       const everOwned = await getEverOwnedTokenIds(chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0);
+      // Queue item B — an enumeration that failed is NOT an empty wallet. Without
+      // this the whole recovery block silently produced zero burned positions.
+      if (!everOwned.complete) {
+        truncated.push(lookupFailureNotice(
+          `${chain.chainName} closed-position recovery`,
+          everOwned.reason ?? LOOKUP_FAILED,
+        ));
+      }
       // Cap candidates so an active LP / market-maker wallet (hundreds of
       // ever-owned NFTs) can't fan out into hundreds of positions()+receipt
       // calls and time the route out. Normal users (the defensive target) have
       // a handful, so the cap never triggers for them.
-      const allCandidates = everOwned.filter((id) => !heldIds.has(id));
+      const allCandidates = everOwned.ids.filter((id) => !heldIds.has(id));
       const candidates = allCandidates.slice(0, CLOSED_CANDIDATE_CAP);
       if (allCandidates.length > candidates.length) {
         truncated.push({
@@ -756,7 +769,19 @@ async function fetchPositionsForChain(
       for (const r of burned) if (r) positions.push(r);
     } catch (err) {
       console.error(`[uniswap] burned-recovery failed on ${chainKey}:`, err);
+      // Queue item B — a thrown recovery dropped every burned position with no
+      // trace. Disclose it on the same channel as a bound cap.
+      truncated.push(lookupFailureNotice(`${chain.chainName} closed-position recovery`));
     }
+  } else if (!archiveRpc) {
+    // No archive endpoint exists for this chain (BNB: Tenderly has no BSC
+    // gateway). Previously "skipped gracefully" — i.e. silently, so a BNB
+    // wallet's burned positions were absent with nothing said. This is the
+    // UNAVAILABLE case by definition: retrying cannot help, configuration can.
+    truncated.push(lookupFailureNotice(
+      `${chain.chainName} closed-position recovery`,
+      LOOKUP_UNAVAILABLE,
+    ));
   } else if (archiveRpc) {
     // The open-position enumeration consumed the chain's budget. Skipping
     // recovery keeps the route inside `maxDuration`; saying so keeps it honest —

@@ -257,7 +257,7 @@ function ScanModeListener() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch, pendingSources } = usePositions();
+  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch, pendingSources, failedSources } = usePositions();
   // Per-position activity events — used for proper P&L calculation per row.
   // Per-row P&L on the positions table comes from the SAME on-chain pipeline
   // that feeds the analytics LP P&L totals — no parallel calculation, no
@@ -1755,6 +1755,20 @@ export default function Dashboard() {
               <div style={{ fontSize: 11, color: C.text, opacity: 0.55, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
                 <span className="spin-icon" style={{ display: "inline-block", marginRight: 6 }}>↻</span>
                 still scanning: {pendingSources.join(" · ")}
+              </div>
+            )}
+
+            {/* Queue item B — a source whose fetch FAILED used to contribute
+                nothing and say nothing, so the table below simply looked
+                shorter (or empty) with no indication that anything was wrong.
+                Warn-coloured rather than error-red: the positions that DID
+                load are fine, and this is about what is missing from them.
+                Deliberately not a spinner — retries are already exhausted. */}
+            {mounted && !isLoading && failedSources.length > 0 && (
+              <div style={{ fontSize: 11, color: C.amber, opacity: 0.85, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
+                <span style={{ display: "inline-block", marginRight: 6 }}>⚠</span>
+                couldn&apos;t load: {failedSources.join(" · ")} — positions and fees from{" "}
+                {failedSources.length === 1 ? "this source" : "these sources"} are missing from the totals
               </div>
             )}
 

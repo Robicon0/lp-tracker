@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { getEverOwnedTokenIds } from '../../lib/evmEverOwnedNftIds';
+import { getEverOwnedTokenIds, type EverOwnedResult } from '../../lib/evmEverOwnedNftIds';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
 import {
@@ -8,7 +8,11 @@ import {
   pageSugarPositions,
   sugarCeilingTruncations,
 } from '../../lib/sugarPaging';
-import type { RouteTruncation } from '../../lib/enumerationTruncation';
+import {
+  type RouteTruncation,
+  lookupFailureNotice,
+  LOOKUP_FAILED,
+} from '../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -143,15 +147,20 @@ async function buildClosedPositions(
   account: string,
   heldIds: Set<string>,
   prices: Record<string, number>,
-): Promise<Record<string, unknown>[]> {
-  let everOwned: string[] = [];
+): Promise<{ positions: Record<string, unknown>[]; notice: RouteTruncation | null }> {
+  // Queue item B — identical treatment to the Aerodrome route: a failed
+  // enumeration is disclosed, never published as "this wallet owns nothing".
+  let enumeration: EverOwnedResult;
   try {
-    everOwned = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
+    enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
   } catch {
-    return [];
+    return { positions: [], notice: lookupFailureNotice('Optimism closed-position recovery') };
   }
-  const closedIds = everOwned.filter((id) => !heldIds.has(id));
-  if (closedIds.length === 0) return [];
+  const notice = enumeration.complete
+    ? null
+    : lookupFailureNotice('Optimism closed-position recovery', enumeration.reason ?? LOOKUP_FAILED);
+  const closedIds = enumeration.ids.filter((id) => !heldIds.has(id));
+  if (closedIds.length === 0) return { positions: [], notice };
 
   // ── Sprint GAUGE-STAKING ─────────────────────────────────────────────
   // Identical treatment to the Aerodrome route — Velodrome is the original
@@ -291,7 +300,7 @@ async function buildClosedPositions(
 
   // Genuinely-burned positions keep their existing Closed behaviour; staked
   // ones ride along in the OPEN shape.
-  return [...closedBuilt, ...stakedOut];
+  return { positions: [...closedBuilt, ...stakedOut], notice };
 }
 
 // Fetch prices from CoinGecko
@@ -548,7 +557,9 @@ export async function GET(request: Request) {
     // exit). Returned as Closed records so they appear in the dashboard Closed
     // tab; their fees are recovered via /api/velodrome/activity?positionId=all.
     const heldIds = new Set(rawPositions.map((p) => p.id));
-    const closedPositions = await buildClosedPositions(account, heldIds, prices);
+    const closed = await buildClosedPositions(account, heldIds, prices);
+    const closedPositions = closed.positions;
+    if (closed.notice) truncated.push(closed.notice);
 
     return NextResponse.json({
       positions: [...positions, ...closedPositions],

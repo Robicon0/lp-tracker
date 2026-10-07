@@ -8,7 +8,11 @@ import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
-import type { RouteTruncation } from '../../../lib/enumerationTruncation';
+import {
+  type RouteTruncation,
+  lookupFailureNotice,
+  LOOKUP_FAILED,
+} from '../../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -474,7 +478,8 @@ async function GET_impl(request: Request) {
       // bounded only part of the work and let the request reach 203 s. One
       // budget for the whole block keeps the route predictable.
       const deadline = Date.now() + WALLET_SCOPE_BUDGET_MS;
-      const allIds = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
+      const enumeration = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
+      const allIds = enumeration.ids;
       const ids = allIds.slice(0, MAX_WALLET_IDS);
       // Queue item C Phase 1 — the dropped ids used to vanish without a trace,
       // even though this route already had an `excluded[]` channel sitting right
@@ -548,6 +553,16 @@ async function GET_impl(request: Request) {
       // per id in `excluded[]`, summarised for the banner in `truncated`.
       for (const tokenId of timedOutIds) excluded.push({ tokenId, reason: 'wallet-scope-time-budget' });
       const truncated: RouteTruncation[] = [];
+      // Queue item B — a THIRD shortfall joins the two below: the ever-owned
+      // enumeration itself may have failed, in which case `allIds` is short and
+      // so is every fee total computed from it. Pushed first so it reads before
+      // the cap/budget notices, which are consequences of a set we DID see.
+      if (!enumeration.complete) {
+        truncated.push(lookupFailureNotice(
+          chain.charAt(0).toUpperCase() + chain.slice(1),
+          enumeration.reason ?? LOOKUP_FAILED,
+        ));
+      }
       // Just the chain as scope: the client labels this source "<protocol>
       // history scan", so repeating "wallet-scope closed scan" here would read
       // as a stutter in the rendered notice.

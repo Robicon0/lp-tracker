@@ -77,6 +77,11 @@ export interface SnapshotLpPnl {
   excluded: number;
   pendingClaimCount: number;
   estimatedPositionCount: number;
+  // Optional (additive — an older v2 blob without it still validates). True
+  // when the compute that produced this snapshot had a failed history lookup,
+  // so its Capital G/L is a partial sum and must not be shown as settled while
+  // the snapshot is on screen.
+  historyLookupFailed?: boolean;
 }
 
 // Sprint SPOT-RESILIENCE-V2: one closed/open position's last-known-good computed

@@ -28,6 +28,17 @@ interface PositionsContextValue {
   // resolved yet — lets pages show a subtle "still scanning X…" hint while
   // already-arrived positions render. Empty once everything has loaded.
   pendingSources: string[];
+  /**
+   * Queue item B / ITEM 0i — sources whose fetch FAILED (react-query exhausted
+   * its retries). Previously a failed source "contributed nothing", which is
+   * indistinguishable from a source that legitimately returned no positions: the
+   * page rendered a smaller portfolio, or an empty one, with nothing said.
+   *
+   * This is the SOURCE-layer counterpart to the per-position degrade funnel
+   * (architecture Rule 11). That funnel protects a position whose own fetch
+   * fails; nothing protected the case where the whole source never answered.
+   */
+  failedSources: string[];
 }
 
 const PositionsContext = createContext<PositionsContextValue>({
@@ -38,6 +49,7 @@ const PositionsContext = createContext<PositionsContextValue>({
   dataUpdatedAt: 0,
   refetch: () => {},
   pendingSources: [],
+  failedSources: [],
 });
 
 // One entry per (protocol source, wallet address) — each becomes its own React
@@ -261,10 +273,20 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, queries.filter((q) => q.isPending).length]);
 
+  // Queue item B — a source that errored is NAMED, not silently dropped. Keyed
+  // off the same `signature` memo discipline as pendingSources so the array
+  // identity is stable across renders that changed nothing.
+  const failedSources = useMemo(() => {
+    const labels = new Set<string>();
+    queries.forEach((q, i) => { if (q.isError) labels.add(sources[i].label); });
+    return [...labels];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, queries.filter((q) => q.isError).length]);
+
   const refetch = () => { void queryClient.invalidateQueries({ queryKey: ["positions"] }); };
 
   return (
-    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch, pendingSources }}>
+    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch, pendingSources, failedSources }}>
       {children}
     </PositionsContext.Provider>
   );

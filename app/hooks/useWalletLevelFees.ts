@@ -415,14 +415,19 @@ export function useWalletLevelFees(
       const hit = urlCacheRef.current.get(url);
       if (hit) return hit;
       const p = fetch(url)
-        .then((r) => (r.ok ? (r.json() as Promise<RawActivityResponse & { truncated?: RouteTruncation[] }>) : { events: [] }))
+        // `failed` marks a non-OK response. It must NOT reach
+        // applyTruncationNotices: passing "no truncated field" there CLEARS the
+        // notice, i.e. reads a failed fetch as proof the scan was complete.
+        .then((r) => (r.ok
+          ? (r.json() as Promise<RawActivityResponse & { truncated?: RouteTruncation[]; failed?: boolean }>)
+          : ({ events: [], failed: true } as RawActivityResponse & { truncated?: RouteTruncation[]; failed?: boolean })))
         .then((j) => {
           // Queue item C Phase 1 — a wallet-scope scan that hit its id cap
           // computed Capital G/L and Fee Income over a PARTIAL set of the
           // wallet's ever-owned positions. Disclosed under a source label
           // distinct from the positions fetchers', so the banner says the
           // shortfall is in the HISTORY scan, not in the position list.
-          if (account) {
+          if (account && !j.failed) {
             applyTruncationNotices(`${protocol} history scan`, account, (j as { truncated?: RouteTruncation[] }).truncated);
           }
           return (j.events ?? []).map((e) => ({ event: e, protocol, chain }));
@@ -500,7 +505,7 @@ export function useWalletLevelFees(
         `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
         `&pool=${encodeURIComponent(ctx.pool)}` +
         `&p0=${ctx.price0}&p1=${ctx.price1}`;
-      fetches.push(dedupFetch(aeroUrl, "Aerodrome", "Base"));
+      fetches.push(dedupFetch(aeroUrl, "Aerodrome", "Base", ctx.account));
     }
 
     // Velodrome (Optimism) wallet-scope fee scan — recovers Collect events from
@@ -515,7 +520,7 @@ export function useWalletLevelFees(
         `&t0d=${ctx.decimals0}&t1d=${ctx.decimals1}` +
         `&pool=${encodeURIComponent(ctx.pool)}` +
         `&p0=${ctx.price0}&p1=${ctx.price1}`;
-      fetches.push(dedupFetch(veloUrl, "Velodrome", "Optimism"));
+      fetches.push(dedupFetch(veloUrl, "Velodrome", "Optimism", ctx.account));
     }
 
     // Uniswap V3 (multi-chain) wallet-scope fee scan — recovers Collect events

@@ -47,6 +47,62 @@ export interface RouteTruncation {
   reason: string;
 }
 
+/**
+ * Reason codes for a notice that reports a FAILED LOOKUP rather than a cap.
+ *
+ * Queue item B / ITEM 0i. A cap and a failure are different causes with the SAME
+ * user-facing consequence — "what you are looking at is not everything" — so they
+ * share this channel rather than growing a second one. The distinction that
+ * matters is not cap-vs-failure, it is COMPLETE-vs-NOT, and a caller that cannot
+ * say which must never present its result as complete.
+ *
+ * Why this exists: an enumeration that failed used to `return []`, which is
+ * indistinguishable from "this wallet owns nothing". The route then emitted a
+ * well-formed, confident, WRONG answer — no banner, no exclusion, no error. That
+ * is architecture Rule 11 inverted: it did not degrade, it erased. Measured live
+ * 2026-09-19: every Aerodrome closed position vanished from the Closed tab,
+ * Capital G/L and Fee Income for every Base user, because three public RPC
+ * providers had closed their free `eth_getLogs` tiers and the failure was
+ * swallowed at `evmEverOwnedNftIds.ts`.
+ *
+ * `cap` / `returned` are 0 for these: no cap bound, nothing was returned. The
+ * copy branches in `describeTruncation` BEFORE reading either, so the
+ * cap-oriented wording can never be applied to a failure.
+ */
+export const LOOKUP_FAILED = 'lookup-failed';
+export const LOOKUP_UNAVAILABLE = 'lookup-unavailable';
+
+/**
+ * Build a notice for a lookup that FAILED or was UNAVAILABLE.
+ *
+ * `lookup-failed`      — the call was made and errored / returned unusable data
+ *                        (transient: throttle, 5xx, network). Retryable.
+ * `lookup-unavailable` — the capability is absent by configuration, not by luck
+ *                        (no archive endpoint configured, provider withdrew the
+ *                        free tier). Retrying changes nothing; say so differently.
+ */
+export function lookupFailureNotice(
+  scope: string,
+  reason: typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE = LOOKUP_FAILED,
+): RouteTruncation {
+  return { scope, cap: 0, returned: 0, knownTotal: null, reason };
+}
+
+/**
+ * True for a reason that means "a lookup did not complete" (as opposed to a cap
+ * that bound). The ONE definition, shared by the banner wording, the Capital G/L
+ * completeness marker and the activity-route cache, so the three cannot drift on
+ * what counts as a failed lookup.
+ */
+export function isLookupFailureReason(reason: unknown): boolean {
+  return typeof reason === 'string' && reason.startsWith('lookup-');
+}
+
+/** True when at least one notice reports a failed / unavailable lookup. */
+export function hasLookupFailure(notices: ReadonlyArray<{ reason: string }>): boolean {
+  return notices.some((n) => isLookupFailureReason(n.reason));
+}
+
 /** A registry entry: a route truncation plus who reported it. */
 export interface TruncationNotice extends RouteTruncation {
   /** Fetcher label, matching PositionsContext's source labels. */
@@ -141,6 +197,13 @@ export function describeTruncation(n: TruncationNotice): string {
   // saying so would misdescribe what was missed. Each gets its own wording so
   // the notice states the real limit the user ran into.
   switch (n.reason) {
+    // Queue item B / ITEM 0i — a FAILED lookup, not a cap. These must be worded
+    // as "we could not verify", never as a count, because we do not know the
+    // count: that is precisely what failed.
+    case LOOKUP_FAILED:
+      return `${where}: couldn't verify this right now — some positions and fees may be missing from totals`;
+    case LOOKUP_UNAVAILABLE:
+      return `${where}: history lookup is unavailable right now — some positions and fees may be missing from totals`;
     case 'pool-scan-ceiling':
       return `${where}: this contract can only scan the first ${n.cap} pools — a position staked in a newer pool would not be listed`;
     case 'page-revert-skipped':
