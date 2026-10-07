@@ -2828,12 +2828,17 @@ function ConnectedRow({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
+        // Wrap rather than overflow: at phone width the address + CONNECTED +
+        // Disconnect do not fit on one line, and without wrapping the
+        // Disconnect button was pushed out past the row's right border.
+        flexWrap: "wrap",
+        gap: 8,
         background: C.bg1,
         border: `1px solid ${tagColor}`,
         padding: "9px 12px",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <span
           style={{
             fontSize: 12,
@@ -2846,19 +2851,20 @@ function ConnectedRow({
         >
           {tagLabel}
         </span>
-        <span style={{ fontSize: 14, color: C.textBright, fontFamily: FONT }}>
+        <span style={{ fontSize: 14, color: C.textBright, fontFamily: FONT, whiteSpace: "nowrap" }}>
           {addr.slice(0, 8)}…{addr.slice(-6)}
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ color: C.green, fontSize: 14, fontWeight: 600, letterSpacing: "0.08em" }}>● CONNECTED</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+        <span style={{ color: C.green, fontSize: 14, fontWeight: 600, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>● CONNECTED</span>
         <button
           onClick={onDisconnect}
           style={{
             background: C.redFaint,
             border: `1px solid ${C.red}`,
             color: C.red,
-            padding: "2px 8px",
+            // Tall enough to hit reliably with a finger (was 25px).
+            padding: "7px 10px",
             fontSize: 12,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
