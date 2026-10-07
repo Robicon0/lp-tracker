@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { useQueries, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { fetchAerodromePositions, AerodromePosition } from "../lib/aerodrome";
+import { fetchAerodromePositions, fetchAerodromeClosedPositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
 import { useWatchedWallets } from "./WatchedWalletsContext";
 import { fetchUniswapV3Positions } from "../lib/uniswap";
@@ -215,6 +215,10 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   for (const a of evmFetchAddresses) {
     sources.push(
       { label: "Aerodrome", address: a, fetcher: fetchAerodromePositions },
+      // Closed + gauge-staked Aerodrome positions need the wallet's whole NFT
+      // history, so they are their own source: the open rows above paint first
+      // and this one stays in `pendingSources` (totals marked) until it lands.
+      { label: "Aerodrome history", address: a, fetcher: fetchAerodromeClosedPositions },
       { label: "Uniswap V3", address: a, fetcher: fetchUniswapV3Positions },
       { label: "Velodrome", address: a, fetcher: fetchVelodromePositions },
       { label: "HyperEVM", address: a, fetcher: fetchHyperSwapPositions },

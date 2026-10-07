@@ -397,7 +397,7 @@ export default function PositionDetail() {
   const { data: aeroActivity, isLoading: aeroActivityLoading, error: aeroActivityError } = usePositionActivity(
     aeroTokenId, pos?.token0Decimals ?? 18, pos?.token1Decimals ?? 18,
     pos?.token0Address, pos?.token1Address, pos?.price0, pos?.price1,
-    pos?.tickLower, pos?.tickUpper,
+    pos?.tickLower, pos?.tickUpper, pos?.walletAddress,
   );
 
   const bluefinObjId = pos?.protocol === 'Bluefin' ? pos.id.replace('bluefin-', '') : null;

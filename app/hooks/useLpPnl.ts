@@ -432,6 +432,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) p.set("p0", String(pos.price0));
     if (pos.price1 != null) p.set("p1", String(pos.price1));
     if (pos.poolAddress) p.set("pool", pos.poolAddress);
+    if (pos.walletAddress) p.set("owner", pos.walletAddress);
     appendTicks();
     return `/api/aerodrome/activity?${p}`;
   }
@@ -524,6 +525,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price1 != null) p.set("p1", String(pos.price1));
     if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
+    if (pos.walletAddress) p.set("owner", pos.walletAddress);
     return `/api/uniswap/activity?${p}`;
   }
   if (pos.protocol === "Velodrome") {
@@ -536,6 +538,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price1 != null) p.set("p1", String(pos.price1));
     if (pos.poolAddress) p.set("pool", pos.poolAddress);
     appendTicks();
+    if (pos.walletAddress) p.set("owner", pos.walletAddress);
     return `/api/velodrome/activity?${p}`;
   }
   if (pos.protocol === "PancakeSwap V3") {
@@ -1152,6 +1155,11 @@ export interface ClosedPositionRow {
   feesUSD: number;       // lifetime claimed fees (separate from Capital G/L, Rule 4)
   capitalGL: number;     // withdrawalUSD − depositUSD
   inTotals: boolean;     // chain ∈ CAPITAL_GL_CHAINS ⇒ counted in the Capital G/L cell
+  // True when any of this position's deposits/withdrawals was valued on a
+  // SUBSTITUTE price basis (tick estimate or current spot) — the same per-
+  // position test `capitalGLApproximate` / the spot-fallback count use, so a row
+  // can be named as the one behind the `≈`. Display/test only.
+  estimated: boolean;
 }
 
 interface PositionMeta {
@@ -1316,6 +1324,7 @@ function aggregate(
           feesUSD: d.feesCollected,
           capitalGL: d.closingValue - d.initialValue,
           inTotals: !!(chain && CAPITAL_GL_CHAINS.has(chain)),
+          estimated: (d.estimatedBasisEventCount ?? 0) > 0 || (d.spotFallbackEventCount ?? 0) > 0,
         });
       }
       included += 1;

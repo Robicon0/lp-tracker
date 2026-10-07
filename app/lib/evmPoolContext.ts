@@ -108,8 +108,10 @@ export async function resolveEvmPositionContext(opts: {
   increaseTopic: string;
   poolMintTopic: string;
   deployBlock: number;
+  /** The position's mint tx, when already known — skips the log query for it. */
+  mintTxHash?: string;
 }): Promise<EvmPositionContext | null> {
-  const { chain, rpc, nftManager, tokenId, increaseTopic, poolMintTopic, deployBlock } = opts;
+  const { chain, rpc, nftManager, tokenId, increaseTopic, poolMintTopic, deployBlock, mintTxHash } = opts;
   const cacheKey = `${KEY_PREFIX}${chain}:${nftManager.toLowerCase()}:${tokenId}`;
 
   if (memCache.has(cacheKey)) return memCache.get(cacheKey) ?? null;
@@ -126,24 +128,29 @@ export async function resolveEvmPositionContext(opts: {
   try {
     const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
 
-    // 1. The position's FIRST IncreaseLiquidity log (survives a burned NFT).
-    const logsRes = await evmRpcPost(rpc, {
-      jsonrpc: '2.0', id: 1, method: 'eth_getLogs',
-      params: [{
-        address: nftManager,
-        topics: [increaseTopic, tokenIdHex],
-        fromBlock: '0x' + deployBlock.toString(16),
-        toBlock: 'latest',
-      }],
-    });
-    const logs = (logsRes.result as Array<{ transactionHash: string; blockNumber: string }> | undefined) ?? [];
-    if (logsRes.error || logs.length === 0) return cacheAndReturn(cacheKey, null);
-    logs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
+    // 1. The position's FIRST IncreaseLiquidity log (survives a burned NFT) —
+    //    unless the caller already knows the mint tx.
+    let firstTx = mintTxHash ?? null;
+    if (!firstTx) {
+      const logsRes = await evmRpcPost(rpc, {
+        jsonrpc: '2.0', id: 1, method: 'eth_getLogs',
+        params: [{
+          address: nftManager,
+          topics: [increaseTopic, tokenIdHex],
+          fromBlock: '0x' + deployBlock.toString(16),
+          toBlock: 'latest',
+        }],
+      });
+      const logs = (logsRes.result as Array<{ transactionHash: string; blockNumber: string }> | undefined) ?? [];
+      if (logsRes.error || logs.length === 0) return cacheAndReturn(cacheKey, null);
+      logs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
+      firstTx = logs[0].transactionHash;
+    }
 
     // 2. That tx's receipt → the POOL's own Mint log; its `address` is the pool.
     const rcptRes = await evmRpcPost(rpc, {
       jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt',
-      params: [logs[0].transactionHash],
+      params: [firstTx],
     });
     const rcpt = rcptRes.result as { logs?: Array<{ address: string; topics: string[] }> } | undefined;
     const mintLog = rcpt?.logs?.find(
@@ -196,15 +203,16 @@ function cacheAndReturn(key: string, ctx: EvmPositionContext | null): EvmPositio
 /** Batch helper — resolves many positions with bounded concurrency. */
 export async function resolveEvmPositionContexts(
   ids: string[],
-  base: Omit<Parameters<typeof resolveEvmPositionContext>[0], 'tokenId'>,
+  base: Omit<Parameters<typeof resolveEvmPositionContext>[0], 'tokenId' | 'mintTxHash'>,
   concurrency = 4,
+  mintTxById: Record<string, string> = {},
 ): Promise<Map<string, EvmPositionContext | null>> {
   const out = new Map<string, EvmPositionContext | null>();
   let i = 0;
   const workers = Array.from({ length: Math.min(concurrency, ids.length) }, async () => {
     while (i < ids.length) {
       const id = ids[i++];
-      out.set(id, await resolveEvmPositionContext({ ...base, tokenId: id }));
+      out.set(id, await resolveEvmPositionContext({ ...base, tokenId: id, mintTxHash: mintTxById[id] }));
     }
   });
   await Promise.all(workers);

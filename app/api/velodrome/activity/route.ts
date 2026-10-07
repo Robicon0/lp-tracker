@@ -8,6 +8,8 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import { archiveRpcUrl } from '../../../lib/evmArchiveRpc';
+import { getVerifiedPositionLogs } from '../../../lib/evmAssetTransferHistory';
 import {
   type RouteTruncation,
   lookupFailureNotice,
@@ -19,7 +21,7 @@ const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
 const ALCHEMY_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit
-const TENDERLY_RPC = 'https://optimism.gateway.tenderly.co';
+const TENDERLY_RPC = archiveRpcUrl('optimism');
 // LlamaRPC Optimism — secondary: now enforces 30k block range limit (code -32012)
 const LLAMA_RPC = 'https://op.llamarpc.com';
 // publicnode — tertiary fallback for chunked scanning
@@ -162,7 +164,7 @@ async function fetchLogsChunked(
   return allLogs;
 }
 
-async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
+async function fetchLogs(tokenIdHex: string, owner: string): Promise<RawLog[]> {
   const logsParams = {
     address: NFT_MANAGER,
     topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
@@ -179,6 +181,12 @@ async function fetchLogs(tokenIdHex: string): Promise<RawLog[]> {
     return tenderlyAttempt.result ?? [];
   }
   console.warn('[velodrome/activity] Tenderly error:', tenderlyAttempt.error.message);
+
+  // Tier 1a: the holder's transfer-index history, used only when it reconciles.
+  const viaTransfers = await getVerifiedPositionLogs({
+    chain: 'optimism', nftManager: NFT_MANAGER, tokenId: BigInt(tokenIdHex).toString(), owner,
+  });
+  if (viaTransfers) return viaTransfers;
 
   // Tier 2: LlamaRPC full range
   const llamaAttempt = await rpcPost(LLAMA_RPC, {
@@ -265,6 +273,7 @@ async function GET_impl(request: Request) {
   // positionId=all pattern. Per-tokenId mode (numeric positionId) is unchanged.
   const account    = (searchParams.get('account') ?? '').toLowerCase();
   const walletScope = positionId === 'all';
+  const owner = (searchParams.get('owner') ?? '').toLowerCase();
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -287,7 +296,7 @@ async function GET_impl(request: Request) {
     // the original Slipstream architecture, so the bug and fix are the same.
     // See app/lib/evmPoolContext.ts for the measured evidence.
     if (walletScope) {
-      const enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK);
+      const enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK, 'optimism');
       const ids = enumeration.ids;
       // Queue item B — wallet-scope fees are summed over THIS id set. If the
       // enumeration was short, every total below is short too, and saying
@@ -302,7 +311,7 @@ async function GET_impl(request: Request) {
         increaseTopic: TOPIC_INCREASE,
         poolMintTopic: POOL_MINT_TOPIC,
         deployBlock: DEPLOY_BLOCK,
-      });
+      }, 4, enumeration.history?.mintTx ?? {});
 
       const origin = new URL(request.url).origin;
       const perPosition: Array<Record<string, unknown>> = [];
@@ -325,6 +334,7 @@ async function GET_impl(request: Request) {
         sub.searchParams.set('t0d', String(ctx.decimals0));
         sub.searchParams.set('t1d', String(ctx.decimals1));
         sub.searchParams.set('pool', ctx.pool);
+        sub.searchParams.set('owner', account);
         try {
           const res = await GET_impl(new Request(sub.toString()));
           const body = (await res.json()) as ActivityResponse & { error?: string };
@@ -366,7 +376,7 @@ async function GET_impl(request: Request) {
     let logs: RawLog[];
     {
       const tokenIdHex = '0x' + BigInt(positionId).toString(16).padStart(64, '0');
-      logs = await fetchLogs(tokenIdHex);
+      logs = await fetchLogs(tokenIdHex, owner);
     }
 
     if (logs.length === 0) {

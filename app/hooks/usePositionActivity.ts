@@ -57,6 +57,7 @@ export function usePositionActivity(
   price1?: number,
   tickLower?: number | null,
   tickUpper?: number | null,
+  owner?: string,
 ) {
   const [data, setData] = useState<PositionActivityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -87,6 +88,7 @@ export function usePositionActivity(
     if (price1 != null) params.set('p1', String(price1));
     if (tickLower != null) params.set('tickLower', String(tickLower));
     if (tickUpper != null) params.set('tickUpper', String(tickUpper));
+    if (owner) params.set('owner', owner);
 
     fetch(`/api/aerodrome/activity?${params.toString()}`)
       .then((r) => r.json())
@@ -109,7 +111,7 @@ export function usePositionActivity(
       });
 
     return () => { cancelled = true; };
-  }, [positionId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1, tickLower, tickUpper]);
+  }, [positionId, token0Decimals, token1Decimals, token0Address, token1Address, price0, price1, tickLower, tickUpper, owner]);
 
   return { data, isLoading, error };
 }

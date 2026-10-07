@@ -84,9 +84,24 @@ interface AerodromeResponse {
   error?: string;
 }
 
-export async function fetchAerodromePositions(account: string): Promise<AerodromePosition[]> {
+// The Aerodrome route is asked for in two halves so the open positions never
+// wait for history (performance baseline: first render 1–4 s):
+//
+//   fetchAerodromePositions        scope=open   — the fast Sugar sweep
+//   fetchAerodromeClosedPositions  scope=closed — burned / gauge-staked positions,
+//                                  which need the wallet's whole NFT history
+//
+// Each is its own source in PositionsContext, so the closed half shows up in
+// `pendingSources` while it loads and the totals stay marked until it lands.
+// The notices are keyed per half: a clean answer from one must not clear a
+// notice the other raised.
+async function fetchAerodromeScope(
+  account: string,
+  scope: 'open' | 'closed',
+  noticeSource: string,
+): Promise<AerodromePosition[]> {
   try {
-    const response = await fetch(`/api/aerodrome?account=${account}`);
+    const response = await fetch(`/api/aerodrome?account=${account}&scope=${scope}`);
     const data: AerodromeResponse = await response.json();
 
     if (data.error) {
@@ -97,11 +112,19 @@ export async function fetchAerodromePositions(account: string): Promise<Aerodrom
     // Record (or clear) the truncation notice for this source+wallet. Only
     // reached on a SUCCESSFUL response — a failed fetch must never be read as
     // evidence that the enumeration was complete.
-    applyTruncationNotices('Aerodrome', account, data.truncated);
+    applyTruncationNotices(noticeSource, account, data.truncated);
 
     return (data.positions || []).map((p: AerodromePosition) => ({ ...p }));
   } catch (error) {
     console.error('Failed to fetch Aerodrome positions:', error);
     return [];
   }
+}
+
+export function fetchAerodromePositions(account: string): Promise<AerodromePosition[]> {
+  return fetchAerodromeScope(account, 'open', 'Aerodrome');
+}
+
+export function fetchAerodromeClosedPositions(account: string): Promise<AerodromePosition[]> {
+  return fetchAerodromeScope(account, 'closed', 'Aerodrome history');
 }

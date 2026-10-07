@@ -235,17 +235,12 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
-**🔴 NEXT UP (owner-ordered 2026-10-07): BASE HISTORY, then the SOLANA SAFETY NET.**
+**🔴 NEXT UP (owner-ordered 2026-10-07): the SOLANA SAFETY NET (Base history is built).**
 
-**1. Base history is DOWN for every Base user (Tenderly outage).** The public Tenderly Base
-gateway now refuses `eth_getLogs` over 1,000 blocks ("Block range too large for public
-access"); publicnode's archive needs a token (403); Alchemy free caps `getLogs` at 10 blocks.
-Effect on production: Aerodrome closed positions missing (Account 1 shows 1 position instead
-of 8, Capital G/L −$1,880.39 instead of −$4,635.37), `/api/aerodrome/activity` returns 500 for
-the open position, the wallet-scope scan returns nothing. `7d5e496` DISCLOSES this (banner +
-incomplete marker) but does not fix it. Phase A is read-only: free route first
-(`alchemy_getAssetTransfers` or a chunked scan for ever-owned NFTs, env override for the
-hardcoded RPC URLs), then what a paid archive plan adds.
+**1. ✅ Base history — BUILT (see Recent fixes, "Base history restored").** The public Tenderly
+Base gateway refuses `eth_getLogs` over 1,000 blocks, so Base history now comes from the
+transfer index (free Alchemy plan). Left open on purpose: production timings and the Uniswap /
+Velodrome fallback path still need a live measurement; **C2** (pool-scan ceiling) is unchanged.
 
 **2. Solana safety net — design APPROVED, plan-gate before building.** After a Helius key
 rotation every Solana user silently saw zero open Orca/Raydium positions. Build
@@ -254,6 +249,19 @@ covers all five Solana routes plus the DefiTuna on-chain check; client wrappers 
 the truncation channel instead of returning `[]`; routes `console.error`. No public Solana RPC
 as a third endpoint. Note Alchemy has no `getAssetBatch`. Report:
 `reports/solana-missing-positions.md`.
+
+**Queued from the Base history work (owner-listed 2026-10-08 — NOT built, each needs its own
+plan):**
+- **a. Closed Aerodrome positions for a wallet with no open Aerodrome position.** The
+  empty-Sugar gate returns before the closed half runs, so such a wallet sees no closed rows.
+- **b. DefiLlama pools list (about 15 MB) is downloaded on every positions request.** It is too
+  big for Next's data cache ("items over 2MB can not be cached") and sits on the open path.
+- **c. Snapshot save is intermittent.** After a fully settled load the page sometimes never
+  POSTs its snapshot. Find the blocking condition (suspects: the save effect's deps do not
+  include `stalePositions` / `errored`). Cost today is only a slower first paint next visit.
+- **d. The `~` on Total Deposited comes from a non-Base position.** Trace which one.
+- **e. Hard ceiling (about 60 s) on a positions source.** A stuck source must end as
+  "unavailable", never "loading" forever. This is the still-open part (b) of ITEM 0i.
 
 **Small fixes list:** Solana balances "couldn't load" notice on Token Holdings / the wallet
 page (deliberately left out of the safety net). Local `.env.local` Helius key is dead, and the
@@ -494,7 +502,7 @@ matching Cetus/Bluefin/Aerodrome. Requires a `lp-pnl-events`/`analytics-activity
 totals change). Complexity SMALL. Verify on a Uniswap wallet with a claim CoinGecko can't
 price: the claim must report pending, never a spot figure.
 
-**⚪ ITEM 0f — LOW / cosmetic: the determinism harness's row scraper also matches the
+**✅ ITEM 0f — FIXED (harness reads the marked breakdown table only; live values get a tolerance). Original: the determinism harness's row scraper also matches the
 OPEN-positions table, so live price movement reads as "the position SET is unstable".**
 _(Found 2026-08-06.)_ `scripts/capgl-determinism.mjs` selects any `<tr>` with ≥3 dollar cells,
 which catches the main positions table as well as the Capital G/L breakdown; an open
@@ -938,6 +946,65 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **(Base history restored — hash added at commit)** — **Aerodrome closed positions and fee
+  history are back for every Base user, without the archive `eth_getLogs` the public gateway
+  stopped serving.** Account 1 (EVM alone): 14 Aerodrome positions (13 closed + 1 open, was 1),
+  Aerodrome Capital G/L −$1,644.47, wallet Capital G/L **−$3,524.86**, Aerodrome fees
+  $2,533.41, the open position's fee history 200 (was 500). Chain table with all 14 tokenIds and
+  tx hashes: `reports/aerodrome-reconciliation.md`.
+  **⚠️ FIGURE SUPERSEDED: Account 1's Capital G/L is −$3,524.86, not −$4,635.37.** The old
+  figure was measured in August with 7 closed Aerodrome positions; six more have closed since.
+  **FOUR STANDING RULES from this work:**
+  **(a) All EVM history / archive calls go through `app/lib/evmArchiveRpc.ts`.** No hardcoded
+  provider URL in a route (there were 12, in 6 files). Per-chain env override, read through
+  `rpcUrlFromEnv`: `EVM_ARCHIVE_RPC_BASE` (alias `TENDERLY_NODE_RPC`), `_ETHEREUM`,
+  `_ARBITRUM`, `_POLYGON`, `_OPTIMISM`. `archiveServesWideLogs(chain)` is the capability
+  switch (Base: false on the public gateway) — flip config, not route code, when a provider
+  changes. The returned URL can carry a key: never log it.
+  **(b) History is completeness-checked PER POSITION, and an unverifiable position is flagged
+  through the existing banner, never served.** `app/lib/evmAssetTransferHistory.ts` rebuilds
+  each position's events from the transfer index (`alchemy_getAssetTransfers` + receipts) and
+  reconciles liquidity: Σ Increase − Σ Decrease must equal 0 for a burned NFT (and collects must
+  cover decreases), or the on-chain `positions(id).liquidity` otherwise. A position that fails
+  gets a second lookup (ERC-20 transfers between the wallet and its pool — covers positions
+  operated through a gauge, router or Sickle); if it still fails, `getVerifiedPositionLogs`
+  returns null and the route pushes `lookupFailureNotice('Base history scan',
+  LOOKUP_UNAVAILABLE)`. Verified on a Sickle (5 positions) and a gauge-staking wallet (66);
+  dropping one Decrease log on purpose made exactly that position unverified.
+  **(c) Position routes return OPEN positions before closed history.** `/api/aerodrome` takes
+  `scope=open` (the Sugar sweep) and `scope=closed` (burned + gauge-staked, needs the wallet's
+  whole NFT history); the client asks for both at once as two sources, "Aerodrome" and
+  "Aerodrome history". While the history source is pending, Capital G/L, Net P&L, Total
+  Deposited and Current Value show `≈` + "N positions still loading" / "closed history still
+  loading" (`loadingMore` in `app/analytics/page.tsx`); an open-position sum with nothing in it
+  yet shows `—`, never `$0.00`. Any new slow per-wallet scan on a positions route gets its own
+  scope and source the same way — never put it back in front of the open rows.
+  **(d) ONE transfer-index scan per wallet, cached and extended incrementally.** In-flight
+  dedup + 60 s memo in process; Redis `evm_wallet_hist_v1:{chain}:{manager}:{wallet}` (30 d,
+  only blocks ≤ head−64, failed scans never stored). An EOA whose nonce and NFT balance are
+  unchanged skips the transfer queries entirely; a later scan only reads past the stored
+  cursors. Routes, activity scans and the wallet-scope scan all read this one result.
+  Also: the wallet-scope Aerodrome scan runs 3 positions at a time (output identical);
+  activity URLs carry `owner`; breakdown rows carry `data-position-id` / `data-estimated`.
+  **Harness:** `scripts/capgl-determinism.mjs` now prints `VERDICT: PASS` / `FAIL`. Settled
+  figures (Total Deposited, Capital G/L, Fees Collected, every breakdown row) must match to the
+  cent; Current Value and Net P&L may move within `--live-tol` (1% of Current Value) because an
+  open position is re-priced each load. Rows come from the marked breakdown table only (closes
+  ITEM 0f). A flat row (deposited === withdrawn) fails only when it is undisclosed AND not
+  reproduced on every run: five of Account 1's Aerodrome positions are flat because they went
+  in and came out entirely in USDC.
+  **The remaining `≈ approximate — 1 position priced from estimates` on Account 1 is ProjectX
+  HYPE/USDC tokenId 435568 on HyperEVM (closed 2026-05-06) — ITEM 0h, not Base.**
+  **Timings, LOCAL production build (each RPC round trip costs 0.4–1.9 s from the dev machine,
+  so these overstate production):** `scope=open` 2.3–4.8 s alone, `scope=closed` 4–6 s warm
+  and 18–28 s on a wallet's first-ever scan (82 receipts). Production not yet measured.
+  **Still open:** the Uniswap / Velodrome transfer-index fallback was never checked
+  against known figures (their gateways still serve logs; a cache entry for Account 1 on
+  Arbitrum shows it has run at least once); the empty-Sugar gate still hides closed positions for a
+  wallet with no open Aerodrome position; no physical phone or tablet. New Redis key only — no
+  bump to `lp-pnl-events` / `analytics-activity` (previously the events were simply absent, and
+  failed fetches were never cached).
 
 - **`7d5e496` + `cfb2cd0`** — **A failed history lookup is DISCLOSED, never shown as a
   confident number (queue item B and ITEM 0i, both closed for the EVM routes).**
@@ -2559,6 +2626,13 @@ shorthand.
 - `app/lib/clmmTickDecoder.ts` — `solanaCLMMTickRegistry` (binary tick-array
   dispatch) + `anchorDiscriminator`. Solana only; Sui uses JSON extraction.
 
+**EVM history sources** (canonical — see "Base history restored" in Recent fixes):
+- `app/lib/evmArchiveRpc.ts` — `archiveRpcUrl(chain)` / `archiveServesWideLogs(chain)`: the
+  ONLY place an EVM archive endpoint is named. Never hardcode a provider URL in a route.
+- `app/lib/evmAssetTransferHistory.ts` — `getWalletNftHistory` / `getVerifiedPositionLogs`:
+  one cached transfer-index scan per wallet, completeness-checked per position. Used first on
+  a chain whose archive cannot serve wide logs, and as the fallback elsewhere.
+
 **Shared chain RPC transport** (canonical — Contract invariant (l), Sprint
 SUI-RPC-RELIABILITY `8d82287`):
 - `app/lib/suiRpc.ts` — `suiRpc(method, params)`: EVERY Sui read routes through
@@ -2620,6 +2694,10 @@ Investigate-first, always. Before any fix:
 All changes are additive unless explicitly replacing broken logic.
 Every fix is a platform fix that benefits all current and future users
 with similar position shapes. Never wallet-specific framing.
+
+**Position routes return open positions first.** A scan that needs a wallet's whole history
+(closed / staked recovery) is a separate `scope` and a separate client source, loading behind
+the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
 
 **Performance is a platform requirement (Sprint PERFORMANCE `f4b58ac` +
 LPPNL-PERF `535453e` baselines).**

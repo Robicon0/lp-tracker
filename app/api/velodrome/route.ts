@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getEverOwnedTokenIds, type EverOwnedResult } from '../../lib/evmEverOwnedNftIds';
+import { archiveRpcUrl } from '../../lib/evmArchiveRpc';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
 import {
@@ -26,7 +27,7 @@ const SUGAR_ADDRESS = '0xb8a82f0334e43c2eb0ab5d799036965f7bf07ba8';
 // activity route's positionId=all wallet-scope scan).
 // Tenderly archive RPC is required for full-range eth_getLogs (Alchemy free
 // tier caps at 10 blocks). Mirrors app/api/aerodrome/route.ts.
-const TENDERLY_RPC = 'https://optimism.gateway.tenderly.co';
+const TENDERLY_RPC = archiveRpcUrl('optimism');
 // Velodrome Voter — the protocol's own pool -> gauge registry, used to CONFIRM
 // a holder really is that pool's gauge (Sprint GAUGE-STAKING). If this were
 // wrong, detection fails CLOSED-SAFE: the position is excluded, never booked
@@ -152,7 +153,7 @@ async function buildClosedPositions(
   // enumeration is disclosed, never published as "this wallet owns nothing".
   let enumeration: EverOwnedResult;
   try {
-    enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
+    enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK, 'optimism');
   } catch {
     return { positions: [], notice: lookupFailureNotice('Optimism closed-position recovery') };
   }

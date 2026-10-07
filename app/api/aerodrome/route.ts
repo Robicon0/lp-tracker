@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getEverOwnedTokenIds, type EverOwnedResult } from '../../lib/evmEverOwnedNftIds';
+import { archiveRpcUrl } from '../../lib/evmArchiveRpc';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
 import {
@@ -31,7 +32,7 @@ const CL_FACTORY = '0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A';
 // activity route's positionId=all wallet-scope scan).
 // Tenderly archive RPC is required for full-range eth_getLogs (Alchemy free
 // tier caps at 10 blocks).
-const TENDERLY_RPC = 'https://base.gateway.tenderly.co';
+const TENDERLY_RPC = archiveRpcUrl('base');
 const NFT_MANAGER = '0x827922686190790b37229fd06084350E74485b72';
 const NFT_DEPLOY_BLOCK = 13_844_000;
 // IncreaseLiquidity (NFT manager) + pool Mint (CL pool) topic0 — used to derive
@@ -72,7 +73,21 @@ function padAddress(addr: string): string {
 }
 
 // Fetch token0 and token1 addresses from a CL pool contract
-async function getPoolTokens(poolAddress: string): Promise<{ token0: string; token1: string } | null> {
+// A pool's token pair never changes, and one wallet's closed positions usually
+// share a handful of pools — resolve each pool once per process. A failed
+// lookup is not kept, so a transient error cannot pin a pool to "unknown".
+const poolTokensMemo = new Map<string, Promise<{ token0: string; token1: string } | null>>();
+function getPoolTokens(poolAddress: string): Promise<{ token0: string; token1: string } | null> {
+  const key = poolAddress.toLowerCase();
+  const hit = poolTokensMemo.get(key);
+  if (hit) return hit;
+  const p = fetchPoolTokens(poolAddress);
+  poolTokensMemo.set(key, p);
+  p.then((r) => { if (!r) poolTokensMemo.delete(key); });
+  return p;
+}
+
+async function fetchPoolTokens(poolAddress: string): Promise<{ token0: string; token1: string } | null> {
   try {
     // token0() selector: 0x0dfe1681
     const res0 = await fetch(BASE_RPC, {
@@ -147,10 +162,13 @@ async function buildClosedPositions(
   account: string,
   heldIds: Set<string>,
   prices: Record<string, number>,
+  enumerationPromise: Promise<EverOwnedResult | null>,
 ): Promise<{ positions: Record<string, unknown>[]; notice: RouteTruncation | null }> {
   let enumeration: EverOwnedResult;
   try {
-    enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK);
+    const started = await enumerationPromise;
+    if (!started) throw new Error('enumeration failed');
+    enumeration = started;
   } catch {
     // A throw is as uninformative as an error response — same disclosure.
     return { positions: [], notice: lookupFailureNotice('Base closed-position recovery') };
@@ -174,6 +192,9 @@ async function buildClosedPositions(
   //   unresolved  → RPC failure; excluded rather than guessed (Rule 11)
   const verdicts = await Promise.all(
     closedIds.map(async (id) => {
+      // The transfer index already recorded this NFT's burn (a transfer to the
+      // zero address) — that IS the verdict, no further calls needed.
+      if (enumeration.history?.burned[id]) return { id, v: { kind: 'burned' as const } };
       try {
         return { id, v: await resolveHolderVerdict({ rpc: TENDERLY_RPC, nftManager: NFT_MANAGER, voter: AERODROME_VOTER, tokenId: id }) };
       } catch {
@@ -253,16 +274,21 @@ async function buildClosedPositions(
     };
     try {
       const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
-      const incLogs = await rpcResult(TENDERLY_RPC, 'eth_getLogs', [{
-        address: NFT_MANAGER,
-        topics: [INCREASE_TOPIC, tokenIdHex],
-        fromBlock: '0x' + NFT_DEPLOY_BLOCK.toString(16),
-        toBlock: 'latest',
-      }]) as Array<{ transactionHash: string; blockNumber: string }> | null;
-      if (!incLogs || incLogs.length === 0) return minimal;
-      incLogs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
+      // The mint tx is already known when the ids came from the transfer index.
+      let mintTx = enumeration.history?.mintTx[tokenId] ?? null;
+      if (!mintTx) {
+        const incLogs = await rpcResult(TENDERLY_RPC, 'eth_getLogs', [{
+          address: NFT_MANAGER,
+          topics: [INCREASE_TOPIC, tokenIdHex],
+          fromBlock: '0x' + NFT_DEPLOY_BLOCK.toString(16),
+          toBlock: 'latest',
+        }]) as Array<{ transactionHash: string; blockNumber: string }> | null;
+        if (!incLogs || incLogs.length === 0) return minimal;
+        incLogs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
+        mintTx = incLogs[0].transactionHash;
+      }
 
-      const receipt = await rpcResult(BASE_RPC, 'eth_getTransactionReceipt', [incLogs[0].transactionHash]) as
+      const receipt = await rpcResult(BASE_RPC, 'eth_getTransactionReceipt', [mintTx]) as
         { logs?: Array<{ address: string; topics: string[] }> } | null;
       const mintLog = receipt?.logs?.find((l) =>
         l.topics?.[0]?.toLowerCase() === POOL_MINT_TOPIC &&
@@ -363,19 +389,45 @@ async function fetchPoolAPYs(): Promise<Record<string, number>> {
   }
 }
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const account = searchParams.get('account');
+// The open positions of one wallet: the paged Sugar sweep plus the token, price
+// and APY reads that turn its rows into dashboard positions. This is the FAST
+// half of the route (about 1–3 s) and everything the closed-history half needs
+// from it (which ids are held, the prices it already fetched).
+interface OpenPositionsResult {
+  positions: Record<string, unknown>[];
+  heldIds: Set<string>;
+  prices: Record<string, number>;
+  truncated: RouteTruncation[];
+}
 
-  if (!account) {
-    return NextResponse.json({ error: 'Account address required' }, { status: 400 });
+// The client asks for the two halves in separate requests (`scope=open`, then
+// `scope=closed`), and both need the Sugar sweep. A short in-process memo makes
+// them share ONE sweep when they land on the same instance. Failures are never
+// kept; 15 s is far below the 60 s client refresh, so no refresh is served stale.
+const OPEN_MEMO_MS = 15_000;
+const openMemo = new Map<string, { at: number; p: Promise<OpenPositionsResult> }>();
+
+function loadOpenPositionsShared(account: string): Promise<OpenPositionsResult> {
+  const key = account.toLowerCase();
+  const hit = openMemo.get(key);
+  if (hit && Date.now() - hit.at < OPEN_MEMO_MS) return hit.p;
+  const p = loadOpenPositions(account);
+  openMemo.set(key, { at: Date.now(), p });
+  p.catch(() => { if (openMemo.get(key)?.p === p) openMemo.delete(key); });
+  if (openMemo.size > 500) {
+    for (const [k, v] of openMemo) if (Date.now() - v.at >= OPEN_MEMO_MS) openMemo.delete(k);
   }
+  return p;
+}
 
-  if (!ALCHEMY_KEY) {
-    return NextResponse.json({ error: 'Alchemy API key not configured' }, { status: 500 });
-  }
+async function loadOpenPositions(account: string): Promise<OpenPositionsResult> {
+    // Prices and APYs depend on nothing the Sugar sweep returns, so they start
+    // now and overlap it instead of adding a network round after it. Awaited in
+    // step 3 exactly as before; the no-op catch only keeps a rejection from
+    // going unhandled when the empty-wallet return below never reaches step 3.
+    const pricesAndApys = Promise.all([fetchPrices(), fetchPoolAPYs()]);
+    pricesAndApys.catch(() => {});
 
-  try {
     // 1. Fetch raw positions from Sugar — the whole iteration space, paged.
     //
     // The span is measured first (balanceOf + allPoolsLength, 2 eth_calls), so
@@ -423,12 +475,7 @@ export async function GET(request: Request) {
     if (rawPositions.length === 0) {
       // Still disclose: a swept-but-truncated empty is NOT the same answer as a
       // wallet that genuinely holds nothing (queue item B).
-      return NextResponse.json({
-        positions: [],
-        count: 0,
-        account,
-        ...(truncated.length > 0 ? { truncated } : {}),
-      });
+      return { positions: [], heldIds: new Set(), prices: {}, truncated };
     }
 
     // 2. Fetch token info for each unique pool
@@ -443,10 +490,7 @@ export async function GET(request: Request) {
     );
 
     // 3. Fetch live prices and APY data in parallel
-    const [prices, apyData] = await Promise.all([
-      fetchPrices(),
-      fetchPoolAPYs(),
-    ]);
+    const [prices, apyData] = await pricesAndApys;
 
     // 3b. (Sprint 1.10 Tier-3 fix) Resolve any pool token NOT in the hardcoded
     // TOKENS map via the shared platform-wide tokenResolver, so symbol AND
@@ -553,18 +597,63 @@ export async function GET(request: Request) {
       };
     });
 
+    return { positions, heldIds: new Set(rawPositions.map((p) => p.id)), prices, truncated };
+}
+
+// `scope` splits the route so the open positions never wait for history:
+//
+//   scope=open    the Sugar sweep only — the fast path the dashboard paints from
+//   scope=closed  burned (closed) positions and gauge-staked ones the sweep does
+//                 not return; needs the wallet's whole NFT history, so it is slow
+//                 on a wallet's first load and loads behind the open rows
+//   (absent)      both in one response — the original shape, kept for callers
+//                 that want a single answer
+//
+// Each scope reports only its OWN reasons for being short, so the two client
+// requests can never clear each other's notice.
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const account = searchParams.get('account');
+  const scope = searchParams.get('scope');
+  const wantOpen = scope !== 'closed';
+  const wantClosed = scope !== 'open';
+
+  if (!account) {
+    return NextResponse.json({ error: 'Account address required' }, { status: 400 });
+  }
+
+  if (!ALCHEMY_KEY) {
+    return NextResponse.json({ error: 'Alchemy API key not configured' }, { status: 500 });
+  }
+
+  // The ever-owned scan does not depend on the open-position reads, so it starts
+  // now and runs alongside them instead of after them. A rejection is turned
+  // into null here so it can never surface as an unhandled rejection.
+  const enumerationPromise: Promise<EverOwnedResult | null> | null = wantClosed
+    ? getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, NFT_DEPLOY_BLOCK, 'base').catch(() => null)
+    : null;
+
+  try {
+    const open = await loadOpenPositionsShared(account);
+    const positions = wantOpen ? open.positions : [];
+    // Copied: the memoized result is shared with the other scope's request.
+    const truncated: RouteTruncation[] = wantOpen ? [...open.truncated] : [];
+
     // Recover positions the wallet once owned but Sugar no longer returns
     // because the NFT was burned on close (Aerodrome Slipstream burns on full
     // exit). Returned as Closed records so they appear in the dashboard Closed
     // tab; their fees are recovered via /api/aerodrome/activity?positionId=all.
-    const heldIds = new Set(rawPositions.map((p) => p.id));
-    const closed = await buildClosedPositions(account, heldIds, prices);
-    const closedPositions = closed.positions;
-    // Queue item B — a failed closed-position enumeration now travels on the
-    // SAME channel as a bound cap, because it has the same meaning for the user:
-    // this list is not necessarily everything. Pushed here (not inside the
-    // helper) so the one response carries every reason it may be short.
-    if (closed.notice) truncated.push(closed.notice);
+    // Skipped for a wallet Sugar returns nothing for (the long-standing
+    // empty-Sugar gate — unchanged here).
+    let closedPositions: Record<string, unknown>[] = [];
+    if (enumerationPromise && open.heldIds.size > 0) {
+      const closed = await buildClosedPositions(account, open.heldIds, open.prices, enumerationPromise);
+      closedPositions = closed.positions;
+      // Queue item B — a failed closed-position enumeration travels on the SAME
+      // channel as a bound cap, because it has the same meaning for the user:
+      // this list is not necessarily everything.
+      if (closed.notice) truncated.push(closed.notice);
+    }
 
     return NextResponse.json({
       positions: [...positions, ...closedPositions],

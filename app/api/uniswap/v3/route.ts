@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import { archiveRpcUrl, type ArchiveChain } from '../../../lib/evmArchiveRpc';
 import {
   type RouteTruncation,
   lookupFailureNotice,
@@ -16,12 +17,8 @@ const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // eth_getLogs at 10 blocks). Tenderly has no BSC gateway, so BNB has no entry
 // and burned-NFT recovery is gracefully skipped there. Mirrors the activity
 // route's TENDERLY_RPCS / DEPLOY_BLOCKS.
-const TENDERLY_RPCS: Record<string, string> = {
-  ethereum: 'https://mainnet.gateway.tenderly.co',
-  arbitrum: 'https://arbitrum.gateway.tenderly.co',
-  polygon:  'https://polygon.gateway.tenderly.co',
-  optimism: 'https://optimism.gateway.tenderly.co',
-};
+const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism'];
+const TENDERLY_RPCS: Record<string, string> = Object.fromEntries(ARCHIVE_CHAINS.map((c) => [c, archiveRpcUrl(c)]));
 const DEPLOY_BLOCKS: Record<string, number> = {
   ethereum: 12_369_140,
   arbitrum:    165_216,
@@ -738,7 +735,10 @@ async function fetchPositionsForChain(
   if (archiveRpc && Date.now() < recoveryDeadline) {
     try {
       const heldIds = new Set(positions.map((p) => String(p.tokenId)));
-      const everOwned = await getEverOwnedTokenIds(chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0);
+      const everOwned = await getEverOwnedTokenIds(
+        chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0,
+        ARCHIVE_CHAINS.find((c) => c === chainKey),
+      );
       // Queue item B — an enumeration that failed is NOT an empty wallet. Without
       // this the whole recovery block silently produced zero burned positions.
       if (!everOwned.complete) {

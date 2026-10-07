@@ -176,6 +176,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
     setPool();
+    if (pos.walletAddress) params.set("owner", pos.walletAddress);
     return `/api/aerodrome/activity?${params}`;
   }
 
@@ -264,6 +265,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
     setPool();
+    if (pos.walletAddress) params.set("owner", pos.walletAddress);
     return `/api/uniswap/activity?${params}`;
   }
 
@@ -277,6 +279,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
     if (pos.price0 != null) params.set("p0", String(pos.price0));
     if (pos.price1 != null) params.set("p1", String(pos.price1));
     setPool();
+    if (pos.walletAddress) params.set("owner", pos.walletAddress);
     return `/api/velodrome/activity?${params}`;
   }
 

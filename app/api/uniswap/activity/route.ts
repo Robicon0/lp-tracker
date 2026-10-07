@@ -7,6 +7,8 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
+import { archiveRpcUrl, type ArchiveChain } from '../../../lib/evmArchiveRpc';
+import { getVerifiedPositionLogs } from '../../../lib/evmAssetTransferHistory';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 import {
   type RouteTruncation,
@@ -19,12 +21,8 @@ const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 // Tenderly public gateways — primary for eth_getLogs: full-history, no block-range limit, fast.
 // NOTE: no BNB Chain entry — Tenderly has no public BSC gateway. BNB skips
 // straight to publicnode chunked via ROLLING_SCAN_DEPTH below.
-const TENDERLY_RPCS: Record<string, string> = {
-  ethereum: 'https://mainnet.gateway.tenderly.co',
-  arbitrum: 'https://arbitrum.gateway.tenderly.co',
-  polygon:  'https://polygon.gateway.tenderly.co',
-  optimism: 'https://optimism.gateway.tenderly.co',
-};
+const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism'];
+const TENDERLY_RPCS: Record<string, string> = Object.fromEntries(ARCHIVE_CHAINS.map((c) => [c, archiveRpcUrl(c)]));
 
 // LlamaRPC public RPCs — secondary: now enforces 30k block range limit (code -32012)
 const BLAST_RPCS: Record<string, string> = {
@@ -265,6 +263,7 @@ async function fetchLogs(
   blastRpc: string,
   alchemyRpc: string,
   tokenIdHex: string,
+  owner: string,
 ): Promise<RawLog[]> {
   const nftManager = NFT_MANAGERS[chain];
   if (!nftManager) {
@@ -315,6 +314,15 @@ async function fetchLogs(
       return tenderlyAttempt.result ?? [];
     }
     console.warn('[uniswap/activity] Tenderly error:', chain, tenderlyAttempt.error.message);
+
+    // Tier 1a: the holder's transfer-index history, used only when it reconciles.
+    const archiveChain = ARCHIVE_CHAINS.find((c) => c === chain);
+    if (archiveChain) {
+      const viaTransfers = await getVerifiedPositionLogs({
+        chain: archiveChain, nftManager, tokenId: BigInt(tokenIdHex).toString(), owner,
+      });
+      if (viaTransfers) return viaTransfers;
+    }
   }
 
   // Tier 2: LlamaRPC full range
@@ -416,6 +424,7 @@ async function GET_impl(request: Request) {
   // unchanged. Mirrors the Aerodrome positionId=all pattern.
   const account = (searchParams.get('account') ?? '').toLowerCase();
   const walletScope = tokenId === 'all' || searchParams.get('positionId') === 'all';
+  const owner = (searchParams.get('owner') ?? '').toLowerCase();
 
   if (!chain) {
     return NextResponse.json({ error: 'chain required' }, { status: 400 });
@@ -478,7 +487,10 @@ async function GET_impl(request: Request) {
       // bounded only part of the work and let the request reach 203 s. One
       // budget for the whole block keeps the route predictable.
       const deadline = Date.now() + WALLET_SCOPE_BUDGET_MS;
-      const enumeration = await getEverOwnedTokenIds(nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0);
+      const enumeration = await getEverOwnedTokenIds(
+        nftManager, account, archiveRpc, DEPLOY_BLOCKS[chain] ?? 0,
+        ARCHIVE_CHAINS.find((c) => c === chain),
+      );
       const allIds = enumeration.ids;
       const ids = allIds.slice(0, MAX_WALLET_IDS);
       // Queue item C Phase 1 — the dropped ids used to vanish without a trace,
@@ -497,7 +509,7 @@ async function GET_impl(request: Request) {
         increaseTopic: TOPIC_INCREASE,
         poolMintTopic: POOL_MINT_TOPIC,
         deployBlock: DEPLOY_BLOCKS[chain] ?? 0,
-      });
+      }, 4, enumeration.history?.mintTx ?? {});
 
       const origin = new URL(request.url).origin;
       const perPosition: Array<Record<string, unknown>> = [];
@@ -528,6 +540,7 @@ async function GET_impl(request: Request) {
         sub.searchParams.set('t0d', String(ctx.decimals0));
         sub.searchParams.set('t1d', String(ctx.decimals1));
         sub.searchParams.set('pool', ctx.pool);
+        sub.searchParams.set('owner', account);
         try {
           const res = await GET_impl(new Request(sub.toString()));
           const body = (await res.json()) as ActivityResponse & { error?: string };
@@ -604,7 +617,7 @@ async function GET_impl(request: Request) {
     let logs: RawLog[];
     {
       const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
-      logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex);
+      logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex, owner);
     }
 
     if (logs.length === 0) {

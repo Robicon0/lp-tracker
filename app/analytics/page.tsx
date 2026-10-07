@@ -1110,6 +1110,21 @@ export default function Analytics() {
   const headerSkel = useSnap ? false : isLoading;
   const aprSkel = useSnap ? false : (isLoading || activityLoading);
   const feeSkel = useSnap ? false : activityLoading;
+  // Positions arrive per source and are then computed one by one. Until both
+  // are done the LIVE sums are partial: a source that has not answered yet has
+  // no positions in them at all (measured: Capital G/L read a clean -$1,644.47
+  // for several seconds before another chain's closed positions arrived and
+  // made it -$3,524.86). A snapshot-backed render is exempt — those figures are
+  // a complete earlier result, not a sum in progress.
+  const loadingMore = !useSnap && (lpPnl.inflightCount > 0 || pendingSources.length > 0);
+  const nothingYet = !useSnap && lpPnl.included === 0 && (lpPnl.isLoading || pendingSources.length > 0);
+  // With no position mid-computation, what is outstanding is a whole source.
+  // When every such source is a history half (closed positions), say that —
+  // "positions still loading" would point at the open rows, which are all here.
+  const onlyHistoryPending = pendingSources.length > 0 && pendingSources.every((s) => /history$/i.test(s));
+  const loadingNote = lpPnl.inflightCount > 0
+    ? `${lpPnl.inflightCount} position${lpPnl.inflightCount === 1 ? "" : "s"} still loading`
+    : onlyHistoryPending ? "closed history still loading" : "positions still loading";
 
   // Status line for the LP P&L header slot (replaces the machinery counter):
   //   snapshot shown → "updated N min ago · refreshing…"
@@ -2012,8 +2027,9 @@ export default function Analytics() {
                     tooltip: lpPnl.estimatedPositionCount > 0
                       ? `${lpPnl.estimatedPositionCount} position${lpPnl.estimatedPositionCount === 1 ? "" : "s"} using estimated deposit value — Deposit price unavailable, using current value as estimate.`
                       : undefined,
+                    pendingOpen: true,
                   },
-                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market" },
+                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market", pendingOpen: true },
                   {
                     label: "Fees Collected",
                     val: `+${fmt$(lifetimeFeesCollected)}`,
@@ -2044,7 +2060,7 @@ export default function Analytics() {
                     sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
                     pendingClosed: true,
                   },
-                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; expandable?: boolean }>);
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; pendingOpen?: boolean; expandable?: boolean }>);
                 })().map((c, i, arr) => (
                   <div
                     key={c.label}
@@ -2075,7 +2091,7 @@ export default function Analytics() {
                         show a "scanning closed positions…" sub-note while a
                         closed-chain scan is still running, then finalize — never a
                         blank full-block spinner. */}
-                    {(lpPnl.included === 0 && lpPnl.isLoading) ? (
+                    {nothingYet ? (
                       <div
                         aria-label="Loading"
                         style={{
@@ -2095,7 +2111,7 @@ export default function Analytics() {
                           color: c.color,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                           textShadow: c.color === C.green ? "0 0 12px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
-                          opacity: (lpPnl.aggregateSelfContradictory || (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete))) ? 0.6 : 1,
+                          opacity: (lpPnl.aggregateSelfContradictory || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete))) ? 0.6 : 1,
                         }}
                       >
                         {/* An incompletely-priced Capital G/L is a PARTIAL sum,
@@ -2112,11 +2128,15 @@ export default function Analytics() {
                             is the honest render: we do not know this number. */}
                         {lpPnl.aggregateSelfContradictory
                           ? "—"
-                          : c.pendingClosed && !lpPnl.capitalGLComplete ? `≈ ${c.val}` : c.val}
+                          // An open-position sum that is still zero while
+                          // sources are loading has nothing in it yet — a dash,
+                          // not "≈ $0.00", which reads as an estimate of zero.
+                          : (c.pendingOpen && loadingMore && c.val === fmt$(0)) ? "—"
+                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) ? `≈ ${c.val}` : c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
-                      {(lpPnl.included === 0 && lpPnl.isLoading)
+                      {nothingYet
                         ? "calculating…"
                         // ITEM 0i — takes precedence over every other sub-note:
                         // while the aggregate disagrees with its own breakdown,
@@ -2124,6 +2144,13 @@ export default function Analytics() {
                         // meaningful, because the number is not being shown.
                         : lpPnl.aggregateSelfContradictory
                         ? "couldn't verify — see breakdown below"
+                        // A position that has not finished loading is not in
+                        // these two sums yet. Without this the boxes show a
+                        // confident lower figure for as long as the slowest
+                        // position takes (measured: one $9k position missing
+                        // for up to a minute).
+                        : ((c.pendingOpen || c.pendingClosed) && loadingMore)
+                          ? loadingNote
                         : (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading))
                           ? "scanning closed positions…"
                           // ITEM 0g (G3) — two DIFFERENT reasons a Capital G/L
@@ -2164,7 +2191,7 @@ export default function Analytics() {
                     </span>
                   </div>
                   <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT }}>
+                    <table data-testid="capgl-breakdown" style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT }}>
                       <thead>
                         <tr>
                           {["POSITION", "OPENED", "CLOSED", "DEPOSITED", "WITHDRAWN", "FEES (LIFETIME)", "CAPITAL G/L"].map((h, hi) => (
@@ -2176,7 +2203,7 @@ export default function Analytics() {
                       </thead>
                       <tbody>
                         {lpPnl.closedRows.map((r) => (
-                          <tr key={r.id}>
+                          <tr key={r.id} data-position-id={r.id} data-estimated={r.estimated ? "1" : undefined}>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
                               <span style={{ color: C.textBright, fontWeight: 600 }}>{r.pair}</span>
                               <span style={{ marginLeft: 8, fontSize: 10, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>

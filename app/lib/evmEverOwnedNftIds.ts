@@ -16,6 +16,8 @@
 // all well under 2^53).
 
 import { LOOKUP_FAILED, LOOKUP_UNAVAILABLE } from './enumerationTruncation';
+import { archiveServesWideLogs, type ArchiveChain } from './evmArchiveRpc';
+import { getWalletNftHistory, type WalletNftHistory } from './evmAssetTransferHistory';
 
 const TRANSFER_TOPIC =
   '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
@@ -48,6 +50,11 @@ export interface EverOwnedResult {
    * complete.
    */
   reason: typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE | null;
+  /**
+   * Present when the ids came from the transfer index. Carries each position's
+   * mint tx and events, so callers need no further log queries for them.
+   */
+  history?: WalletNftHistory;
 }
 
 const COMPLETE_EMPTY: EverOwnedResult = { ids: [], complete: true, reason: null };
@@ -84,6 +91,37 @@ function classifyRpcError(
 }
 
 export async function getEverOwnedTokenIds(
+  nftManager: string,
+  wallet: string,
+  rpc: string,
+  fromBlock: number,
+  /**
+   * Chain to use for the transfer-index source when the archive endpoint
+   * cannot serve the scan (or is known not to). Omit for a chain it does not
+   * cover — the result is then exactly the archive scan's.
+   */
+  chain?: ArchiveChain,
+): Promise<EverOwnedResult> {
+  if (!wallet) return COMPLETE_EMPTY;
+  const viaTransfers = async (): Promise<EverOwnedResult | null> => {
+    if (!chain) return null;
+    const history = await getWalletNftHistory({ chain, nftManager, wallet });
+    return history.complete
+      ? { ids: history.ids, complete: true, reason: null, history }
+      : null;
+  };
+  if (chain && !archiveServesWideLogs(chain)) {
+    const direct = await viaTransfers();
+    if (direct) return direct;
+  }
+  const archive = await scanArchive(nftManager, wallet, rpc, fromBlock);
+  if (archive.complete) return archive;
+  // The archive scan failed or was refused. An index of the same transfers is a
+  // genuine second source, so try it before reporting the lookup as incomplete.
+  return (chain && archiveServesWideLogs(chain) ? await viaTransfers() : null) ?? archive;
+}
+
+async function scanArchive(
   nftManager: string,
   wallet: string,
   rpc: string,

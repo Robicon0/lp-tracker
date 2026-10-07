@@ -169,6 +169,9 @@ export default function PositionDetail() {
     pos?.token1Address,
     pos?.price0,
     pos?.price1,
+    undefined,
+    undefined,
+    pos?.walletAddress,
   );
 
   const bluefinObjId = pos?.protocol === 'Bluefin' ? pos.id.replace('bluefin-', '') : null;

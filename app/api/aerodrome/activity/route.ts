@@ -12,9 +12,11 @@ import {
   type RouteTruncation,
   lookupFailureNotice,
   LOOKUP_FAILED,
+  LOOKUP_UNAVAILABLE,
 } from '../../../lib/enumerationTruncation';
 import { evmRpcPost, isEvmRpcThrottle } from '../../../lib/evmRpc';
-import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
+import { archiveRpcUrl, archiveServesWideLogs } from '../../../lib/evmArchiveRpc';
+import { getWalletNftHistory } from '../../../lib/evmAssetTransferHistory';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
@@ -26,7 +28,7 @@ const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // URL, free tier) in env for a private quota; the public gateway stays as the
 // zero-config fallback. Read via rpcUrlFromEnv so a malformed value (bare key)
 // degrades to the public gateway instead of throwing on URL parse.
-const TENDERLY_RPC = rpcUrlFromEnv('TENDERLY_NODE_RPC') || 'https://base.gateway.tenderly.co';
+const TENDERLY_RPC = archiveRpcUrl('base');
 // LlamaRPC — secondary: now enforces 30k block range limit (code -32012)
 const LLAMA_RPC = 'https://base.llamarpc.com';
 // publicnode — tertiary fallback with chunked scanning; ~8s/request for historical blocks
@@ -75,6 +77,8 @@ const TENDERLY_CHUNK       = 500_000;
 // limit. Rule 6: conservative parameters accommodate the most-constrained
 // endpoint. (Still additionally capped by evmRpc's global semaphore of 6.)
 const TENDERLY_CONCURRENCY = 2;
+// Positions processed at once in a wallet-scope scan.
+const WALLET_SCOPE_CONCURRENCY = 3;
 
 // Known anchor point: tokenId 50,093,212 was minted at Base block 41,878,002 (from prod data)
 // Used to estimate the start block for a given tokenId so we scan far fewer chunks
@@ -208,7 +212,34 @@ async function fetchLogsChunked(
 // Tier 2: LlamaRPC full range — fallback if Tenderly fails
 // Tier 3: LlamaRPC chunked 29k blocks, 10 concurrent — if LlamaRPC has range limit
 // Tier 4: publicnode chunked 49k blocks, 5 concurrent — if LlamaRPC fully down
-async function fetchLogs(tokenIdHex: string, tokenId: number): Promise<RawLog[]> {
+// Tier 0 / 1a: the transfer-index source (app/lib/evmAssetTransferHistory.ts).
+// Returns the position's logs only when its event set RECONCILES with on-chain
+// state; null otherwise, so an unverifiable set never stands in for the real one.
+async function fetchLogsViaTransfers(tokenId: number, owner: string): Promise<RawLog[] | null> {
+  let holder = owner;
+  if (!holder) {
+    // No owner supplied (older client, direct call): the NFT's current holder
+    // works for a live, directly-held position.
+    const res = await rpcPost(ALCHEMY_RPC, {
+      jsonrpc: '2.0', id: 1, method: 'eth_call',
+      params: [{ to: NFT_MANAGER, data: '0x6352211e' + tokenId.toString(16).padStart(64, '0') }, 'latest'],
+    }) as { result?: string };
+    holder = typeof res.result === 'string' && res.result.length >= 66 ? '0x' + res.result.slice(-40).toLowerCase() : '';
+  }
+  if (!holder) return null;
+  const history = await getWalletNftHistory({ chain: 'base', nftManager: NFT_MANAGER, wallet: holder });
+  const id = String(tokenId);
+  return history.verified[id] ? history.logsByToken[id] : null;
+}
+
+async function fetchLogs(tokenIdHex: string, tokenId: number, owner: string): Promise<RawLog[]> {
+  // Where the archive endpoint is known not to serve wide-range logs, asking it
+  // first is a wasted call on every request.
+  if (!archiveServesWideLogs('base')) {
+    const viaTransfers = await fetchLogsViaTransfers(tokenId, owner);
+    if (viaTransfers) return viaTransfers;
+  }
+
   // Get current block to bound chunked scans
   const bnRes = await rpcPost(ALCHEMY_RPC, {
     jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
@@ -236,6 +267,11 @@ async function fetchLogs(tokenIdHex: string, tokenId: number): Promise<RawLog[]>
     return tenderlyAttempt.result ?? [];
   }
   console.warn('[aerodrome/activity] Tenderly full-range error:', (tenderlyAttempt.error as unknown as {code?:number}).code, tenderlyAttempt.error.message);
+
+  if (archiveServesWideLogs('base')) {
+    const viaTransfers = await fetchLogsViaTransfers(tokenId, owner);
+    if (viaTransfers) return viaTransfers;
+  }
 
   // Tier 1b (Sprint SPOT-RESILIENCE-V2): Tenderly CHUNKED. The full-range call
   // above hangs under concurrent load, but Tenderly serves small chunks in
@@ -337,6 +373,9 @@ async function GET_impl(request: Request) {
   // positionId=all pattern. Per-tokenId mode (numeric positionId) is unchanged.
   const account = (searchParams.get('account') ?? '').toLowerCase();
   const walletScope = positionId === 'all';
+  // The wallet that holds (or held) this position. Lets a per-position request
+  // use the wallet's transfer-index history when wide-range logs are unavailable.
+  const owner = (searchParams.get('owner') ?? '').toLowerCase();
 
   if (!positionId) {
     return NextResponse.json({ error: 'positionId required' }, { status: 400 });
@@ -366,7 +405,7 @@ async function GET_impl(request: Request) {
     // unchanged: the old union already scanned per tokenId and merely threw
     // the association away.
     if (walletScope) {
-      const enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK);
+      const enumeration = await getEverOwnedTokenIds(NFT_MANAGER, account, TENDERLY_RPC, DEPLOY_BLOCK, 'base');
       const ids = enumeration.ids;
       // Queue item B — wallet-scope fees are summed over THIS id set. If the
       // enumeration was short, every total below is short too, and saying
@@ -381,7 +420,7 @@ async function GET_impl(request: Request) {
         increaseTopic: TOPIC_INCREASE,
         poolMintTopic: POOL_MINT_TOPIC,
         deployBlock: DEPLOY_BLOCK,
-      });
+      }, 4, enumeration.history?.mintTx ?? {});
 
       const origin = new URL(request.url).origin;
       const perPosition: Array<Record<string, unknown>> = [];
@@ -389,42 +428,65 @@ async function GET_impl(request: Request) {
       const merged: ActivityEvent[] = [];
       let ni0 = 0, ni1 = 0, tf0 = 0, tf1 = 0;
 
+      // Bounded fan-out: each position is independent, so they run a few at a
+      // time (the shared RPC semaphore and CoinGecko pacing still apply) and are
+      // merged in id order, so the response does not depend on finish order.
+      type Sub = { ctx: NonNullable<ReturnType<typeof ctxs.get>>; body: ActivityResponse } | { reason: string };
+      const subResults = new Map<string, Sub>();
+      let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(WALLET_SCOPE_CONCURRENCY, ids.length) }, async () => {
+        while (cursor < ids.length) {
+          const id = ids[cursor++];
+          const ctx = ctxs.get(id) ?? null;
+          if (!ctx) {
+            // HONEST DEGRADATION (architecture Rule 11): a position whose own
+            // context we could not resolve is EXCLUDED and surfaced. It is never
+            // decoded with another pool's decimals — that is the bug itself.
+            subResults.set(id, { reason: 'pool-context-unresolved' });
+            continue;
+          }
+          const sub = new URL('/api/aerodrome/activity', origin);
+          sub.searchParams.set('positionId', id);
+          sub.searchParams.set('token0', ctx.token0);
+          sub.searchParams.set('token1', ctx.token1);
+          sub.searchParams.set('t0d', String(ctx.decimals0));
+          sub.searchParams.set('t1d', String(ctx.decimals1));
+          sub.searchParams.set('pool', ctx.pool);
+          sub.searchParams.set('owner', account);
+          try {
+            const res = await GET_impl(new Request(sub.toString()));
+            const body = (await res.json()) as ActivityResponse & { error?: string };
+            subResults.set(id, body.error ? { reason: body.error } : { ctx, body });
+          } catch (err) {
+            subResults.set(id, { reason: String(err).slice(0, 80) });
+          }
+        }
+      }));
+
       for (const id of ids) {
-        const ctx = ctxs.get(id) ?? null;
-        if (!ctx) {
-          // HONEST DEGRADATION (architecture Rule 11): a position whose own
-          // context we could not resolve is EXCLUDED and surfaced. It is never
-          // decoded with another pool's decimals — that is the bug itself.
-          excluded.push({ tokenId: id, reason: 'pool-context-unresolved' });
-          continue;
-        }
-        const sub = new URL('/api/aerodrome/activity', origin);
-        sub.searchParams.set('positionId', id);
-        sub.searchParams.set('token0', ctx.token0);
-        sub.searchParams.set('token1', ctx.token1);
-        sub.searchParams.set('t0d', String(ctx.decimals0));
-        sub.searchParams.set('t1d', String(ctx.decimals1));
-        sub.searchParams.set('pool', ctx.pool);
-        try {
-          const res = await GET_impl(new Request(sub.toString()));
-          const body = (await res.json()) as ActivityResponse & { error?: string };
-          if (body.error) { excluded.push({ tokenId: id, reason: body.error }); continue; }
-          merged.push(...(body.events ?? []));
-          ni0 += body.netInvested0 ?? 0; ni1 += body.netInvested1 ?? 0;
-          tf0 += body.totalFees0 ?? 0;   tf1 += body.totalFees1 ?? 0;
-          perPosition.push({
-            tokenId: id,
-            pool: ctx.pool,
-            pair: `${ctx.symbol0} / ${ctx.symbol1}`,
-            token0: ctx.token0, token1: ctx.token1,
-            decimals0: ctx.decimals0, decimals1: ctx.decimals1,
-            netInvested0: body.netInvested0, netInvested1: body.netInvested1,
-            totalFees0: body.totalFees0, totalFees1: body.totalFees1,
-            events: body.events ?? [],
-          });
-        } catch (err) {
-          excluded.push({ tokenId: id, reason: String(err).slice(0, 80) });
-        }
+        const r = subResults.get(id);
+        if (!r || 'reason' in r) { excluded.push({ tokenId: id, reason: r?.reason ?? 'not-processed' }); continue; }
+        const { ctx, body } = r;
+        merged.push(...(body.events ?? []));
+        ni0 += body.netInvested0 ?? 0; ni1 += body.netInvested1 ?? 0;
+        tf0 += body.totalFees0 ?? 0;   tf1 += body.totalFees1 ?? 0;
+        perPosition.push({
+          tokenId: id,
+          pool: ctx.pool,
+          pair: `${ctx.symbol0} / ${ctx.symbol1}`,
+          token0: ctx.token0, token1: ctx.token1,
+          decimals0: ctx.decimals0, decimals1: ctx.decimals1,
+          netInvested0: body.netInvested0, netInvested1: body.netInvested1,
+          totalFees0: body.totalFees0, totalFees1: body.totalFees1,
+          events: body.events ?? [],
+        });
+      }
+
+      // A position whose history could not be loaded or verified is left out of
+      // the sums above. Say so — a total that silently omits a position is the
+      // failure this channel exists to prevent.
+      if (excluded.length > 0 && scanNotices.length === 0) {
+        scanNotices.push(lookupFailureNotice('Base history scan', LOOKUP_UNAVAILABLE));
       }
 
       console.log(`[aerodrome/activity] positionId=all account=${account} → ${ids.length} tokenIds, ${perPosition.length} resolved, ${excluded.length} excluded`);
@@ -453,7 +515,7 @@ async function GET_impl(request: Request) {
       const tokenIdBig = BigInt(positionId);
       const tokenIdNum = Number(tokenIdBig);
       const tokenIdHex = '0x' + tokenIdBig.toString(16).padStart(64, '0');
-      logs = await fetchLogs(tokenIdHex, tokenIdNum);
+      logs = await fetchLogs(tokenIdHex, tokenIdNum, owner);
       console.log(`[aerodrome/activity] tokenId=${positionId} tokenIdHex=${tokenIdHex} → ${logs.length} logs`);
     }
 
