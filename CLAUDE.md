@@ -235,6 +235,31 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
+**🔴 NEXT UP (owner-ordered 2026-10-07): BASE HISTORY, then the SOLANA SAFETY NET.**
+
+**1. Base history is DOWN for every Base user (Tenderly outage).** The public Tenderly Base
+gateway now refuses `eth_getLogs` over 1,000 blocks ("Block range too large for public
+access"); publicnode's archive needs a token (403); Alchemy free caps `getLogs` at 10 blocks.
+Effect on production: Aerodrome closed positions missing (Account 1 shows 1 position instead
+of 8, Capital G/L −$1,880.39 instead of −$4,635.37), `/api/aerodrome/activity` returns 500 for
+the open position, the wallet-scope scan returns nothing. `7d5e496` DISCLOSES this (banner +
+incomplete marker) but does not fix it. Phase A is read-only: free route first
+(`alchemy_getAssetTransfers` or a chunked scan for ever-owned NFTs, env override for the
+hardcoded RPC URLs), then what a paid archive plan adds.
+
+**2. Solana safety net — design APPROVED, plan-gate before building.** After a Helius key
+rotation every Solana user silently saw zero open Orca/Raydium positions. Build
+`app/lib/solanaRpc.ts` (Helius → Alchemy, 12 s timeout, semaphore, THROW on total failure);
+covers all five Solana routes plus the DefiTuna on-chain check; client wrappers report through
+the truncation channel instead of returning `[]`; routes `console.error`. No public Solana RPC
+as a third endpoint. Note Alchemy has no `getAssetBatch`. Report:
+`reports/solana-missing-positions.md`.
+
+**Small fixes list:** Solana balances "couldn't load" notice on Token Holdings / the wallet
+page (deliberately left out of the safety net). Local `.env.local` Helius key is dead, and the
+local `HYPEREVM_ARCHIVE_RPC` (Chainstack) key returns 401 — production state of the latter is
+unverified.
+
 **🟠 ITEM 0b — DISCLOSURE SHIPPED (2026-08-06), DETERMINISM STILL OPEN → see ITEM 0d, which
 is the direct continuation and the NEXT thing to build.** The activity route silently
 substituted a different price basis when a position's historical price wasn't available,
@@ -383,7 +408,7 @@ on production → `VERDICT: deterministic ✓`.
 ledger cards now read the same per-transfer value as the chain list; see Recent fixes. Kept here
 only so the old "two figures for the same transfers" item is not re-opened.
 
-**🟠 ITEM 0i — A HUNG positions source renders a confident $0.00 total, with NO loading state,
+**✅ ITEM 0i — parts (a) and (c) SHIPPED `7d5e496` (aggregate never $0 above a non-empty breakdown; failed sources named). Part (b), a client timeout on a HUNG positions query, is still open.** Original: A HUNG positions source renders a confident $0.00 total, with NO loading state,
 NO error, and NO banner — while the breakdown table below it still shows real positions.**
 _(Found 2026-08-10 on production during the ITEM 0g verification. Load-induced — see the
 honesty note below — but the failure shape is real and reachable by a normal user.)_
@@ -668,7 +693,7 @@ verified, no such Sickle was found; **(10b)** confirm long-tail token resolution
 dust Sickle (pools `0x948e80fb…` / `0xcf88b8bf…`, which render `TOKEN0` placeholders) —
 never verified, and unreachable today precisely because those are CLOSED positions.
 
-**⚠️ B. ACTIVE BUG (scope-and-fix later) — a FAILED wallet enumeration returns an empty
+**✅ B. FIXED for the EVM routes (`7d5e496`) — see Recent fixes. Original statement kept:** _(was: ACTIVE BUG)_ — a FAILED wallet enumeration returns an empty
 result that is indistinguishable from "no positions", and gets CACHED as truth.**
 _(Found 2026-08-02 while verifying Item A. NOT fixed there, deliberately — logged separately
 so it can be scoped properly.)_
@@ -913,6 +938,43 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`7d5e496` + `cfb2cd0`** — **A failed history lookup is DISCLOSED, never shown as a
+  confident number (queue item B and ITEM 0i, both closed for the EVM routes).**
+  `getEverOwnedTokenIds` returns `{ ids, complete, reason }`; a failed or unavailable lookup
+  travels the existing truncation channel as `lookup-failed` / `lookup-unavailable`, and
+  `isIncompletePayload` keeps it out of the activity-route cache.
+  **THREE STANDING RULES from this work:**
+  **(1) A failed lookup forces the incomplete marker.** Capital G/L and Net P&L render `≈` +
+  "incomplete — some history couldn't be loaded" whenever ANY notice is a `lookup-*` reason
+  (`hasLookupFailure` in `enumerationTruncation.ts`, read in `useLpPnl` from the same registry
+  as the banner, so the two cannot disagree). Do NOT tie the marker to whether a position
+  happens to be estimate-priced — that was the first version, and it only "passed" by
+  coincidence.
+  **(2) Never save a snapshot while a source is pending or failed, while any position has no
+  result yet, or when the totals contradict the breakdown** — and never SHOW a saved snapshot
+  that contradicts live data (`isAggregateSelfContradictory`, now applied to what is actually
+  on screen: snapshot totals above the live breakdown). Root cause of the all-zero snapshots:
+  the page counted as settled the moment the FIRST source answered "no positions", plus a
+  one-render gap before the P&L hook marks itself loading. The write gate is
+  `included + excluded + errored < filteredPositions.length`; a looser `=== 0` gate still let
+  a 4-of-5 snapshot through.
+  **(3) Test scripts must not write to the shared store.** The Upstash DB is ONE database for
+  production, preview and local, and any analytics load used to POST a snapshot.
+  `scripts/capgl-determinism.mjs` now answers snapshot POSTs locally; any new Playwright check
+  that loads `/analytics` must route `**/api/analytics-snapshot` the same way.
+  Also: `TruncationBanner` picks its heading by kind (cap / failed lookup / both); the
+  Aerodrome and Velodrome fee scans in `useWalletLevelFees` never passed the wallet to
+  `applyTruncationNotices`, so "Base history scan" was silently dropped — and a failed fetch
+  CLEARED an existing notice; the dashboard names sources that could not load
+  (`failedSources`).
+  One zero snapshot was deleted from the shared store
+  (`analytics_snapshot_v2:3b1962b41ed01823ab4b729a8745cb88`, Account 1 EVM watched alone).
+  **Still open:** a saved zero snapshot can show for the first seconds before live data
+  arrives; Total Deposited reads `$0.00` for ~30–60 s on Account 1 while its open Aerodrome
+  position computes; the underlying Base outage is NOT fixed (see top of queue). The Solana
+  wrappers still return `[]` on a failed response. No cache bumps — the snapshot field is
+  optional and additive.
 
 - **(this session)** — **Wallet disconnect actually disconnects, on all three chains, from both
   the navbar chip and Manage Wallets.** Two reported bugs plus one found in testing.
