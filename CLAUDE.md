@@ -242,6 +242,9 @@ each needs its own go-ahead). Ranks above everything below.**
 |---|---|---|
 | 1a | Never-shrink guard + expiry stopgap on the Sui and Solana closed caches | shipped |
 | 1b | Sui history through GraphQL with four completeness checks; closed scan, three fee scans and per-position activity moved; incremental from the last checkpoint | shipped |
+| 1c | **Sui first scan must be resumable.** Measured on production: a wallet with more than 10,000 sent transactions scans 200 pages (~55–59 s), is reported short, stores NOTHING and starts from zero on the next load, so its closed Sui positions never appear (0 shown, with the notice). Store progress per page and resume from the cursor; give the scan a wall-clock budget; serve the positions found so far, marked incomplete | not started |
+| 1d | `suiPoolContext.ts` remembers a failed pool read and assumes 9 decimals (same pattern as the defect fixed in `suiClosedPositions.ts`) | not started |
+| 1e | Rewards on CLOSED Sui positions are not valued inside the closed list (they do reach Fees Collected through the wallet-wide scans) | not started |
 | 2 | Extend the SOLANA closed cache from a cursor on each load (Sui is done in 1b) | 3–4 |
 | 3 | Fees Collected includes closed Sui fees, plus rewards at claim-date price (owner-approved) | 5–7 |
 | 4 | Orca: exact-time prices for closed legs (today one price per UTC day, so a same-day leg reads 0.00); a historical price for open-position deposits (every open Orca position is always "priced from estimates") | 4–6 |
@@ -962,7 +965,7 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Sprint 1b)** — **Sui history rebuilt on GraphQL; the 22 missing Cetus
+- **`f110144`** (Sprint 1b) — **Sui history rebuilt on GraphQL; the 22 missing Cetus
   positions, the open position's deposit and the closed Sui fees are back.** NEW
   `app/lib/suiHistory.ts` is the ONE source for Sui history (`suiRpc.ts` stays the transport
   for LIVE state only): `getSuiWalletHistory` (transactions the wallet sent, position events
@@ -1001,6 +1004,19 @@ shorthand.
   v5 → v6, `bluefin-activity` v5 → v6.** `closed_pos_sui` NOT bumped (stored records are kept
   byte-identical; bumping would discard them). Tests: `npx tsx scripts/sui-history-test.ts`,
   `node scripts/closed-cache-guard-test.mjs`.
+  **PRODUCTION, measured 2026-10-09 on `f110144`, Account 1 full wallet set, desktop + emulated
+  iPhone + iPad:** closed Sui 47 / 6 / 2 (0 missing, 0 extra, 0 pending), 33 previously stored
+  records byte-identical, 22/22 new Cetus positions matched by open and close transaction.
+  Capital G/L **≈ −$11,868.33** (112 closed rows; was −$12,106.70): Cetus −3,719.97, Bluefin
+  −2,644.68, Momentum −288.24, Orca −1,690.63, Aerodrome −1,644.46, Uniswap V3 −1,991.48, ProjectX
+  +111.08 (EVM −3,524.86 unchanged). Fees Collected **$14,184.53** (was $7,183.38) = EVM 2,924.13
+  + Sui wide scans 8,015.44 + Solana 3,244.96. Total Deposited $28,013.19 with no `~` (closes
+  queue item d). Net P&L ≈ +$878.85. The marker still reads "3 positions priced from estimates"
+  (ProjectX 435568 + the two open Orca positions). Harness PASS, 2 runs. Stored history:
+  `sui_wallet_hist_v1` for Account 1 = 347 transactions, 166 with position events.
+  **Cold third-party wallets:** 2,078 transactions → 1,006 closed Cetus positions in 6.6 s, 1.2 s
+  on the second load. More than 12,000 transactions → short after ~59 s on every load, nothing
+  stored, 0 positions (plan step 1c). Function limit is 300 s (`vercel.json`).
   **Still open (found, not fixed):** `suiPoolContext.ts` has the same cache-a-failure and
   blind-9-decimals pattern as defect (2); the SUI claim-date price is one CoinGecko DAILY price
   (Rule 1), so a fee claimed late on a volatile day differs from the exact-minute value (−$33
