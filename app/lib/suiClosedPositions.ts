@@ -43,6 +43,7 @@ import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillama
 import { logPrice } from './priceLogger';
 import { suiRpc } from './suiRpc';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
+import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, mergeSuiBlocks, type SuiHistoryBlock } from './suiHistory';
 
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
@@ -163,71 +164,93 @@ export interface SuiClosedPosition {
 // Sprint SUI-RPC-RELIABILITY: routed through the shared paced+failover client
 // (was a bare fetch with no timeout/fallback).
 
-// Currently-owned (open) position object IDs — the set we subtract from the
-// ever-opened set to find CLOSED (destroyed-object) positions.
-async function fetchOwnedPositionIds(account: string, protocol: SuiClmmProtocol): Promise<Set<string>> {
-  const ids = new Set<string>();
-  let cursor: string | null = null;
-  do {
-    const result = (await suiRpc('suix_getOwnedObjects', [
-      account,
-      { filter: { StructType: POSITION_TYPE[protocol] }, options: { showType: false, showContent: false } },
-      cursor,
-      50,
-    ])) as { data?: Array<{ data?: { objectId?: string } }>; nextCursor?: string; hasNextPage?: boolean } | null;
-    if (!result?.data) break;
-    for (const item of result.data) { const id = item?.data?.objectId; if (id) ids.add(id); }
-    cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
-  } while (cursor);
-  return ids;
-}
+type SuiTxBlock = SuiHistoryBlock;
 
-interface SuiTxBlock {
-  digest: string;
-  timestampMs: string;
-  events?: Array<{ type: string; parsedJson: Record<string, unknown> }>;
-}
-
-// Fetch every transaction the wallet signed, with events — the SAME pagination
-// the cetus/bluefin activity routes already run (FromAddress, 50/page, then
-// multiGet 25/batch with showEvents). Returns all blocks.
-//
-// `complete` is false whenever the answer cannot be shown to cover the wallet's
-// whole history: a digest page that did not come back, a detail batch that did
-// not come back, or a transaction returned WITHOUT its timestamp. The last one
-// is how a pruned node answers — it lists every digest but returns an empty
-// shell for anything older than its retention window, which reads exactly like
-// "this transaction emitted no events". Measured on the production endpoint:
-// 347 digests listed, 338 returned as shells. A short answer is never complete.
-async function fetchWalletBlocksWithStatus(account: string): Promise<{ blocks: SuiTxBlock[]; complete: boolean }> {
-  const digests: string[] = [];
-  let complete = true;
-  let cursor: string | null = null;
-  do {
-    const result = (await suiRpc('suix_queryTransactionBlocks', [
-      { filter: { FromAddress: account } }, cursor, 50, true,
-    ])) as { data?: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
-    if (!result?.data) { complete = false; break; }
-    digests.push(...result.data.map((t) => t.digest));
-    cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
-  } while (cursor);
-
-  const blocks: SuiTxBlock[] = [];
-  for (let i = 0; i < digests.length; i += 25) {
-    const batch = (await suiRpc('sui_multiGetTransactionBlocks', [
-      digests.slice(i, i + 25),
-      { showEvents: true, showInput: false, showEffects: false, showObjectChanges: false, showBalanceChanges: false },
-    ])) as SuiTxBlock[] | null;
-    if (batch) blocks.push(...batch);
-    else complete = false;
+// Which position ids a set of transactions OPENED and CLOSED, read from the
+// protocols' own open/close marker events (the lifecycle parser below skips
+// those markers; this is the one place they are used).
+function positionMarkers(protocol: SuiClmmProtocol, blocks: SuiTxBlock[]): { opened: Set<string>; closed: Set<string>; touched: Set<string> } {
+  const opened = new Set<string>(), closed = new Set<string>(), touched = new Set<string>();
+  for (const tx of blocks) {
+    for (const ev of tx.events ?? []) {
+      if (!eventPackageMatches(protocol, ev.type)) continue;
+      const id = (ev.parsedJson?.[POSITION_ID_FIELD[protocol]] as string) ?? '';
+      if (!id) continue;
+      touched.add(id);
+      const name = ev.type.replace(/<.*/, '').split('::').pop() ?? '';
+      if (name === 'OpenPositionEvent' || name === 'PositionOpened') opened.add(id);
+      else if (name === 'ClosePositionEvent' || name === 'PositionClosed') closed.add(id);
+    }
   }
-  if (blocks.length < digests.length) complete = false;
-  if (blocks.some((b) => !b || !b.timestampMs)) complete = false;
-  return { blocks, complete };
+  return { opened, closed, touched };
+}
+
+// The most positions per wallet whose history is completed from the position
+// object. Past it the scan is reported short rather than made slow.
+const MAX_OBJECT_LOOKUPS = 25;
+
+interface ProtocolHistory {
+  blocks: SuiTxBlock[];
+  /** Position objects the wallet owns now. */
+  owned: Set<string>;
+  /** Positions whose history could not be made whole — never reported as closed. */
+  unresolved: Set<string>;
+  /** False when the history cannot be shown to cover everything (see suiHistory.ts). */
+  complete: boolean;
+  mark: string;
+}
+
+// One protocol's position history for a wallet, with the FOURTH completeness
+// check: positions opened minus positions closed must equal the position
+// objects the wallet owns now. Where the wallet's own transactions do not tell
+// the whole story for a position — it holds one it never opened, it acted on
+// one it never opened, or one it opened is gone without a close — that
+// position's history is read from the position OBJECT, which is exact whoever
+// signed. A position that still cannot be accounted for is `unresolved`: it is
+// left out and the scan is reported short. It is never booked as closed, which
+// would turn "we lost track of it" into a loss the size of its deposit.
+async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProtocol): Promise<ProtocolHistory> {
+  const [hist, ownedOrNull] = await Promise.all([
+    getSuiWalletHistory(walletAddress),
+    getSuiOwnedObjectIds(walletAddress, POSITION_TYPE[protocol]).catch(() => null),
+  ]);
+  let complete = hist.complete && ownedOrNull !== null;
+  const owned = ownedOrNull ?? new Set<string>();
+  let blocks: SuiTxBlock[] = hist.blocks;
+  const unresolved = new Set<string>();
+
+  let m = positionMarkers(protocol, blocks);
+  if (ownedOrNull === null) {
+    // Without the owned set an open position cannot be told from a closed one.
+    for (const id of m.touched) if (!m.closed.has(id)) unresolved.add(id);
+    return { blocks, owned, unresolved, complete: false, mark: hist.mark };
+  }
+
+  const lookups = new Set<string>();
+  for (const id of owned) if (!m.opened.has(id)) lookups.add(id);
+  for (const id of m.touched) if (!m.opened.has(id)) lookups.add(id);
+  for (const id of m.opened) if (!m.closed.has(id) && !owned.has(id)) lookups.add(id);
+  if (lookups.size > 0) {
+    const ids = [...lookups].slice(0, MAX_OBJECT_LOOKUPS);
+    if (lookups.size > ids.length) complete = false;
+    const extra = await Promise.all(ids.map((id) => getSuiObjectHistory(id).catch(() => null)));
+    if (extra.some((x) => x === null)) complete = false;
+    blocks = mergeSuiBlocks(blocks, ...extra.filter((x): x is NonNullable<typeof x> => x !== null));
+    m = positionMarkers(protocol, blocks);
+  }
+
+  for (const id of m.opened) if (!m.closed.has(id) && !owned.has(id)) { unresolved.add(id); complete = false; }
+  for (const id of m.touched) if (!m.opened.has(id)) { unresolved.add(id); complete = false; }
+  for (const id of owned) if (!m.opened.has(id)) complete = false;
+  return { blocks, owned, unresolved, complete, mark: hist.mark };
 }
 
 async function fetchWalletBlocks(account: string): Promise<SuiTxBlock[]> {
-  return (await fetchWalletBlocksWithStatus(account)).blocks;
+  return (await getSuiWalletHistory(account)).blocks;
+}
+
+async function fetchOwnedPositionIds(account: string, protocol: SuiClmmProtocol): Promise<Set<string>> {
+  return getSuiOwnedObjectIds(account, POSITION_TYPE[protocol]);
 }
 
 // Parse + group every lifecycle event in the wallet's history by position id.
@@ -252,27 +275,34 @@ function groupEventsByPosition(
 // ── Pool context (coin types + decimals) — resolved from the persistent pool ──
 // The pool is a SHARED object that survives the position's destruction, so its
 // `Pool<A, B>` type params + coin metadata are always available. Cached per pool.
-const poolContextCache = new Map<string, { coinTypeA: string; coinTypeB: string; decimalsA: number; decimalsB: number } | null>();
+// Only a RESOLVED context is cached. A read that fails returns null for this
+// call and is tried again on the next: caching the failure pinned every
+// position in that pool to "cannot be reconstructed" for the life of the
+// instance, and they were then skipped without a word. Decimals are never
+// guessed — a token whose decimals cannot be read leaves the context unresolved.
+const poolContextCache = new Map<string, { coinTypeA: string; coinTypeB: string; decimalsA: number; decimalsB: number }>();
 
-async function resolveDecimals(coinType: string): Promise<number> {
+async function resolveDecimals(coinType: string): Promise<number | null> {
   const tok = lookupHardcodedToken('sui', normalizeSuiType(coinType));
   if (tok) return tok.decimals;
   try {
     const meta = (await suiRpc('suix_getCoinMetadata', [coinType])) as { decimals?: number } | null;
     if (meta && typeof meta.decimals === 'number') return meta.decimals;
   } catch { /* ignore */ }
-  return 9; // Sui default
+  return null;
 }
 
 async function resolvePoolContext(poolId: string) {
-  if (poolContextCache.has(poolId)) return poolContextCache.get(poolId)!;
+  const hit = poolContextCache.get(poolId);
+  if (hit) return hit;
   const obj = (await suiRpc('sui_getObject', [poolId, { showType: true }])) as { data?: { type?: string } } | null;
   const typ = obj?.data?.type ?? '';
   const m = typ.match(/<([^,]+),\s*([^,>]+)/); // Pool<A, B[, ...]>
-  if (!m) { poolContextCache.set(poolId, null); return null; }
+  if (!m) return null;
   const coinTypeA = normalizeSuiType(m[1].trim());
   const coinTypeB = normalizeSuiType(m[2].trim());
   const [decimalsA, decimalsB] = await Promise.all([resolveDecimals(coinTypeA), resolveDecimals(coinTypeB)]);
+  if (decimalsA === null || decimalsB === null) return null;
   const ctx = { coinTypeA, coinTypeB, decimalsA, decimalsB };
   poolContextCache.set(poolId, ctx);
   return ctx;
@@ -599,22 +629,42 @@ export async function getClosedPositionsForWallet(
 // Same scan, plus whether it can be shown to cover the wallet's whole history.
 // `complete: false` means the list may be missing positions — the cache must not
 // store it and the page must say so.
+//
+// `known` maps a position id to the number of events its STORED record holds.
+// A closed position is immutable, so one that is already stored with at least
+// as many events is not valued again (valuation is the slow part — it fetches
+// claim-date prices). The cache merge keeps the stored record for it.
 export async function getClosedPositionsForWalletWithStatus(
   walletAddress: string,
   protocol: SuiClmmProtocol,
+  known?: ReadonlyMap<string, number>,
 ): Promise<{ positions: SuiClosedPosition[]; complete: boolean }> {
-  const [{ blocks, complete }, owned] = await Promise.all([
-    fetchWalletBlocksWithStatus(walletAddress),
-    fetchOwnedPositionIds(walletAddress, protocol),
-  ]);
+  const history = await loadProtocolHistory(walletAddress, protocol);
+  const { blocks, owned, unresolved } = history;
+  let complete = history.complete;
   const grouped = groupEventsByPosition(protocol, blocks);
-  const out: SuiClosedPosition[] = [];
+
+  const todo: Array<[string, SuiPositionEvent[]]> = [];
   for (const [pid, evs] of grouped) {
     if (owned.has(pid)) continue;
+    if (unresolved.has(pid)) continue;
     if (!evs.some((e) => e.kind === 'deposit')) continue;
-    const lifecycle = await buildLifecycle(protocol, pid, evs);
-    if (!lifecycle) continue;
-    out.push(await valuePositionLifecycle(lifecycle));
+    const stored = known?.get(pid);
+    if (stored !== undefined && stored >= evs.length) continue;
+    todo.push([pid, evs]);
+  }
+
+  // Valued a few at a time (each one waits on claim-date prices). A position
+  // that is known to exist but cannot be reconstructed — its pool could not be
+  // read — makes the scan SHORT: it is not skipped as though it were not there.
+  const out: SuiClosedPosition[] = [];
+  const CONCURRENCY = 4;
+  for (let i = 0; i < todo.length; i += CONCURRENCY) {
+    const batch = await Promise.all(todo.slice(i, i + CONCURRENCY).map(async ([pid, evs]) => {
+      const lifecycle = await buildLifecycle(protocol, pid, evs);
+      return lifecycle ? valuePositionLifecycle(lifecycle) : null;
+    }));
+    for (const p of batch) { if (p) out.push(p); else complete = false; }
   }
   return { positions: out, complete };
 }
@@ -692,11 +742,17 @@ export function getCachedClosedPositionsGuarded(
   const existing = _inFlightSuiScans.get(key);
   if (existing) return existing;
   const p = (async (): Promise<SuiClosedPositionsResult> => {
+    // The wallet's history is extended from where the last scan stopped (one
+    // small request when nothing is new). Its mark tells the guard whether the
+    // stored list is older than the history, so a position closed today is
+    // rebuilt into the list today.
+    const hist = await getSuiWalletHistory(walletAddress);
     const r = await loadClosedPositionsGuarded<SuiClosedPosition>({
       backend: _backend,
       slots: [{ name: protocol, key: closedPosKey(protocol, walletAddress) }],
-      scan: async () => {
-        const fresh = await getClosedPositionsForWalletWithStatus(walletAddress, protocol);
+      scan: async (cached) => {
+        const known = new Map((cached[protocol] ?? []).map((x) => [x.positionId, x.events.length] as const));
+        const fresh = await getClosedPositionsForWalletWithStatus(walletAddress, protocol, known);
         return { bySlot: { [protocol]: fresh.positions }, complete: fresh.complete };
       },
       idOf: (x) => x.positionId,
@@ -704,9 +760,11 @@ export function getCachedClosedPositionsGuarded(
       isValid: isCachedSuiPosition,
       emptyTtlSeconds: null,
       legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
+      mark: hist.mark,
       log: (m) => console.warn(`[suiClosedPositions] ${protocol}: ${m}`),
     });
-    return { positions: r.bySlot[protocol] ?? [], incomplete: r.incomplete };
+    // A short history is reported even when it triggered no rebuild.
+    return { positions: r.bySlot[protocol] ?? [], incomplete: r.incomplete || !hist.complete };
   })();
   _inFlightSuiScans.set(key, p);
   return p.finally(() => { _inFlightSuiScans.delete(key); });

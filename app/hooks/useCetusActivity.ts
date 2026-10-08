@@ -34,7 +34,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 function cacheKey(positionId: string) {
   // v5 (Sprint CETUS-V1-EVENTS): V1 AddLiquidityEvent / RemoveLiquidityEvent now
   // parsed — pre-V2 deposits/withdrawals enter the event stream; flush v4.
-  return `cetus-activity-v5-${positionId}`;
+  // v6 (Sprint 1b): history from GraphQL (a deposit older than a week was
+  // missing); deposits/withdrawals valued from the event's own pool price.
+  return `cetus-activity-v6-${positionId}`;
 }
 
 function readCache(positionId: string): CetusActivityData | null {

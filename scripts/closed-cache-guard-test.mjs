@@ -67,6 +67,18 @@ for(const prot of ["cetus","bluefin","momentum"]){ const list=sui.filter(p=>p.pr
   ok("solana: COMPLETE scan → adds the new one, keeps all 40 untouched",stored.length===sol.length+1&&sol.every(p=>stored.some(q=>JSON.stringify(q)===JSON.stringify(p)))&&!r.incomplete,`stored ${sol.length}→${stored.length}`);
   ok("solana: complete EMPTY Raydium stored with its 7-day TTL",(await B.get(kr))==="[]"&&(await B.ttl(kr))===7*DAY); }
 
+// ───────── history mark: a list is rebuilt the day history grows, not after 30 days
+{ const B=mem(), key="closed_pos_sui_v2:cetus:w"; NOW=Date.parse("2026-10-08T12:00:00Z"); const list=sui.filter(p=>p.protocol==="cetus"); B.seed(key,list,11*DAY); let scans=0, seenCached=-1;
+  const run=(mark,scan)=>loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"cetus",key}],emptyTtlSeconds:null,mark,scan:async(cached)=>{scans++;seenCached=cached.cetus.length;return scan();}});
+  let r=await run("m1",async()=>({bySlot:{cetus:[fake("TODAY1")]},complete:true}));
+  ok("mark: a list with no mark is rebuilt once and gains the new position",scans===1&&seenCached===list.length&&r.bySlot.cetus.length===list.length+1&&!r.incomplete);
+  scans=0; r=await run("m1",async()=>({bySlot:{cetus:[]},complete:true}));
+  ok("mark: unchanged history → no rebuild",scans===0&&r.bySlot.cetus.length===list.length+1);
+  r=await run("m2",async()=>({bySlot:{cetus:[fake("TODAY2")]},complete:false}));
+  ok("mark: history grew but the scan was SHORT → nothing written, flagged, retried next load",scans===1&&r.incomplete&&JSON.parse(B.m.get(key)).length===list.length+1);
+  r=await run("m2",async()=>({bySlot:{cetus:[fake("TODAY2")]},complete:true}));
+  ok("mark: next load completes → position closed today is stored today",scans===2&&!r.incomplete&&JSON.parse(B.m.get(key)).length===list.length+2); }
+
 // ───────── read-only switch: a local run can never write to the shared store
 { process.env.CLOSED_POS_CACHE_READONLY="1"; process.env.CLOSED_POS_REFRESH_AFTER_SECONDS="0"; const B=mem(), key="closed_pos_sui_v2:cetus:w"; NOW=Date.parse("2026-10-08T12:00:00Z"); const list=sui.filter(p=>p.protocol==="cetus"); B.seed(key,list,11*DAY); B.reset();
   const r=await loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"cetus",key}],emptyTtlSeconds:null,scan:async()=>({bySlot:{cetus:[fake("N")]},complete:true})});

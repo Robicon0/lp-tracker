@@ -241,8 +241,8 @@ each needs its own go-ahead). Ranks above everything below.**
 | Step | Work | Hours |
 |---|---|---|
 | 1a | Never-shrink guard + expiry stopgap on the Sui and Solana closed caches | shipped |
-| 1b | Sui history through GraphQL (`graphql.mainnet.sui.io`) with four completeness checks (paging ends; oldest scanned = wallet's first transaction; opened − closed = position objects owned now; event pages past 50 followed). Moves the closed scan, the three wallet-wide fee scans and per-position activity. No keyless second provider exists — decision pending | 14–18 |
-| 2 | Extend both closed caches from a cursor on each load, so a position closed today appears today | 5–7 |
+| 1b | Sui history through GraphQL with four completeness checks; closed scan, three fee scans and per-position activity moved; incremental from the last checkpoint | shipped |
+| 2 | Extend the SOLANA closed cache from a cursor on each load (Sui is done in 1b) | 3–4 |
 | 3 | Fees Collected includes closed Sui fees, plus rewards at claim-date price (owner-approved) | 5–7 |
 | 4 | Orca: exact-time prices for closed legs (today one price per UTC day, so a same-day leg reads 0.00); a historical price for open-position deposits (every open Orca position is always "priced from estimates") | 4–6 |
 | 5 | Position routes never return value 0 on a failed read (`app/api/cetus/route.ts:498` — the dashboard total dropped to $6,429.77 for one refresh) | 3–4 |
@@ -961,6 +961,51 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **(Sprint 1b)** — **Sui history rebuilt on GraphQL; the 22 missing Cetus
+  positions, the open position's deposit and the closed Sui fees are back.** NEW
+  `app/lib/suiHistory.ts` is the ONE source for Sui history (`suiRpc.ts` stays the transport
+  for LIVE state only): `getSuiWalletHistory` (transactions the wallet sent, position events
+  only, stored once without expiry in `sui_wallet_hist_v1:{wallet}` and extended from the last
+  checkpoint — one request when nothing is new), `getSuiObjectHistory` (everything that touched
+  one position object, whoever signed), `getSuiOwnedObjectIds`, `getSuiCoinMetadata`.
+  **Completeness is proven, four checks:** paging ended; the oldest transaction scanned is the
+  wallet's first (asked separately); extra event pages fetched past 50; and — in
+  `suiClosedPositions.loadProtocolHistory` — positions opened minus closed equals the position
+  objects owned now. A position the wallet did not open itself is completed from its OBJECT
+  history; one that still cannot be accounted for is left out and the scan is reported short,
+  never booked as closed. **The "affected address" filter was measured and rejected** (27
+  transactions by other senders, two of them aggregator swaps carrying strangers' pool events).
+  Moved onto it: closed Sui positions, the three wallet-wide fee scans, per-position activity.
+  The closed list is rebuilt whenever the history's `mark` moves (guard option `mark`), so a
+  position closed today is stored today; only NEW positions are valued.
+  **Five defects found on the way, all fixed here:**
+  **(1)** `rpcUrlFromEnv` returns `''` for an unset var, so `?? DEFAULT` never applies — use
+  `||`. **(2)** a failed pool read was cached as "unresolvable" for the life of the instance and
+  every position in that pool was then skipped silently while the scan reported complete; only
+  a resolved context is cached now, and an unreconstructable position makes the scan short.
+  **(3)** the token resolver stored "decimals unknown" as `decimals: 0` and consumers applied
+  it: a 9-decimal Momentum reward (X_SUI, for which the JSON-RPC provider returns no metadata)
+  was valued a billion times over ($66bn). The resolver now asks GraphQL as a second source,
+  never caches an unknown, ignores a stored `0`-with-no-id entry, and the Momentum route keeps
+  such a claim pending. **(4)** Cetus/Bluefin per-position deposits and withdrawals had NO
+  historical tier (range estimate or spot only); they are now valued from the pool price the
+  event itself carries (`app/lib/suiEventPrice.ts`), the same basis the closed engine uses.
+  **(5)** `useWalletLevelFees` tied cancellation to effect cleanup. The effect re-runs on
+  every positions refresh and usually returns early (scan key unchanged), so a re-run
+  CANCELLED the in-flight wallet-wide scans and started nothing in their place: any scan slower
+  than the next refresh never reached Fee Income (all chains, not only Sui). A run is now
+  superseded only by a newer run (`runIdRef`). **Standing lesson: an effect that can return
+  early must not cancel work in its cleanup.**
+  **Cache bumps: `lp-pnl-events` v30 → v31, `analytics-activity` v22 → v23, `cetus-activity`
+  v5 → v6, `bluefin-activity` v5 → v6.** `closed_pos_sui` NOT bumped (stored records are kept
+  byte-identical; bumping would discard them). Tests: `npx tsx scripts/sui-history-test.ts`,
+  `node scripts/closed-cache-guard-test.mjs`.
+  **Still open (found, not fixed):** `suiPoolContext.ts` has the same cache-a-failure and
+  blind-9-decimals pattern as defect (2); the SUI claim-date price is one CoinGecko DAILY price
+  (Rule 1), so a fee claimed late on a volatile day differs from the exact-minute value (−$33
+  of $2,064 on the 22 positions); rewards on CLOSED Sui positions are still not valued in the
+  closed list (they do reach Fee Income through the wallet-wide scans).
 
 - **(Sprint 1a)** — **Safety net for closed positions: the
   Sui and Solana closed-position caches can no longer lose a position.** Phase A / A2 found the

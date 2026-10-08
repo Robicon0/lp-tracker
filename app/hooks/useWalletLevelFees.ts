@@ -196,6 +196,19 @@ export function useWalletLevelFees(
   // context + prices), so reusing a resolved/in-flight URL is exact. Failures
   // are evicted so the next run retries them.
   const urlCacheRef = useRef<Map<string, Promise<TaggedFeeEvent[]>>>(new Map());
+  // Which scan run owns the result. A run is superseded ONLY by a newer run (or
+  // by the wallet set emptying, or unmount) — never by the effect merely
+  // re-running. The effect re-runs every time the positions array changes, and
+  // most of those re-runs return early because the scan key is unchanged; tying
+  // cancellation to effect cleanup meant such a re-run cancelled the in-flight
+  // scans and started nothing in their place, so any scan slower than the next
+  // positions refresh never reached Fee Income at all.
+  const runIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     // Group Bluefin positions by wallet. Pick the highest-value position per
@@ -377,6 +390,7 @@ export function useWalletLevelFees(
 
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
     if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && velodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0 && solanaWallets.size === 0) {
+      runIdRef.current += 1; // nothing to scan: drop any in-flight run's result
       setEvents([]);
       setIsLoading(false);
       return;
@@ -449,7 +463,7 @@ export function useWalletLevelFees(
         `&coinTypeB=${encodeURIComponent(ctx.coinTypeB)}` +
         `&decimalsA=${ctx.decimalsA}&decimalsB=${ctx.decimalsB}` +
         `&priceA=${ctx.priceA}&priceB=${ctx.priceB}`;
-      fetches.push(dedupFetch(url, "Bluefin", "Sui"));
+      fetches.push(dedupFetch(url, "Bluefin", "Sui", ctx.account));
     }
 
     for (const acct of suiWallets.values()) {
@@ -470,7 +484,7 @@ export function useWalletLevelFees(
         `&coinTypeB=${encodeURIComponent(ctx.coinTypeB)}` +
         `&decimalsA=${ctx.decimalsA}&decimalsB=${ctx.decimalsB}` +
         `&priceA=${ctx.priceA}&priceB=${ctx.priceB}`;
-      fetches.push(dedupFetch(cetusUrl, "Cetus", "Sui"));
+      fetches.push(dedupFetch(cetusUrl, "Cetus", "Sui", ctx.account));
 
       // Momentum wallet-scope fee + reward scan — same model as Cetus/Bluefin.
       // Momentum positions don't expose coinTypeA/coinTypeB, so the fixed
@@ -490,7 +504,7 @@ export function useWalletLevelFees(
         `&coinTypeB=${encodeURIComponent(momentumCtx.coinTypeB)}` +
         `&decimalsA=${momentumCtx.decimalsA}&decimalsB=${momentumCtx.decimalsB}` +
         `&priceA=${momentumCtx.priceA}&priceB=${momentumCtx.priceB}`;
-      fetches.push(dedupFetch(momentumUrl, "Momentum", "Sui"));
+      fetches.push(dedupFetch(momentumUrl, "Momentum", "Sui", momentumCtx.account));
     }
 
     // Aerodrome (Base) wallet-scope fee scan — recovers Collect events from
@@ -588,7 +602,8 @@ export function useWalletLevelFees(
       fetches.push(p);
     }
 
-    let cancelled = false;
+    const runId = ++runIdRef.current;
+    const superseded = () => !mountedRef.current || runIdRef.current !== runId;
     setIsLoading(true);
     // Sprint PERFORMANCE: progressive delivery. On the FIRST load (no events
     // shown yet) each wallet-scope scan's results are appended to state as that
@@ -603,20 +618,16 @@ export function useWalletLevelFees(
     const firstLoad = events.length === 0;
     for (const f of fetches) {
       f.then((group) => {
-        if (cancelled || group.length === 0) return;
+        if (superseded() || group.length === 0) return;
         acc.push(...group);
         if (firstLoad) setEvents([...acc]);
       });
     }
     Promise.all(fetches).then(() => {
-      if (cancelled) return;
+      if (superseded()) return;
       setEvents([...acc]);
       setIsLoading(false);
     });
-
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions, suiWalletAddresses, suiPrice, solanaWalletAddresses]);
 

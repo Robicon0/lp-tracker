@@ -44,6 +44,8 @@ export interface ClosedCacheMeta {
   /** Last time any refresh was attempted (ms). */
   lastAttemptAt?: number;
   lastAttemptComplete?: boolean;
+  /** The history mark the list was last built from (see GuardedLoadOptions.mark). */
+  mark?: string;
 }
 
 export interface GuardedClosedResult<T> {
@@ -56,7 +58,12 @@ export interface GuardedClosedResult<T> {
 export interface GuardedLoadOptions<T> {
   backend: ClosedCacheBackend | null;
   slots: ClosedCacheSlot[];
-  scan: () => Promise<ClosedScanResult<T>>;
+  /**
+   * `cached` is what is stored per slot right now. A scan may use it to skip
+   * work for positions that are already stored (they are kept by the merge
+   * whatever the scan returns for them).
+   */
+  scan: (cached: Record<string, T[]>) => Promise<ClosedScanResult<T>>;
   idOf: (p: T) => string;
   /** Size of a position record; a rescan only replaces a cached record with a strictly larger one. */
   weightOf: (p: T) => number;
@@ -65,6 +72,14 @@ export interface GuardedLoadOptions<T> {
   emptyTtlSeconds: number | null;
   /** TTL older deployments wrote non-empty lists with; used to date a list that has no meta yet. */
   legacyTtlSeconds: number;
+  /**
+   * Identifies the history the caller would scan now (e.g. "how many
+   * transactions with position events, and the newest one"). When it differs
+   * from the mark stored with a list, the list is rebuilt and merged — this is
+   * how a position closed today appears today without waiting for the 30-day
+   * refresh. Omit it for a source that cannot tell cheaply whether history grew.
+   */
+  mark?: string;
   refreshAfterSeconds?: number;
   retryAfterSeconds?: number;
   now?: () => number;
@@ -182,7 +197,9 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
 
   const isStale = (s: SlotState<T>) => !!s.meta && now - s.meta.refreshedAt > refreshAfterMs;
   const isDue = (s: SlotState<T>) => isStale(s) && now - (s.meta?.lastAttemptAt ?? 0) > retryAfterMs;
-  const needScan = states.some((s) => s.cached === null || isDue(s));
+  const markMoved = (s: SlotState<T>) =>
+    opts.mark !== undefined && (s.cached?.length ?? 0) > 0 && s.meta?.mark !== opts.mark;
+  const needScan = states.some((s) => s.cached === null || isDue(s) || markMoved(s));
 
   if (!needScan) {
     const bySlot: Record<string, T[]> = {};
@@ -196,7 +213,9 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
   const haveCached = states.some((s) => (s.cached?.length ?? 0) > 0);
   let scan: ClosedScanResult<T>;
   try {
-    scan = await opts.scan();
+    const cachedBySlot: Record<string, T[]> = {};
+    for (const s of states) cachedBySlot[s.slot.name] = s.cached ?? [];
+    scan = await opts.scan(cachedBySlot);
   } catch (err) {
     if (!haveCached) throw err;
     log(`scan failed, serving cached list: ${String(err)}`);
@@ -226,7 +245,10 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
       continue;
     }
     // Rule 1 holds by construction: `merged` contains every cached id.
-    const meta: ClosedCacheMeta = { refreshedAt: now, lastAttemptAt: now, lastAttemptComplete: true };
+    const meta: ClosedCacheMeta = {
+      refreshedAt: now, lastAttemptAt: now, lastAttemptComplete: true,
+      ...(opts.mark !== undefined ? { mark: opts.mark } : {}),
+    };
     await write(() => backend!.set(s.slot.key, JSON.stringify(merged)));
     await write(() => backend!.set(closedMetaKey(s.slot.key), JSON.stringify(meta)));
   }

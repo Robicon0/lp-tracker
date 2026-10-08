@@ -135,7 +135,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // v20 → v21 (ITEM 0b): lockstep with lp-pnl-events-v29 — cached events predate
 // the `priceBasis` marker, so a spot-substituted event would be indistinguishable
 // from a historically-priced one.
-function cacheKey(id: string) { return `analytics-activity-v22-${id}`; }
+// v22 → v23 (Sprint 1b): lockstep with lp-pnl-events-v31 — Sui events come from
+// the full history and Cetus/Bluefin deposits are valued from the event's pool price.
+function cacheKey(id: string) { return `analytics-activity-v23-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { suiRpc } from '../../../lib/suiRpc';
+import { getSuiActivityBlocks } from '../../../lib/suiHistory';
+import { lookupFailureNotice, LOOKUP_UNAVAILABLE, type RouteTruncation } from '../../../lib/enumerationTruncation';
+import { sidePricesFromEventSqrt } from '../../../lib/suiEventPrice';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -89,50 +92,13 @@ async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
 }
 
 
-// Fetch all wallet transaction digests, paginating through all pages
-async function fetchAllDigests(account: string): Promise<string[]> {
-  const digests: string[] = [];
-  let cursor: string | null = null;
-
-  do {
-    const result = await suiRpc('suix_queryTransactionBlocks', [
-      { filter: { FromAddress: account } },
-      cursor,
-      50,
-      true, // descending (newest first)
-    ]) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
-
-    if (!result) break;
-    digests.push(...result.data.map((t) => t.digest));
-    cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
-  } while (cursor);
-
-  return digests;
-}
-
+// History comes from the shared Sui history client (app/lib/suiHistory.ts).
 interface SuiTxBlock {
   digest: string;
   timestampMs: string;
   events: Array<{ type: string; parsedJson: Record<string, unknown> }>;
 }
 
-// Batch-fetch transaction blocks with events (25 at a time)
-async function fetchTransactionEvents(digests: string[]): Promise<SuiTxBlock[]> {
-  const results: SuiTxBlock[] = [];
-  const BATCH = 25;
-
-  for (let i = 0; i < digests.length; i += BATCH) {
-    const batch = digests.slice(i, i + BATCH);
-    const txBlocks = await suiRpc('sui_multiGetTransactionBlocks', [
-      batch,
-      { showEvents: true, showInput: false, showEffects: false, showObjectChanges: false, showBalanceChanges: false },
-    ]) as SuiTxBlock[] | null;
-
-    if (txBlocks) results.push(...txBlocks);
-  }
-
-  return results;
-}
 
 export const GET = withActivityRouteCache(GET_impl);
 
@@ -161,11 +127,19 @@ async function GET_impl(request: Request) {
   const walletScope = positionId === 'all';
 
   try {
-    const allDigests = await fetchAllDigests(account);
+    const history = await getSuiActivityBlocks(account, walletScope ? null : positionId);
 
-    if (allDigests.length === 0) {
+    // Wallet scope only: a history scan that could not be shown to be whole is
+    // reported with the result (rule (a)); the notice also keeps this response
+    // out of the activity-route cache.
+    const historyNotices: RouteTruncation[] = history.complete
+      ? []
+      : [lookupFailureNotice('wallet history', LOOKUP_UNAVAILABLE)];
+
+    if (history.blocks.length === 0) {
       return NextResponse.json({
         events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
+        ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
       } as ActivityResponse);
     }
 
@@ -183,7 +157,7 @@ async function GET_impl(request: Request) {
     // so neither source is consulted there.
     const everOwnedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
 
-    const allTxBlocks = await fetchTransactionEvents(allDigests);
+    const allTxBlocks: SuiTxBlock[] = history.blocks;
 
     // Source 2: single in-memory pass over the already-fetched tx blocks to
     // collect every position the wallet has ever opened (LiquidityProvided
@@ -214,6 +188,7 @@ async function GET_impl(request: Request) {
       rewardSymbol?: string;
       rewardDecimals?: number;
       poolId?: string;        // fee_claim only — for per-event pool-context resolution
+      sqrtPrice?: unknown;    // deposit / withdrawal — the pool's price in that transaction (absent on V1 events)
     }
 
     const rawEvents: RawEvent[] = [];
@@ -251,14 +226,14 @@ async function GET_impl(request: Request) {
           const a1 = BigInt((pj.coin_b_amount as string) ?? '0');
           deposited0 += a0;
           deposited1 += a1;
-          rawEvents.push({ type: 'deposit', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+          rawEvents.push({ type: 'deposit', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1, sqrtPrice: pj.current_sqrt_price });
 
         } else if (evName === 'LiquidityRemoved') {
           const a0 = BigInt((pj.coin_a_amount as string) ?? '0');
           const a1 = BigInt((pj.coin_b_amount as string) ?? '0');
           withdrawn0 += a0;
           withdrawn1 += a1;
-          rawEvents.push({ type: 'withdrawal', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+          rawEvents.push({ type: 'withdrawal', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1, sqrtPrice: pj.current_sqrt_price });
 
         } else if (evName === 'UserFeeCollected') {
           const a0 = BigInt((pj.coin_a_amount as string) ?? '0');
@@ -406,7 +381,22 @@ async function GET_impl(request: Request) {
       // historical-only (Rule 1a), mirroring the Cetus 1.15 cascade.
       let __feeClaimSrc = 'unknown';
 
-      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
+      if (ev.type === 'deposit' || ev.type === 'withdrawal') {
+        // The pool's own price in this transaction (historical by construction).
+        // Exact basis, so no priceBasis marker. Falls through when the event
+        // carries no sqrt price or the pool has no stablecoin side.
+        const px = sidePricesFromEventSqrt(
+          ev.sqrtPrice, decimalsA, decimalsB,
+          STABLECOINS.has(coinTypeA.toLowerCase()), STABLECOINS.has(coinTypeB.toLowerCase()),
+        );
+        if (px) {
+          price0AtTime = px.price0;
+          price1AtTime = px.price1;
+          usdAtTime = amount0 * px.price0 + amount1 * px.price1;
+        }
+      }
+
+      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && usdAtTime == null && hasTicks) {
         const derived = deriveDepositPrices(
           amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
           coinTypeA, coinTypeB, STABLECOINS,
@@ -605,6 +595,7 @@ async function GET_impl(request: Request) {
       netInvested1: Number(deposited1 - withdrawn1) / Number(scaleB),
       totalFees0: Number(fees0) / Number(scaleA),
       totalFees1: Number(fees1) / Number(scaleB),
+      ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
     } as ActivityResponse);
   } catch (err) {
     console.error('[bluefin/activity] Unexpected error:', err);

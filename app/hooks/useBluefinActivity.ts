@@ -32,7 +32,9 @@ function cacheKey(positionId: string) {
   // (pure historical) instead of getCachedSuiPriceForTimestamp, which could return
   // the FIX-C cg-spot fallback on a CoinGecko-historical miss (Rule 1a leak). Flush
   // so any spot-contaminated cached fee value re-resolves via DeFiLlama / pending.
-  return `bluefin-activity-v5-${positionId}`;
+  // v5 → v6 (Sprint 1b): history from GraphQL; deposits/withdrawals valued from
+  // the event's own pool price instead of a range-boundary estimate.
+  return `bluefin-activity-v6-${positionId}`;
 }
 
 function readCache(positionId: string): BluefinActivityData | null {

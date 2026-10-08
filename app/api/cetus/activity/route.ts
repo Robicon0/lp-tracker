@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { suiRpc, suiRpcIndexed, SuiIndexUnavailableError } from '../../../lib/suiRpc';
+import { suiRpc } from '../../../lib/suiRpc';
+import { getSuiActivityBlocks } from '../../../lib/suiHistory';
+import { lookupFailureNotice, LOOKUP_UNAVAILABLE, type RouteTruncation } from '../../../lib/enumerationTruncation';
+import { sidePricesFromEventSqrt } from '../../../lib/suiEventPrice';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getCachedSuiPriceForTimestamp, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -166,105 +169,16 @@ async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
   return ids;
 }
 
-// Fetch every transaction digest matching a queryTransactionBlocks filter,
-// paginating through all pages.
-//
-// Sprint SPOT-RESILIENCE-V2 (Bug B): FAIL-LOUD on a partial scan. suiRpc returns
-// `undefined` when every endpoint fails a page under load; the old code did
-// `if (!result) break`, which SILENTLY TRUNCATED the digest list — and if the
-// truncated slice held a position's deposit tx, `computePositionPnL` reported a
-// false `no_deposits` that LOOKS authoritative. Now a failed page is retried
-// once; if it still fails we THROW, so the route returns 500 → the client
-// degrades the position to STALE (last-known-good) instead of asserting the
-// position has no deposits. An incomplete scan must never masquerade as "no
-// on-chain history".
-async function fetchDigestsByFilter(filter: Record<string, unknown>, indexed = false): Promise<string[]> {
-  const digests: string[] = [];
-  let cursor: string | null = null;
-
-  // indexed=true routes through suiRpcIndexed (PRIMARY endpoint only): object
-  // filters like ChangedObject aren't served by the public fallback — it
-  // answers a silent `{ data: [] }` for them (verified live 2026-07-18), which
-  // an ordinary failover would present as an authoritative "no results".
-  // suiRpcIndexed THROWS SuiIndexUnavailableError instead, so the caller can
-  // say "I don't know" rather than "nothing found". FromAddress (indexed=false)
-  // is a standard index served correctly by both endpoints — failover stays.
-  const call = indexed
-    ? (c: string | null) => suiRpcIndexed('suix_queryTransactionBlocks', [{ filter }, c, 50, true])
-    : (c: string | null) => suiRpc('suix_queryTransactionBlocks', [{ filter }, c, 50, true]);
-
-  do {
-    let result = await call(cursor) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
-
-    if (!result) {
-      // One retry before failing loud — a single transient page failure
-      // shouldn't tank the whole scan, but a genuinely-unavailable page must
-      // NOT silently truncate.
-      result = await call(cursor) as typeof result;
-    }
-    if (!result) {
-      throw new Error(`cetus/activity: queryTransactionBlocks page failed (filter=${JSON.stringify(filter)}) — refusing to return a partial scan`);
-    }
-    digests.push(...result.data.map((t) => t.digest));
-    cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
-  } while (cursor);
-
-  return digests;
-}
-
-// Discover the transaction digests relevant to a scan.
-//
-//  - Wallet scope: every tx SENT BY the account (fee/reward events across all
-//    the wallet's positions).
-//  - Per-position: additionally UNION every tx that CHANGED the position object
-//    itself (`ChangedObject: positionId`). Sprint SPOT-RESILIENCE-V2 (Bug B):
-//    the `FromAddress`-only scan misses a position opened via a router/aggregator
-//    or received by transfer (its AddLiquidity tx isn't signed by the account) →
-//    a false `no_deposits`. The object-scoped query finds that deposit tx
-//    regardless of who signed it. De-duplicated across both sources.
-async function fetchScanDigests(account: string, positionId: string | null): Promise<string[]> {
-  const fromDigests = await fetchDigestsByFilter({ FromAddress: account });
-  if (!positionId || positionId === 'all') return fromDigests;
-
-  // Per-position: also pull txs that touched this exact position object. If the
-  // object query fails transiently we DON'T fail the whole request — the
-  // FromAddress scan is still the primary source; the object query is an
-  // additive safety net for router-opened / received positions.
-  let objDigests: string[] = [];
-  try {
-    objDigests = await fetchDigestsByFilter({ ChangedObject: positionId }, true);
-  } catch (err) {
-    // SuiIndexUnavailableError = the indexed primary couldn't answer — the
-    // safety net is OFF for this request ("I don't know"), never "no results".
-    const tag = err instanceof SuiIndexUnavailableError ? 'index-unavailable' : 'failed';
-    console.warn(`[cetus/activity] ChangedObject discovery ${tag} (non-fatal, FromAddress scan still authoritative for self-signed txs):`, String(err));
-  }
-  return [...new Set([...fromDigests, ...objDigests])];
-}
-
+// History comes from the shared Sui history client (app/lib/suiHistory.ts):
+// per position it reads the position OBJECT's history, so a position opened
+// through a router or received by transfer still has its deposit; a read that
+// cannot be completed throws, and is never passed off as "no on-chain history".
 interface SuiTxBlock {
   digest: string;
   timestampMs: string;
   events: Array<{ type: string; parsedJson: Record<string, unknown> }>;
 }
 
-// Batch-fetch transaction blocks with events (25 at a time).
-async function fetchTransactionEvents(digests: string[]): Promise<SuiTxBlock[]> {
-  const results: SuiTxBlock[] = [];
-  const BATCH = 25;
-
-  for (let i = 0; i < digests.length; i += BATCH) {
-    const batch = digests.slice(i, i + BATCH);
-    const txBlocks = await suiRpc('sui_multiGetTransactionBlocks', [
-      batch,
-      { showEvents: true, showInput: false, showEffects: false, showObjectChanges: false, showBalanceChanges: false },
-    ]) as SuiTxBlock[] | null;
-
-    if (txBlocks) results.push(...txBlocks);
-  }
-
-  return results;
-}
 
 // CollectRewardV2Event carries rewarder_type as {name: "…::module::SYMBOL"}
 // (NOT 0x-prefixed). Extract the trailing symbol for pricing + decimals lookup.
@@ -305,11 +219,19 @@ async function GET_impl(request: Request) {
     // changed the position object (router-opened / received positions), and the
     // scan fails loud on a partial page rather than truncating to a false
     // no_deposits. Wallet-scope is unchanged (FromAddress only).
-    const allDigests = await fetchScanDigests(account, positionId);
+    const history = await getSuiActivityBlocks(account, walletScope ? null : positionId);
 
-    if (allDigests.length === 0) {
+    // Wallet scope only: a history scan that could not be shown to be whole is
+    // reported with the result (rule (a)); the notice also keeps this response
+    // out of the activity-route cache.
+    const historyNotices: RouteTruncation[] = history.complete
+      ? []
+      : [lookupFailureNotice('wallet history', LOOKUP_UNAVAILABLE)];
+
+    if (history.blocks.length === 0) {
       return NextResponse.json({
         events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
+        ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
       } as ActivityResponse);
     }
 
@@ -328,7 +250,7 @@ async function GET_impl(request: Request) {
     // so neither source is consulted there.
     const everOwnedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
 
-    const allTxBlocks = await fetchTransactionEvents(allDigests);
+    const allTxBlocks: SuiTxBlock[] = history.blocks;
 
     // Source 2: collect position IDs from OpenPositionEvent in tx history.
     // Single in-memory pass — no extra RPCs (allTxBlocks is already loaded).
@@ -358,6 +280,7 @@ async function GET_impl(request: Request) {
       rewardSymbol?: string;
       rewardDecimals?: number;
       poolId?: string;        // fee_claim only — for per-event pool-context resolution
+      sqrtPrice?: unknown;    // deposit / withdrawal — the pool's price in that transaction (absent on V1 events)
     }
 
     const rawEvents: RawEvent[] = [];
@@ -403,13 +326,13 @@ async function GET_impl(request: Request) {
           const a0 = BigInt((pj.amount_a as string) ?? '0');
           const a1 = BigInt((pj.amount_b as string) ?? '0');
           deposited0 += a0; deposited1 += a1;
-          rawEvents.push({ type: 'deposit', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+          rawEvents.push({ type: 'deposit', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1, sqrtPrice: pj.current_sqrt_price });
 
         } else if (evName === 'RemoveLiquidityV2Event' || evName === 'RemoveLiquidityEvent') {
           const a0 = BigInt((pj.amount_a as string) ?? '0');
           const a1 = BigInt((pj.amount_b as string) ?? '0');
           withdrawn0 += a0; withdrawn1 += a1;
-          rawEvents.push({ type: 'withdrawal', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1 });
+          rawEvents.push({ type: 'withdrawal', txHash: tx.digest, timestamp: ts, amount0Raw: a0, amount1Raw: a1, sqrtPrice: pj.current_sqrt_price });
 
         } else if (evName === 'CollectFeeEvent') {
           const a0 = BigInt((pj.amount_a as string) ?? '0');
@@ -573,7 +496,22 @@ async function GET_impl(request: Request) {
       // are historical-only (Rule 1a).
       let __feeClaimSrc = 'unknown';
 
-      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
+      if (ev.type === 'deposit' || ev.type === 'withdrawal') {
+        // The pool's own price in this transaction (historical by construction).
+        // Exact basis, so no priceBasis marker. Falls through when the event
+        // carries no sqrt price or the pool has no stablecoin side.
+        const px = sidePricesFromEventSqrt(
+          ev.sqrtPrice, decimalsA, decimalsB,
+          STABLECOINS.has(coinTypeA.toLowerCase()), STABLECOINS.has(coinTypeB.toLowerCase()),
+        );
+        if (px) {
+          price0AtTime = px.price0;
+          price1AtTime = px.price1;
+          usdAtTime = amount0 * px.price0 + amount1 * px.price1;
+        }
+      }
+
+      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && usdAtTime == null && hasTicks) {
         const derived = deriveDepositPrices(
           amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
           coinTypeA, coinTypeB, STABLECOINS,
@@ -811,6 +749,7 @@ async function GET_impl(request: Request) {
       netInvested1: Number(deposited1 - withdrawn1) / Number(scaleB),
       totalFees0: Number(fees0) / Number(scaleA),
       totalFees1: Number(fees1) / Number(scaleB),
+      ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
     } as ActivityResponse);
   } catch (err) {
     console.error('[cetus/activity] Unexpected error:', err);

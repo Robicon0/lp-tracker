@@ -676,7 +676,12 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // spot-substituted deposit/withdrawal makes the position report as pricing-
 // pending. A v28 entry has no marker, so a cached spot-substituted event would
 // keep rendering as a settled historical value — exactly the bug being fixed.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v30-";
+// v30 → v31 (Sprint 1b): Sui history now comes from GraphQL. A Cetus/Bluefin
+// deposit or withdrawal is valued from the pool price recorded in the event
+// itself instead of a range-boundary estimate, and a position whose deposit was
+// missing (history source returned one week) now has it. A v30 entry holds the
+// estimate-marked or deposit-less events.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v31-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

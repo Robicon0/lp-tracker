@@ -50,6 +50,7 @@ import { withCgPacing } from './cgPriceHistory';
 import { resolveCgId } from './cgSymbolSearch';
 import { logPrice } from './priceLogger';
 import { suiRpc } from './suiRpc';
+import { getSuiCoinMetadata } from './suiHistory';
 import {
   type Chain,
   CG_PLATFORM,
@@ -122,6 +123,9 @@ async function redisGet(chain: Chain, normId: string): Promise<ResolvedToken | n
     if (raw == null) return null;
     const obj = typeof raw === 'string' ? (JSON.parse(raw) as ResolvedToken) : raw;
     if (obj && typeof obj.symbol === 'string' && typeof obj.decimals === 'number') {
+      // `decimals: 0` with no CoinGecko id is how an UNKNOWN-decimals result was
+      // stored. It is not knowledge — resolve again rather than serve it.
+      if (obj.decimals === 0 && obj.cgId == null) return null;
       return obj;
     }
     return null;
@@ -227,9 +231,12 @@ async function suiMetadata(coinType: string): Promise<OnchainMeta | null> {
     if (r && (typeof r.symbol === 'string' || typeof r.decimals === 'number')) {
       return { symbol: r.symbol ?? null, decimals: typeof r.decimals === 'number' ? r.decimals : null };
     }
-    return null;
+    // The JSON-RPC provider answers `null` for coins it does not carry metadata
+    // for (measured: X_SUI, real decimals 9). Ask the chain's GraphQL service
+    // before concluding the decimals are unknown.
+    return await getSuiCoinMetadata(coinType);
   } catch {
-    return null;
+    return await getSuiCoinMetadata(coinType);
   }
 }
 
@@ -428,6 +435,7 @@ export async function resolveToken(id: TokenIdentifier): Promise<ResolvedToken> 
       // Step 7 — Finalize with graceful fallbacks. Symbol always present;
       // decimals NEVER a blind 18 (0 when truly unknown, per spec edge case).
       if (!symbol) symbol = addrFallbackSymbol(chain, raw);
+      const decimalsKnown = decimals != null;
       if (decimals == null) {
         decimals = 0;
         console.warn(`[tokenResolver] no decimals for ${chain}:${normId} — defaulting to 0 (not 18)`);
@@ -436,11 +444,16 @@ export async function resolveToken(id: TokenIdentifier): Promise<ResolvedToken> 
       if (cgId === null && source !== 'defillama') source = 'unresolvable';
 
       const out: ResolvedToken = { symbol, decimals, cgId, priceable, source };
-      memCache.set(cacheKey, out);
 
-      // Cache write with outcome-appropriate TTL.
-      const ttl = priceable ? TTL_PRICEABLE : metadataKnown ? TTL_METADATA_ONLY : TTL_NEGATIVE;
-      redisSet(chain, normId, out, ttl);
+      // Cache write with outcome-appropriate TTL. A result whose decimals could
+      // not be read is NOT cached anywhere: `0` here means "unknown", and a
+      // cached 0 was being applied as a real scale (a 9-decimal reward valued a
+      // billion times over). The next call tries the read again.
+      if (decimalsKnown) {
+        memCache.set(cacheKey, out);
+        const ttl = priceable ? TTL_PRICEABLE : metadataKnown ? TTL_METADATA_ONLY : TTL_NEGATIVE;
+        redisSet(chain, normId, out, ttl);
+      }
 
       emitUsed(chain, normId, out, Date.now() - t0);
       if (!priceable) {

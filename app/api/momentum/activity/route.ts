@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { suiRpc } from '../../../lib/suiRpc';
+import { getSuiActivityBlocks } from '../../../lib/suiHistory';
+import { lookupFailureNotice, LOOKUP_UNAVAILABLE, type RouteTruncation } from '../../../lib/enumerationTruncation';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmSuiPricesForTimestamps, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
@@ -123,44 +125,13 @@ async function fetchOwnedPositionIds(account: string): Promise<Set<string>> {
   return ids;
 }
 
-// Fetch all wallet transaction digests, paginating through all pages.
-async function fetchAllDigests(account: string): Promise<string[]> {
-  const digests: string[] = [];
-  let cursor: string | null = null;
-  do {
-    const result = await suiRpc('suix_queryTransactionBlocks', [
-      { filter: { FromAddress: account } },
-      cursor,
-      50,
-      true, // descending (newest first)
-    ]) as { data: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
-    if (!result) break;
-    digests.push(...result.data.map((t) => t.digest));
-    cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
-  } while (cursor);
-  return digests;
-}
-
+// History comes from the shared Sui history client (app/lib/suiHistory.ts).
 interface SuiTxBlock {
   digest: string;
   timestampMs: string;
   events: Array<{ type: string; parsedJson: Record<string, unknown> }>;
 }
 
-// Batch-fetch transaction blocks with events (25 at a time).
-async function fetchTransactionEvents(digests: string[]): Promise<SuiTxBlock[]> {
-  const results: SuiTxBlock[] = [];
-  const BATCH = 25;
-  for (let i = 0; i < digests.length; i += BATCH) {
-    const batch = digests.slice(i, i + BATCH);
-    const txBlocks = await suiRpc('sui_multiGetTransactionBlocks', [
-      batch,
-      { showEvents: true, showInput: false, showEffects: false, showObjectChanges: false, showBalanceChanges: false },
-    ]) as SuiTxBlock[] | null;
-    if (txBlocks) results.push(...txBlocks);
-  }
-  return results;
-}
 
 export const GET = withActivityRouteCache(GET_impl);
 
@@ -188,10 +159,18 @@ async function GET_impl(request: Request) {
   const walletScope = positionId === 'all';
 
   try {
-    const allDigests = await fetchAllDigests(account);
-    if (allDigests.length === 0) {
+    const history = await getSuiActivityBlocks(account, walletScope ? null : positionId);
+    // Wallet scope only: a history scan that could not be shown to be whole is
+    // reported with the result (rule (a)); the notice also keeps this response
+    // out of the activity-route cache.
+    const historyNotices: RouteTruncation[] = history.complete
+      ? []
+      : [lookupFailureNotice('wallet history', LOOKUP_UNAVAILABLE)];
+
+    if (history.blocks.length === 0) {
       return NextResponse.json({
         events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
+        ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
       } as ActivityResponse);
     }
 
@@ -202,7 +181,7 @@ async function GET_impl(request: Request) {
     // parsedJson.position_id === positionId, so neither source is consulted.
     const everOwnedPositionIds = walletScope ? await fetchOwnedPositionIds(account) : new Set<string>();
 
-    const allTxBlocks = await fetchTransactionEvents(allDigests);
+    const allTxBlocks: SuiTxBlock[] = history.blocks;
 
     if (walletScope) {
       for (const tx of allTxBlocks) {
@@ -324,22 +303,27 @@ async function GET_impl(request: Request) {
     // shared platform-wide tokenResolver (architecture Rule 9) for every unique
     // reward coin type. Used for the human amount AND the historical-only
     // valuation below. Reward tokens are NEVER spot-valued (Rule 1a).
-    interface RewardMeta { decimals: number; isStable: boolean; isSui: boolean }
+    // `decimalsKnown` is false when the resolver could not read the token's
+    // decimals (it reports 0 for "unknown"). Such a claim stays PENDING: scaling
+    // by a guessed or zero exponent values it wrongly by orders of magnitude.
+    interface RewardMeta { decimals: number; decimalsKnown: boolean; isStable: boolean; isSui: boolean }
     const rewardMeta = new Map<string, RewardMeta>();
     const rewardTypes = [...new Set(
       rawEvents.filter((e) => e.type === 'reward_claim' && e.rewardCoinType).map((e) => e.rewardCoinType!),
     )];
     await Promise.all(rewardTypes.map(async (ct) => {
       let decimals = 9;
+      let decimalsKnown = false;
       let cgId: string | null = null;
+      const isSui = ct.toLowerCase() === SUI_CANONICAL;
       try {
         const tok = await resolveToken({ chain: 'sui', suiType: ct });
-        decimals = tok.decimals;
         cgId = tok.cgId;
-      } catch { /* graceful — leaves decimals=9, cgId=null → pending unless SUI */ }
-      const isSui = ct.toLowerCase() === SUI_CANONICAL;
+        if (tok.decimals > 0) { decimals = tok.decimals; decimalsKnown = true; }
+      } catch { /* graceful — decimals stay unknown → the claim stays pending */ }
+      if (isSui) { decimals = 9; decimalsKnown = true; }
       const isStable = (cgId != null && STABLE_CGIDS.has(cgId)) || STABLECOINS.has(ct.toLowerCase());
-      rewardMeta.set(ct, { decimals, isStable, isSui });
+      rewardMeta.set(ct, { decimals, decimalsKnown, isStable, isSui });
     }));
     for (const e of rawEvents) {
       if (e.type === 'reward_claim' && e.rewardCoinType) {
@@ -466,7 +450,8 @@ async function GET_impl(request: Request) {
         const ct = ev.rewardCoinType;
         const m = ct ? rewardMeta.get(ct) : undefined;
         let px: number | null = null;
-        if (m?.isStable) { px = 1; __claimSrc = 'stablecoin-fixed'; }
+        if (!m?.decimalsKnown) { /* amount cannot be scaled → pending */ }
+        else if (m?.isStable) { px = 1; __claimSrc = 'stablecoin-fixed'; }
         else if (m?.isSui) {
           const hist = getHistoricalOnlySuiPrice(ev.timestamp);
           if (hist != null) { px = hist; __claimSrc = 'sui-historical'; }
@@ -607,6 +592,7 @@ async function GET_impl(request: Request) {
       netInvested1: Number(deposited1 - withdrawn1) / Number(scaleB),
       totalFees0: Number(fees0) / Number(scaleA),
       totalFees1: Number(fees1) / Number(scaleB),
+      ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
     } as ActivityResponse);
   } catch (err) {
     console.error('[momentum/activity] Unexpected error:', err);
