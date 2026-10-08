@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
-import { hasLookupFailure } from "../lib/enumerationTruncation";
+import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, type RouteTruncation } from "../lib/enumerationTruncation";
 import { useTruncationNotices } from "./useTruncationNotices";
 
 // ── Result shape ────────────────────────────────────────────────────────────
@@ -1503,6 +1503,13 @@ interface SuiClosedPositionDTO {
 
 // Closed Sui position protocol → display label (used for the Capital G/L
 // breakdown / warning banner metadata).
+// Notice sources for the closed-position history scans. A short scan (reported
+// by the route) or a failed request (reported here) lands in the same registry
+// as every other lookup failure, so the banner and the Capital G/L "incomplete"
+// marker both pick it up without any wiring of their own.
+const SUI_CLOSED_NOTICE_SOURCE = "Sui";
+const SOLANA_CLOSED_NOTICE_SOURCE = "Solana";
+
 const SUI_CLOSED_PROTOCOL_LABEL: Record<SuiClosedPositionDTO["protocol"], string> = {
   cetus: "Cetus",
   bluefin: "Bluefin",
@@ -1588,8 +1595,11 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       await Promise.all(addrs.map(async (addr) => {
         try {
           const res = await fetchClosedWithBudget(`/api/sui-closed-positions?account=${encodeURIComponent(addr)}`);
-          if (!res || !res.ok) return;
+          // A failed request is not "no closed positions": say so through the
+          // same notice the route uses for a short scan.
+          if (!res || !res.ok) { applyTruncationNotices(SUI_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); return; }
           const json = await res.json();
+          applyTruncationNotices(SUI_CLOSED_NOTICE_SOURCE, addr, json.truncated as RouteTruncation[] | undefined);
           for (const sp of (json.positions ?? []) as SuiClosedPositionDTO[]) {
             // Value via the SAME pure engine EVM closed positions use, so the
             // injected closingValue/initialValue/fees are byte-identical in shape.
@@ -1599,7 +1609,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             newMap.set(id, pnl);
             newMeta.set(id, { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui", openedTs: sp.openedTs, closedTs: sp.closedTs });
           }
-        } catch { /* graceful — a Sui address that fails contributes nothing */ }
+        } catch { applyTruncationNotices(SUI_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); }
       }));
       suiClosedLoadingRef.current = false;
       if (cancelled || !mountedRef.current) return;
@@ -1636,8 +1646,9 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       await Promise.all(addrs.map(async (addr) => {
         try {
           const res = await fetchClosedWithBudget(`/api/solana-closed-positions?account=${encodeURIComponent(addr)}`);
-          if (!res || !res.ok) return;
+          if (!res || !res.ok) { applyTruncationNotices(SOLANA_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); return; }
           const json = await res.json();
+          applyTruncationNotices(SOLANA_CLOSED_NOTICE_SOURCE, addr, json.truncated as RouteTruncation[] | undefined);
           for (const sp of (json.positions ?? []) as SolanaClosedPositionDTO[]) {
             const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
             if (!pnl.ok) continue;
@@ -1645,7 +1656,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             newMap.set(id, pnl);
             newMeta.set(id, { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana", openedTs: sp.openedTs, closedTs: sp.closedTs });
           }
-        } catch { /* graceful — a Solana address that fails contributes nothing */ }
+        } catch { applyTruncationNotices(SOLANA_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); }
       }));
       solanaClosedLoadingRef.current = false;
       if (cancelled || !mountedRef.current) return;

@@ -49,6 +49,7 @@ import { prewarmTokenPrices, getCachedOnlyTokenPrice } from './cgPriceHistory';
 import { resolveToken } from './tokenResolver';
 import { logPrice } from './priceLogger';
 import { rpcUrlFromEnv } from './rpcEnv';
+import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
 
 // rpcUrlFromEnv: a malformed value (bare API key) behaves like UNSET → the
 // engine's existing graceful degrade (empty result, stats.complete=false so
@@ -185,7 +186,7 @@ function parseRaydiumEventLogs(tx: SolTx): RayLogEvent[] {
 }
 
 // ── Alchemy JSON-RPC with throttle backoff (Phase A pacing) ───────────────────
-export interface ScanStats { signatures: number; validSignatures: number; txFetched: number; throttleEvents: number; wallMs: number; billedCalls: number; complete: boolean; }
+export interface ScanStats { signatures: number; validSignatures: number; txFetched: number; throttleEvents: number; wallMs: number; billedCalls: number; complete: boolean; /** A signature page failed or the page cap was hit — the list is not the wallet's whole history. */ signaturesIncomplete?: boolean; }
 
 async function alchemyRpc(method: string, params: unknown[], stats: ScanStats): Promise<unknown> {
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -206,13 +207,19 @@ interface SigInfo { signature: string; err: unknown; }
 async function fetchAllSignatures(wallet: string, stats: ScanStats): Promise<string[]> {
   const sigs: SigInfo[] = [];
   let before: string | undefined;
+  // A page that fails (null after every retry) is NOT the end of the history,
+  // and neither is running out of pages: both leave the list short, so both mark
+  // the scan incomplete instead of ending it as though the wallet stopped there.
+  let reachedEnd = false;
   for (let page = 0; page < 50; page++) {
     const r = (await alchemyRpc('getSignaturesForAddress', [wallet, { limit: 1000, ...(before ? { before } : {}) }], stats)) as SigInfo[] | null;
-    if (!r || r.length === 0) break;
+    if (!Array.isArray(r)) break;
+    if (r.length === 0) { reachedEnd = true; break; }
     sigs.push(...r);
-    if (r.length < 1000) break;
+    if (r.length < 1000) { reachedEnd = true; break; }
     before = r[r.length - 1].signature;
   }
+  if (!reachedEnd) stats.signaturesIncomplete = true;
   stats.signatures = sigs.length;
   const valid = sigs.filter((s) => !s.err).map((s) => s.signature);
   stats.validSignatures = valid.length;
@@ -269,7 +276,7 @@ async function fetchTransactions(sigs: string[], stats: ScanStats): Promise<Map<
     if (queue.length) await sleep(1000);
   }
   stats.txFetched = [...out.values()].filter(Boolean).length;
-  stats.complete = out.size === sigs.length;
+  stats.complete = out.size === sigs.length && !stats.signaturesIncomplete;
   return out;
 }
 
@@ -841,6 +848,8 @@ export async function getClosedPositionsForWallet(wallet: string): Promise<Walle
 // once, then ~0). Same contract as suiClosedPositions: own client, PRICE_CACHE_KV_*,
 // no-op stub if unset, NEVER throws, fire-and-forget writes. Empty results are
 // cached ONLY after a provably-complete scan (see writeClosedPosCache).
+// The TTL older deployments wrote with. Non-empty lists are now stored WITHOUT
+// expiry; this is only used to date a list that predates the meta key.
 const CLOSED_POS_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const CLOSED_POS_CACHE_VERSION = 'closed_pos_solana_v1'; // bump to invalidate on valuation-logic change
 
@@ -865,62 +874,73 @@ function closedPosKey(protocol: SolanaClmmProtocol, wallet: string): string {
   return `${CLOSED_POS_CACHE_VERSION}:${protocol}:${wallet.toLowerCase()}`;
 }
 
-async function readClosedPosCache(protocol: SolanaClmmProtocol, wallet: string): Promise<SolanaClosedPosition[] | null> {
-  if (!_redis) return null;
-  try {
-    const raw = await _redis.get<SolanaClosedPosition[] | string | null>(closedPosKey(protocol, wallet));
-    if (raw == null) return null;
-    const arr = typeof raw === 'string' ? (JSON.parse(raw) as SolanaClosedPosition[]) : raw;
-    // An EMPTY array is a VALID cached value (written only after a provably
-    // COMPLETE scan — see writeClosedPosCache). Distinguishes "scanned, none
-    // found" from null = "never scanned".
-    if (Array.isArray(arr) && arr.every((p) => p && typeof p.capitalGL === 'number' && Array.isArray(p.events))) return arr;
-    return null;
-  } catch { return null; }
-}
-// Sprint RAYDIUM refinement to the Sprint 1.14 empty-never-cached rule: an empty
-// result IS cached — but ONLY when the scan was 100% complete (stats.complete),
-// and with a short 24h TTL. The rule's purpose is that a TRANSIENT failure must
-// never freeze in as "no closed positions" — a provably-complete scan yielding
-// empty is not a transient failure, and without this a wallet legitimately empty
-// on one protocol (the common case: most wallets use one AMM) would re-pay the
-// full 40–120s scan on EVERY load. Partial/failed scans still never cache.
-function writeClosedPosCache(protocol: SolanaClmmProtocol, wallet: string, positions: SolanaClosedPosition[], scanComplete: boolean): void {
-  if (!_redis || !Array.isArray(positions)) return;
-  if (positions.length === 0 && !scanComplete) return; // transient-failure empties never cached
-  const ttl = positions.length === 0 ? CLOSED_POS_EMPTY_TTL_SECONDS : CLOSED_POS_TTL_SECONDS;
-  _redis.set(closedPosKey(protocol, wallet), JSON.stringify(positions), { ex: ttl })
-    .catch((err) => console.warn('[solanaClosedPositions] Redis write failed (ignored):', err));
+// Storage rules (never shrink, no expiry on found positions, a short scan is
+// never written) live in closedPositionCache.ts and are shared with Sui.
+//
+// Sprint RAYDIUM refinement, unchanged: an EMPTY list IS stored — but only after
+// a provably-complete scan (stats.complete), with the short TTL above. Without
+// it a wallet legitimately empty on one protocol (the common case: most wallets
+// use one AMM) would re-pay the full 40–120 s scan on EVERY load.
+const _backend: ClosedCacheBackend | null = _redis
+  ? {
+      get: (k) => _redis!.get(k),
+      set: (k, v, o) => (o ? _redis!.set(k, v, o) : _redis!.set(k, v)),
+      ttl: (k) => _redis!.ttl(k),
+      persist: (k) => _redis!.persist(k),
+    }
+  : null;
+
+function isCachedSolanaPosition(p: unknown): boolean {
+  const x = p as SolanaClosedPosition | null;
+  return !!x && typeof x.capitalGL === 'number' && Array.isArray(x.events);
 }
 
-// Redis-cached top-level entry point (mirrors sui getCachedClosedPositionCapitalGL,
-// but returns BOTH protocols' closed positions from at most ONE scan). Read both
-// sub-keys first; if either misses, run the single shared scan once, write both,
-// and return the fresh result (fresh is a superset of cached — it also captures
-// positions closed since the cache was written).
+export interface SolanaClosedPositionsResult {
+  positions: SolanaClosedPosition[];
+  /** True when the newest history scan was short or failed — the list may be missing positions. */
+  incomplete: boolean;
+}
+
+// Redis-cached top-level entry point (mirrors the Sui one, but returns BOTH
+// protocols' closed positions from at most ONE scan). Read both sub-keys first;
+// if either misses, or a stored list is 30 days old, run the single shared scan
+// once and MERGE it into what is stored.
 // Sprint LPPNL-PERF (Part B2): module-level in-flight dedup keyed by wallet. The
 // route is fetched concurrently by useLpPnl + useWalletLevelFees; even with the
 // route-level withActivityRouteCache dedup, this guarantees that within a warm
 // instance the expensive scan runs ONCE per wallet no matter how many callers
 // (or effect re-runs) arrive while it's in flight. Deleted on settle so a later
 // load re-reads cache / re-scans normally.
-const _inFlightScans = new Map<string, Promise<SolanaClosedPosition[]>>();
-export function getCachedClosedPositionCapitalGL(wallet: string): Promise<SolanaClosedPosition[]> {
-  if (!wallet) return Promise.resolve([]);
+const _inFlightScans = new Map<string, Promise<SolanaClosedPositionsResult>>();
+export function getCachedClosedPositionsGuarded(wallet: string): Promise<SolanaClosedPositionsResult> {
+  if (!wallet) return Promise.resolve({ positions: [], incomplete: false });
   const key = wallet.toLowerCase();
   const existing = _inFlightScans.get(key);
   if (existing) return existing;
-  const p = (async (): Promise<SolanaClosedPosition[]> => {
-    const [cachedOrca, cachedRay] = await Promise.all([
-      readClosedPosCache('orca', wallet),
-      readClosedPosCache('raydium', wallet),
-    ]);
-    if (cachedOrca !== null && cachedRay !== null) return [...cachedOrca, ...cachedRay];
-    const { orca, raydium, stats } = await getClosedPositionsForWallet(wallet);
-    writeClosedPosCache('orca', wallet, orca, stats.complete);
-    writeClosedPosCache('raydium', wallet, raydium, stats.complete);
-    return [...orca, ...raydium];
+  const p = (async (): Promise<SolanaClosedPositionsResult> => {
+    const r = await loadClosedPositionsGuarded<SolanaClosedPosition>({
+      backend: _backend,
+      slots: [
+        { name: 'orca', key: closedPosKey('orca', wallet) },
+        { name: 'raydium', key: closedPosKey('raydium', wallet) },
+      ],
+      scan: async () => {
+        const { orca, raydium, stats } = await getClosedPositionsForWallet(wallet);
+        return { bySlot: { orca, raydium }, complete: stats.complete };
+      },
+      idOf: (x) => x.positionId,
+      weightOf: (x) => x.events.length,
+      isValid: isCachedSolanaPosition,
+      emptyTtlSeconds: CLOSED_POS_EMPTY_TTL_SECONDS,
+      legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
+      log: (m) => console.warn(`[solanaClosedPositions] ${m}`),
+    });
+    return { positions: [...(r.bySlot.orca ?? []), ...(r.bySlot.raydium ?? [])], incomplete: r.incomplete };
   })();
   _inFlightScans.set(key, p);
   return p.finally(() => { _inFlightScans.delete(key); });
+}
+
+export function getCachedClosedPositionCapitalGL(wallet: string): Promise<SolanaClosedPosition[]> {
+  return getCachedClosedPositionsGuarded(wallet).then((r) => r.positions);
 }

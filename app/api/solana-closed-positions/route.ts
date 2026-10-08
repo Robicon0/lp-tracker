@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getCachedClosedPositionCapitalGL, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
+import { getCachedClosedPositionsGuarded, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
+import { lookupFailureNotice, LOOKUP_FAILED, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { withActivityRouteCache } from '../../lib/activityRouteCache';
 
 // Sprint LPPNL-PERF (Part B1): the wallet tx-history scan is unbounded (scales
@@ -34,7 +35,7 @@ export const maxDuration = 300;
 // at once (double CU + double Alchemy contention, worsening throttling). The
 // wrapper's URL-keyed in-flight map collapses both callers onto ONE scan (the
 // dominant win), plus a short TTL result mirror. The authoritative durable cache
-// remains Redis `closed_pos_solana_v1:*` inside getCachedClosedPositionCapitalGL.
+// remains Redis `closed_pos_solana_v1:*` inside getCachedClosedPositionsGuarded.
 async function GET_impl(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
@@ -43,8 +44,18 @@ async function GET_impl(request: Request) {
   }
 
   try {
-    const positions: SolanaClosedPosition[] = await getCachedClosedPositionCapitalGL(account);
-    return NextResponse.json({ positions, count: positions.length, account });
+    const { positions, incomplete }: { positions: SolanaClosedPosition[]; incomplete: boolean } =
+      await getCachedClosedPositionsGuarded(account);
+    // A short history scan is reported, never passed off as the whole list.
+    // Carrying a lookup notice also keeps withActivityRouteCache from holding
+    // this response (isIncompletePayload).
+    const truncated: RouteTruncation[] = incomplete
+      ? [lookupFailureNotice('closed-position history', LOOKUP_FAILED)]
+      : [];
+    return NextResponse.json({
+      positions, count: positions.length, account,
+      ...(truncated.length > 0 ? { truncated } : {}),
+    });
   } catch (err) {
     console.error('[solana-closed-positions] error:', err);
     return NextResponse.json(

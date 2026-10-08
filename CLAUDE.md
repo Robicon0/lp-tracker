@@ -235,6 +235,21 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
+**🔴 RECONCILIATION PLAN (owner-approved 2026-10-08; step 1a shipped, the rest NOT started —
+each needs its own go-ahead). Ranks above everything below.**
+
+| Step | Work | Hours |
+|---|---|---|
+| 1a | Never-shrink guard + expiry stopgap on the Sui and Solana closed caches | shipped |
+| 1b | Sui history through GraphQL (`graphql.mainnet.sui.io`) with four completeness checks (paging ends; oldest scanned = wallet's first transaction; opened − closed = position objects owned now; event pages past 50 followed). Moves the closed scan, the three wallet-wide fee scans and per-position activity. No keyless second provider exists — decision pending | 14–18 |
+| 2 | Extend both closed caches from a cursor on each load, so a position closed today appears today | 5–7 |
+| 3 | Fees Collected includes closed Sui fees, plus rewards at claim-date price (owner-approved) | 5–7 |
+| 4 | Orca: exact-time prices for closed legs (today one price per UTC day, so a same-day leg reads 0.00); a historical price for open-position deposits (every open Orca position is always "priced from estimates") | 4–6 |
+| 5 | Position routes never return value 0 on a failed read (`app/api/cetus/route.ts:498` — the dashboard total dropped to $6,429.77 for one refresh) | 3–4 |
+| 6 | ITEM 0h (HyperEVM historical price) | 4–6 |
+| 7 | `scripts/reference-reconcile.mjs` with the independent chain check, as the rule (c) gate | 6–8 |
+| 8 | Display of one-sided re-range legs (they are REAL and stay in totals; group a run into one row) | 3–6 |
+
 **🔴 NEXT UP (owner-ordered 2026-10-07): the SOLANA SAFETY NET (Base history is built).**
 
 **1. ✅ Base history — BUILT (see Recent fixes, "Base history restored").** The public Tenderly
@@ -946,6 +961,39 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **(Sprint 1a)** — **Safety net for closed positions: the
+  Sui and Solana closed-position caches can no longer lose a position.** Phase A / A2 found the
+  Sui history endpoint now returns about one week (347 digests listed, 338 returned as empty
+  shells; the public fallback answers "JSON-RPC deprecated"), and both closed lists were stored
+  with a 30-day expiry and replaced wholesale on rebuild — so on 2026-10-19 Account 1's 33
+  closed Sui positions (−$6,891 Capital G/L) would have been replaced by a one-week list with
+  no error. NEW `app/lib/closedPositionCache.ts` owns the storage for both chains: merge by
+  position id, no expiry on a non-empty list, a short scan never written (rules (a)/(b) in
+  Methodology). The stored VALUE is still a plain array, so an older deployment reads it
+  unchanged; bookkeeping is in a sibling key `closed_pos_meta_v1:{positions key}`
+  (`refreshedAt`, `lastAttemptAt`, `lastAttemptComplete`). A list written before this change is
+  dated from its remaining TTL and then has the TTL removed on first read. A stale list whose
+  refresh came back short is retried at most every 6 h and keeps reporting itself incomplete
+  in between. Both scans now say whether they were complete: Sui when every digest page and
+  detail batch came back and every transaction carries its timestamp; Solana when signature
+  paging reached the end (a failed page or the 50-page cap no longer ends the list silently).
+  Both routes return `truncated: [lookup-*]` on a short scan and `useLpPnl` registers it (and a
+  failed request) as "Sui" / "Solana" · closed-position history.
+  **Two test switches, both in `closedPositionCache.ts`:** `CLOSED_POS_CACHE_READONLY=1` (no
+  writes — use it for ANY local run, the store is shared with production) and
+  `CLOSED_POS_REFRESH_AFTER_SECONDS` (force a refresh attempt).
+  **Consequences to expect:** from 2026-10-19 Account 1's page shows the banner and `≈`,
+  because its Sui list goes stale and the refresh is short — correct until the Sui history
+  source is rebuilt. A wallet with no stored Sui list is rescanned on every load and always
+  flagged. Neither change restores anything that is already missing.
+  **Still missing from DefiDesh (chain-verified, see reports):** 22 closed Cetus positions
+  (08-26 → 09-28: G/L +247.54, fees 2,064.20, rewards 163.30); the Orca ZEC/USDC position
+  closed 2026-10-08 (4,300.96 USDC in); the open Cetus position's 12,268.26 USDC deposit (the
+  `~` on Total Deposited — closes queue item d); closed Sui fees in Fees Collected.
+  Reports are OUTSIDE the repo (`reports/` is tracked): `~/Documents/defidesh-reports/`.
+  No bump to `lp-pnl-events` / `analytics-activity` / `closed_pos_*`: stored lists are
+  byte-identical (verified by content hash before and after).
 
 - **`0294937`** (Base history restored) — **Aerodrome closed positions and fee
   history are back for every Base user, without the archive `eth_getLogs` the public gateway
@@ -2711,6 +2759,28 @@ Investigate-first, always. Before any fix:
 All changes are additive unless explicitly replacing broken logic.
 Every fix is a platform fix that benefits all current and future users
 with similar position shapes. Never wallet-specific framing.
+
+**Three standing rules for history and closed positions (Sprint 1a, 2026-10-08).**
+
+- **(a) A short or empty history answer is never treated as complete.** A scan must be able
+  to show it covered the wallet's whole history; if it cannot, it reports itself incomplete
+  through the truncation channel (`lookupFailureNotice`) and the totals carry `≈` + "incomplete
+  — some history couldn't be loaded". A page that did not come back, a batch that did not come
+  back, a transaction returned without its details, a hit page cap and a failed request are all
+  "short", never "the end". Nothing short is written to a cache.
+- **(b) Closed-position caches never shrink.** A closed position is immutable, so once found
+  it is kept: stored without expiry, merged by position id, and only ever replaced by a record
+  with MORE events. The 30-day mark triggers a refresh attempt, nothing else. The one
+  implementation is `app/lib/closedPositionCache.ts` (`loadClosedPositionsGuarded`); a new
+  closed-position cache on any chain goes through it. Check with
+  `node scripts/closed-cache-guard-test.mjs`.
+- **(c) Reference reconciliation is a B7 gate.** Before a sprint is called done, Account 1's
+  production figures are reconciled against the owner's calculator export. The chain wins every
+  disagreement: each difference is settled by an independent chain read (a path DefiDesh does
+  not use for that row), never by trusting either side. The export stays in `~/Downloads`,
+  read-only: never copied into the repo, never committed, never written to the shared store,
+  and reports carry aggregates and transaction prefixes only. **A chain position or fee that is
+  missing from DefiDesh blocks the sprint.**
 
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind

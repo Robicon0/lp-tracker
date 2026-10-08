@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getCachedClosedPositionCapitalGL, type SuiClosedPosition } from '../../lib/suiClosedPositions';
+import { getCachedClosedPositionsGuarded, type SuiClosedPosition } from '../../lib/suiClosedPositions';
+import { lookupFailureNotice, LOOKUP_UNAVAILABLE, type RouteTruncation } from '../../lib/enumerationTruncation';
 
 // Sprint LPPNL-PERF (Part B1): pin to the Vercel Pro ceiling so the tx-history
 // scan (public-Sui-RPC queryTransactionBlocks + multiGet, ~18–50 s cold) never
@@ -30,12 +31,21 @@ export async function GET(request: Request) {
 
   try {
     const [cetus, bluefin, momentum] = await Promise.all([
-      getCachedClosedPositionCapitalGL(account, 'cetus'),
-      getCachedClosedPositionCapitalGL(account, 'bluefin'),
-      getCachedClosedPositionCapitalGL(account, 'momentum'),
+      getCachedClosedPositionsGuarded(account, 'cetus'),
+      getCachedClosedPositionsGuarded(account, 'bluefin'),
+      getCachedClosedPositionsGuarded(account, 'momentum'),
     ]);
-    const positions: SuiClosedPosition[] = [...cetus, ...bluefin, ...momentum];
-    return NextResponse.json({ positions, count: positions.length, account });
+    const positions: SuiClosedPosition[] = [...cetus.positions, ...bluefin.positions, ...momentum.positions];
+    // A short history scan is reported, never passed off as the whole list. The
+    // positions above are still returned (cached ones are never dropped); the
+    // notice is what makes the page mark its totals as incomplete.
+    const truncated: RouteTruncation[] = (cetus.incomplete || bluefin.incomplete || momentum.incomplete)
+      ? [lookupFailureNotice('closed-position history', LOOKUP_UNAVAILABLE)]
+      : [];
+    return NextResponse.json({
+      positions, count: positions.length, account,
+      ...(truncated.length > 0 ? { truncated } : {}),
+    });
   } catch (err) {
     console.error('[sui-closed-positions] error:', err);
     return NextResponse.json(

@@ -42,6 +42,7 @@ import { prewarmSuiPricesForTimestamps, getHistoricalOnlySuiPrice } from './suiP
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillamaPriceHistory';
 import { logPrice } from './priceLogger';
 import { suiRpc } from './suiRpc';
+import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
 
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
@@ -190,14 +191,23 @@ interface SuiTxBlock {
 // Fetch every transaction the wallet signed, with events — the SAME pagination
 // the cetus/bluefin activity routes already run (FromAddress, 50/page, then
 // multiGet 25/batch with showEvents). Returns all blocks.
-async function fetchWalletBlocks(account: string): Promise<SuiTxBlock[]> {
+//
+// `complete` is false whenever the answer cannot be shown to cover the wallet's
+// whole history: a digest page that did not come back, a detail batch that did
+// not come back, or a transaction returned WITHOUT its timestamp. The last one
+// is how a pruned node answers — it lists every digest but returns an empty
+// shell for anything older than its retention window, which reads exactly like
+// "this transaction emitted no events". Measured on the production endpoint:
+// 347 digests listed, 338 returned as shells. A short answer is never complete.
+async function fetchWalletBlocksWithStatus(account: string): Promise<{ blocks: SuiTxBlock[]; complete: boolean }> {
   const digests: string[] = [];
+  let complete = true;
   let cursor: string | null = null;
   do {
     const result = (await suiRpc('suix_queryTransactionBlocks', [
       { filter: { FromAddress: account } }, cursor, 50, true,
     ])) as { data?: Array<{ digest: string }>; nextCursor?: string; hasNextPage?: boolean } | null;
-    if (!result?.data) break;
+    if (!result?.data) { complete = false; break; }
     digests.push(...result.data.map((t) => t.digest));
     cursor = result.hasNextPage ? (result.nextCursor ?? null) : null;
   } while (cursor);
@@ -209,8 +219,15 @@ async function fetchWalletBlocks(account: string): Promise<SuiTxBlock[]> {
       { showEvents: true, showInput: false, showEffects: false, showObjectChanges: false, showBalanceChanges: false },
     ])) as SuiTxBlock[] | null;
     if (batch) blocks.push(...batch);
+    else complete = false;
   }
-  return blocks;
+  if (blocks.length < digests.length) complete = false;
+  if (blocks.some((b) => !b || !b.timestampMs)) complete = false;
+  return { blocks, complete };
+}
+
+async function fetchWalletBlocks(account: string): Promise<SuiTxBlock[]> {
+  return (await fetchWalletBlocksWithStatus(account)).blocks;
 }
 
 // Parse + group every lifecycle event in the wallet's history by position id.
@@ -576,8 +593,18 @@ export async function getClosedPositionsForWallet(
   walletAddress: string,
   protocol: SuiClmmProtocol,
 ): Promise<SuiClosedPosition[]> {
-  const [blocks, owned] = await Promise.all([
-    fetchWalletBlocks(walletAddress),
+  return (await getClosedPositionsForWalletWithStatus(walletAddress, protocol)).positions;
+}
+
+// Same scan, plus whether it can be shown to cover the wallet's whole history.
+// `complete: false` means the list may be missing positions — the cache must not
+// store it and the page must say so.
+export async function getClosedPositionsForWalletWithStatus(
+  walletAddress: string,
+  protocol: SuiClmmProtocol,
+): Promise<{ positions: SuiClosedPosition[]; complete: boolean }> {
+  const [{ blocks, complete }, owned] = await Promise.all([
+    fetchWalletBlocksWithStatus(walletAddress),
     fetchOwnedPositionIds(walletAddress, protocol),
   ]);
   const grouped = groupEventsByPosition(protocol, blocks);
@@ -589,7 +616,7 @@ export async function getClosedPositionsForWallet(
     if (!lifecycle) continue;
     out.push(await valuePositionLifecycle(lifecycle));
   }
-  return out;
+  return { positions: out, complete };
 }
 
 // ── Redis cache (Sprint 1.14 immutable-closed-position pattern) ───────────────
@@ -600,6 +627,8 @@ export async function getClosedPositionsForWallet(
 // same PRICE_CACHE_KV_* env, no-op stub if unset, NEVER throws, fire-and-forget
 // writes, and an EMPTY result is NEVER cached (no false negatives — a transient
 // RPC failure during the scan must not be frozen in as "no closed positions").
+// The TTL older deployments wrote with. Lists are now stored WITHOUT expiry; this
+// is only used to date a list that predates the meta key.
 const CLOSED_POS_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 // Cache VERSION key — bump this suffix to invalidate on a valuation-logic change.
 // v2 (Sprint CETUS-V1-EVENTS): Cetus V1 Add/RemoveLiquidityEvent now parsed, so a
@@ -620,53 +649,72 @@ function closedPosKey(protocol: SuiClmmProtocol, walletAddress: string): string 
   return `${CLOSED_POS_CACHE_VERSION}:${protocol}:${walletAddress.toLowerCase()}`;
 }
 
-async function readClosedPosCache(protocol: SuiClmmProtocol, walletAddress: string): Promise<SuiClosedPosition[] | null> {
-  if (!_redis) return null;
-  try {
-    const raw = await _redis.get<SuiClosedPosition[] | string | null>(closedPosKey(protocol, walletAddress));
-    if (raw == null) return null;
-    const arr = typeof raw === 'string' ? (JSON.parse(raw) as SuiClosedPosition[]) : raw;
-    if (Array.isArray(arr) && arr.length > 0 && arr.every((p) => p && typeof p.capitalGL === 'number' && Array.isArray(p.events))) {
-      return arr;
+// Storage rules (never shrink, no expiry on found positions, a short scan is
+// never written) live in closedPositionCache.ts and are shared with Solana.
+// What stays specific to Sui: an EMPTY list is never stored at all, because this
+// scan cannot yet prove a wallet has no closed positions.
+const _backend: ClosedCacheBackend | null = _redis
+  ? {
+      get: (k) => _redis!.get(k),
+      set: (k, v, o) => (o ? _redis!.set(k, v, o) : _redis!.set(k, v)),
+      ttl: (k) => _redis!.ttl(k),
+      persist: (k) => _redis!.persist(k),
     }
-    return null;
-  } catch { return null; }
+  : null;
+
+function isCachedSuiPosition(p: unknown): boolean {
+  const x = p as SuiClosedPosition | null;
+  return !!x && typeof x.capitalGL === 'number' && Array.isArray(x.events);
 }
 
-function writeClosedPosCache(protocol: SuiClmmProtocol, walletAddress: string, positions: SuiClosedPosition[]): void {
-  // Fire-and-forget; never block the hot path, never throw. NEVER cache empty
-  // (Sprint 1.14 invariant — a transient empty scan must not become a frozen
-  // "no closed positions" false negative).
-  if (!_redis || !Array.isArray(positions) || positions.length === 0) return;
-  _redis
-    .set(closedPosKey(protocol, walletAddress), JSON.stringify(positions), { ex: CLOSED_POS_TTL_SECONDS })
-    .catch((err) => console.warn('[suiClosedPositions] Redis write failed (ignored):', err));
+export interface SuiClosedPositionsResult {
+  positions: SuiClosedPosition[];
+  /** True when the newest history scan was short or failed — the list may be missing positions. */
+  incomplete: boolean;
 }
 
-// B4 — Redis-cached top-level entry point. Read-first; on miss, retrieve +
-// reconstruct + value all closed positions, write fire-and-forget. Empty results
-// are NEVER cached. This is what useLpPnl (B5) calls per (wallet, protocol).
+// B4 — Redis-cached top-level entry point. Read-first; on a miss, or once the
+// stored list is 30 days old, retrieve + reconstruct + value all closed
+// positions and MERGE them into what is stored. This is what the route calls
+// per (wallet, protocol).
 //
 // Sprint LPPNL-PERF (Part B2): module-level in-flight dedup keyed by
 // (protocol, wallet) so the sui-closed route's concurrent 3-protocol Promise.all
 // (and any effect re-run) never launches two identical scans within a warm
 // instance — the expensive tx-history walk runs once per (protocol, wallet).
-const _inFlightSuiScans = new Map<string, Promise<SuiClosedPosition[]>>();
+const _inFlightSuiScans = new Map<string, Promise<SuiClosedPositionsResult>>();
+export function getCachedClosedPositionsGuarded(
+  walletAddress: string,
+  protocol: SuiClmmProtocol,
+): Promise<SuiClosedPositionsResult> {
+  if (!walletAddress) return Promise.resolve({ positions: [], incomplete: false });
+  const key = `${protocol}:${walletAddress.toLowerCase()}`;
+  const existing = _inFlightSuiScans.get(key);
+  if (existing) return existing;
+  const p = (async (): Promise<SuiClosedPositionsResult> => {
+    const r = await loadClosedPositionsGuarded<SuiClosedPosition>({
+      backend: _backend,
+      slots: [{ name: protocol, key: closedPosKey(protocol, walletAddress) }],
+      scan: async () => {
+        const fresh = await getClosedPositionsForWalletWithStatus(walletAddress, protocol);
+        return { bySlot: { [protocol]: fresh.positions }, complete: fresh.complete };
+      },
+      idOf: (x) => x.positionId,
+      weightOf: (x) => x.events.length,
+      isValid: isCachedSuiPosition,
+      emptyTtlSeconds: null,
+      legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
+      log: (m) => console.warn(`[suiClosedPositions] ${protocol}: ${m}`),
+    });
+    return { positions: r.bySlot[protocol] ?? [], incomplete: r.incomplete };
+  })();
+  _inFlightSuiScans.set(key, p);
+  return p.finally(() => { _inFlightSuiScans.delete(key); });
+}
+
 export function getCachedClosedPositionCapitalGL(
   walletAddress: string,
   protocol: SuiClmmProtocol,
 ): Promise<SuiClosedPosition[]> {
-  if (!walletAddress) return Promise.resolve([]);
-  const key = `${protocol}:${walletAddress.toLowerCase()}`;
-  const existing = _inFlightSuiScans.get(key);
-  if (existing) return existing;
-  const p = (async (): Promise<SuiClosedPosition[]> => {
-    const cached = await readClosedPosCache(protocol, walletAddress);
-    if (cached) return cached;
-    const fresh = await getClosedPositionsForWallet(walletAddress, protocol);
-    writeClosedPosCache(protocol, walletAddress, fresh);
-    return fresh;
-  })();
-  _inFlightSuiScans.set(key, p);
-  return p.finally(() => { _inFlightSuiScans.delete(key); });
+  return getCachedClosedPositionsGuarded(walletAddress, protocol).then((r) => r.positions);
 }
