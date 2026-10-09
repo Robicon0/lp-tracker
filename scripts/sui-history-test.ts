@@ -1,12 +1,12 @@
 // Sui history client test (app/lib/suiHistory.ts). Reads the chain through
 // GraphQL for one wallet and checks, against an IN-MEMORY store (nothing is
 // written to the shared store):
-//   1. a full scan is complete and its events are stored,
-//   2. the next scan is incremental — one request, same result,
-//   3. a history that is behind catches up to exactly the full scan,
-//   4. an unreachable endpoint returns the stored events flagged incomplete and
-//      leaves the store untouched,
-//   5. a position's own object history contains its deposit.
+//   1. a full scan is complete, oldest first, and the next one is one request,
+//   2. with a time budget too small to finish, each load returns a flagged
+//      partial result, resumes from its cursor and converges to the full scan,
+//   3. an unreachable endpoint returns the stored events flagged failed and
+//      leaves them untouched,
+//   4. a position's own object history contains its deposit.
 //
 // USAGE  npx tsx scripts/sui-history-test.ts [wallet] [positionObjectId]
 import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, _setSuiHistoryStoreForTests } from '../app/lib/suiHistory';
@@ -19,48 +19,57 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = ((...a: Parameters<typeof fetch>) => { requests += 1; return realFetch(...a); }) as typeof fetch;
 
 const mem = new Map<string, string>();
-let writes = 0;
-const store = { get: async (k: string) => mem.get(k) ?? null, set: async (k: string, v: string) => { writes += 1; mem.set(k, v); } };
+const store = {
+  get: async (k: string) => mem.get(k) ?? null,
+  mget: async (keys: string[]) => keys.map((k) => mem.get(k) ?? null),
+  set: async (k: string, v: string, o?: { nx?: boolean }) => { if (o?.nx && mem.has(k)) return null; mem.set(k, v); return 'OK'; },
+  del: async (k: string) => { mem.delete(k); return 1; },
+};
 const fresh = () => _setSuiHistoryStoreForTests(store);
+const chunks = () => [...mem.entries()].filter(([k]) => /:c\d+$/.test(k)).map(([k, v]) => `${k}=${v.length}`).sort().join('|');
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, detail = '') => { if (cond) pass += 1; else fail += 1; console.log(cond ? 'PASS' : 'FAIL', name, detail); };
 const sig = (h: { blocks: Array<{ digest: string; events: unknown[] }> }) => h.blocks.map((b) => `${b.digest}:${b.events.length}`).join(',');
 
 (async () => {
+  // 1. One pass with a generous budget: the reference result.
+  process.env.HISTORY_SCAN_BUDGET_MS = '120000';
   fresh();
   let t = Date.now(); requests = 0;
   const full = await getSuiWalletHistory(WALLET);
   const fullMs = Date.now() - t, fullReq = requests;
-  ok('full scan is complete', full.complete, `${full.txCount} transactions, ${full.blocks.length} with position events, ${fullReq} requests, ${(fullMs / 1000).toFixed(1)} s${full.reason ? ' — ' + full.reason : ''}`);
-  ok('full scan stored once', writes === 1 && mem.size === 1, `stored ${(([...mem.values()][0]?.length ?? 0) / 1024).toFixed(0)} KB`);
+  ok('full scan is complete', full.complete && full.status === 'complete', `${full.txCount} transactions, ${full.blocks.length} with position events, ${fullReq} requests, ${(fullMs / 1000).toFixed(1)} s${full.reason ? ' — ' + full.reason : ''}`);
+  ok('blocks are oldest first', full.blocks.every((b, i) => i === 0 || Number(b.timestampMs) >= Number(full.blocks[i - 1].timestampMs)));
 
-  fresh(); t = Date.now(); requests = 0; writes = 0;
+  fresh(); t = Date.now(); requests = 0;
   const again = await getSuiWalletHistory(WALLET);
-  ok('second scan is incremental and identical', again.complete && requests === 1 && sig(again) === sig(full) && again.mark === full.mark, `${requests} request, ${((Date.now() - t) / 1000).toFixed(1)} s, writes ${writes}`);
+  ok('second scan is incremental and identical', again.complete && requests === 1 && sig(again) === sig(full) && again.mark === full.mark, `${requests} request, ${((Date.now() - t) / 1000).toFixed(1)} s`);
 
-  // Put the stored history back to where it stood 40 position transactions ago.
-  const key = [...mem.keys()][0];
-  const stored = JSON.parse(mem.get(key)!);
-  const cut = Math.max(1, stored.blocks.length - 40);
-  const cutTs = Number(stored.blocks[cut].timestampMs);
-  const probe = await realFetch('https://graphql.mainnet.sui.io/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: `{ transactions(first:50, filter:{sentAddress:"${WALLET}"}){ nodes{ digest } } }` }) });
-  void probe;
-  // Find the checkpoint of the last kept transaction by asking for it.
-  const lastKept = stored.blocks[cut - 1].digest;
-  const cpRes = await (await realFetch('https://graphql.mainnet.sui.io/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: `{ transaction(digest:"${lastKept}"){ effects{ checkpoint{ sequenceNumber } } } }` }) })).json();
-  const cp = cpRes.data.transaction.effects.checkpoint.sequenceNumber as number;
-  mem.set(key, JSON.stringify({ ...stored, blocks: stored.blocks.slice(0, cut), lastCheckpoint: cp, tailDigests: [lastKept], txCount: 0 }));
-  fresh(); requests = 0; writes = 0;
-  const caught = await getSuiWalletHistory(WALLET);
-  ok('a history that is behind catches up to the full scan', caught.complete && sig(caught) === sig(full), `was ${cut} of ${stored.blocks.length} position transactions (cut at ${new Date(cutTs).toISOString().slice(0, 10)}), now ${caught.blocks.length}; ${requests} requests, writes ${writes}`);
+  // 2. The same wallet with a budget too small to finish: partial, flagged, resumed, converging.
+  const reference = sig(full);
+  mem.clear(); process.env.HISTORY_SCAN_BUDGET_MS = '900';
+  const loads: string[] = []; let last = 0; let grew = true; let flagged = true; let r = full;
+  for (let i = 0; i < 40; i++) {
+    fresh(); requests = 0; t = Date.now();
+    r = await getSuiWalletHistory(WALLET);
+    loads.push(`${i + 1}: ${((Date.now() - t) / 1000).toFixed(1)}s ${requests}req scanned ${r.txCount} kept ${r.blocks.length} ${r.status}`);
+    if (!r.complete && r.status !== 'in-progress') flagged = false;
+    if (r.blocks.length < last) grew = false; last = r.blocks.length;
+    if (r.complete) break;
+  }
+  ok('small budget: first load is partial and flagged', loads.length > 1 && /in-progress/.test(loads[0]), loads[0]);
+  ok('small budget: never shrinks, always flagged until done', grew && flagged);
+  ok('small budget: converges to exactly the full scan', r.complete && sig(r) === reference, `\n     ${loads.join('\n     ')}`);
 
-  const before = mem.get(key);
+  // 3. Endpoint unreachable: stored events returned, flagged, stored chunks untouched.
+  const before = chunks();
   process.env.SUI_GRAPHQL_URL = 'https://127.0.0.1:9/graphql';
-  fresh(); writes = 0;
+  fresh();
   const down = await getSuiWalletHistory(WALLET);
-  ok('endpoint unreachable → stored events returned, flagged incomplete, store untouched', !down.complete && sig(down) === sig(full) && writes === 0 && mem.get(key) === before, `reason: ${down.reason}`);
+  ok('endpoint unreachable → stored events returned, flagged failed, stored events untouched', !down.complete && down.status === 'failed' && sig(down) === reference && chunks() === before, `reason: ${down.reason}`);
   delete process.env.SUI_GRAPHQL_URL;
+  process.env.HISTORY_SCAN_BUDGET_MS = '120000';
 
   fresh();
   const owned = await getSuiOwnedObjectIds(WALLET, CETUS_POSITION);

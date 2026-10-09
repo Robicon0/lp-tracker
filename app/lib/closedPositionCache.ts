@@ -12,9 +12,13 @@
 //   2. NO EXPIRY ON FOUND POSITIONS. A non-empty list is stored without a TTL.
 //      The 30-day mark only triggers a refresh ATTEMPT; a failed or short
 //      attempt leaves the stored list exactly as it was.
-//   3. A SHORT SCAN IS NEVER WRITTEN. Its positions are returned for this
-//      request (merged over the cached list) with `incomplete: true`, which the
-//      routes turn into the existing "couldn't verify" notice.
+//   3. A SHORT SCAN IS NEVER STORED AS COMPLETE. Its positions are returned for
+//      this request (merged over the cached list) with `incomplete: true`, which
+//      the routes turn into the existing "couldn't verify" notice. A caller
+//      whose scan is resumable (`storePartial`) may keep the positions a short
+//      scan found — each one is whole and immutable — but the list is stored
+//      FLAGGED: its meta says the last attempt was short, so every later load
+//      reports it incomplete until a complete scan confirms it.
 //
 // The stored VALUE of a position key stays a plain JSON array, byte-compatible
 // with what older deployments read. Bookkeeping lives in a sibling meta key so a
@@ -36,6 +40,12 @@ export interface ClosedScanResult<T> {
   bySlot: Record<string, T[]>;
   /** False when the scan could not prove it saw the wallet's whole history. */
   complete: boolean;
+  /**
+   * False when the scan stopped early for a reason of its own (its time budget)
+   * and would find more on the SAME history. The history mark is then not
+   * recorded, so the next load scans again instead of waiting for it to move.
+   */
+  settled?: boolean;
 }
 
 export interface ClosedCacheMeta {
@@ -80,6 +90,12 @@ export interface GuardedLoadOptions<T> {
    * refresh. Omit it for a source that cannot tell cheaply whether history grew.
    */
   mark?: string;
+  /**
+   * Keep the positions found by a SHORT scan (merged, never shrinking), stored
+   * flagged incomplete. For resumable scans, whose progress must not be lost
+   * between loads. Without it a short scan writes nothing (rule 3).
+   */
+  storePartial?: boolean;
   refreshAfterSeconds?: number;
   retryAfterSeconds?: number;
   now?: () => number;
@@ -99,6 +115,22 @@ function envRefreshAfter(): number | null {
   if (raw == null || raw === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+// In read-only mode nothing is written to the store, but a local run still has
+// to behave like production — a list stored by one request must be there for
+// the next, or a resumable scan would start over on every load and never
+// settle. So writes go to this process-local overlay and reads fall through to
+// the store for keys never written here.
+const _overlay = new Map<string, string>();
+const _overlayNoTtl = new Set<string>();
+function overlayBackend(base: ClosedCacheBackend): ClosedCacheBackend {
+  return {
+    get: async (k) => (_overlay.has(k) ? _overlay.get(k) : base.get(k)),
+    set: async (k, v) => { _overlay.set(k, v); _overlayNoTtl.add(k); },
+    ttl: async (k) => (_overlayNoTtl.has(k) ? -1 : base.ttl(k)),
+    persist: async (k) => { _overlayNoTtl.add(k); },
+  };
 }
 
 export function closedMetaKey(positionsKey: string): string {
@@ -169,10 +201,11 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
   const refreshAfterMs = (opts.refreshAfterSeconds ?? envRefreshAfter() ?? CLOSED_REFRESH_AFTER_SECONDS) * 1000;
   const retryAfterMs = (opts.retryAfterSeconds ?? CLOSED_RETRY_AFTER_SECONDS) * 1000;
   const log = opts.log ?? (() => {});
-  const backend = opts.backend;
+  // Read-only: the real store is never written; see overlayBackend.
+  const backend = readOnly && opts.backend ? overlayBackend(opts.backend) : opts.backend;
 
   const write = (fn: () => Promise<unknown>): Promise<void> =>
-    readOnly || !backend ? Promise.resolve() : fn().then(() => undefined, (err) => log(`write failed (ignored): ${String(err)}`));
+    !backend ? Promise.resolve() : fn().then(() => undefined, (err) => log(`write failed (ignored): ${String(err)}`));
 
   const states: SlotState<T>[] = await Promise.all(opts.slots.map(async (slot): Promise<SlotState<T>> => {
     if (!backend) return { slot, cached: null, meta: null };
@@ -229,9 +262,22 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
     bySlot[s.slot.name] = merged;
 
     if (!scan.complete) {
-      // Rule 3 — nothing about a short scan reaches the positions key. Only the
-      // attempt is recorded, so a stale list is not rescanned on every load.
-      if (cached.length > 0 && s.meta) {
+      // Rule 3 — a short scan never produces a list that reads as complete.
+      const settled = scan.settled !== false;
+      if (opts.storePartial && merged.length > 0) {
+        // `refreshedAt` (the last COMPLETE confirmation) is not advanced: a list
+        // that has never been confirmed keeps 0, which reads as stale, which is
+        // what makes every later load report it incomplete.
+        const meta: ClosedCacheMeta = {
+          refreshedAt: s.meta?.refreshedAt ?? 0, lastAttemptAt: now, lastAttemptComplete: false,
+          ...(opts.mark !== undefined && settled ? { mark: opts.mark } : {}),
+        };
+        if (merged.length !== cached.length || merged.some((p, i) => p !== cached[i])) {
+          await write(() => backend!.set(s.slot.key, JSON.stringify(merged)));
+        }
+        await write(() => backend!.set(closedMetaKey(s.slot.key), JSON.stringify(meta)));
+      } else if (cached.length > 0 && s.meta) {
+        // Only the attempt is recorded, so a stale list is not rescanned on every load.
         const meta: ClosedCacheMeta = { ...s.meta, lastAttemptAt: now, lastAttemptComplete: false };
         await write(() => backend!.set(closedMetaKey(s.slot.key), JSON.stringify(meta)));
       }

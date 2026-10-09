@@ -242,13 +242,11 @@ each needs its own go-ahead). Ranks above everything below.**
 |---|---|---|
 | 1a | Never-shrink guard + expiry stopgap on the Sui and Solana closed caches | shipped |
 | 1b | Sui history through GraphQL with four completeness checks; closed scan, three fee scans and per-position activity moved; incremental from the last checkpoint | shipped |
-| 1c | **Sui first scan must be resumable.** Measured on production: a wallet with more than 10,000 sent transactions scans 200 pages (~55–59 s), is reported short, stores NOTHING and starts from zero on the next load, so its closed Sui positions never appear (0 shown, with the notice). Store progress per page and resume from the cursor; give the scan a wall-clock budget; serve the positions found so far, marked incomplete | not started |
-| 1d | `suiPoolContext.ts` remembers a failed pool read and assumes 9 decimals (same pattern as the defect fixed in `suiClosedPositions.ts`) | not started |
+| 2a | ONE resumable, time-budgeted history-scan engine (`app/lib/historyScan.ts`) for Sui and Solana closed positions (was 1c + 2); pool-context helper no longer remembers a failed read (was 1d); Sui and Solana position routes never return value 0 on a failed read | shipped |
 | 1e | Rewards on CLOSED Sui positions are not valued inside the closed list (they do reach Fees Collected through the wallet-wide scans) | not started |
-| 2 | Extend the SOLANA closed cache from a cursor on each load (Sui is done in 1b) | 3–4 |
 | 3 | Fees Collected includes closed Sui fees, plus rewards at claim-date price (owner-approved) | 5–7 |
 | 4 | Orca: exact-time prices for closed legs (today one price per UTC day, so a same-day leg reads 0.00); a historical price for open-position deposits (every open Orca position is always "priced from estimates") | 4–6 |
-| 5 | Position routes never return value 0 on a failed read (`app/api/cetus/route.ts:498` — the dashboard total dropped to $6,429.77 for one refresh) | 3–4 |
+| 5 | Position routes never return value 0 on a failed read — done for Sui and Solana in 2a; the EVM position routes are still to do | 2–3 |
 | 6 | ITEM 0h (HyperEVM historical price) | 4–6 |
 | 7 | `scripts/reference-reconcile.mjs` with the independent chain check, as the rule (c) gate | 6–8 |
 | 8 | Display of one-sided re-range legs (they are REAL and stay in totals; group a run into one row) | 3–6 |
@@ -964,6 +962,44 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **(Sprint 2a)** — **One resumable, time-budgeted history-scan engine for
+  Sui and Solana closed positions.** NEW `app/lib/historyScan.ts` (`runResumableScan`): history
+  is read newest first; the cursor and what was kept are stored after every few pages (a meta key
+  plus chunk keys, one lock per wallet); a request spends at most its time budget (40 s) and
+  returns what it has with a state — `in-progress`, `capped`, `failed` or `complete`. Methodology
+  rule (d). A chain supplies only a `page()` adapter.
+  **Sui** (`suiHistory.ts`, key `sui_wallet_hist_v2`): caps 30,000 transactions examined / 4,000
+  kept. An open position's own page reads the stored wallet history and never waits for the scan.
+  **Solana** (`solanaClosedPositions.ts`, key `solana_wallet_hist_v1`): the scan used to re-read
+  the whole wallet whenever its cache was rebuilt and kept nothing in between; it now stores each
+  transaction reduced to what the reconstruction reads (about 1–2 KB) and each load asks only for
+  signatures newer than the stored head — **a position closed today appears today**. Only new
+  positions are valued. A failed owned-NFT read no longer reads as "owns nothing" (every open
+  position would have been reported closed at a full loss).
+  **Guard** (`closedPositionCache.ts`, `storePartial`): positions an unfinished scan found are
+  stored FLAGGED (never as complete, never shrinking). Valuation has its own 25 s budget.
+  **Notices:** `lookup-in-progress` and `lookup-capped` join the truncation channel; the client
+  (`useLpPnl`, `useWalletLevelFees`) asks again while a scan is in progress, up to 12 rounds,
+  showing each partial result. A closed-position response is limited to the 2,500 most recently
+  closed (a 4.5 MB function response would otherwise fail outright) and says so.
+  **Also:** `suiPoolContext.ts` no longer remembers a failed pool read or guesses 9 decimals;
+  the Sui and Solana position routes answer 503 instead of a position worth $0 when the pool or
+  a pinned token's price could not be read (`positionReadGuard.ts`), and their client wrappers
+  throw (`positionsFetch.ts`) so the page keeps the last good rows and names the failed source.
+  **Local B7 (production build of this code, read-only store):** Account 1 Sui 55/55 identical
+  to production; Solana 40 stored records byte-identical plus three new Orca ZEC/USDC positions
+  (closed 10-08 08:31, 10-08 09:18 and 10-09 01:10 — the last one closed during testing and was
+  picked up on the next load). Heavy public wallet `0x9dae5a…89cb`: 741 → 1,565 → 1,904 positions
+  over three loads (52 / 44 / 22 s), then capped with its notice; repeat load 1.9 s.
+  **Testing trap:** `next dev` re-creates module state when it compiles another route, which
+  wipes the read-only in-memory stand-in for the store and restarts every scan. Verify resumable
+  scans locally on `next build && next start`, never on `next dev`.
+  **Not done:** the EVM position routes still can return value 0 on a failed read; Orca closed
+  legs are still priced per UTC day (a same-day open-and-close reads G/L 0.00); no bump to
+  `lp-pnl-events` / `analytics-activity` / `closed_pos_*` (stored records are unchanged).
+  Tests: `npx tsx scripts/history-scan-test.ts` (20), `npx tsx scripts/sui-history-test.ts` (8),
+  `node scripts/closed-cache-guard-test.mjs` (40).
 
 - **`f110144`** (Sprint 1b) — **Sui history rebuilt on GraphQL; the 22 missing Cetus
   positions, the open position's deposit and the closed Sui fees are back.** NEW
@@ -2828,7 +2864,8 @@ with similar position shapes. Never wallet-specific framing.
   through the truncation channel (`lookupFailureNotice`) and the totals carry `≈` + "incomplete
   — some history couldn't be loaded". A page that did not come back, a batch that did not come
   back, a transaction returned without its details, a hit page cap and a failed request are all
-  "short", never "the end". Nothing short is written to a cache.
+  "short", never "the end". Nothing short is written to a cache as complete (rule (d) covers the
+  one exception: a resumable scan's progress, stored flagged).
 - **(b) Closed-position caches never shrink.** A closed position is immutable, so once found
   it is kept: stored without expiry, merged by position id, and only ever replaced by a record
   with MORE events. The 30-day mark triggers a refresh attempt, nothing else. The one
@@ -2842,6 +2879,20 @@ with similar position shapes. Never wallet-specific framing.
   read-only: never copied into the repo, never committed, never written to the shared store,
   and reports carry aggregates and transaction prefixes only. **A chain position or fee that is
   missing from DefiDesh blocks the sprint.**
+
+- **(d) Every long history scan is resumable, time-budgeted, and its partial results are
+  flagged, never silent.** A scan that reads a wallet's whole history goes through
+  `app/lib/historyScan.ts` (`runResumableScan`): progress and the cursor are stored after every
+  few pages, so an interrupted, failed or capped scan continues where it stopped and never
+  restarts from zero; a request spends at most its time budget (40 s by default,
+  `HISTORY_SCAN_BUDGET_MS`), then returns what it has found; and the result carries its state —
+  `in-progress` (the client asks again and shows more each round), `capped` (the history is
+  longer than the stated limit; the most recent part is kept and the notice stays), `failed`,
+  or `complete`. Only `complete` clears the banner and the `≈`. History is read newest first,
+  so a partial or capped result is the recent history. Positions found by an unfinished scan
+  are stored only as FLAGGED partial lists (`storePartial` in `closedPositionCache.ts`): never
+  as complete, and never shrinking. A new chain adds a `page()` adapter, not a new scan loop.
+  Check with `npx tsx scripts/history-scan-test.ts`.
 
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind

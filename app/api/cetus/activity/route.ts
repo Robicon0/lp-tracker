@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { suiRpc } from '../../../lib/suiRpc';
 import { getSuiActivityBlocks } from '../../../lib/suiHistory';
-import { lookupFailureNotice, LOOKUP_UNAVAILABLE, type RouteTruncation } from '../../../lib/enumerationTruncation';
+import { scanStatusNotice, type RouteTruncation } from '../../../lib/enumerationTruncation';
 import { sidePricesFromEventSqrt } from '../../../lib/suiEventPrice';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
@@ -224,9 +224,10 @@ async function GET_impl(request: Request) {
     // Wallet scope only: a history scan that could not be shown to be whole is
     // reported with the result (rule (a)); the notice also keeps this response
     // out of the activity-route cache.
-    const historyNotices: RouteTruncation[] = history.complete
-      ? []
-      : [lookupFailureNotice('wallet history', LOOKUP_UNAVAILABLE)];
+    // `in-progress` (the resumable scan has more to read; the client asks again)
+    // and `capped` (history too long, most recent part only) say so by name.
+    const historyNotice = scanStatusNotice('wallet history', history.status);
+    const historyNotices: RouteTruncation[] = historyNotice ? [historyNotice] : [];
 
     if (history.blocks.length === 0) {
       return NextResponse.json({

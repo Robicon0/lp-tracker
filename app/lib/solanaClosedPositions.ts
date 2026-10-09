@@ -20,6 +20,14 @@
 // per-wallet cost (~25k CU) then served from Redis forever (closed positions are
 // immutable). Target is 100% completeness, not speed — it's a background scan.
 //
+// RESUMABLE AND TIME-BUDGETED (app/lib/historyScan.ts, shared with Sui). The
+// wallet's signatures are read newest first, a page at a time; each page's
+// transactions are fetched, reduced to the few fields the reconstruction reads,
+// and stored with the cursor. A request spends at most its time budget and
+// returns what it has, flagged; the next request continues. Once the first pass
+// has reached the wallet's first transaction a load only asks for signatures
+// newer than the stored head, so a position closed today is found today.
+//
 // HOW IT PLUGS INTO Capital G/L (mirrors app/lib/suiClosedPositions.ts exactly)
 // Each closed position is reconstructed as an ActivityEventForPnL[] with every
 // event's `usdAtTime` resolved historical-only, then valued via the SAME pure
@@ -50,6 +58,7 @@ import { resolveToken } from './tokenResolver';
 import { logPrice } from './priceLogger';
 import { rpcUrlFromEnv } from './rpcEnv';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
+import { runResumableScan, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
 
 // rpcUrlFromEnv: a malformed value (bare API key) behaves like UNSET → the
 // engine's existing graceful degrade (empty result, stats.complete=false so
@@ -204,27 +213,6 @@ async function alchemyRpc(method: string, params: unknown[], stats: ScanStats): 
 }
 
 interface SigInfo { signature: string; err: unknown; }
-async function fetchAllSignatures(wallet: string, stats: ScanStats): Promise<string[]> {
-  const sigs: SigInfo[] = [];
-  let before: string | undefined;
-  // A page that fails (null after every retry) is NOT the end of the history,
-  // and neither is running out of pages: both leave the list short, so both mark
-  // the scan incomplete instead of ending it as though the wallet stopped there.
-  let reachedEnd = false;
-  for (let page = 0; page < 50; page++) {
-    const r = (await alchemyRpc('getSignaturesForAddress', [wallet, { limit: 1000, ...(before ? { before } : {}) }], stats)) as SigInfo[] | null;
-    if (!Array.isArray(r)) break;
-    if (r.length === 0) { reachedEnd = true; break; }
-    sigs.push(...r);
-    if (r.length < 1000) { reachedEnd = true; break; }
-    before = r[r.length - 1].signature;
-  }
-  if (!reachedEnd) stats.signaturesIncomplete = true;
-  stats.signatures = sigs.length;
-  const valid = sigs.filter((s) => !s.err).map((s) => s.signature);
-  stats.validSignatures = valid.length;
-  return valid;
-}
 
 interface SolTx {
   transaction: { message: { instructions: RawInstr[]; accountKeys: Array<{ pubkey: string } | string> }; signatures?: string[] };
@@ -245,14 +233,18 @@ interface TokenBalance { accountIndex: number; mint: string; owner: string; uiTo
 // serial, 120ms gap, exponential backoff on 429; a naive burst dropped 37% of
 // txs, this achieves 100%. Returns a Map(signature → tx). Retries throttled
 // items until the queue drains (bounded by attempt cap inside the batch).
-async function fetchTransactions(sigs: string[], stats: ScanStats): Promise<Map<string, SolTx | null>> {
+async function fetchTransactions(sigs: string[], stats: ScanStats, giveUpAtMs?: number): Promise<Map<string, SolTx | null>> {
   const out = new Map<string, SolTx | null>();
   let queue = [...sigs];
   let outerGuard = 0;
-  while (queue.length && outerGuard < 40) {
+  // Past `giveUpAtMs` the batch loop stops; the caller sees fewer results than
+  // signatures and treats the page as not read (it is retried next request).
+  const late = () => giveUpAtMs !== undefined && Date.now() >= giveUpAtMs;
+  while (queue.length && outerGuard < 40 && !late()) {
     outerGuard += 1;
     const next: string[] = [];
     for (let i = 0; i < queue.length; i += 20) {
+      if (late()) { next.push(...queue.slice(i)); break; }
       const batch = queue.slice(i, i + 20);
       const body = batch.map((s, k) => ({ jsonrpc: '2.0', id: k, method: 'getTransaction', params: [s, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }] }));
       stats.billedCalls += batch.length;
@@ -276,7 +268,6 @@ async function fetchTransactions(sigs: string[], stats: ScanStats): Promise<Map<
     if (queue.length) await sleep(1000);
   }
   stats.txFetched = [...out.values()].filter(Boolean).length;
-  stats.complete = out.size === sigs.length && !stats.signaturesIncomplete;
   return out;
 }
 
@@ -299,6 +290,8 @@ async function fetchPoolContexts(pools: string[], decHint: Map<string, number>, 
     const values = res?.value ?? [];
     batch.forEach((pool, k) => {
       const acc = values[k];
+      // No answer for the batch (res null) is a failed read: not remembered.
+      if (!res) return;
       if (!acc?.data?.[0]) { poolContextCache.set(pool, null); return; }
       const d = Buffer.from(acc.data[0], 'base64');
       if (d.length < 245) { poolContextCache.set(pool, null); return; }
@@ -331,7 +324,10 @@ async function gmaAll(addrs: string[], stats: ScanStats): Promise<Map<string, { 
       res = (await alchemyRpc('getMultipleAccounts', [batch, { encoding: 'base64' }], stats)) as GmaResult;
       if (!res) await sleep(1000);
     }
-    batch.forEach((addr, k) => out.set(addr, res?.value?.[k] ?? null));
+    // A batch that never answered leaves its addresses OUT of the map (unknown),
+    // which is different from null (the chain says there is no such account).
+    if (!res) continue;
+    batch.forEach((addr, k) => out.set(addr, res!.value?.[k] ?? null));
   }
   return out;
 }
@@ -347,6 +343,7 @@ async function fetchRaydiumPoolContexts(candidates: string[], stats: ScanStats):
   if (toFetch.length > 0) {
     const gma = await gmaAll(toFetch, stats);
     for (const [addr, v] of gma) {
+      if (v === undefined) continue; // batch never answered: a failed read is not remembered
       if (!v?.data?.[0] || v.owner !== RAYDIUM_PROGRAM) { rayPoolContextCache.set(addr, null); continue; }
       const d = Buffer.from(v.data[0], 'base64');
       if (d.length < 273 || !d.subarray(0, 8).equals(RAY_POOL_DISC)) { rayPoolContextCache.set(addr, null); continue; }
@@ -485,12 +482,17 @@ function reconstructRaydiumEvents(
 // "ever-opened − currently-owned" rule proven in both Phase As (handles
 // re-ranging correctly: a position re-ranged today is no longer owned, so it
 // correctly counts as closed).
-async function fetchOwnedPositionSets(wallet: string, stats: ScanStats): Promise<{ orca: Set<string>; raydium: Set<string> }> {
+async function fetchOwnedPositionSets(wallet: string, stats: ScanStats): Promise<{ orca: Set<string>; raydium: Set<string> } | null> {
+  type Owned = { value?: Array<{ account: { data: { parsed: { info: { tokenAmount: { amount: string; decimals: number }; mint: string } } } } }> } | null;
   const [r1, r2] = await Promise.all([
-    alchemyRpc('getTokenAccountsByOwner', [wallet, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }], stats) as Promise<{ value?: Array<{ account: { data: { parsed: { info: { tokenAmount: { amount: string; decimals: number }; mint: string } } } } }> } | null>,
-    alchemyRpc('getTokenAccountsByOwner', [wallet, { programId: TOKEN_PROGRAM_2022 }, { encoding: 'jsonParsed' }], stats) as Promise<{ value?: Array<{ account: { data: { parsed: { info: { tokenAmount: { amount: string; decimals: number }; mint: string } } } } }> } | null>,
+    alchemyRpc('getTokenAccountsByOwner', [wallet, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }], stats) as Promise<Owned>,
+    alchemyRpc('getTokenAccountsByOwner', [wallet, { programId: TOKEN_PROGRAM_2022 }, { encoding: 'jsonParsed' }], stats) as Promise<Owned>,
   ]);
-  const mints = [...(r1?.value ?? []), ...(r2?.value ?? [])]
+  // A read that failed is NOT "the wallet holds no position NFTs": with an
+  // empty owned set every open position would be reported as closed, with its
+  // whole deposit as a loss. No answer → null → nothing is reported closed.
+  if (!r1 || !Array.isArray(r1.value) || !r2 || !Array.isArray(r2.value)) return null;
+  const mints = [...r1.value, ...r2.value]
     .filter((t) => t.account.data.parsed.info.tokenAmount.amount === '1' && t.account.data.parsed.info.tokenAmount.decimals === 0)
     .map((t) => t.account.data.parsed.info.mint);
   const orca = new Set<string>();
@@ -764,23 +766,143 @@ function shortSym(mint: string): string {
 // Sprint RAYDIUM B7 gate E). Fetches signatures + txs + owned sets ONCE,
 // reconstructs and values every closed position per protocol. This is what the
 // Redis-cached entry point wraps.
-export interface WalletClosedPositions { orca: SolanaClosedPosition[]; raydium: SolanaClosedPosition[]; stats: ScanStats }
+export interface WalletClosedPositions {
+  orca: SolanaClosedPosition[];
+  raydium: SolanaClosedPosition[];
+  stats: ScanStats;
+  /** `in-progress`: more on the next load. `capped`: history larger than the limit. */
+  status: ScanStatus;
+  /** False when valuation stopped at its deadline: the same history has more to value. */
+  settled: boolean;
+}
 
-export async function getClosedPositionsForWallet(wallet: string): Promise<WalletClosedPositions> {
-  const stats: ScanStats = { signatures: 0, validSignatures: 0, txFetched: 0, throttleEvents: 0, wallMs: 0, billedCalls: 0, complete: false };
+// ── Stored, resumable wallet history ─────────────────────────────────────────
+// Scan limits. Past either one the first pass stops and the history is reported
+// capped (most recent part kept).
+export const SOLANA_MAX_SCANNED_SIGNATURES = 50_000;
+export const SOLANA_MAX_KEPT_TX = 4_000;
+// Small enough that one page (its signatures plus their transactions, paced)
+// takes a few seconds, so the time budget is honoured to within one page.
+const SIG_PAGE = 100;
+// How long past the request's budget a page already under way may still run.
+const PAGE_GRACE_MS = 8_000;
+
+// A transaction reduced to what the reconstruction reads: the Whirlpool /
+// Raydium instructions (re-indexed), the SPL transfers inside them, one decimals
+// hint per mint, and Raydium's event logs. A raw transaction is 10–50 KB; this
+// is about 1–2 KB. Returns null for a transaction that touches neither program.
+function reduceTx(signature: string, tx: SolTx): SolTx | null {
+  if (!tx?.meta || tx.meta.err) return null;
+  const all = tx.transaction.message.instructions ?? [];
+  const keep: number[] = [];
+  all.forEach((ins, i) => { if ((ins.programId === WHIRLPOOL_PROGRAM || ins.programId === RAYDIUM_PROGRAM) && ins.data) keep.push(i); });
+  if (keep.length === 0) return null;
+  const hasRaydium = keep.some((i) => all[i].programId === RAYDIUM_PROGRAM);
+  const innerByIndex = new Map((tx.meta.innerInstructions ?? []).map((g) => [g.index, g] as const));
+  const innerInstructions: NonNullable<NonNullable<SolTx['meta']>['innerInstructions']> = [];
+  keep.forEach((orig, k) => {
+    const g = innerByIndex.get(orig);
+    if (!g) return;
+    const transfers: ParsedInner[] = [];
+    for (const ii of g.instructions ?? []) {
+      const p = ii.parsed;
+      if (!p || (p.type !== 'transfer' && p.type !== 'transferChecked')) continue;
+      const info = p.info ?? {};
+      transfers.push({ parsed: { type: p.type, info: {
+        source: info.source, destination: info.destination,
+        ...(info.amount !== undefined ? { amount: info.amount } : {}),
+        ...(info.tokenAmount !== undefined ? { tokenAmount: { amount: (info.tokenAmount as { amount?: string }).amount } } : {}),
+      } } });
+    }
+    innerInstructions.push({ index: k, instructions: transfers });
+  });
+  const decimals = new Map<string, number>();
+  for (const b of [...(tx.meta.preTokenBalances ?? []), ...(tx.meta.postTokenBalances ?? [])]) {
+    if (!decimals.has(b.mint)) decimals.set(b.mint, b.uiTokenAmount.decimals);
+  }
+  return {
+    transaction: {
+      signatures: [tx.transaction.signatures?.[0] ?? signature],
+      message: { accountKeys: [], instructions: keep.map((i) => ({ programId: all[i].programId, data: all[i].data, accounts: all[i].accounts ?? [] })) },
+    },
+    meta: {
+      err: null,
+      postTokenBalances: [...decimals].map(([mint, d]) => ({ accountIndex: 0, mint, owner: '', uiTokenAmount: { amount: '0', decimals: d } })),
+      innerInstructions,
+      ...(hasRaydium ? { logMessages: (tx.meta.logMessages ?? []).filter((l) => l.startsWith('Program data: ')) } : {}),
+    },
+    blockTime: tx.blockTime,
+  };
+}
+const sigOf = (tx: SolTx) => tx.transaction.signatures?.[0] ?? '';
+
+function walletSource(wallet: string, stats: ScanStats): ScanSource<SolTx, string> {
+  return {
+    async page({ until, cursor, deadlineMs }) {
+      // Newest first. `until` is the newest signature an earlier segment covered.
+      const page = (await alchemyRpc('getSignaturesForAddress', [wallet, {
+        limit: SIG_PAGE, ...(cursor ? { before: cursor } : {}), ...(until ? { until } : {}),
+      }], stats)) as SigInfo[] | null;
+      // A page that did not come back is not the end of the history.
+      if (!Array.isArray(page)) throw new Error('signature page not returned');
+      stats.signatures += page.length;
+      const valid = page.filter((x) => !x.err).map((x) => x.signature);
+      stats.validSignatures += valid.length;
+      const txMap = valid.length ? await fetchTransactions(valid, stats, deadlineMs + PAGE_GRACE_MS) : new Map<string, SolTx | null>();
+      if (txMap.size !== valid.length) throw new Error(`transactions not returned (${txMap.size} of ${valid.length})`);
+      const items: SolTx[] = [];
+      for (let i = valid.length - 1; i >= 0; i--) { // oldest first within the page
+        const tx = txMap.get(valid[i]);
+        const reduced = tx ? reduceTx(valid[i], tx) : null;
+        if (reduced) items.push(reduced);
+      }
+      return {
+        items, scanned: page.length,
+        top: cursor ? undefined : (page[0]?.signature ?? null),
+        next: page.length < SIG_PAGE ? null : page[page.length - 1].signature,
+      };
+    },
+  };
+}
+
+interface SolanaWalletHistory { txs: SolTx[]; complete: boolean; status: ScanStatus; reason?: string; mark: string }
+
+async function getSolanaWalletHistory(wallet: string, stats: ScanStats): Promise<SolanaWalletHistory> {
+  const r = await runResumableScan<SolTx, string>({
+    key: `solana_wallet_hist_v1:${wallet.toLowerCase()}`,
+    store: _scanStore,
+    source: walletSource(wallet, stats),
+    idOf: sigOf,
+    maxScanned: SOLANA_MAX_SCANNED_SIGNATURES,
+    maxKept: SOLANA_MAX_KEPT_TX,
+    log: (m) => console.warn(`[solanaClosedPositions] ${m}`),
+  });
+  try {
+    return { txs: await r.items(), complete: r.complete, status: r.status, reason: r.reason, mark: r.mark };
+  } catch (err) {
+    return { txs: [], complete: false, status: 'failed', reason: String(err).slice(0, 160), mark: '0:failed' };
+  }
+}
+
+// `known` maps a stored position id to its event count: an immutable closed
+// position that is already stored with as many events is not valued again.
+// `deadlineMs` bounds valuation; what is valued by then is returned.
+async function closedPositionsFromHistory(
+  wallet: string,
+  hist: SolanaWalletHistory,
+  stats: ScanStats,
+  known?: ReadonlyMap<string, number>,
+  deadlineMs?: number,
+): Promise<WalletClosedPositions> {
   const t0 = Date.now();
-  if (!ALCHEMY_RPC) { stats.wallMs = 0; return { orca: [], raydium: [], stats }; }
+  const owned = await fetchOwnedPositionSets(wallet, stats);
+  if (!owned) {
+    stats.complete = false; stats.wallMs = Date.now() - t0;
+    return { orca: [], raydium: [], stats, status: 'failed', settled: true };
+  }
+  const txs = hist.txs;
 
-  const [validSigs, owned] = await Promise.all([
-    fetchAllSignatures(wallet, stats),
-    fetchOwnedPositionSets(wallet, stats),
-  ]);
-  if (validSigs.length === 0) { stats.wallMs = Date.now() - t0; return { orca: [], raydium: [], stats }; }
-
-  const txMap = await fetchTransactions(validSigs, stats);
-  const txs = [...txMap.values()].filter((t): t is SolTx => !!t);
-
-  // ── ORCA (unchanged Sprint 3-FREE logic) ────────────────────────────────────
+  // ── ORCA ────────────────────────────────────────────────────────────────────
   // Ever-opened PDAs (open_position acct[2]); pools referenced; decimals hints.
   const everOpened = new Set<string>();
   const pools = new Set<string>();
@@ -799,19 +921,28 @@ export async function getClosedPositionsForWallet(wallet: string): Promise<Walle
     }
   }
 
+  let whole = true;       // every closed position found could be reconstructed
+  let settled = true;     // valuation was not cut by the deadline
+  const pastDeadline = () => deadlineMs !== undefined && Date.now() >= deadlineMs;
+  const lastTs = (evs: SolanaPositionEvent[]) => evs.reduce((m, e) => Math.max(m, e.timestamp), 0);
+
   const poolCtx = await fetchPoolContexts([...pools], decHint, stats);
   const grouped = reconstructEvents(txs, poolCtx, everOpened);
 
   const orca: SolanaClosedPosition[] = [];
-  for (const [pid, events] of grouped) {
+  // Most recently active first, so a deadline leaves the recent history valued.
+  for (const [pid, events] of [...grouped].sort((a, b) => lastTs(b[1]) - lastTs(a[1]))) {
     if (owned.orca.has(pid)) continue;                       // still open — not closed
     if (!events.some((e) => e.kind === 'deposit')) continue; // nothing to reconstruct
+    const stored = known?.get(pid);
+    if (stored !== undefined && stored >= events.length) continue;
     const ctx = poolCtx.get(events.find((e) => e.pool)?.pool ?? '');
-    if (!ctx) continue;
+    if (!ctx) { whole = false; continue; }                   // pool unreadable: short, not skipped silently
+    if (pastDeadline()) { settled = false; break; }
     orca.push(await valueClosedPosition(pid, events, ctx, 'orca'));
   }
 
-  // ── RAYDIUM (Sprint RAYDIUM; same txs, zero extra scan) ─────────────────────
+  // ── RAYDIUM (same transactions, zero extra scan) ────────────────────────────
   const raydium: SolanaClosedPosition[] = [];
   const posMintByPda = discoverRaydiumPositions(txs);
   if (posMintByPda.size > 0) {
@@ -827,18 +958,35 @@ export async function getClosedPositionsForWallet(wallet: string): Promise<Walle
     }
     const rayPoolCtx = await fetchRaydiumPoolContexts([...rayCand], stats);
     const rayGrouped = reconstructRaydiumEvents(txs, rayPoolCtx, posMintByPda);
-    for (const [pid, { events, rewardsRaw }] of rayGrouped) {
+    for (const [pid, { events, rewardsRaw }] of [...rayGrouped].sort((a, b) => lastTs(b[1].events) - lastTs(a[1].events))) {
       if (owned.raydium.has(pid)) continue;
       if (!events.some((e) => e.kind === 'deposit')) continue;
+      const stored = known?.get(pid);
+      if (stored !== undefined && stored >= events.length) continue;
       const ctx = rayPoolCtx.get(events.find((e) => e.pool)?.pool ?? '');
-      if (!ctx) continue;
+      if (!ctx) { whole = false; continue; }
+      if (pastDeadline()) { settled = false; break; }
       const rewards: [string, string, string] = [rewardsRaw[0].toString(), rewardsRaw[1].toString(), rewardsRaw[2].toString()];
       raydium.push(await valueClosedPosition(pid, events, ctx, 'raydium', rewards));
     }
   }
 
+  stats.complete = hist.complete && whole && settled;
   stats.wallMs = Date.now() - t0;
-  return { orca, raydium, stats };
+  const status: ScanStatus = !settled || hist.status === 'in-progress' ? 'in-progress'
+    : hist.status === 'capped' ? 'capped'
+    : stats.complete ? 'complete' : 'failed';
+  return { orca, raydium, stats, status, settled };
+}
+
+const newStats = (): ScanStats => ({ signatures: 0, validSignatures: 0, txFetched: 0, throttleEvents: 0, wallMs: 0, billedCalls: 0, complete: false });
+
+/** One request's worth of scan plus reconstruction, uncached. For scripts and tests. */
+export async function getClosedPositionsForWallet(wallet: string): Promise<WalletClosedPositions> {
+  const stats = newStats();
+  if (!ALCHEMY_RPC) return { orca: [], raydium: [], stats, status: 'failed', settled: true };
+  const hist = await getSolanaWalletHistory(wallet, stats);
+  return closedPositionsFromHistory(wallet, hist, stats);
 }
 
 // ── Redis cache (Sprint 1.14 / 2.2b immutable-closed-position pattern) ─────────
@@ -890,6 +1038,18 @@ const _backend: ClosedCacheBackend | null = _redis
     }
   : null;
 
+const _scanStore: ScanStore | null = _redis
+  ? {
+      get: (k) => _redis!.get(k),
+      mget: (keys) => (keys.length ? _redis!.mget(...keys) : Promise.resolve([])),
+      set: (k, v, o) => (o ? _redis!.set(k, v, { ...(o.nx ? { nx: true as const } : {}), ...(o.ex ? { ex: o.ex } : {}) } as never) : _redis!.set(k, v)),
+      del: (k) => _redis!.del(k),
+    }
+  : null;
+
+// Time left for valuing new positions once the history is in hand.
+const VALUATION_BUDGET_MS = 25_000;
+
 function isCachedSolanaPosition(p: unknown): boolean {
   const x = p as SolanaClosedPosition | null;
   return !!x && typeof x.capitalGL === 'number' && Array.isArray(x.events);
@@ -899,6 +1059,8 @@ export interface SolanaClosedPositionsResult {
   positions: SolanaClosedPosition[];
   /** True when the newest history scan was short or failed — the list may be missing positions. */
   incomplete: boolean;
+  /** Why: `in-progress` (more on the next load), `capped` (history larger than the limit) or `failed`. */
+  status: ScanStatus;
 }
 
 // Redis-cached top-level entry point (mirrors the Sui one, but returns BOTH
@@ -913,29 +1075,45 @@ export interface SolanaClosedPositionsResult {
 // load re-reads cache / re-scans normally.
 const _inFlightScans = new Map<string, Promise<SolanaClosedPositionsResult>>();
 export function getCachedClosedPositionsGuarded(wallet: string): Promise<SolanaClosedPositionsResult> {
-  if (!wallet) return Promise.resolve({ positions: [], incomplete: false });
+  if (!wallet) return Promise.resolve({ positions: [], incomplete: false, status: 'complete' });
   const key = wallet.toLowerCase();
   const existing = _inFlightScans.get(key);
   if (existing) return existing;
   const p = (async (): Promise<SolanaClosedPositionsResult> => {
+    if (!ALCHEMY_RPC) return { positions: [], incomplete: true, status: 'failed' };
+    // Advance the wallet's history by one time budget (one small request when
+    // nothing is new). Its mark tells the guard whether the stored lists are
+    // older than the history, so a position closed today is rebuilt in today.
+    const stats = newStats();
+    const hist = await getSolanaWalletHistory(wallet, stats);
+    const deadline = Date.now() + VALUATION_BUDGET_MS;
+    let scanStatus: ScanStatus | null = null;
     const r = await loadClosedPositionsGuarded<SolanaClosedPosition>({
       backend: _backend,
       slots: [
         { name: 'orca', key: closedPosKey('orca', wallet) },
         { name: 'raydium', key: closedPosKey('raydium', wallet) },
       ],
-      scan: async () => {
-        const { orca, raydium, stats } = await getClosedPositionsForWallet(wallet);
-        return { bySlot: { orca, raydium }, complete: stats.complete };
+      scan: async (cached) => {
+        const known = new Map([...(cached.orca ?? []), ...(cached.raydium ?? [])].map((x) => [x.positionId, x.events.length] as const));
+        const fresh = await closedPositionsFromHistory(wallet, hist, stats, known, deadline);
+        scanStatus = fresh.status;
+        return { bySlot: { orca: fresh.orca, raydium: fresh.raydium }, complete: fresh.stats.complete, settled: fresh.settled };
       },
       idOf: (x) => x.positionId,
       weightOf: (x) => x.events.length,
       isValid: isCachedSolanaPosition,
       emptyTtlSeconds: CLOSED_POS_EMPTY_TTL_SECONDS,
       legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
+      mark: hist.mark,
+      storePartial: true,
       log: (m) => console.warn(`[solanaClosedPositions] ${m}`),
     });
-    return { positions: [...(r.bySlot.orca ?? []), ...(r.bySlot.raydium ?? [])], incomplete: r.incomplete };
+    const incomplete = r.incomplete || !hist.complete;
+    const status: ScanStatus = !incomplete ? 'complete'
+      : scanStatus === 'in-progress' || hist.status === 'in-progress' ? 'in-progress'
+      : hist.status === 'capped' ? 'capped' : 'failed';
+    return { positions: [...(r.bySlot.orca ?? []), ...(r.bySlot.raydium ?? [])], incomplete, status };
   })();
   _inFlightScans.set(key, p);
   return p.finally(() => { _inFlightScans.delete(key); });

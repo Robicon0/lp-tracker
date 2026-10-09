@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCachedClosedPositionsGuarded, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
-import { lookupFailureNotice, LOOKUP_FAILED, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { scanStatusNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { capClosedPositions } from '../../lib/closedPositionResponse';
 import { withActivityRouteCache } from '../../lib/activityRouteCache';
 
 // Sprint LPPNL-PERF (Part B1): the wallet tx-history scan is unbounded (scales
@@ -44,14 +45,16 @@ async function GET_impl(request: Request) {
   }
 
   try {
-    const { positions, incomplete }: { positions: SolanaClosedPosition[]; incomplete: boolean } =
-      await getCachedClosedPositionsGuarded(account);
-    // A short history scan is reported, never passed off as the whole list.
-    // Carrying a lookup notice also keeps withActivityRouteCache from holding
-    // this response (isIncompletePayload).
-    const truncated: RouteTruncation[] = incomplete
-      ? [lookupFailureNotice('closed-position history', LOOKUP_FAILED)]
-      : [];
+    const { positions: all, status } = await getCachedClosedPositionsGuarded(account);
+    // A history scan that is not whole is reported, never passed off as the
+    // whole list: `in-progress` (the resumable scan stopped at its time budget;
+    // the next request continues), `capped` (history too long to read in full)
+    // or unavailable. Carrying a lookup notice also keeps withActivityRouteCache
+    // from holding this response (isIncompletePayload).
+    const notice = scanStatusNotice('closed-position history', status);
+    const { positions, notice: capNotice }: { positions: SolanaClosedPosition[]; notice: RouteTruncation | null } =
+      capClosedPositions(all, (p) => p.closedTs);
+    const truncated: RouteTruncation[] = [...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])];
     return NextResponse.json({
       positions, count: positions.length, account,
       ...(truncated.length > 0 ? { truncated } : {}),

@@ -1,14 +1,9 @@
 import { AerodromePosition } from './aerodrome';
+import { fetchPositionList } from './positionsFetch';
 
 export type BluefinPosition = AerodromePosition;
 
-export async function fetchBluefinPositions(account: string): Promise<AerodromePosition[]> {
-  try {
-    const res = await fetch(`/api/bluefin?account=${account}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.positions || [];
-  } catch {
-    return [];
-  }
+// Throws on a failed request (see positionsFetch.ts): a failure is not "no positions".
+export function fetchBluefinPositions(account: string): Promise<AerodromePosition[]> {
+  return fetchPositionList(`/api/bluefin?account=${account}`);
 }

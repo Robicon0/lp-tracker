@@ -43,7 +43,8 @@ import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillama
 import { logPrice } from './priceLogger';
 import { suiRpc } from './suiRpc';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
-import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, mergeSuiBlocks, type SuiHistoryBlock } from './suiHistory';
+import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, mergeSuiBlocks, type SuiHistoryBlock, type SuiWalletHistory } from './suiHistory';
+import type { ScanStatus } from './historyScan';
 
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
@@ -197,6 +198,8 @@ interface ProtocolHistory {
   unresolved: Set<string>;
   /** False when the history cannot be shown to cover everything (see suiHistory.ts). */
   complete: boolean;
+  /** The wallet scan's own state: `in-progress` and `capped` are partial histories. */
+  status: ScanStatus;
   mark: string;
 }
 
@@ -209,9 +212,11 @@ interface ProtocolHistory {
 // signed. A position that still cannot be accounted for is `unresolved`: it is
 // left out and the scan is reported short. It is never booked as closed, which
 // would turn "we lost track of it" into a loss the size of its deposit.
-async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProtocol): Promise<ProtocolHistory> {
+async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProtocol, given?: SuiWalletHistory): Promise<ProtocolHistory> {
+  // `given` is the history the caller already advanced in this request: an
+  // unfinished scan must move by ONE time budget per request, not one per caller.
   const [hist, ownedOrNull] = await Promise.all([
-    getSuiWalletHistory(walletAddress),
+    given ?? getSuiWalletHistory(walletAddress),
     getSuiOwnedObjectIds(walletAddress, POSITION_TYPE[protocol]).catch(() => null),
   ]);
   let complete = hist.complete && ownedOrNull !== null;
@@ -223,7 +228,16 @@ async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProto
   if (ownedOrNull === null) {
     // Without the owned set an open position cannot be told from a closed one.
     for (const id of m.touched) if (!m.closed.has(id)) unresolved.add(id);
-    return { blocks, owned, unresolved, complete: false, mark: hist.mark };
+    return { blocks, owned, unresolved, complete: false, status: hist.status, mark: hist.mark };
+  }
+  if (hist.status === 'in-progress' || hist.status === 'failed') {
+    // The wallet scan has not reached the start of the history yet. Positions
+    // opened and closed inside what has been read are whole and are valued now;
+    // anything that reaches past the scanned window waits for the scan (object
+    // lookups for it would be repeated, differently, on every load).
+    for (const id of m.touched) if (!m.opened.has(id)) unresolved.add(id);
+    for (const id of m.opened) if (!m.closed.has(id) && !owned.has(id)) unresolved.add(id);
+    return { blocks, owned, unresolved, complete: false, status: hist.status, mark: hist.mark };
   }
 
   const lookups = new Set<string>();
@@ -242,7 +256,7 @@ async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProto
   for (const id of m.opened) if (!m.closed.has(id) && !owned.has(id)) { unresolved.add(id); complete = false; }
   for (const id of m.touched) if (!m.opened.has(id)) { unresolved.add(id); complete = false; }
   for (const id of owned) if (!m.opened.has(id)) complete = false;
-  return { blocks, owned, unresolved, complete, mark: hist.mark };
+  return { blocks, owned, unresolved, complete, status: hist.status, mark: hist.mark };
 }
 
 async function fetchWalletBlocks(account: string): Promise<SuiTxBlock[]> {
@@ -638,8 +652,10 @@ export async function getClosedPositionsForWalletWithStatus(
   walletAddress: string,
   protocol: SuiClmmProtocol,
   known?: ReadonlyMap<string, number>,
-): Promise<{ positions: SuiClosedPosition[]; complete: boolean }> {
-  const history = await loadProtocolHistory(walletAddress, protocol);
+  deadlineMs?: number,
+  given?: SuiWalletHistory,
+): Promise<{ positions: SuiClosedPosition[]; complete: boolean; status: ScanStatus; settled: boolean }> {
+  const history = await loadProtocolHistory(walletAddress, protocol, given);
   const { blocks, owned, unresolved } = history;
   let complete = history.complete;
   const grouped = groupEventsByPosition(protocol, blocks);
@@ -653,20 +669,29 @@ export async function getClosedPositionsForWalletWithStatus(
     if (stored !== undefined && stored >= evs.length) continue;
     todo.push([pid, evs]);
   }
+  // Most recently active first: when the time budget cuts valuation short, what
+  // is shown is the recent history.
+  const lastTs = (evs: SuiPositionEvent[]) => evs.reduce((m, e) => Math.max(m, e.timestamp), 0);
+  todo.sort((a, b) => lastTs(b[1]) - lastTs(a[1]));
 
   // Valued a few at a time (each one waits on claim-date prices). A position
   // that is known to exist but cannot be reconstructed — its pool could not be
   // read — makes the scan SHORT: it is not skipped as though it were not there.
   const out: SuiClosedPosition[] = [];
   const CONCURRENCY = 4;
+  let settled = true;
   for (let i = 0; i < todo.length; i += CONCURRENCY) {
+    if (deadlineMs !== undefined && Date.now() >= deadlineMs) { settled = false; complete = false; break; }
     const batch = await Promise.all(todo.slice(i, i + CONCURRENCY).map(async ([pid, evs]) => {
       const lifecycle = await buildLifecycle(protocol, pid, evs);
       return lifecycle ? valuePositionLifecycle(lifecycle) : null;
     }));
     for (const p of batch) { if (p) out.push(p); else complete = false; }
   }
-  return { positions: out, complete };
+  const status: ScanStatus = !settled || history.status === 'in-progress' ? 'in-progress'
+    : history.status === 'capped' ? 'capped'
+    : complete ? 'complete' : 'failed';
+  return { positions: out, complete, status, settled };
 }
 
 // ── Redis cache (Sprint 1.14 immutable-closed-position pattern) ───────────────
@@ -721,7 +746,13 @@ export interface SuiClosedPositionsResult {
   positions: SuiClosedPosition[];
   /** True when the newest history scan was short or failed — the list may be missing positions. */
   incomplete: boolean;
+  /** Why: `in-progress` (more on the next load), `capped` (history larger than the limit) or `failed`. */
+  status: ScanStatus;
 }
+
+// Time left for valuing new positions once the history is in hand. Past it the
+// request returns what is valued (stored, flagged) and the next one continues.
+const VALUATION_BUDGET_MS = 25_000;
 
 // B4 — Redis-cached top-level entry point. Read-first; on a miss, or once the
 // stored list is 30 days old, retrieve + reconstruct + value all closed
@@ -737,7 +768,7 @@ export function getCachedClosedPositionsGuarded(
   walletAddress: string,
   protocol: SuiClmmProtocol,
 ): Promise<SuiClosedPositionsResult> {
-  if (!walletAddress) return Promise.resolve({ positions: [], incomplete: false });
+  if (!walletAddress) return Promise.resolve({ positions: [], incomplete: false, status: 'complete' });
   const key = `${protocol}:${walletAddress.toLowerCase()}`;
   const existing = _inFlightSuiScans.get(key);
   if (existing) return existing;
@@ -747,13 +778,16 @@ export function getCachedClosedPositionsGuarded(
     // stored list is older than the history, so a position closed today is
     // rebuilt into the list today.
     const hist = await getSuiWalletHistory(walletAddress);
+    const deadline = Date.now() + VALUATION_BUDGET_MS;
+    let scanStatus: ScanStatus | null = null;
     const r = await loadClosedPositionsGuarded<SuiClosedPosition>({
       backend: _backend,
       slots: [{ name: protocol, key: closedPosKey(protocol, walletAddress) }],
       scan: async (cached) => {
         const known = new Map((cached[protocol] ?? []).map((x) => [x.positionId, x.events.length] as const));
-        const fresh = await getClosedPositionsForWalletWithStatus(walletAddress, protocol, known);
-        return { bySlot: { [protocol]: fresh.positions }, complete: fresh.complete };
+        const fresh = await getClosedPositionsForWalletWithStatus(walletAddress, protocol, known, deadline, hist);
+        scanStatus = fresh.status;
+        return { bySlot: { [protocol]: fresh.positions }, complete: fresh.complete, settled: fresh.settled };
       },
       idOf: (x) => x.positionId,
       weightOf: (x) => x.events.length,
@@ -761,10 +795,16 @@ export function getCachedClosedPositionsGuarded(
       emptyTtlSeconds: null,
       legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
       mark: hist.mark,
+      // The scan is resumable: positions a short scan found are kept (flagged).
+      storePartial: true,
       log: (m) => console.warn(`[suiClosedPositions] ${protocol}: ${m}`),
     });
     // A short history is reported even when it triggered no rebuild.
-    return { positions: r.bySlot[protocol] ?? [], incomplete: r.incomplete || !hist.complete };
+    const incomplete = r.incomplete || !hist.complete;
+    const status: ScanStatus = !incomplete ? 'complete'
+      : scanStatus === 'in-progress' || hist.status === 'in-progress' ? 'in-progress'
+      : hist.status === 'capped' ? 'capped' : 'failed';
+    return { positions: r.bySlot[protocol] ?? [], incomplete, status };
   })();
   _inFlightSuiScans.set(key, p);
   return p.finally(() => { _inFlightSuiScans.delete(key); });

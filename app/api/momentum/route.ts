@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
@@ -388,6 +389,8 @@ export async function GET(request: Request) {
     // on-chain Position object is destroyed and suix_getOwnedObjects cannot
     // return it. Only zero-liquidity positions whose object still exists
     // surface here.
+    // A zero value from a failed read is never returned (positionReadGuard.ts).
+    const readGuard = createPositionReadGuard('Momentum', 'sui');
     const positions = rawWithNormalized.map((pos) => {
       const poolId = pos.pool_id as string;
       const pool = poolMap[poolId];
@@ -414,6 +417,7 @@ export async function GET(request: Request) {
       const priceX = priceData[coinTypeX] || 0;
       const priceY = priceData[coinTypeY] || 0;
       const value = amount0 * priceX + amount1 * priceY;
+      readGuard.check({ id: `momentum-${pos.objectId as string}`, live: liquidity > 0n, poolRead: !!pool, sides: [{ token: coinTypeX, amount: amount0, price: priceX }, { token: coinTypeY, amount: amount1, price: priceY }] });
 
       // Calculate pending fees
       const tableId = poolTicksTableIds[poolId];
@@ -483,6 +487,8 @@ export async function GET(request: Request) {
       };
     });
 
+    const unreadable = readGuard.response();
+    if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
     return NextResponse.json(

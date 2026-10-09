@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
@@ -608,6 +609,8 @@ export async function GET(request: Request) {
     }
 
     // 8. Transform to shared position shape
+    // A zero value from a failed read is never returned (positionReadGuard.ts).
+    const readGuard = createPositionReadGuard('Orca', 'solana');
     const positions = rawPositions.map((pos) => {
       const pool = poolDataMap[pos.whirlpool];
       const tAKnown = pool ? KNOWN_TOKENS[pool.tokenMintA] : null;
@@ -627,6 +630,7 @@ export async function GET(request: Request) {
       const priceA = pool ? (allPrices[pool.tokenMintA] || 0) : 0;
       const priceB = pool ? (allPrices[pool.tokenMintB] || 0) : 0;
       const value = amount0 * priceA + amount1 * priceB;
+      readGuard.check({ id: `orca-${pos.positionPda}`, live: BigInt(pos.liquidity) > 0n, poolRead: !!pool, sides: pool ? [{ token: pool.tokenMintA, amount: amount0, price: priceA }, { token: pool.tokenMintB, amount: amount1, price: priceB }] : [] });
 
       // Settled fees (ready to claim) + pending fees (accrued since last checkpoint)
       let feesA = Number(pos.feeOwedA) / 10 ** tADecimals;
@@ -714,6 +718,8 @@ export async function GET(request: Request) {
       };
     });
 
+    const unreadable = readGuard.response();
+    if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
     return NextResponse.json(

@@ -20,12 +20,15 @@
 // positions closed equals the position objects the wallet owns now — needs
 // per-protocol event knowledge and lives with the caller (suiClosedPositions).
 //
-// THE SCAN IS INCREMENTAL. Finalized history is immutable, so the position
-// events found for a wallet are stored once (no expiry) with the checkpoint the
-// scan reached; the next load only asks for transactions from that checkpoint
-// on. A position closed today is therefore seen today, for one small request.
-// A short or failed scan is never written — the stored events are returned with
-// `complete: false`.
+// THE SCAN IS RESUMABLE AND TIME-BUDGETED (app/lib/historyScan.ts). History is
+// read newest first, 50 transactions a page; the cursor and the position events
+// found so far are stored after every few pages. A request spends at most its
+// time budget, then returns what it has flagged incomplete, and the next request
+// carries on from the cursor. Finalized history is immutable, so once the first
+// pass has reached the wallet's first transaction a load only asks for what is
+// newer than the stored head: a position closed today is seen today, for one
+// small request. A history longer than the limits below is CAPPED: the most
+// recent part is kept and the result stays flagged for good.
 //
 // SENDER FILTER. The wallet scan lists transactions the wallet SENT. The wider
 // "affected address" filter was measured and rejected: it adds transactions sent
@@ -38,6 +41,7 @@
 
 import { Redis } from '@upstash/redis';
 import { rpcUrlFromEnv } from './rpcEnv';
+import { runResumableScan, readStoredScan, _resetHistoryScanOverlay, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
 
 const DEFAULT_ENDPOINT = 'https://graphql.mainnet.sui.io/graphql';
 function endpoint(): string { return rpcUrlFromEnv('SUI_GRAPHQL_URL') || DEFAULT_ENDPOINT; }
@@ -49,7 +53,11 @@ const MAX_ATTEMPTS = 4;
 const MAX_CONCURRENT = 4;
 const TX_PAGE = 50;
 const EVENT_PAGE = 50;
-const MAX_TX_PAGES = 200; // 10,000 transactions; hitting it marks the scan short
+const MAX_TX_PAGES = 200; // object history only: 10,000 transactions; hitting it throws
+// Wallet-scan limits. Past either one the first pass stops and the history is
+// reported capped (most recent part kept).
+export const SUI_MAX_SCANNED_TX = 30_000;
+export const SUI_MAX_KEPT_TX = 4_000;
 
 export class SuiHistoryUnavailableError extends Error {
   constructor(reason: string) { super(`sui-history-unavailable: ${reason}`); this.name = 'SuiHistoryUnavailableError'; }
@@ -117,6 +125,7 @@ interface GqlTx {
   effects?: { status?: string; timestamp?: string; checkpoint?: { sequenceNumber?: number } | null; events?: GqlEvents | null } | null;
 }
 interface GqlTxPage { pageInfo: { hasNextPage: boolean; endCursor?: string | null }; nodes: GqlTx[] }
+interface GqlTxPageBack { pageInfo: { hasPreviousPage: boolean; startCursor?: string | null }; nodes: GqlTx[] }
 
 const TX_FIELDS =
   `digest effects{ status timestamp checkpoint{ sequenceNumber } ` +
@@ -184,18 +193,6 @@ async function toBlock(tx: GqlTx): Promise<SuiHistoryBlock | null> {
 }
 
 // ── Stored wallet history ────────────────────────────────────────────────────
-interface StoredHistory {
-  v: 1;
-  /** The wallet's first transaction (null = the wallet has sent none). */
-  firstDigest: string | null;
-  /** Checkpoint of the newest transaction scanned (or the chain head when none). */
-  lastCheckpoint: number;
-  /** Digests already counted at `lastCheckpoint`, so the overlap is not double counted. */
-  tailDigests: string[];
-  txCount: number;
-  blocks: SuiHistoryBlock[];
-}
-
 const _url = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
@@ -203,138 +200,108 @@ if (_url && _token) {
   try { _redis = new Redis({ url: _url, token: _token }); }
   catch (err) { console.warn('[suiHistory] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
-// The store is shared with production: a local run must not write to it.
-const readOnly = () => process.env.CLOSED_POS_CACHE_READONLY === '1';
-const historyKey = (wallet: string) => `sui_wallet_hist_v1:${wallet.toLowerCase()}`;
+// v2: resumable layout (a meta key plus chunk keys). v1 held one finished scan
+// in a single value and is no longer read.
+const historyKey = (wallet: string) => `sui_wallet_hist_v2:${wallet.toLowerCase()}`;
 
-interface HistoryStore { get(key: string): Promise<unknown>; set(key: string, value: string): Promise<unknown> }
-let _store: HistoryStore | null = _redis
-  ? { get: (k) => _redis!.get(k), set: (k, v) => _redis!.set(k, v) }
+let _store: ScanStore | null = _redis
+  ? {
+      get: (k) => _redis!.get(k),
+      mget: (keys) => (keys.length ? _redis!.mget(...keys) : Promise.resolve([])),
+      set: (k, v, o) => (o ? _redis!.set(k, v, { ...(o.nx ? { nx: true as const } : {}), ...(o.ex ? { ex: o.ex } : {}) } as never) : _redis!.set(k, v)),
+      del: (k) => _redis!.del(k),
+    }
   : null;
-
-async function readStored(wallet: string): Promise<StoredHistory | null> {
-  if (!_store) return null;
-  try {
-    const raw = (await _store.get(historyKey(wallet))) as StoredHistory | string | null;
-    const v = typeof raw === 'string' ? (JSON.parse(raw) as StoredHistory) : raw;
-    if (v && v.v === 1 && Array.isArray(v.blocks) && typeof v.lastCheckpoint === 'number') return v;
-    return null;
-  } catch { return null; }
-}
-function writeStored(wallet: string, value: StoredHistory): void {
-  if (!_store || readOnly()) return;
-  _store.set(historyKey(wallet), JSON.stringify(value))
-    .catch((err) => console.warn('[suiHistory] Redis write failed (ignored):', String(err).slice(0, 160)));
-}
 
 export interface SuiWalletHistory {
   /** Transactions the wallet sent that carry position events, oldest first. */
   blocks: SuiHistoryBlock[];
   /** False when the scan could not be shown to cover the wallet's whole history. */
   complete: boolean;
+  /** `in-progress`: more arrives on the next load. `capped`: the history is larger than the limit. */
+  status: ScanStatus;
   /** Why it is short (for logs and the notice), when `complete` is false. */
   reason?: string;
-  /** Changes whenever the stored history gains a transaction with position events. */
+  /** Changes whenever the stored history gains a transaction or its completeness changes. */
   mark: string;
+  /** Transactions examined so far. */
   txCount: number;
 }
 
-const markOf = (blocks: SuiHistoryBlock[]) => `${blocks.length}:${blocks[blocks.length - 1]?.digest ?? '-'}`;
+/** Cursor of the next (older) page, with the oldest digest seen so far for the end check. */
+interface SuiCursor { c: string; o: string | null }
 
-async function scanWallet(wallet: string): Promise<SuiWalletHistory> {
-  const stored = await readStored(wallet);
-  const short = (reason: string): SuiWalletHistory => ({
-    blocks: stored?.blocks ?? [], complete: false, reason, mark: markOf(stored?.blocks ?? []), txCount: stored?.txCount ?? 0,
-  });
-
-  try {
-    const run = async (from: StoredHistory | null): Promise<SuiWalletHistory> => {
-      const filter = from
-        ? `{sentAddress:"${wallet}", afterCheckpoint:${Math.max(0, from.lastCheckpoint - 1)}}`
-        : `{sentAddress:"${wallet}"}`;
-      const seen = new Set(from?.tailDigests ?? []);
-      const fresh: GqlTx[] = [];
-      let firstDigest: string | null = null;
-      let head = 0;
-      let cursor: string | null = null;
-      let ended = false;
-      for (let page = 0; page < MAX_TX_PAGES; page++) {
-        const after: string = cursor ? `, after:"${cursor}"` : '';
-        // The first request also asks, separately, for the wallet's first
-        // transaction and the chain head.
-        const extra: string = page === 0
-          ? ` first: transactions(first:1, filter:{sentAddress:"${wallet}"}){ nodes{ digest } } head: checkpoint{ sequenceNumber }`
-          : '';
-        const d = await gql<{ page: GqlTxPage; first?: { nodes: Array<{ digest: string }> }; head?: { sequenceNumber: number } }>(
-          `{ page: transactions(first:${TX_PAGE}${after}, filter:${filter}){ pageInfo{ hasNextPage endCursor } nodes{ ${TX_FIELDS} } }${extra} }`,
+function walletSource(wallet: string): ScanSource<SuiHistoryBlock, SuiCursor> {
+  return {
+    async page({ until, cursor }) {
+      // `until` is the checkpoint an earlier segment already covered; this one
+      // reads strictly after it. The first page also reads the chain head, which
+      // becomes the next segment's `until`.
+      const filter = `{sentAddress:"${wallet}"${until !== null ? `, afterCheckpoint:${until}` : ''}}`;
+      const before = cursor ? `, before:"${cursor.c}"` : '';
+      const extra = cursor ? '' : ' head: checkpoint{ sequenceNumber }';
+      const d = await gql<{ page: GqlTxPageBack; head?: { sequenceNumber: number } }>(
+        `{ page: transactions(last:${TX_PAGE}${before}, filter:${filter}){ pageInfo{ hasPreviousPage startCursor } nodes{ ${TX_FIELDS} } }${extra} }`,
+      );
+      const nodes = d.page.nodes; // oldest first within the page
+      // check 3 (extra event pages) inside toBlock; a transaction returned
+      // without its details throws and the page is retried on the next load.
+      const items = (await Promise.all(nodes.map(toBlock))).filter((b): b is SuiHistoryBlock => b !== null);
+      let top: string | null = null;
+      if (!cursor) {
+        let hi = d.head?.sequenceNumber ?? 0;
+        for (const n of nodes) hi = Math.max(hi, n.effects?.checkpoint?.sequenceNumber ?? 0);
+        if (!(hi > 0)) throw new SuiHistoryUnavailableError('chain head not returned');
+        top = String(hi);
+      }
+      const oldest = nodes[0]?.digest ?? cursor?.o ?? null;
+      const ended = !d.page.pageInfo.hasPreviousPage;
+      if (ended && until === null) {
+        // check 2 — the first pass ends at the wallet's FIRST transaction, which
+        // is asked for separately. Anything else means the provider cut the list.
+        const f = await gql<{ first: { nodes: Array<{ digest: string }> } }>(
+          `{ first: transactions(first:1, filter:{sentAddress:"${wallet}"}){ nodes{ digest } } }`,
         );
-        if (page === 0) { firstDigest = d.first?.nodes?.[0]?.digest ?? null; head = d.head?.sequenceNumber ?? 0; }
-        for (const tx of d.page.nodes) { if (!seen.has(tx.digest)) { seen.add(tx.digest); fresh.push(tx); } }
-        if (!d.page.pageInfo.hasNextPage) { ended = true; break; }
-        cursor = d.page.pageInfo.endCursor ?? null;
-        if (!cursor) break;
+        const firstDigest = f.first?.nodes?.[0]?.digest ?? null;
+        if (firstDigest !== oldest) throw new SuiHistoryUnavailableError('oldest scanned transaction is not the wallet\'s first');
       }
-      if (!ended) return short('paging did not end');                              // check 1
-
-      // check 2 — the oldest transaction we hold must be the wallet's first.
-      const oldest = from ? from.firstDigest : (fresh[0]?.digest ?? null);
-      if (oldest !== firstDigest) {
-        if (from) return run(null); // stored history does not start where the chain says: rebuild
-        return short('oldest scanned transaction is not the wallet\'s first');
-      }
-
-      // check 3 inside toBlock (extra event pages; paced by the transport semaphore)
-      const newBlocks = (await Promise.all(fresh.map(toBlock))).filter((b): b is SuiHistoryBlock => b !== null);
-      const blocks = [...(from?.blocks ?? []), ...newBlocks];
-
-      let lastCheckpoint = from?.lastCheckpoint ?? head;
-      let tailDigests = from?.tailDigests ?? [];
-      const newest = fresh[fresh.length - 1]?.effects?.checkpoint?.sequenceNumber;
-      if (typeof newest === 'number' && newest >= lastCheckpoint) {
-        const atNewest = fresh.filter((t) => t.effects?.checkpoint?.sequenceNumber === newest).map((t) => t.digest);
-        tailDigests = newest === lastCheckpoint ? [...new Set([...tailDigests, ...atNewest])] : atNewest;
-        lastCheckpoint = newest;
-      }
-      const txCount = (from?.txCount ?? 0) + fresh.length;
-      if (!from || fresh.length > 0) writeStored(wallet, { v: 1, firstDigest, lastCheckpoint, tailDigests, txCount, blocks });
-      return { blocks, complete: true, mark: markOf(blocks), txCount };
-    };
-    return await run(stored);
-  } catch (err) {
-    return short(err instanceof SuiHistoryUnavailableError ? err.message : String(err).slice(0, 160));
-  }
+      const start = d.page.pageInfo.startCursor ?? null;
+      if (!ended && !start) throw new SuiHistoryUnavailableError('page cursor missing');   // check 1
+      return { items, scanned: nodes.length, top, next: ended ? null : { c: start!, o: oldest } };
+    },
+  };
 }
-
-// One scan per wallet per instance at a time, and a short memo so the closed
-// scan, the three fee scans and any effect re-run share ONE result.
-const MEMO_MS = 30_000;
-// `doneAt` is null while the scan is in flight: an in-flight scan is always
-// shared, and the freshness window starts when it FINISHES (a first scan can
-// take longer than the window itself).
-interface Memo<T> { doneAt: number | null; p: Promise<T> }
-const memoFresh = <T>(m: Memo<T> | undefined): m is Memo<T> => !!m && (m.doneAt === null || Date.now() - m.doneAt < MEMO_MS);
-const _walletMemo = new Map<string, Memo<SuiWalletHistory>>();
 
 /**
- * The wallet's position-event history, extended from where the last scan
- * stopped. Never throws: a failed or short scan returns the stored events with
- * `complete: false`.
+ * The wallet's position-event history, advanced by one time budget from where
+ * the last request stopped. Never throws: an unfinished, capped or failed scan
+ * returns what is stored with `complete: false` and a `status` saying which.
  */
-export function getSuiWalletHistory(wallet: string): Promise<SuiWalletHistory> {
-  const key = wallet.toLowerCase();
-  const hit = _walletMemo.get(key);
-  if (memoFresh(hit)) return hit.p;
-  const p = scanWallet(wallet);
-  const memo: Memo<SuiWalletHistory> = { doneAt: null, p };
-  _walletMemo.set(key, memo);
-  // A short result is not held: the next caller tries again.
-  p.then(
-    (r) => { if (_walletMemo.get(key) !== memo) return; if (r.complete) memo.doneAt = Date.now(); else _walletMemo.delete(key); },
-    () => { if (_walletMemo.get(key) === memo) _walletMemo.delete(key); },
-  );
-  return p;
+export async function getSuiWalletHistory(wallet: string): Promise<SuiWalletHistory> {
+  const r = await runResumableScan<SuiHistoryBlock, SuiCursor>({
+    key: historyKey(wallet),
+    store: _store,
+    source: walletSource(wallet),
+    idOf: (b) => b.digest,
+    maxScanned: SUI_MAX_SCANNED_TX,
+    maxKept: SUI_MAX_KEPT_TX,
+    log: (m) => console.warn(`[suiHistory] ${m}`),
+  });
+  let blocks: SuiHistoryBlock[] = [];
+  let failed: string | null = null;
+  try { blocks = await r.items(); } catch (err) { failed = String(err).slice(0, 160); }
+  if (failed) return { blocks: [], complete: false, status: 'failed', reason: failed, mark: '0:failed', txCount: r.scanned };
+  return { blocks, complete: r.complete, status: r.status, reason: r.reason, mark: r.mark, txCount: r.scanned };
 }
 
+/** What is stored for the wallet right now, without scanning. For callers that must not wait. */
+export async function getStoredSuiWalletBlocks(wallet: string): Promise<SuiHistoryBlock[]> {
+  return (await readStoredScan<SuiHistoryBlock>(historyKey(wallet), _store, (b) => b.digest)).items;
+}
+
+interface Memo<T> { doneAt: number | null; p: Promise<T> }
+const MEMO_MS = 30_000;
+const memoFresh = <T>(m: Memo<T> | undefined): m is Memo<T> => !!m && (m.doneAt === null || Date.now() - m.doneAt < MEMO_MS);
 const _objectMemo = new Map<string, Memo<SuiHistoryBlock[]>>();
 
 /**
@@ -414,7 +381,7 @@ export function mergeSuiBlocks(...lists: SuiHistoryBlock[][]): SuiHistoryBlock[]
   return [...byDigest.values()].sort((a, b) => Number(a.timestampMs) - Number(b.timestampMs));
 }
 
-export interface SuiActivityBlocks { blocks: SuiHistoryBlock[]; complete: boolean }
+export interface SuiActivityBlocks { blocks: SuiHistoryBlock[]; complete: boolean; status: ScanStatus }
 
 /**
  * The transactions an activity route parses.
@@ -431,15 +398,18 @@ export interface SuiActivityBlocks { blocks: SuiHistoryBlock[]; complete: boolea
 export async function getSuiActivityBlocks(wallet: string, positionId: string | null): Promise<SuiActivityBlocks> {
   if (!positionId) {
     const h = await getSuiWalletHistory(wallet);
-    return { blocks: h.blocks, complete: h.complete };
+    return { blocks: h.blocks, complete: h.complete, status: h.status };
   }
-  const [obj, h] = await Promise.all([getSuiObjectHistory(positionId), getSuiWalletHistory(wallet)]);
-  return { blocks: mergeSuiBlocks(obj, h.blocks), complete: true };
+  // The object's own history is exact and complete by itself. The wallet's
+  // stored history is merged in as it stands: an open position's page must
+  // never wait for a long wallet scan.
+  const [obj, stored] = await Promise.all([getSuiObjectHistory(positionId), getStoredSuiWalletBlocks(wallet)]);
+  return { blocks: mergeSuiBlocks(obj, stored), complete: true, status: 'complete' };
 }
 
 /** Tests only: swap the store (e.g. for an in-memory one) and forget memoized scans. */
-export function _setSuiHistoryStoreForTests(store: HistoryStore | null): void {
+export function _setSuiHistoryStoreForTests(store: ScanStore | null): void {
   _store = store;
-  _walletMemo.clear();
+  _resetHistoryScanOverlay();
   _objectMemo.clear();
 }

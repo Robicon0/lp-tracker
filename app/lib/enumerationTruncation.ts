@@ -71,6 +71,35 @@ export interface RouteTruncation {
  */
 export const LOOKUP_FAILED = 'lookup-failed';
 export const LOOKUP_UNAVAILABLE = 'lookup-unavailable';
+/**
+ * A long history scan that is still being read. The scan is resumable: it stops
+ * at its time budget, returns what it has, and the next request continues. The
+ * client asks again while it sees this reason (see `isScanInProgress`).
+ */
+export const LOOKUP_IN_PROGRESS = 'lookup-in-progress';
+/**
+ * A history too long to read in full. Only its most recent part is included,
+ * and asking again does not change that.
+ */
+export const LOOKUP_CAPPED = 'lookup-capped';
+
+export type LookupReason =
+  | typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE | typeof LOOKUP_IN_PROGRESS | typeof LOOKUP_CAPPED;
+
+/** The notice for a history scan in a given state, or null when it is complete. */
+export function scanStatusNotice(
+  scope: string,
+  status: 'complete' | 'in-progress' | 'capped' | 'failed',
+): RouteTruncation | null {
+  if (status === 'complete') return null;
+  const reason: LookupReason = status === 'in-progress' ? LOOKUP_IN_PROGRESS : status === 'capped' ? LOOKUP_CAPPED : LOOKUP_UNAVAILABLE;
+  return { scope, cap: 0, returned: 0, knownTotal: null, reason };
+}
+
+/** True when a response says its history scan is still running and another request will add to it. */
+export function isScanInProgress(truncated: ReadonlyArray<{ reason?: unknown }> | undefined | null): boolean {
+  return !!truncated && truncated.some((t) => t?.reason === LOOKUP_IN_PROGRESS);
+}
 
 /**
  * Build a notice for a lookup that FAILED or was UNAVAILABLE.
@@ -83,7 +112,7 @@ export const LOOKUP_UNAVAILABLE = 'lookup-unavailable';
  */
 export function lookupFailureNotice(
   scope: string,
-  reason: typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE = LOOKUP_FAILED,
+  reason: LookupReason = LOOKUP_FAILED,
 ): RouteTruncation {
   return { scope, cap: 0, returned: 0, knownTotal: null, reason };
 }
@@ -204,6 +233,10 @@ export function describeTruncation(n: TruncationNotice): string {
       return `${where}: couldn't verify this right now — some positions and fees may be missing from totals`;
     case LOOKUP_UNAVAILABLE:
       return `${where}: history lookup is unavailable right now — some positions and fees may be missing from totals`;
+    case LOOKUP_IN_PROGRESS:
+      return `${where}: still reading this wallet's history — more positions and fees will appear as it loads`;
+    case LOOKUP_CAPPED:
+      return `${where}: this wallet's history is too long to read in full — only its most recent activity is included`;
     case 'pool-scan-ceiling':
       return `${where}: this contract can only scan the first ${n.cap} pools — a position staked in a newer pool would not be listed`;
     case 'page-revert-skipped':

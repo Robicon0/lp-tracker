@@ -3,7 +3,11 @@
 import { useState, useEffect, useRef } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { ActivityEvent } from "./useAllPositionsActivity";
-import { applyTruncationNotices, type RouteTruncation } from "../lib/enumerationTruncation";
+import { applyTruncationNotices, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
+
+// Rounds of "ask again" for a resumable history scan that is still reading.
+const FEE_SCAN_MAX_ROUNDS = 12;
+const FEE_SCAN_ROUND_GAP_MS = 2_500;
 
 // Wallet-scope fee events. Captures fees from positions that no longer exist
 // as on-chain objects / NFTs — i.e. fully closed Bluefin positions on Sui
@@ -204,6 +208,11 @@ export function useWalletLevelFees(
   // scans and started nothing in their place, so any scan slower than the next
   // positions refresh never reached Fee Income at all.
   const runIdRef = useRef(0);
+  // Continuation of resumable history scans (see the end of the effect).
+  const continueRef = useRef(false);
+  const continueCountRef = useRef(0);
+  const scanKeyRef = useRef("");
+  const [continueTick, setContinueTick] = useState(0);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -419,6 +428,8 @@ export function useWalletLevelFees(
     const key = allWalletKeys.join("|") + `::sui${suiPrice ?? 0}` + `::cetus[${cetusSig}]` + `::aero[${aeroSig}]` + `::velo[${veloSig}]` + `::uni[${uniSig}]` + `::sol[${solSig}]`;
     if (key === fetchedKeyRef.current) return;
     fetchedKeyRef.current = key;
+    // A different wallet set or context starts its continuation count afresh.
+    if (key !== scanKeyRef.current) { scanKeyRef.current = key; continueCountRef.current = 0; }
 
     // Build fetches only after confirming the key changed.
     const fetches: Array<Promise<TaggedFeeEvent[]>> = [];
@@ -442,7 +453,11 @@ export function useWalletLevelFees(
           // distinct from the positions fetchers', so the banner says the
           // shortfall is in the HISTORY scan, not in the position list.
           if (account && !j.failed) {
-            applyTruncationNotices(`${protocol} history scan`, account, (j as { truncated?: RouteTruncation[] }).truncated);
+            const truncated = (j as { truncated?: RouteTruncation[] }).truncated;
+            applyTruncationNotices(`${protocol} history scan`, account, truncated);
+            // A resumable scan that is still reading: show what it has, and ask
+            // again shortly (the answer is not kept as this URL's final result).
+            if (isScanInProgress(truncated)) { urlCacheRef.current.delete(url); continueRef.current = true; }
           }
           return (j.events ?? []).map((e) => ({ event: e, protocol, chain }));
         })
@@ -578,8 +593,9 @@ export function useWalletLevelFees(
       const cached = urlCacheRef.current.get(solUrl);
       if (cached) { fetches.push(cached); continue; }
       const p = fetch(solUrl)
-        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }> }>) : { positions: [] }))
-        .then((j) => {
+        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[] }>) : { positions: [] }))
+        .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[] }) => {
+          if (isScanInProgress(j.truncated)) { urlCacheRef.current.delete(solUrl); continueRef.current = true; }
           const out: TaggedFeeEvent[] = [];
           for (const pos of j.positions ?? []) {
             // Sprint RAYDIUM: tag by the position's protocol (orca | raydium) so
@@ -623,13 +639,26 @@ export function useWalletLevelFees(
         if (firstLoad) setEvents([...acc]);
       });
     }
+    continueRef.current = false;
     Promise.all(fetches).then(() => {
       if (superseded()) return;
       setEvents([...acc]);
+      // A history scan said it is still reading: run again in a moment. Settled
+      // URLs are served from the per-URL cache, so only the unfinished scans are
+      // asked again. Bounded, so a history that cannot finish stops asking.
+      if (continueRef.current && continueCountRef.current < FEE_SCAN_MAX_ROUNDS) {
+        continueCountRef.current += 1;
+        setTimeout(() => {
+          if (superseded()) return;
+          fetchedKeyRef.current = "";
+          setContinueTick((t) => t + 1);
+        }, FEE_SCAN_ROUND_GAP_MS);
+        return; // still loading
+      }
       setIsLoading(false);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions, suiWalletAddresses, suiPrice, solanaWalletAddresses]);
+  }, [positions, suiWalletAddresses, suiPrice, solanaWalletAddresses, continueTick]);
 
   return { events, isLoading };
 }

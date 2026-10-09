@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
@@ -470,6 +471,8 @@ export async function GET(request: Request) {
     // on-chain Position object is destroyed and suix_getOwnedObjects cannot
     // return it. Only zero-liquidity positions whose object still exists
     // surface here.
+    // A zero value from a failed read is never returned (positionReadGuard.ts).
+    const readGuard = createPositionReadGuard('Cetus', 'sui');
     const positions = rawPositions.map((pos) => {
       const poolId = pos.pool as string;
       const pool = poolMap[poolId];
@@ -502,6 +505,7 @@ export async function GET(request: Request) {
       const priceA = priceData[coinTypeA] || 0;
       const priceB = priceData[coinTypeB] || 0;
       const value = amount0 * priceA + amount1 * priceB;
+      readGuard.check({ id: `cetus-${pos.objectId as string}`, live: liquidity > 0n, poolRead: !!pool, sides: [{ token: coinTypeA, amount: amount0, price: priceA }, { token: coinTypeB, amount: amount1, price: priceB }] });
 
       const inRange = liquidity > 0n && tickCurrent >= tickLower && tickCurrent < tickUpper;
 
@@ -538,6 +542,8 @@ export async function GET(request: Request) {
       };
     });
 
+    const unreadable = readGuard.response();
+    if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
     return NextResponse.json(

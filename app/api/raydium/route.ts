@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
@@ -398,6 +399,8 @@ export async function GET(request: Request) {
     }
 
     // 5. Transform to shared position shape
+    // A zero value from a failed read is never returned (positionReadGuard.ts).
+    const readGuard = createPositionReadGuard('Raydium', 'solana');
     const positions = rawPositions.map((pos) => {
       const pool = poolDataMap[pos.poolId];
       const t0Known = pool ? TOKENS[pool.tokenMint0] : null;
@@ -418,6 +421,7 @@ export async function GET(request: Request) {
       const price1 = pool ? (allPrices[pool.tokenMint1] || 0) : 0;
 
       const value = amount0 * price0 + amount1 * price1;
+      readGuard.check({ id: `ray-${pos.positionPubkey}`, live: BigInt(pos.liquidity) > 0n, poolRead: !!pool, sides: pool ? [{ token: pool.tokenMint0, amount: amount0, price: price0 }, { token: pool.tokenMint1, amount: amount1, price: price1 }] : [] });
 
       const fees0 = Number(pos.tokenFeesOwed0) / 10 ** t0Decimals;
       const fees1 = Number(pos.tokenFeesOwed1) / 10 ** t1Decimals;
@@ -471,6 +475,8 @@ export async function GET(request: Request) {
       };
     });
 
+    const unreadable = readGuard.response();
+    if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
     return NextResponse.json(

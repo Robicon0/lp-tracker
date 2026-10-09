@@ -33,6 +33,7 @@
 
 import { lookupHardcodedToken, normalizeSuiType } from './tokenConstants';
 import { suiRpc } from './suiRpc';
+import { getSuiCoinMetadata } from './suiHistory';
 import { Redis } from '@upstash/redis';
 
 export interface SuiPoolContext {
@@ -42,8 +43,11 @@ export interface SuiPoolContext {
   decimalsB: number;
 }
 
-// poolId → context | null (null = resolved-but-unresolvable; cached so we never
-// refetch a known-bad id). Immutable pool type params → no TTL.
+// poolId → context | null. `null` is stored ONLY when the chain itself says the
+// id is not a pool (the object exists and its type carries no coin pair, or the
+// object does not exist). A read that FAILED, or a coin whose decimals could not
+// be read, is never stored: the next request tries again. Remembering a failure
+// here used to drop every fee claim in that pool for the life of the instance.
 const _poolCtxCache = new Map<string, SuiPoolContext | null>();
 
 // ── L2 Redis (Sprint 1.14 contract: own client, no-op stub, never throws) ─────
@@ -78,19 +82,25 @@ function redisSetPoolCtx(id: string, ctx: SuiPoolContext): void {
     .catch(() => { /* fire-and-forget */ });
 }
 
-// ── Decimals: pinned constants (no RPC) → on-chain metadata → default 9 ────────
+// ── Decimals: pinned constants (no RPC) → on-chain metadata (two sources) ─────
+// Returns null when no source answers. Decimals are never guessed: a wrong
+// guess mis-scales an amount by a power of ten and prices it confidently.
 const _decimalsCache = new Map<string, number>();
-async function resolveDecimals(coinType: string): Promise<number> {
+async function resolveDecimals(coinType: string): Promise<number | null> {
   const norm = normalizeSuiType(coinType);
   const tok = lookupHardcodedToken('sui', norm);
   if (tok) return tok.decimals;
   if (_decimalsCache.has(norm)) return _decimalsCache.get(norm)!;
-  let dec = 9;
+  let dec: number | null = null;
   try {
     const meta = (await suiRpc('suix_getCoinMetadata', [coinType])) as { decimals?: number } | null;
     if (meta && typeof meta.decimals === 'number') dec = meta.decimals;
-  } catch { /* default 9 */ }
-  _decimalsCache.set(norm, dec);
+  } catch { /* try the second source */ }
+  if (dec === null) {
+    const meta = await getSuiCoinMetadata(coinType);
+    if (meta && typeof meta.decimals === 'number') dec = meta.decimals;
+  }
+  if (dec !== null) _decimalsCache.set(norm, dec);
   return dec;
 }
 
@@ -130,21 +140,30 @@ export async function resolveSuiPoolContexts(poolIds: Iterable<string>): Promise
   // each pool's decimals (pinned constants are free; others one metadata call).
   for (let i = 0; i < stillNeed.length; i += 50) {
     const chunk = stillNeed.slice(i, i + 50);
-    const objs = (await suiRpc('sui_multiGetObjects', [chunk, { showType: true }])) as
-      Array<{ data?: { objectId?: string; type?: string } }> | null;
+    // A failed read leaves the whole chunk unresolved for THIS request only.
+    type PoolObj = { data?: { objectId?: string; type?: string }; error?: { code?: string; object_id?: string } };
+    const objs = await (suiRpc('sui_multiGetObjects', [chunk, { showType: true }]) as Promise<PoolObj[] | null>).catch((err) => {
+      console.error('[suiPoolContext] pool read failed (not cached):', String(err).slice(0, 160));
+      return null;
+    });
+    if (!Array.isArray(objs)) continue;
     // multiGetObjects returns results in request order; map back by index (and by
     // objectId when present, in case an endpoint reorders).
-    const byId = new Map<string, string>();
-    (objs ?? []).forEach((o, k) => {
-      const id = o?.data?.objectId ?? chunk[k];
-      const typ = o?.data?.type ?? '';
-      if (id) byId.set(id, typ);
+    const byId = new Map<string, { typ: string; gone: boolean }>();
+    objs.forEach((o, k) => {
+      const id = o?.data?.objectId ?? o?.error?.object_id ?? chunk[k];
+      const gone = o?.error?.code === 'notExists' || o?.error?.code === 'deleted';
+      if (id) byId.set(id, { typ: o?.data?.type ?? '', gone });
     });
     await Promise.all(chunk.map(async (id) => {
-      const typ = byId.get(id) ?? '';
-      const pair = parsePoolCoinTypes(typ);
-      if (!pair) { _poolCtxCache.set(id, null); return; } // unresolvable → cache null (L1)
+      const got = byId.get(id);
+      if (!got) return;                                   // no answer for this id → retry next time
+      if (got.gone) { _poolCtxCache.set(id, null); return; } // the chain says there is no such object
+      if (!got.typ) return;                               // answered without a type → not a verdict
+      const pair = parsePoolCoinTypes(got.typ);
+      if (!pair) { _poolCtxCache.set(id, null); return; } // a real object that is not a Pool<A,B>
       const [decimalsA, decimalsB] = await Promise.all([resolveDecimals(pair.a), resolveDecimals(pair.b)]);
+      if (decimalsA === null || decimalsB === null) return; // decimals unknown → unresolved, not cached
       const ctx: SuiPoolContext = { coinTypeA: pair.a, coinTypeB: pair.b, decimalsA, decimalsB };
       _poolCtxCache.set(id, ctx);
       redisSetPoolCtx(id, ctx);

@@ -1,14 +1,9 @@
 import { AerodromePosition } from './aerodrome';
+import { fetchPositionList } from './positionsFetch';
 
 export type OrcaPosition = AerodromePosition;
 
-export async function fetchOrcaPositions(account: string): Promise<AerodromePosition[]> {
-  try {
-    const res = await fetch(`/api/orca?account=${account}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.positions || [];
-  } catch {
-    return [];
-  }
+// Throws on a failed request (see positionsFetch.ts): a failure is not "no positions".
+export function fetchOrcaPositions(account: string): Promise<AerodromePosition[]> {
+  return fetchPositionList(`/api/orca?account=${account}`);
 }

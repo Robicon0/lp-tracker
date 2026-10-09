@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCachedClosedPositionsGuarded, type SuiClosedPosition } from '../../lib/suiClosedPositions';
-import { lookupFailureNotice, LOOKUP_UNAVAILABLE, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { scanStatusNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { capClosedPositions } from '../../lib/closedPositionResponse';
 
 // Sprint LPPNL-PERF (Part B1): pin to the Vercel Pro ceiling so the tx-history
 // scan (public-Sui-RPC queryTransactionBlocks + multiGet, ~18–50 s cold) never
@@ -35,13 +36,20 @@ export async function GET(request: Request) {
       getCachedClosedPositionsGuarded(account, 'bluefin'),
       getCachedClosedPositionsGuarded(account, 'momentum'),
     ]);
-    const positions: SuiClosedPosition[] = [...cetus.positions, ...bluefin.positions, ...momentum.positions];
-    // A short history scan is reported, never passed off as the whole list. The
-    // positions above are still returned (cached ones are never dropped); the
-    // notice is what makes the page mark its totals as incomplete.
-    const truncated: RouteTruncation[] = (cetus.incomplete || bluefin.incomplete || momentum.incomplete)
-      ? [lookupFailureNotice('closed-position history', LOOKUP_UNAVAILABLE)]
-      : [];
+    const all: SuiClosedPosition[] = [...cetus.positions, ...bluefin.positions, ...momentum.positions];
+    // A history scan that is not whole is reported, never passed off as the
+    // whole list. The positions found so far are still returned (stored ones are
+    // never dropped); the notice is what makes the page mark its totals as
+    // incomplete. `in-progress` means the resumable scan stopped at its time
+    // budget and the next request continues it; `capped` means the history is
+    // too long to read in full.
+    const statuses = [cetus.status, bluefin.status, momentum.status];
+    const status = statuses.includes('in-progress') ? 'in-progress'
+      : statuses.includes('capped') ? 'capped'
+      : statuses.includes('failed') ? 'failed' : 'complete';
+    const notice = scanStatusNotice('closed-position history', status);
+    const { positions, notice: capNotice } = capClosedPositions(all, (p) => p.closedTs);
+    const truncated: RouteTruncation[] = [...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])];
     return NextResponse.json({
       positions, count: positions.length, account,
       ...(truncated.length > 0 ? { truncated } : {}),

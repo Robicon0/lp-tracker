@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
-import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, type RouteTruncation } from "../lib/enumerationTruncation";
+import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
 import { useTruncationNotices } from "./useTruncationNotices";
 
 // ── Result shape ────────────────────────────────────────────────────────────
@@ -849,6 +849,53 @@ async function fetchClosedWithBudget(url: string): Promise<Response | null> {
   }
 }
 
+// A closed-position history scan is resumable: the route spends one time budget,
+// returns what it has found (flagged "still reading") and continues on the next
+// request. So the client keeps asking while the answer says so, showing each
+// partial result as it arrives — more positions every round, never a blank wait
+// for the whole history. Bounded: a history too long to finish in these rounds
+// keeps its notice and carries on at the next page load.
+const CLOSED_SCAN_MAX_ROUNDS = 12;
+const CLOSED_SCAN_ROUND_GAP_MS = 2_000;
+async function loadClosedProgressively<D>(opts: {
+  addrs: string[];
+  urlFor: (addr: string) => string;
+  noticeSource: string;
+  isCancelled: () => boolean;
+  /** Called once every address has answered at least once, then after each further round. */
+  onUpdate: (byAddr: Map<string, D[]>) => void;
+}): Promise<void> {
+  const byAddr = new Map<string, D[]>();
+  const answered = new Set<string>();
+  const publish = () => { if (answered.size === opts.addrs.length && !opts.isCancelled()) opts.onUpdate(new Map(byAddr)); };
+  await Promise.all(opts.addrs.map(async (addr) => {
+    for (let round = 0; round < CLOSED_SCAN_MAX_ROUNDS; round++) {
+      let more = false;
+      try {
+        const res = await fetchClosedWithBudget(opts.urlFor(addr));
+        // A failed request is not "no closed positions": say so through the
+        // same notice the route uses for a short scan. What an earlier round
+        // returned is kept.
+        if (!res || !res.ok) {
+          applyTruncationNotices(opts.noticeSource, addr, [lookupFailureNotice("closed-position history")]);
+        } else {
+          const json = await res.json();
+          const truncated = json.truncated as RouteTruncation[] | undefined;
+          applyTruncationNotices(opts.noticeSource, addr, truncated);
+          byAddr.set(addr, (json.positions ?? []) as D[]);
+          more = isScanInProgress(truncated);
+        }
+      } catch {
+        applyTruncationNotices(opts.noticeSource, addr, [lookupFailureNotice("closed-position history")]);
+      }
+      answered.add(addr);
+      publish();
+      if (!more || opts.isCancelled()) return;
+      await sleep(CLOSED_SCAN_ROUND_GAP_MS);
+    }
+  }));
+}
+
 // ── Per-endpoint client-side concurrency limiter ────────────────────────────
 // Caps concurrent fetches PER activity endpoint pathname (e.g.
 // /api/hyperswap/activity, /api/aerodrome/activity, /api/cetus/activity). Keying
@@ -1595,17 +1642,15 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     suiClosedLoadingRef.current = true;
     setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     (async () => {
-      const newMap = new Map<string, PosResult>();
-      const newMeta = new Map<string, PositionMeta>();
-      await Promise.all(addrs.map(async (addr) => {
-        try {
-          const res = await fetchClosedWithBudget(`/api/sui-closed-positions?account=${encodeURIComponent(addr)}`);
-          // A failed request is not "no closed positions": say so through the
-          // same notice the route uses for a short scan.
-          if (!res || !res.ok) { applyTruncationNotices(SUI_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); return; }
-          const json = await res.json();
-          applyTruncationNotices(SUI_CLOSED_NOTICE_SOURCE, addr, json.truncated as RouteTruncation[] | undefined);
-          for (const sp of (json.positions ?? []) as SuiClosedPositionDTO[]) {
+      await loadClosedProgressively<SuiClosedPositionDTO>({
+        addrs,
+        urlFor: (addr) => `/api/sui-closed-positions?account=${encodeURIComponent(addr)}`,
+        noticeSource: SUI_CLOSED_NOTICE_SOURCE,
+        isCancelled: () => cancelled || !mountedRef.current,
+        onUpdate: (byAddr) => {
+          const newMap = new Map<string, PosResult>();
+          const newMeta = new Map<string, PositionMeta>();
+          for (const list of byAddr.values()) for (const sp of list) {
             // Value via the SAME pure engine EVM closed positions use, so the
             // injected closingValue/initialValue/fees are byte-identical in shape.
             const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
@@ -1614,12 +1659,13 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             newMap.set(id, pnl);
             newMeta.set(id, { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui", openedTs: sp.openedTs, closedTs: sp.closedTs });
           }
-        } catch { applyTruncationNotices(SUI_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); }
-      }));
-      suiClosedLoadingRef.current = false;
+          suiClosedRef.current = newMap;
+          suiClosedMetaRef.current = newMeta;
+          setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+        },
+      });
       if (cancelled || !mountedRef.current) return;
-      suiClosedRef.current = newMap;
-      suiClosedMetaRef.current = newMeta;
+      suiClosedLoadingRef.current = false;
       setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     })();
     return () => { cancelled = true; suiClosedLoadingRef.current = false; };
@@ -1646,27 +1692,28 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     solanaClosedLoadingRef.current = true;
     setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     (async () => {
-      const newMap = new Map<string, PosResult>();
-      const newMeta = new Map<string, PositionMeta>();
-      await Promise.all(addrs.map(async (addr) => {
-        try {
-          const res = await fetchClosedWithBudget(`/api/solana-closed-positions?account=${encodeURIComponent(addr)}`);
-          if (!res || !res.ok) { applyTruncationNotices(SOLANA_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); return; }
-          const json = await res.json();
-          applyTruncationNotices(SOLANA_CLOSED_NOTICE_SOURCE, addr, json.truncated as RouteTruncation[] | undefined);
-          for (const sp of (json.positions ?? []) as SolanaClosedPositionDTO[]) {
+      await loadClosedProgressively<SolanaClosedPositionDTO>({
+        addrs,
+        urlFor: (addr) => `/api/solana-closed-positions?account=${encodeURIComponent(addr)}`,
+        noticeSource: SOLANA_CLOSED_NOTICE_SOURCE,
+        isCancelled: () => cancelled || !mountedRef.current,
+        onUpdate: (byAddr) => {
+          const newMap = new Map<string, PosResult>();
+          const newMeta = new Map<string, PositionMeta>();
+          for (const list of byAddr.values()) for (const sp of list) {
             const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
             if (!pnl.ok) continue;
             const id = `solana-closed-${sp.protocol}-${sp.positionId}`;
             newMap.set(id, pnl);
             newMeta.set(id, { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana", openedTs: sp.openedTs, closedTs: sp.closedTs });
           }
-        } catch { applyTruncationNotices(SOLANA_CLOSED_NOTICE_SOURCE, addr, [lookupFailureNotice("closed-position history")]); }
-      }));
-      solanaClosedLoadingRef.current = false;
+          solanaClosedRef.current = newMap;
+          solanaClosedMetaRef.current = newMeta;
+          setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+        },
+      });
       if (cancelled || !mountedRef.current) return;
-      solanaClosedRef.current = newMap;
-      solanaClosedMetaRef.current = newMeta;
+      solanaClosedLoadingRef.current = false;
       setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
     })();
     return () => { cancelled = true; solanaClosedLoadingRef.current = false; };

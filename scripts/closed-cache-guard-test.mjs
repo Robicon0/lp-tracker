@@ -79,6 +79,29 @@ for(const prot of ["cetus","bluefin","momentum"]){ const list=sui.filter(p=>p.pr
   r=await run("m2",async()=>({bySlot:{cetus:[fake("TODAY2")]},complete:true}));
   ok("mark: next load completes → position closed today is stored today",scans===2&&!r.incomplete&&JSON.parse(B.m.get(key)).length===list.length+2); }
 
+// ───────── resumable scans (storePartial): progress is kept, but only ever FLAGGED
+{ const B=mem(), key="closed_pos_sui_v2:cetus:new", mk="closed_pos_meta_v1:"+key; NOW=Date.parse("2026-10-08T12:00:00Z"); let scans=0;
+  const run=(mark,scan)=>loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"cetus",key}],emptyTtlSeconds:null,mark,storePartial:true,scan:async()=>{scans++;return scan();}});
+  let r=await run("p1",async()=>({bySlot:{cetus:[fake("A"),fake("B")]},complete:false}));
+  let meta=JSON.parse(B.m.get(mk));
+  ok("partial: a short scan's positions are stored, flagged incomplete",r.incomplete&&JSON.parse(B.m.get(key)).length===2&&meta.lastAttemptComplete===false&&meta.refreshedAt===0&&(await B.ttl(key))===-1);
+  scans=0; r=await run("p1",async()=>({bySlot:{cetus:[]},complete:true}));
+  ok("partial: same history next load → no rescan, STILL flagged",scans===0&&r.incomplete===true&&r.bySlot.cetus.length===2);
+  r=await run("p2",async()=>({bySlot:{cetus:[fake("C")]},complete:false,settled:false}));
+  meta=JSON.parse(B.m.get(mk));
+  ok("partial: scan cut by its own time budget → kept, mark NOT recorded",scans===1&&r.incomplete&&JSON.parse(B.m.get(key)).length===3&&meta.mark!=="p2");
+  scans=0; r=await run("p2",async()=>({bySlot:{cetus:[fake("D")]},complete:false}));
+  ok("partial: …so the next load scans again on the same history",scans===1&&JSON.parse(B.m.get(key)).length===4&&JSON.parse(B.m.get(mk)).mark==="p2");
+  r=await run("p3",async()=>({bySlot:{cetus:[fake("E")]},complete:true}));
+  meta=JSON.parse(B.m.get(mk));
+  ok("partial: a complete scan clears the flag and keeps everything",!r.incomplete&&r.bySlot.cetus.length===5&&meta.lastAttemptComplete===true&&meta.refreshedAt===NOW);
+  scans=0; r=await run("p3",async()=>({bySlot:{cetus:[]},complete:true}));
+  ok("partial: afterwards served complete with no scan",scans===0&&!r.incomplete&&r.bySlot.cetus.length===5); }
+{ const B=mem(), key="closed_pos_sui_v2:cetus:w"; NOW=Date.parse("2026-10-08T12:00:00Z"); const list=sui.filter(p=>p.protocol==="cetus"); B.seed(key,list,11*DAY);
+  const r=await loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"cetus",key}],emptyTtlSeconds:null,mark:"x",storePartial:true,scan:async()=>({bySlot:{cetus:[...short(list,5),fake("NEW")]},complete:false})});
+  const stored=JSON.parse(B.m.get(key));
+  ok("partial: a short scan over a stored list never shrinks it or any record",r.incomplete&&stored.length===list.length+1&&list.every(p=>stored.some(q=>JSON.stringify(q)===JSON.stringify(p)))); }
+
 // ───────── read-only switch: a local run can never write to the shared store
 { process.env.CLOSED_POS_CACHE_READONLY="1"; process.env.CLOSED_POS_REFRESH_AFTER_SECONDS="0"; const B=mem(), key="closed_pos_sui_v2:cetus:w"; NOW=Date.parse("2026-10-08T12:00:00Z"); const list=sui.filter(p=>p.protocol==="cetus"); B.seed(key,list,11*DAY); B.reset();
   const r=await loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"cetus",key}],emptyTtlSeconds:null,scan:async()=>({bySlot:{cetus:[fake("N")]},complete:true})});
