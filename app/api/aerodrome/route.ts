@@ -655,6 +655,15 @@ export async function GET(request: Request) {
       if (closed.notice) truncated.push(closed.notice);
     }
 
+    // The closed half is built from what the sweep returned. When the sweep
+    // itself could not be read, "no closed positions" is not known: say so on
+    // this scope too (the open scope carries its own notice).
+    if (wantClosed && !wantOpen && open.heldIds.size === 0
+      && open.truncated.some((t) => t.reason === 'page-fetch-failed' || t.reason === 'page-budget')) {
+      console.error(`[aerodrome] closed half not verified for ${account}: the position sweep could not be read`);
+      truncated.push(lookupFailureNotice('Base closed-position recovery'));
+    }
+
     return NextResponse.json({
       positions: [...positions, ...closedPositions],
       count: positions.length + closedPositions.length,
@@ -664,6 +673,7 @@ export async function GET(request: Request) {
       ...(truncated.length > 0 ? { truncated } : {}),
     });
   } catch (error) {
+    console.error('[aerodrome] positions route failed:', error);
     return NextResponse.json(
       { error: 'Failed to fetch positions', details: String(error) },
       { status: 500 }

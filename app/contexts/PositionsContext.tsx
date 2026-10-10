@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import { markFirstRowsReady } from "../lib/firstRowsGate";
 import { useQueries, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { fetchAerodromePositions, fetchAerodromeClosedPositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
@@ -286,6 +287,12 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     return [...labels];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, queries.filter((q) => q.isError).length]);
+
+  // Fee and history scans wait for this (firstRowsGate.ts): open rows first.
+  const anyPending = queries.some((q) => q.isPending);
+  useEffect(() => {
+    if (positions.length > 0 || (queries.length > 0 && !anyPending)) markFirstRowsReady();
+  }, [positions.length, queries.length, anyPending]);
 
   const refetch = () => { void queryClient.invalidateQueries({ queryKey: ["positions"] }); };
 

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
-import type { RouteTruncation } from '../../lib/enumerationTruncation';
+import { lookupFailureNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { ethCallMany } from '../../lib/evmBatchCall';
 import { evmRpcPost } from '../../lib/evmRpc';
 
@@ -110,7 +111,8 @@ async function rpcCall(to: string, data: string): Promise<string> {
 async function getBalance(nftManager: string, account: string): Promise<number> {
   const data = SELECTORS.balanceOf + padAddress(account);
   const result = await rpcCall(nftManager, data);
-  if (!result || result === '0x') return 0;
+  // balanceOf always answers a 32-byte word. No word is a failed read, never "owns nothing".
+  if (!result || result === '0x') throw new PositionListReadError('HyperEVM', 'NFT balance');
   return parseInt(result, 16);
 }
 
@@ -581,7 +583,9 @@ async function fetchPositionsForManager(
     }
     return results;
   } catch (err) {
-    console.error(`[HyperSwap] fetchPositionsForManager threw for ${protocol}:`, err);
+    // A failed read is disclosed (banner + ≈), never returned as "no positions".
+    logPositionListReadFailure(protocol, account, err);
+    truncated.push(lookupFailureNotice(`${protocol} positions`));
     return [];
   }
 }

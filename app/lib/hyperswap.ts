@@ -1,15 +1,10 @@
+import { fetchPositionsJson } from './positionsFetch';
 import { AerodromePosition } from './aerodrome';
 import { applyTruncationNotices, type RouteTruncation } from './enumerationTruncation';
 
 export async function fetchHyperSwapPositions(account: string): Promise<AerodromePosition[]> {
   try {
-    const response = await fetch(`/api/hyperswap?account=${account}`);
-    const data = await response.json();
-
-    if (data.error) {
-      console.error('HyperSwap API error:', data.error);
-      return [];
-    }
+    const data = await fetchPositionsJson<{ positions?: Array<AerodromePosition & { fee?: number }>; truncated?: RouteTruncation[]; error?: string }>(`/api/hyperswap?account=${account}`);
 
     applyTruncationNotices('HyperEVM', account, data.truncated as RouteTruncation[] | undefined);
 
@@ -20,6 +15,7 @@ export async function fetchHyperSwapPositions(account: string): Promise<Aerodrom
     }));
   } catch (error) {
     console.error('Failed to fetch HyperSwap positions:', error);
-    return [];
+    // A failed request is not "no positions" (positionsFetch.ts): the page keeps the last good rows.
+    throw error;
   }
 }

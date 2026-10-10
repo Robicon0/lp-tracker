@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { getCachedClosedPositionsGuarded, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
+import { NextResponse, after } from 'next/server';
+import { getClosedPositionsWithinBudget, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
 import { scanStatusNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { capClosedPositions } from '../../lib/closedPositionResponse';
 import { withActivityRouteCache } from '../../lib/activityRouteCache';
@@ -45,7 +45,10 @@ async function GET_impl(request: Request) {
   }
 
   try {
-    const { positions: all, status } = await getCachedClosedPositionsGuarded(account);
+    // ONE budget per request (60 s). Past it the answer is the stored lists,
+    // flagged in-progress, and the scan is kept alive to store its progress.
+    const { positions: all, status, stillRunning } = await getClosedPositionsWithinBudget(account);
+    if (stillRunning) after(() => stillRunning);
     // A history scan that is not whole is reported, never passed off as the
     // whole list: `in-progress` (the resumable scan stopped at its time budget;
     // the next request continues), `capped` (history too long to read in full)

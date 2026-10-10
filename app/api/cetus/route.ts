@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
@@ -115,7 +116,8 @@ async function fetchAllCetusPositions(account: string): Promise<Array<Record<str
       50,
     ]) as { data: Array<{ data: { objectId: string; content: { fields: Record<string, unknown> } } }>; nextCursor: string | null; hasNextPage: boolean } | null;
 
-    if (!result?.data) break;
+    // No answer is a failed read, never "owns nothing" (positionListRead.ts).
+    if (!result?.data) throw new PositionListReadError('Cetus', 'owned position objects');
     for (const item of result.data) {
       if (item?.data?.content?.fields) {
         positions.push({ objectId: item.data.objectId, ...item.data.content.fields });
@@ -546,6 +548,11 @@ export async function GET(request: Request) {
     if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
+    if (error instanceof PositionListReadError) {
+      logPositionListReadFailure('Cetus', account, error);
+      return NextResponse.json({ error: 'position-list-read-failed', protocol: 'Cetus' }, { status: 503 });
+    }
+    console.error('[Cetus] positions route failed:', error);
     return NextResponse.json(
       { error: 'Failed to fetch Cetus positions', details: String(error) },
       { status: 500 },

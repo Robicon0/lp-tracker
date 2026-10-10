@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { suiRpc } from '../../lib/suiRpc';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
@@ -137,7 +138,8 @@ async function fetchAllMomentumPositions(account: string): Promise<Array<Record<
       50,
     ]) as { data: Array<{ data: { objectId: string; content: { fields: Record<string, unknown> } } }>; nextCursor: string | null; hasNextPage: boolean } | null;
 
-    if (!result?.data) break;
+    // No answer is a failed read, never "owns nothing" (positionListRead.ts).
+    if (!result?.data) throw new PositionListReadError('Momentum', 'owned position objects');
     for (const item of result.data) {
       if (item?.data?.content?.fields) {
         positions.push({ objectId: item.data.objectId, ...item.data.content.fields });
@@ -491,6 +493,11 @@ export async function GET(request: Request) {
     if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
+    if (error instanceof PositionListReadError) {
+      logPositionListReadFailure('Momentum', account, error);
+      return NextResponse.json({ error: 'position-list-read-failed', protocol: 'Momentum' }, { status: 503 });
+    }
+    console.error('[Momentum] positions route failed:', error);
     return NextResponse.json(
       { error: 'Failed to fetch Momentum positions', details: String(error) },
       { status: 500 },

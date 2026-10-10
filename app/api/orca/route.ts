@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
@@ -65,7 +66,9 @@ async function getNftMints(account: string): Promise<string[]> {
     solanaRpc('getTokenAccountsByOwner', [account, { programId: TOKEN_PROGRAM_2022 }, { encoding: 'jsonParsed' }]) as Promise<TokenAccountsResult>,
   ]);
 
-  const allAccounts = [...(result1?.value ?? []), ...(result2?.value ?? [])];
+  // No answer from either token program is a failed read, never "owns nothing" (positionListRead.ts).
+  if (!result1?.value || !result2?.value) throw new PositionListReadError('Orca', 'wallet token accounts');
+  const allAccounts = [...result1.value, ...result2.value];
 
   return allAccounts
     .filter((ta) => {
@@ -141,7 +144,7 @@ async function getMultipleAccounts(addresses: string[]): Promise<Array<{ data: B
     { encoding: 'base64' },
   ]) as { value: Array<{ data: [string, string] } | null> } | null;
 
-  if (!result?.value) return addresses.map(() => null);
+  if (!result?.value) throw new PositionListReadError('Orca', 'position accounts');
 
   return result.value.map((acc) => {
     if (!acc?.data?.[0]) return null;
@@ -722,9 +725,14 @@ export async function GET(request: Request) {
     if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
+    if (error instanceof PositionListReadError) {
+      logPositionListReadFailure('Orca', account, error);
+      return NextResponse.json({ error: 'position-list-read-failed', protocol: 'Orca' }, { status: 503 });
+    }
+    console.error('[Orca] positions route failed:', error);
     return NextResponse.json(
       { error: 'Failed to fetch Orca positions', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

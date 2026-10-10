@@ -808,13 +808,19 @@ async function GET_impl(request: Request) {
     // (fee_claim events prefer the CoinGecko market-price path above; this
     // resolver is the fallback when CG has no entry for that day.)
     const allBlocks = cleanRawEvents.map((e) => e.blockNumber);
-    // Public HyperEVM RPC cannot answer eth_call at old blocks — only current
-    // state. Use the Chainstack archive RPC when configured so historical
-    // sqrtPriceX96 lookups actually resolve; fall back to public RPC only when
-    // the archive env var is unset (the resolver will return null for old
-    // blocks in that case and callers fall through to current-price math).
-    const archiveRpc = rpcUrlFromEnv('HYPEREVM_ARCHIVE_RPC') || HYPEREVM_RPC;
-    const histPrices = pool && allBlocks.length > 0
+    // Historical sqrtPriceX96 lookups need an archive endpoint
+    // (HYPEREVM_ARCHIVE_RPC).
+    //
+    // NEVER fall back to the public RPC here. It ignores the block tag and
+    // answers every historical block with TODAY's pool price, which this
+    // resolver then stores for 90 days as the price at that block. Measured
+    // 2026-10-09: a preview deployment (no HYPEREVM_ARCHIVE_RPC in the Preview
+    // environment) wrote $83.82 for four May blocks of pool 0x6c9a…9285, and
+    // production then valued a May deposit and three May fee claims at it.
+    // With no archive endpoint the historical tier is skipped and the
+    // estimate / CoinGecko-historical tiers below answer, marked as such.
+    const archiveRpc = rpcUrlFromEnv('HYPEREVM_ARCHIVE_RPC');
+    const histPrices = pool && archiveRpc && allBlocks.length > 0
       ? await (async () => {
           const resolver = createHistoricalFeePriceResolver({
             rpc: archiveRpc, pool, token0, token1,

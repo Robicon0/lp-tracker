@@ -5,6 +5,7 @@ import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
 import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
 import { useTruncationNotices } from "./useTruncationNotices";
+import { whenFirstRowsPainted } from "../lib/firstRowsGate";
 
 // ── Result shape ────────────────────────────────────────────────────────────
 
@@ -868,6 +869,9 @@ async function loadClosedProgressively<D>(opts: {
   const byAddr = new Map<string, D[]>();
   const answered = new Set<string>();
   const publish = () => { if (answered.size === opts.addrs.length && !opts.isCancelled()) opts.onUpdate(new Map(byAddr)); };
+  // Open positions first: the history scan starts after the first row has painted.
+  await whenFirstRowsPainted();
+  if (opts.isCancelled()) return;
   await Promise.all(opts.addrs.map(async (addr) => {
     for (let round = 0; round < CLOSED_SCAN_MAX_ROUNDS; round++) {
       let more = false;

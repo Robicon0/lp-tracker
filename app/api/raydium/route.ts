@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
@@ -47,7 +48,9 @@ async function getNftMints(account: string): Promise<string[]> {
     solanaRpc('getTokenAccountsByOwner', [account, { programId: TOKEN_PROGRAM_2022 }, { encoding: 'jsonParsed' }]) as Promise<TokenAccountsResult>,
   ]);
 
-  const allAccounts = [...(result1?.value ?? []), ...(result2?.value ?? [])];
+  // No answer from either token program is a failed read, never "owns nothing" (positionListRead.ts).
+  if (!result1?.value || !result2?.value) throw new PositionListReadError('Raydium', 'wallet token accounts');
+  const allAccounts = [...result1.value, ...result2.value];
 
   return allAccounts
     .filter((ta) => {
@@ -135,7 +138,8 @@ async function fetchRaydiumPositions(nftMints: string[]): Promise<RawRaydiumPosi
     const result = await solanaRpc('getMultipleAccounts', [
       batch.map((e) => e.pda), { encoding: 'base64' },
     ]) as { value: Array<{ data: [string, string]; owner: string } | null> } | null;
-    const values = result?.value ?? [];
+    if (!result?.value) throw new PositionListReadError('Raydium', 'position accounts');
+    const values = result.value;
     batch.forEach((e, k) => {
       const acc = values[k];
       if (!acc?.data?.[0] || acc.owner !== RAYDIUM_CLMM_PROGRAM) return;
@@ -479,9 +483,14 @@ export async function GET(request: Request) {
     if (unreadable) return unreadable;
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (error) {
+    if (error instanceof PositionListReadError) {
+      logPositionListReadFailure('Raydium', account, error);
+      return NextResponse.json({ error: 'position-list-read-failed', protocol: 'Raydium' }, { status: 503 });
+    }
+    console.error('[Raydium] positions route failed:', error);
     return NextResponse.json(
       { error: 'Failed to fetch Raydium positions', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

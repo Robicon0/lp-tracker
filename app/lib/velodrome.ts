@@ -1,3 +1,4 @@
+import { fetchPositionsJson } from './positionsFetch';
 import { AerodromePosition } from './aerodrome';
 import { applyTruncationNotices, type RouteTruncation } from './enumerationTruncation';
 
@@ -12,13 +13,7 @@ interface VelodromeResponse {
 
 export async function fetchVelodromePositions(account: string): Promise<VelodromePosition[]> {
   try {
-    const response = await fetch(`/api/velodrome?account=${account}`);
-    const data: VelodromeResponse = await response.json();
-
-    if (data.error) {
-      console.error('Velodrome API error:', data.error);
-      return [];
-    }
+    const data = await fetchPositionsJson<VelodromeResponse>(`/api/velodrome?account=${account}`);
 
     // Record (or clear) the truncation notice for this source+wallet. Only
     // reached on a SUCCESSFUL response — a failed fetch must never be read as
@@ -28,6 +23,7 @@ export async function fetchVelodromePositions(account: string): Promise<Velodrom
     return (data.positions || []).map((p) => ({ ...p }));
   } catch (error) {
     console.error('Failed to fetch Velodrome positions:', error);
-    return [];
+    // A failed request is not "no positions" (positionsFetch.ts): the page keeps the last good rows.
+    throw error;
   }
 }

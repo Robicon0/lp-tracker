@@ -242,11 +242,11 @@ each needs its own go-ahead). Ranks above everything below.**
 |---|---|---|
 | 1a | Never-shrink guard + expiry stopgap on the Sui and Solana closed caches | shipped |
 | 1b | Sui history through GraphQL with four completeness checks; closed scan, three fee scans and per-position activity moved; incremental from the last checkpoint | shipped |
-| 2a | ONE resumable, time-budgeted history-scan engine (`app/lib/historyScan.ts`) for Sui and Solana closed positions (was 1c + 2); pool-context helper no longer remembers a failed read (was 1d); Sui and Solana position routes never return value 0 on a failed read | shipped |
+| 2a | ONE resumable, time-budgeted history-scan engine (`app/lib/historyScan.ts`) for Sui and Solana closed positions (was 1c + 2); pool-context helper no longer remembers a failed read (was 1d); Sui and Solana position routes never return value 0 on a failed read | shipped `8746c23` |
 | 1e | Rewards on CLOSED Sui positions are not valued inside the closed list (they do reach Fees Collected through the wallet-wide scans) | not started |
 | 3 | Fees Collected includes closed Sui fees, plus rewards at claim-date price (owner-approved) | 5–7 |
 | 4 | Orca: exact-time prices for closed legs (today one price per UTC day, so a same-day leg reads 0.00); a historical price for open-position deposits (every open Orca position is always "priced from estimates") | 4–6 |
-| 5 | Position routes never return value 0 on a failed read — done for Sui and Solana in 2a; the EVM position routes are still to do | 2–3 |
+| 5 | Position routes never return value 0 on a failed read — done for Sui and Solana in 2a. A failed OWNERSHIP read is covered on every route (rule (e), not yet committed). Still to do on EVM: a failed pool or price read for a position that WAS listed | 2–3 |
 | 6 | ITEM 0h (HyperEVM historical price) | 4–6 |
 | 7 | `scripts/reference-reconcile.mjs` with the independent chain check, as the rule (c) gate | 6–8 |
 | 8 | Display of one-sided re-range legs (they are REAL and stay in totals; group a run into one row) | 3–6 |
@@ -963,7 +963,86 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Sprint 2a)** — **One resumable, time-budgeted history-scan engine for
+- **(Sprint 2a follow-up, 2026-10-11)** — **A failed ownership read is never "owns
+  nothing"; first-row timing measured properly; Solana closed route held to one 60 s budget.**
+  **Ownership reads (Methodology rule (e)).** On production the first Cetus call after the 2a
+  deploy answered `{positions: [], count: 0}` with HTTP 200 for a wallet holding $11,358, with
+  nothing logged: `suiRpc` returns `undefined` when every endpoint fails and the route read that
+  as "no positions". The same pattern was in every position-listing route. Now
+  (`app/lib/positionListRead.ts`): Cetus, Bluefin, Momentum, Orca, Raydium and PancakeSwap answer
+  503 `position-list-read-failed`; Uniswap V3 (per chain) and HyperEVM (per manager) keep the
+  chains that answered and add `lookupFailureNotice('<chain> positions')`; Aerodrome's closed
+  half adds a notice when the sweep it depends on could not be read (Aerodrome / Velodrome open
+  already reported `page-fetch-failed`). Every failure is logged. The five EVM client wrappers
+  (`aerodrome`, `uniswap`, `velodrome`, `hyperswap`, `pancakeswap`) now THROW on a failed request
+  (`fetchPositionsJson`) instead of returning `[]`, so the page keeps the last good rows and
+  names the source. Forced end to end with every chain RPC blocked
+  (`NODE_OPTIONS=--require blockhosts.cjs`): no route answered a plain empty 200, the banner
+  listed each one, the dashboard named the six failed sources.
+  **`SUI_RPC_URL` is not set for the Preview environment** (Production and Development only), so
+  on a preview deployment every Sui route now answers 503 — before this change it silently
+  showed no Sui positions.
+  **First dashboard row — what the measurement showed.** The "5.3–8.6 s" after 2a was NOT a 2a
+  regression. Same network, deployment against deployment, dashboard alone, 5 warm loads each:
+  1b 4.30 / 3.15 / 2.87 s, 2a 4.37 / 2.82 / 3.02 s (desktop / phone / tablet). No API request
+  gates the first row: the position routes answer in 0.6–2.2 s, but the first request does not
+  LEAVE until 2.7 s (first visit 4.4–5.0 s) after navigation, because it waits for about 1.2 MB
+  of scripts (one chunk is 565 KB) and hydration. **The test machine was on a VPN with a 330 ms
+  round trip to every host** — check `ping` before trusting any timing from it. The earlier
+  "5–9 s" loads also opened the analytics page at the same time on a cold browser cache.
+  Tried and rejected: starting the open-position requests from an inline `<head>` script made
+  Chromium SLOWER (4.4 → 5.8 s; the early requests slowed the script download) and gained
+  under 0.2 s on WebKit. Kept: closed-history and wallet-wide fee scans now start after the
+  first row has painted (`app/lib/firstRowsGate.ts`, 8 s fallback) — it does not move the first
+  row (4.35 / 2.88 / 3.01 s) but keeps the heavy scans off the open path. **The real lever is
+  the script payload before hydration (lazy-load the wallet libraries); not done — it touches
+  the wallet providers and needs the real-extension check.**
+  **First row, second measurement (2026-10-11) — the earlier figures were all FIRST-VISIT figures.**
+  Every load above ran with the browser's script cache off: a fresh browser per load, and
+  Playwright's request routing (`context.route`) switches the HTTP cache off for the whole context.
+  Production serves its script chunks `public, max-age=31536000, immutable`, so a returning visitor
+  does not download them again. Measured on production `8746c23`, same 340 ms link, one browser
+  kept open, 5 loads after the first, Chromium at three sizes: first request leaves at 0.68 /
+  0.68 / 0.69 s and the **first row paints at 2.12 / 2.27 / 2.09 s** (desktop / phone / tablet).
+  The first visit in the same runs: 6.7–7.6 s, with 1,176 KB of scripts over the network. On a
+  local build (no network delay) the first request leaves at 0.20–0.27 s with one 70–90 ms long
+  task, so start-up is download time, not CPU. Four chunks are 927 KB of the 1,151 KB: the Sui /
+  EVM wallet libraries (563 KB), a wallet SDK loaded late (154 KB), the Solana wallet adapters
+  (106 KB) and the chart library (104 KB). **Three measuring rules:** (1) to time a returning
+  visit, keep one context open and stop the snapshot POST inside the page (patch `fetch` in an
+  init script), never with `context.route`; (2) Playwright's WebKit never reuses scripts between
+  pages, so it can only time a first visit; (3) a preview deployment does not cache scripts
+  either, so a returning visit can only be timed on production.
+  **Two more wrappers (found in the same audit, 2026-10-11):** `app/lib/defituna.ts` turned a
+  failed request into `[]` (the route already answered 502) and now throws; `app/lib/vfatSickle.ts`
+  turned a failed or incomplete Sickle lookup into "no Sickle" and now reports `vfat positions`
+  through the truncation channel (a failed request also throws; a complete answer clears it).
+  Forced on a local build: the banner names vfat, the dashboard names DefiTuna, 0 page errors.
+  **Solana closed route:** the request is bounded at 60 s (`getClosedPositionsWithinBudget`): at
+  the budget it answers with the STORED lists flagged in-progress and the scan is kept alive
+  with `after()` to store its progress. Before: 64 / 60 / 76 / 119 / 67 s on a cold wallet
+  (pool reads and paced batches cannot be cut mid-call); after: 49 / 61 / 61 / 0.2 / 57 s.
+  **⚠️ ProjectX HYPE/USDC 435568 read Capital G/L −2,206.73 on PRODUCTION for about a day
+  (correct: +111.08). CAUSE: a PREVIEW deployment wrote wrong prices into the shared store.**
+  The Preview environment has no `HYPEREVM_ARCHIVE_RPC`; the HyperEVM activity route then fell
+  back to the public endpoint, which ignores the block tag and answers TODAY's pool price for any
+  block (the ITEM 0h trap), and the resolver stored it for 90 days as the price at four May
+  blocks (`evm_hist_price_v1:hyperevm:0x6c9a…9285:*`, written 2026-10-09 21:06 UTC, four minutes
+  after the first preview was created). Production reads the same store, so the May deposit and
+  three May fee claims were valued at $83.82, unmarked: deposit 11,127.46 (correct 8,809.65),
+  fees 315.48 (correct 222.64), Account 1 Capital G/L about −15,005 (correct −12,687.68).
+  Chain evidence: 58.2999999 HYPE + 6,240.99232 USDC deposited into a $35.63–$47.95 range fixes
+  the pool price at the deposit at $44.06 (market price that minute $44.03); $83.82 is outside
+  the range, where the position would hold no HYPE. **Fixed:** the route no longer falls back to
+  the public endpoint (no archive endpoint means the historical step is skipped and the marked
+  estimate answers); the four keys were deleted with the owner's approval (values kept in
+  `~/Documents/defidesh-reports/2026-10-11-deleted-hyperevm-price-keys.json`); production read
+  8,809.65 / 222.64 again straight after, and wrote no new key. See Methodology rule (f).
+  **Uniswap "84.73 vs 168.09" is NOT a rolling window.** All three claims are January 2026
+  (47.28 on 01-20, 37.45 on 01-27, 83.36 on 01-31); the one-year panel on production was missing
+  the 83.36 claim on that load. Cause not found yet — re-read the panel on production.
+
+- **`8746c23`** (Sprint 2a) — **One resumable, time-budgeted history-scan engine for
   Sui and Solana closed positions.** NEW `app/lib/historyScan.ts` (`runResumableScan`): history
   is read newest first; the cursor and what was kept are stored after every few pages (a meta key
   plus chunk keys, one lock per wallet); a request spends at most its time budget (40 s) and
@@ -995,6 +1074,15 @@ shorthand.
   **Testing trap:** `next dev` re-creates module state when it compiles another route, which
   wipes the read-only in-memory stand-in for the store and restarts every scan. Verify resumable
   scans locally on `next build && next start`, never on `next dev`.
+  **PRODUCTION, measured 2026-10-09 on `8746c23`, Account 1:** closed Sui 55 and closed Orca 43
+  records byte-identical to the local build; Sui closed route 4.9 s complete; Solana closed
+  route 66.6 s in-progress then 9.5 s complete (first scan of the stored history). Page on
+  desktop / emulated iPhone / iPad: Closed (115), Capital G/L ≈ −$12,687.68 on all three, Fees
+  Collected $14,487.80 / .80 / .77, Total Deposited $27,899.78 with no `~`, Net P&L ≈ +$808.78
+  to +$827.79 (live value), "3 positions priced from estimates", 0 page errors. Store: 1,484 →
+  1,489 keys (two `sui_wallet_hist_v2`, two `solana_wallet_hist_v1`, one vfat key); every closed
+  list unchanged except Account 1's Orca list (40 → 43). NOT measured on production: the
+  harness and the heavy wallet.
   **Not done:** the EVM position routes still can return value 0 on a failed read; Orca closed
   legs are still priced per UTC day (a same-day open-and-close reads G/L 0.00); no bump to
   `lp-pnl-events` / `analytics-activity` / `closed_pos_*` (stored records are unchanged).
@@ -2893,6 +2981,25 @@ with similar position shapes. Never wallet-specific framing.
   are stored only as FLAGGED partial lists (`storePartial` in `closedPositionCache.ts`): never
   as complete, and never shrinking. A new chain adds a `page()` adapter, not a new scan loop.
   Check with `npx tsx scripts/history-scan-test.ts`.
+
+- **(e) A failed read of what a wallet owns is never "owns nothing".** A position route's first
+  read (owned objects on Sui, token accounts on Solana, `balanceOf` / the Sugar sweep on EVM) must
+  either answer or FAIL: no answer is never turned into an empty list or a zero balance. A route
+  with one source answers a non-200 (`PositionListReadError`, `app/lib/positionListRead.ts`); a
+  route that reads several chains or managers keeps the ones that answered and reports the failed
+  one through the truncation channel. The failure is logged, and the client wrapper throws
+  (`positionsFetch.ts`) so the page keeps the last good rows and names the source. A new position
+  route is checked by blocking its RPC and confirming it does not answer a plain empty 200.
+
+- **(f) A preview deployment writes to the PRODUCTION store.** The Upstash database is one
+  database for production, preview and local, and `CLOSED_POS_CACHE_READONLY=1` covers only the
+  closed-position lists and the history scans — not the price caches, the pool and position
+  context caches or the wallet history index. The Preview environment is also missing variables
+  that Production has (`HYPEREVM_ARCHIVE_RPC`, `SUI_RPC_URL`), so code runs down fallback paths
+  there that production never takes. Two consequences: (1) **an immutable cache must never be
+  filled from a fallback endpoint** — if the designated source is not configured, skip the tier,
+  do not substitute another endpoint and store its answer; (2) after any preview or local test
+  run, compare the store's key counts per prefix before and after, and explain every new key.
 
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind

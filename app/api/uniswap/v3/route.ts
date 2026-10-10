@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../../lib/positionListRead';
 import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
@@ -235,7 +236,8 @@ async function rpcCall(rpc: string, to: string, data: string): Promise<string> {
 async function getBalance(rpc: string, nftManager: string, account: string): Promise<number> {
   const data = SELECTORS.balanceOf + padAddress(account);
   const result = await rpcCall(rpc, nftManager, data);
-  if (!result || result === '0x') return 0;
+  // balanceOf always answers a 32-byte word. No word is a failed read, never "owns nothing".
+  if (!result || result === '0x') throw new PositionListReadError('Uniswap V3', 'NFT balance');
   return parseInt(result, 16);
 }
 
@@ -721,7 +723,9 @@ async function fetchPositionsForChain(
       }
     }
   } catch (err) {
-    console.error(`Error fetching positions on ${chainKey}:`, err);
+    // A failed read is disclosed (banner + ≈), never returned as "no positions".
+    logPositionListReadFailure(`Uniswap V3 ${chain.chainName}`, account, err);
+    truncated.push(lookupFailureNotice(`${chain.chainName} positions`));
   }
 
   // ── Burned-NFT recovery (defensive, additive) ────────────────────────────

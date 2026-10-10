@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { ActivityEvent } from "./useAllPositionsActivity";
 import { applyTruncationNotices, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
+// Wallet-wide fee scans start after the first open-position row has painted.
+import { whenFirstRowsPainted } from "../lib/firstRowsGate";
 
 // Rounds of "ask again" for a resumable history scan that is still reading.
 const FEE_SCAN_MAX_ROUNDS = 12;
@@ -439,7 +441,7 @@ export function useWalletLevelFees(
     const dedupFetch = (url: string, protocol: string, chain: string, account?: string): Promise<TaggedFeeEvent[]> => {
       const hit = urlCacheRef.current.get(url);
       if (hit) return hit;
-      const p = fetch(url)
+      const p = whenFirstRowsPainted().then(() => fetch(url))
         // `failed` marks a non-OK response. It must NOT reach
         // applyTruncationNotices: passing "no truncated field" there CLEARS the
         // notice, i.e. reads a failed fetch as proof the scan was complete.
@@ -592,7 +594,7 @@ export function useWalletLevelFees(
       const solUrl = `/api/solana-closed-positions?account=${encodeURIComponent(acct)}`;
       const cached = urlCacheRef.current.get(solUrl);
       if (cached) { fetches.push(cached); continue; }
-      const p = fetch(solUrl)
+      const p = whenFirstRowsPainted().then(() => fetch(solUrl))
         .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[] }>) : { positions: [] }))
         .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[] }) => {
           if (isScanInProgress(j.truncated)) { urlCacheRef.current.delete(solUrl); continueRef.current = true; }

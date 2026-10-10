@@ -1,3 +1,4 @@
+import { fetchPositionsJson } from './positionsFetch';
 import { AerodromePosition } from './aerodrome';
 import { applyTruncationNotices, type RouteTruncation } from './enumerationTruncation';
 
@@ -16,13 +17,7 @@ interface UniswapResponse {
 
 export async function fetchUniswapV3Positions(account: string): Promise<UniswapPosition[]> {
   try {
-    const response = await fetch(`/api/uniswap/v3?account=${account}`);
-    const data: UniswapResponse = await response.json();
-
-    if (data.error) {
-      console.error('Uniswap V3 API error:', data.error);
-      return [];
-    }
+    const data = await fetchPositionsJson<UniswapResponse>(`/api/uniswap/v3?account=${account}`);
 
     // Label MUST match PositionsContext's source label so the banner names the
     // same source the user sees elsewhere.
@@ -35,6 +30,7 @@ export async function fetchUniswapV3Positions(account: string): Promise<UniswapP
     }));
   } catch (error) {
     console.error('Failed to fetch Uniswap V3 positions:', error);
-    return [];
+    // A failed request is not "no positions" (positionsFetch.ts): the page keeps the last good rows.
+    throw error;
   }
 }

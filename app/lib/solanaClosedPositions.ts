@@ -1047,8 +1047,14 @@ const _scanStore: ScanStore | null = _redis
     }
   : null;
 
-// Time left for valuing new positions once the history is in hand.
+// ONE budget for a request: the history scan and the valuation of new positions
+// share it. The scan takes its own budget first (historyScan.ts, 40 s plus one
+// page of grace); valuation then gets at most VALUATION_BUDGET_MS and never runs
+// past the request budget. What is not valued by then is valued on the next load.
+const REQUEST_BUDGET_MS = 60_000;
 const VALUATION_BUDGET_MS = 25_000;
+const VALUATION_MIN_MS = 5_000;        // always value something, so every load makes progress
+const STORE_MARGIN_MS = 3_000;         // left for writing what was found
 
 function isCachedSolanaPosition(p: unknown): boolean {
   const x = p as SolanaClosedPosition | null;
@@ -1084,9 +1090,14 @@ export function getCachedClosedPositionsGuarded(wallet: string): Promise<SolanaC
     // Advance the wallet's history by one time budget (one small request when
     // nothing is new). Its mark tells the guard whether the stored lists are
     // older than the history, so a position closed today is rebuilt in today.
+    const requestStart = Date.now();
     const stats = newStats();
     const hist = await getSolanaWalletHistory(wallet, stats);
-    const deadline = Date.now() + VALUATION_BUDGET_MS;
+    const now = Date.now();
+    const deadline = Math.max(
+      now + VALUATION_MIN_MS,
+      Math.min(now + VALUATION_BUDGET_MS, requestStart + REQUEST_BUDGET_MS - STORE_MARGIN_MS),
+    );
     let scanStatus: ScanStatus | null = null;
     const r = await loadClosedPositionsGuarded<SolanaClosedPosition>({
       backend: _backend,
@@ -1117,6 +1128,51 @@ export function getCachedClosedPositionsGuarded(wallet: string): Promise<SolanaC
   })();
   _inFlightScans.set(key, p);
   return p.finally(() => { _inFlightScans.delete(key); });
+}
+
+// The stored lists as they are, no scan. Used when a request reaches its budget.
+async function readStoredClosedPositions(wallet: string): Promise<SolanaClosedPosition[]> {
+  if (!_backend) return [];
+  const out: SolanaClosedPosition[] = [];
+  for (const protocol of ['orca', 'raydium'] as const) {
+    try {
+      const raw = await _backend.get(closedPosKey(protocol, wallet));
+      const list = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(list)) out.push(...(list.filter(isCachedSolanaPosition) as SolanaClosedPosition[]));
+    } catch { /* an unreadable list is simply not served */ }
+  }
+  return out;
+}
+
+export interface BudgetedSolanaClosedResult extends SolanaClosedPositionsResult {
+  /** Set when the request reached its budget: the scan is still running and must be kept alive. */
+  stillRunning?: Promise<unknown>;
+}
+
+/**
+ * The guarded scan, answered within ONE request budget (60 s).
+ *
+ * The scan and valuation have their own deadlines, but several steps inside
+ * them cannot be cut short mid-call (paced batches backing off under a rate
+ * limit, the pool reads before valuation). Measured: requests of 64–119 s
+ * against a 60 s target. So the request itself is bounded: at the budget it
+ * answers with what is STORED, flagged `in-progress`, and the scan carries on
+ * in the background (the route keeps the function alive for it) and stores its
+ * progress as usual. The next request joins the same scan or finds it stored.
+ */
+export async function getClosedPositionsWithinBudget(
+  wallet: string,
+  budgetMs: number = REQUEST_BUDGET_MS,
+): Promise<BudgetedSolanaClosedResult> {
+  const work = getCachedClosedPositionsGuarded(wallet);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), budgetMs); });
+  const first = await Promise.race([work, timedOut]);
+  if (timer) clearTimeout(timer);
+  if (first) return first;
+  console.warn(`[solanaClosedPositions] request budget (${Math.round(budgetMs / 1000)} s) reached; answering from the stored lists while the scan continues`);
+  const positions = await readStoredClosedPositions(wallet);
+  return { positions, incomplete: true, status: 'in-progress', stillRunning: work.catch(() => undefined) };
 }
 
 export function getCachedClosedPositionCapitalGL(wallet: string): Promise<SolanaClosedPosition[]> {

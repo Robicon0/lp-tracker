@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
@@ -50,7 +51,8 @@ async function rpcCall(to: string, data: string): Promise<string> {
 
 async function getBalance(account: string): Promise<number> {
   const result = await rpcCall(POSITION_MANAGER, SELECTORS.balanceOf + padAddress(account));
-  if (!result || result === '0x') return 0;
+  // balanceOf always answers a 32-byte word. No word is a failed read, never "owns nothing".
+  if (!result || result === '0x') throw new PositionListReadError('PancakeSwap', 'NFT balance');
   return parseInt(result, 16);
 }
 
@@ -280,6 +282,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ positions, count: positions.length, account });
   } catch (err) {
+    if (err instanceof PositionListReadError) {
+      logPositionListReadFailure('PancakeSwap', account, err);
+      return NextResponse.json({ error: 'position-list-read-failed', protocol: 'PancakeSwap' }, { status: 503 });
+    }
     console.error('PancakeSwap V3 API error:', err);
     return NextResponse.json({ error: 'Failed to fetch positions' }, { status: 500 });
   }
