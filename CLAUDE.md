@@ -963,7 +963,7 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Sprint 2a follow-up, 2026-10-11)** — **A failed ownership read is never "owns
+- **`56d06b7`** (Sprint 2a follow-up, 2026-10-11) — **A failed ownership read is never "owns
   nothing"; first-row timing measured properly; Solana closed route held to one 60 s budget.**
   **Ownership reads (Methodology rule (e)).** On production the first Cetus call after the 2a
   deploy answered `{positions: [], count: 0}` with HTTP 200 for a wallet holding $11,358, with
@@ -1018,6 +1018,23 @@ shorthand.
   turned a failed or incomplete Sickle lookup into "no Sickle" and now reports `vfat positions`
   through the truncation channel (a failed request also throws; a complete answer clears it).
   Forced on a local build: the banner names vfat, the dashboard names DefiTuna, 0 page errors.
+  **PRODUCTION B7, measured 2026-10-11 on `56d06b7`, Account 1:** first row on a returning
+  visit, 5 loads, median: 2.17 / 2.26 / 2.03 s (desktop / phone / tablet sizes in Chromium, 340 ms
+  link); first visit 8.5 / 6.1 / 6.3 s (HTML 1.3–1.6 s, scripts 3.3–4.5 s, first route 1.5–2.2 s).
+  Capital G/L ≈ −12,687.68 on all three devices; Closed (115); Total Deposited 27,899.78, no `~`;
+  Net P&L ties out to the cent with Fees Unclaimed on every load; 0 page errors. Harness, 2 runs:
+  PASS, 17 rows, Capital G/L −3,524.86, EVM fees 2,924.13. Heavy wallet `0x9dae5a…89cb`: 22.9 /
+  5.5 / 5.3 / 7.9 s, 1,950 then 1,953 positions, capped notice, 2.9 MB, no 5xx. Solana closed
+  route, cold wallet: 56 / 62 / 51 / 63 s per request (was up to 119 s). Store 1,558 → 1,607
+  keys, all 49 accounted for (heavy wallet 18, cold Solana wallet 5, prices 23, spot 1, pool
+  context 2); Account 1's closed lists unchanged; no HyperEVM price key came back.
+  **⚠️ TWO OPEN ITEMS — the B7 is NOT a pass until they are explained.** (1) Fees Collected read
+  14,186.23 on the three-device loads and 14,490.45 on two loads 40 minutes later; the 304.22 is
+  in Solana fees (about 3,243 against 3,547.24). On the later loads every source answered in
+  full: Cetus 5,820.19, Orca 3,547.24, Aerodrome 2,533.41, Bluefin 1,828.13, Momentum 370.76,
+  ProjectX 222.64, Uniswap V3 168.09. (2) The Uniswap V3 row in the one-year by-protocol panel
+  showed 168.09 on one load and was absent on the next, while lifetime Fees Collected included
+  it both times. Its three claims: 47.28 (01-20), 37.45 (01-27), 83.36 (01-31), January 2026.
   **Solana closed route:** the request is bounded at 60 s (`getClosedPositionsWithinBudget`): at
   the budget it answers with the STORED lists flagged in-progress and the scan is kept alive
   with `after()` to store its progress. Before: 64 / 60 / 76 / 119 / 67 s on a cold wallet
