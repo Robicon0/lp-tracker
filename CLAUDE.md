@@ -963,6 +963,33 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(Wallet persistence, 2026-10-12, local, not pushed)** — **The
+  wallet the user chose sticks; another extension can no longer become the EVM identity.**
+  Reported on production: the page showed an old EVM address (0x2654…f23c) instead of the wallet
+  connected in the extension (0xD99a…4F20). Cause, read from the saved state in the owner's
+  browser: the old address is a second extension's own EVM account. The wallet library reconnects
+  to EVERY extension that already trusts the site, and that extension trusted it because its
+  Solana side had been connected. Whenever the chosen wallet gave no account at load, the other
+  one became the live identity, was shown as connected, and overwrote the saved address. An
+  extension event could also clear the EVM disconnect flag with no Connect click.
+  **Fix (Methodology rule (h)):** the picked connector is stored and is the only identity source
+  (`useEvmConnect`, `EvmIdentitySync`); reconnect-on-mount is off; the EVM flag is cleared only by
+  a successful pick; Disconnect forgets the choice. A browser with a saved address and no stored
+  choice takes the library's last explicit connect (`wagmi.recentConnectorId`); with none on
+  record the saved address shows as LAST USED and nothing is adopted until a pick. Manage Wallets:
+  "Switch wallet" on the connected row, LAST USED instead of CONNECTED for a restored address, a
+  pasted address equal to a connected or watched one is rejected with a message, 20 watched
+  addresses per chain, one row when an address is both.
+  **Verified (simulated extensions, API stubbed):** `two-wallets.cjs` 30/30 on a local build, 3/24
+  on production's current code; existing harnesses 62/62, 6/6, 72/72. Account 1 pasted as watched
+  on the local build: Capital G/L ≈ −12,768.74, Closed (115), Fees 14,489.67 (production the same
+  hour: −12,687.68, 115, 14,489.84 — the Capital G/L difference is Commit B). No data route changed.
+  **Not changed:** the Solana and Sui disconnect flags are still cleared by the adapter watchers.
+  **Open:** real-extension checks on production; a migrated browser whose saved address is the
+  other extension's account shows it as LAST USED until the chosen wallet answers or the user
+  switches; picking the same wallet again asks it for an account, and what it then offers is up to
+  the wallet.
+
 - **(Commit B — Sprint 2b, 2026-10-11, local, not pushed)** — **Orca legs priced at their own
   hour; Sui reads retried; a failed positions source marks the headline.**
   **(1) Orca / Raydium closed legs.** Deposit and withdrawal legs were priced per UTC DAY (the
@@ -3149,6 +3176,19 @@ with similar position shapes. Never wallet-specific framing.
   value that makes the event look complete (`0` as a timestamp dates the event 1970). When a
   figure moves between loads, read the server log for the low load before attributing it to a
   source: subtracting today's per-source figures from yesterday's total named the wrong source.
+
+- **(h) The EVM identity comes only from the chosen connector.** A Solana-only (or Sui-only)
+  connect must never bring an EVM account in; the EVM identity comes only from the chosen
+  connector; the disconnect flag is cleared only by a Connect click. The chosen connector is the
+  one the user picked in a Connect EVM dialog (`defidesh-evm-connector`, written by
+  `app/hooks/useEvmConnect.ts`, the one EVM connect implementation). Only that connector is asked
+  to reconnect on load (the library's reconnect-to-everything is off), and a live address is
+  adopted only from that connector's own connection (`EvmIdentitySync` in `app/providers.tsx`).
+  When it reports no account the saved address shows as LAST USED; no other extension's account
+  is ever shown or saved. Never read the library's "current" account (`useAccount().address`) as
+  the identity: with two extensions installed it can be the wrong wallet. Check with
+  `node scripts/wallet-e2e/two-wallets.cjs` (two simulated extensions), then the real-extension
+  checks, before any wallet-flow change is called done.
 
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind

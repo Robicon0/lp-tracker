@@ -104,7 +104,7 @@ async function connectVia(p, btn, pick) {
 }
 async function modalDisconnect(p, tag) {
   // The "Connect Browser Wallet" row for this chain: tag + address + ● CONNECTED + Disconnect.
-  const row = p.locator("div", { hasText: "● CONNECTED" }).filter({ hasText: tag }).last();
+  const row = p.locator("div", { hasText: /● CONNECTED|○ LAST USED/ }).filter({ hasText: tag }).last();
   await row.getByRole("button", { name: /^disconnect$/i }).click();
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useDisconnect } from "wagmi";
+import { useDisconnect, useConnectors } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
@@ -31,13 +31,22 @@ export function useWalletDisconnect() {
   const { disconnect: wagmiDisconnect } = useDisconnect();
   const { disconnect: solanaAdapterDisconnect } = useWallet();
   const { mutate: suiAdapterDisconnect } = useDisconnectWallet();
-  const { setEvmAddress, setSolanaAddress, setSuiAddress } = useWalletAuth();
+  const connectors = useConnectors();
+  const { setEvmAddress, evmConnectorId, chooseEvmConnector, setSolanaAddress, setSuiAddress } = useWalletAuth();
 
   const disconnectEvm = useCallback(() => {
     setDisconnected("evm");
     setEvmAddress(null); // the setter also removes `defidesh-evm-addr`
-    wagmiDisconnect();
-  }, [setEvmAddress, wagmiDisconnect]);
+    // Disconnect the CHOSEN connector (the library's "current" one can be
+    // another extension that connected on its own), then forget the choice:
+    // after an explicit disconnect there is no EVM identity source at all
+    // until the next Connect pick.
+    const chosen = evmConnectorId ? connectors.find((c) => c.id === evmConnectorId) : undefined;
+    chooseEvmConnector(null);
+    // No chosen connector means we hold no connection of our own; whatever the
+    // library is connected to belongs to another extension and is left alone.
+    if (chosen) wagmiDisconnect({ connector: chosen });
+  }, [setEvmAddress, wagmiDisconnect, connectors, evmConnectorId, chooseEvmConnector]);
 
   const disconnectSolana = useCallback(() => {
     setDisconnected("solana");

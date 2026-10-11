@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
   useCurrentAccount,
@@ -13,6 +12,8 @@ import { useRouter } from "next/navigation";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { setDisconnected } from "../lib/walletDisconnectFlag";
 import { useSolanaConnect } from "../hooks/useSolanaConnect";
+import { useEvmConnect } from "../hooks/useEvmConnect";
+import { useWalletDisconnect } from "../hooks/useWalletDisconnect";
 import { detectChain } from "../lib/detectChain";
 
 const EVM_DISPLAY: { id: string; name: string }[] = [
@@ -47,9 +48,8 @@ export default function HeroWalletConnect() {
 
   // EVM — wagmi for connect/disconnect mechanics; display identity from
   // WalletAuthContext.evmAddress (persisted last-confirmed, parity with Sol/Sui).
-  useAccount();
-  const { connect, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
+  const { connectEvmById, connectors } = useEvmConnect();
+  const { disconnectEvm } = useWalletDisconnect();
   const [showEvmModal, setShowEvmModal] = useState(false);
 
   // Solana
@@ -65,7 +65,7 @@ export default function HeroWalletConnect() {
   const [showSuiModal, setShowSuiModal] = useState(false);
   const awaitingSuiConnect = useRef(false);
 
-  const { evmAddress, setEvmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
   const address = evmAddress;
   const isConnected = !!evmAddress;
 
@@ -77,17 +77,11 @@ export default function HeroWalletConnect() {
   }, [adapterSuiAccount, setSuiAddress]);
 
   const handleEvmConnect = (id: string) => {
-    const conn = connectors.find((c) => c.id === id);
-    if (!conn) return;
-    connect({ connector: conn });
+    void connectEvmById(id);
     setShowEvmModal(false);
   };
 
-  const handleEvmDisconnect = () => {
-    setDisconnected("evm");
-    setEvmAddress(null); // clears the persisted identity too
-    disconnect();
-  };
+  const handleEvmDisconnect = () => disconnectEvm();
 
   const handleSolanaConnect = (walletName: string) => {
     setShowSolanaModal(false);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { WagmiProvider, useDisconnect, useAccount, useReconnect } from "wagmi";
+import { WagmiProvider, useDisconnect, useConnections, useConnectors, useReconnect } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConnectionProvider, WalletProvider, useWallet } from "@solana/wallet-adapter-react";
 import { SuiClientProvider, WalletProvider as SuiWalletProvider, createNetworkConfig, useCurrentAccount } from "@mysten/dapp-kit";
@@ -38,19 +38,24 @@ function EvmDisconnectGate() {
   return null;
 }
 
-// Per-chain "connection confirmed" watchers — these are the ONLY places that
-// clear the corresponding `defidesh_<chain>_disconnected` flag. They fire
-// only when the adapter reports a fully-confirmed connection, never when the
-// user merely clicks Connect. That way a failed connect attempt (e.g. wallet
-// is locked) can't strand the flag in a cleared state and let autoConnect
-// silently reconnect on the next click.
+// Per-chain "connection confirmed" watchers for SOLANA and SUI — they clear the
+// corresponding `defidesh_<chain>_disconnected` flag when the adapter reports a
+// fully-confirmed connection, never when the user merely clicks Connect. That
+// way a failed connect attempt (e.g. wallet is locked) can't strand the flag in
+// a cleared state and let autoConnect silently reconnect on the next click.
 //
-// Pattern: skip the FIRST effect run on mount. Reason: when wagmi has stored
-// state (or the adapter silently reconnected before the disconnect gate
-// fired), `connected` is true on the very first render. Reacting to that
-// would clear a flag the user never asked us to clear. We only act on
-// transitions that happen AFTER mount — i.e. real user-initiated connects.
-function useClearOnConfirmedConnect(chain: "evm" | "solana" | "sui", connected: boolean) {
+// Pattern: skip the FIRST effect run on mount. Reason: when the adapter
+// silently reconnected before the disconnect gate fired, `connected` is true on
+// the very first render. Reacting to that would clear a flag the user never
+// asked us to clear. We only act on transitions that happen AFTER mount.
+//
+// EVM does NOT use this any more (2026-10-12). The wallet library connects on
+// its own when ANY extension that trusts the site emits an account event, so a
+// "connected" transition is not evidence of a user action: with the flag set,
+// a second extension announcing its account cleared the flag and became the
+// identity with no Connect click. The EVM flag is cleared in exactly one place,
+// the Connect pick (app/hooks/useEvmConnect.ts).
+function useClearOnConfirmedConnect(chain: "solana" | "sui", connected: boolean) {
   const initialized = useRef(false);
   useEffect(() => {
     if (!initialized.current) {
@@ -61,32 +66,45 @@ function useClearOnConfirmedConnect(chain: "evm" | "solana" | "sui", connected: 
   }, [chain, connected]);
 }
 
-function EvmConnectionWatcher() {
-  const { isConnected } = useAccount();
-  useClearOnConfirmedConnect("evm", isConnected);
-  return null;
-}
-
-// EVM identity sync (2026-07-19, owner-requested EVM session persistence —
-// parity with Solana/Sui). Keeps WalletAuthContext.evmAddress as the single
-// EVM identity every page reads:
-//   1. On mount, if the user did NOT explicitly disconnect, restore the
-//      last-confirmed address from localStorage — so a locked MetaMask (which
-//      reveals no accounts until unlocked) still yields the read-only view the
-//      user had last session, exactly like Solana/Sui wallets do.
-//   2. Whenever wagmi reports a live address (unlocked + authorized), it wins
-//      and is persisted as the new last-confirmed identity.
-//   3. A wagmi DISCONNECTED report does NOT clear the identity (that's the
-//      locked-wallet-on-load case); only the explicit Disconnect handlers call
-//      setEvmAddress(null), which also removes the persisted key.
-function EvmAddressSync() {
-  const { address } = useAccount();
-  const { setEvmAddress, restoreEvmAddress } = useWalletAuth();
+// EVM identity (2026-10-12: the CHOSEN connector is the only source).
+//
+// WalletAuthContext.evmAddress is the single EVM identity every page reads.
+// It comes from exactly two places:
+//   - the connector the user picked in a Connect EVM dialog (live), or
+//   - the address saved at the last confirmed connect (shown as LAST USED).
+// Never from any other extension, whatever the library is connected to.
+//
+//   1. RESTORE. On mount, unless the user explicitly disconnected, the saved
+//      address is adopted as a read-only identity marked "restored".
+//   2. RECONNECT THE CHOSEN CONNECTOR ONLY. The library's own
+//      reconnect-on-mount asks every extension that trusts the site and makes
+//      the first to answer current; it is switched off (see Providers), and
+//      only the chosen connector is asked here.
+//   3. ADOPT ONLY FROM THE CHOSEN CONNECTOR. The live address is read from the
+//      chosen connector's own connection (matched by this session's connector
+//      instance, so a connection list saved by an earlier session can never
+//      pass for live), not from the library's "current" account.
+//   4. FOLLOW THE CHOSEN WALLET. An account switch inside it reaches us through
+//      its connection; an unlock is heard on ITS provider (not the page default,
+//      which may belong to another extension) and reconnects it alone.
+//   5. An explicit disconnect always wins: nothing here runs while the flag is
+//      set, and only the Connect pick clears it.
+function EvmIdentitySync() {
+  const connections = useConnections();
+  const connectors = useConnectors();
   const { reconnect } = useReconnect();
+  const { setEvmAddress, restoreEvmAddress, demoteEvmIdentity, evmConnectorId } = useWalletAuth();
 
-  // (1) RESTORE — adopt the persisted identity as READ-ONLY ("restored"), not
-  // as a live connection. Marking it restored is what stops the UI claiming
-  // "Connected" for an address that may be stale.
+  const chosen = evmConnectorId ? connectors.find((c) => c.id === evmConnectorId) : undefined;
+  const chosenUid = chosen?.uid;
+  const live = chosen ? connections.find((c) => c.connector.uid === chosen.uid)?.accounts[0] : undefined;
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const chosenRef = useRef(chosen);
+  chosenRef.current = chosen;
+
+  // (1) RESTORE — read-only, marked "restored" so the UI never claims a live
+  // connection for an address that may be stale.
   useEffect(() => {
     if (!isDisconnected("evm")) {
       try {
@@ -97,78 +115,86 @@ function EvmAddressSync() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // (2) SILENT RECONNECT on mount. Without this, a wallet that is installed,
-  // unlocked and already authorized still leaves wagmi DISCONNECTED, so the
-  // restored address is never reconciled and a stale one survives forever —
-  // the confirmed 2026-08-02 bug. Asking wagmi to reconnect promotes an
-  // already-authorized wallet to a live connection with no user action and no
-  // prompt. Skipped when the user explicitly disconnected (flag always wins).
+  // (2) RECONNECT the chosen connector, once, as soon as it exists (an
+  // auto-discovered connector is registered a moment after mount). One
+  // macrotask later, so it runs after the library's own mount work. No cleanup
+  // on purpose: an effect that can return early must not cancel work it has
+  // already marked as started.
+  const askedUid = useRef<string | null>(null);
   useEffect(() => {
-    if (isDisconnected("evm")) return;
-    try { reconnect(); } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!chosenUid || isDisconnected("evm")) return;
+    if (askedUid.current === chosenUid) return;
+    askedUid.current = chosenUid;
+    if (liveRef.current) return; // just connected by an explicit pick
+    setTimeout(() => {
+      const c = chosenRef.current;
+      if (!c || c.uid !== chosenUid || liveRef.current || isDisconnected("evm")) return;
+      try { reconnect({ connectors: [c] }); } catch {}
+    }, 0);
+  }, [chosenUid, reconnect]);
 
-  // (3) LIVE WINS. wagmi reporting an address means an ACTIVE connection, so it
-  // is authoritative: it overwrites the restored identity and is persisted as
-  // the new last-confirmed one. Because PositionsContext keys its queries by
-  // address (`["positions", label, address]`), changing it here makes React
-  // Query fetch the correct address automatically — no manual page refresh.
+  // (3) ADOPT — only the chosen connector's account, and persist it as the new
+  // last-confirmed identity. PositionsContext keys its queries by address, so
+  // the right wallet is fetched with no page refresh. When the chosen wallet
+  // stops reporting an account mid-session the address stays, as LAST USED.
+  const wasLive = useRef(false);
   useEffect(() => {
-    if (address) setEvmAddress(address);
-  }, [address, setEvmAddress]);
+    if (live) {
+      if (isDisconnected("evm")) return;
+      wasLive.current = true;
+      setEvmAddress(live);
+    } else if (wasLive.current) {
+      wasLive.current = false;
+      demoteEvmIdentity();
+    }
+  }, [live, setEvmAddress, demoteEvmIdentity]);
 
-  return null;
-}
-
-// (4) UNLOCK / ACCOUNT-SWITCH WATCHER.
-//
-// wagmi only surfaces `accountsChanged` for a connector it is already
-// connected to. The failing case is the opposite: wagmi is NOT connected
-// (wallet was locked at load), the user then unlocks or switches account, and
-// nothing tells us. So we listen to the injected provider directly and ask
-// wagmi to reconnect when the wallet becomes available. Once wagmi connects,
-// effect (3) above replaces the identity and positions refetch on their own.
-//
-// Covers Rabby and MetaMask (both inject `window.ethereum` and emit EIP-1193
-// events). A wallet that emits nothing still gets the visibilitychange sweep.
-function EvmUnlockWatcher() {
-  const { reconnect } = useReconnect();
-  const { isConnected } = useAccount();
+  // (4) UNLOCK WATCHER on the chosen connector's own provider. The library
+  // only reports account changes for a connector it is connected to; the case
+  // that needs help is the opposite one (wallet locked at load, unlocked
+  // later). A wallet that emits nothing still gets the tab-refocus check.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (isDisconnected("evm")) return;
-
-    const eth = (window as unknown as { ethereum?: { on?: (e: string, f: (...a: unknown[]) => void) => void; removeListener?: (e: string, f: (...a: unknown[]) => void) => void } }).ethereum;
+    if (!chosenUid || isDisconnected("evm")) return;
+    type Provider = {
+      on?: (e: string, f: (...a: unknown[]) => void) => void;
+      removeListener?: (e: string, f: (...a: unknown[]) => void) => void;
+    };
+    let cancelled = false;
+    let detach = () => {};
 
     const tryReconnect = () => {
+      const c = chosenRef.current;
+      if (!c || c.uid !== chosenUid || liveRef.current) return;
       if (isDisconnected("evm")) return; // an explicit disconnect always wins
-      try { reconnect(); } catch {}
+      try { reconnect({ connectors: [c] }); } catch {}
     };
-
-    // Unlocking fires accountsChanged with a non-empty array; switching
-    // accounts fires it with the new one. Both mean "reconcile now".
     const onAccountsChanged = (...args: unknown[]) => {
       const accts = args[0];
       if (Array.isArray(accts) && accts.length > 0) tryReconnect();
     };
     const onConnect = () => tryReconnect();
 
-    eth?.on?.("accountsChanged", onAccountsChanged);
-    eth?.on?.("connect", onConnect);
+    void chosenRef.current?.getProvider().then((p) => {
+      const provider = p as Provider | undefined;
+      if (cancelled || !provider?.on) return;
+      provider.on("accountsChanged", onAccountsChanged);
+      provider.on("connect", onConnect);
+      detach = () => {
+        provider.removeListener?.("accountsChanged", onAccountsChanged);
+        provider.removeListener?.("connect", onConnect);
+      };
+    }).catch(() => {});
 
-    // Fallback for wallets that unlock without emitting anything we hear:
-    // re-check when the tab regains focus. Cheap and idempotent — reconnect()
-    // is a no-op when already connected.
-    const onVisible = () => { if (document.visibilityState === "visible" && !isConnected) tryReconnect(); };
+    const onVisible = () => { if (document.visibilityState === "visible") tryReconnect(); };
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      eth?.removeListener?.("accountsChanged", onAccountsChanged);
-      eth?.removeListener?.("connect", onConnect);
+      cancelled = true;
+      detach();
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [reconnect, isConnected]);
+  }, [chosenUid, reconnect]);
+
   return null;
 }
 
@@ -190,27 +216,21 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   // (no flag, first visit) = autoConnect ON; flag set = autoConnect OFF.
   const [solanaAutoConnect] = useState(() => !isDisconnected("solana"));
   const [suiAutoConnect] = useState(() => !isDisconnected("sui"));
-  // EVM needs the same gate. wagmi's reconnect-on-mount tries EVERY connector,
-  // and one wallet is usually reachable through several (its named injected
-  // connector AND its EIP-6963 announcement). disconnect() only marks the one
-  // connector that was in use, so on the next load wagmi silently reconnected
-  // through another, the confirmed-connect watcher cleared the flag, and an
-  // explicitly disconnected wallet came back. Measured with a real extension
-  // 2026-10-07. An explicit disconnect must never be overridden by a silent
-  // restore (wallet-security Rule 1).
-  const [evmReconnectOnMount] = useState(() => !isDisconnected("evm"));
+  // EVM: the library's reconnect-on-mount is OFF for everyone. It asks every
+  // extension that trusts the site, not the wallet the user chose, and with
+  // two wallets installed the wrong one became the identity (2026-10-12).
+  // EvmIdentitySync reconnects the chosen connector alone, and not at all
+  // after an explicit disconnect (wallet-security Rule 1).
 
   return (
     <ConnectionProvider endpoint={SOLANA_RPC}>
       <WalletProvider wallets={solanaWallets} autoConnect={solanaAutoConnect}>
         <SolanaConnectionWatcher />
         <WalletAuthProvider>
-          <WagmiProvider config={config} reconnectOnMount={evmReconnectOnMount}>
+          <WagmiProvider config={config} reconnectOnMount={false}>
             <QueryClientProvider client={queryClient}>
               <EvmDisconnectGate />
-              <EvmConnectionWatcher />
-              <EvmAddressSync />
-              <EvmUnlockWatcher />
+              <EvmIdentitySync />
               <SuiClientProvider networks={suiNetworkConfig} defaultNetwork="mainnet">
                 <SuiWalletProvider autoConnect={suiAutoConnect}>
                   <SuiConnectionWatcher />

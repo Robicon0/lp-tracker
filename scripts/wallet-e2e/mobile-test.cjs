@@ -26,13 +26,13 @@ if (process.env.SHARE) { await p.goto(process.env.SHARE, { waitUntil: "domconten
     const chipVisible = await p.locator("nav button[aria-haspopup='menu']").first().isVisible().catch(() => false);
     const open = async () => { await p.locator("button.term-btn", { hasText: /wallets/i }).first().tap(); await p.getByText("Connect Browser Wallet").waitFor(); };
     const rows = async () => { const t = await p.locator("text=Connect Browser Wallet").locator("xpath=..").innerText(); return { evm: /EVM[\s\S]*?CONNECTED/.test(t.split("SOL")[0]), text: t.replace(/\s+/g, " ") }; };
-    const connected = async (tag) => (await p.locator("div", { hasText: "● CONNECTED" }).filter({ hasText: tag }).count()) > 0 && !(await p.getByRole("button", { name: new RegExp(`connect ${tag === "SOL" ? "solana" : tag.toLowerCase()} wallet`, "i") }).count());
+    const connected = async (tag) => (await p.locator("div", { hasText: /● CONNECTED|○ LAST USED/ }).filter({ hasText: tag }).count()) > 0 && !(await p.getByRole("button", { name: new RegExp(`connect ${tag === "SOL" ? "solana" : tag.toLowerCase()} wallet`, "i") }).count());
     await open();
     await p.screenshot({ path: `${__dirname}/shots/${LABEL}-mobile-${devName.replace(/\W+/g, "")}-modal.png` });
     for (const tag of ["EVM", "SOL", "SUI"]) rec(`${T} ${tag} shown as connected in Manage Wallets`, await connected(tag));
     for (const [tag, key, flag] of [["EVM", "defidesh-evm-addr", "defidesh_evm_disconnected"], ["SOL", "defidesh-solana-addr", "defidesh_solana_disconnected"], ["SUI", "defidesh-sui-addr", "defidesh_sui_disconnected"]]) {
       if (!(await connected(tag))) continue;
-      const btn = p.locator("div", { hasText: "● CONNECTED" }).filter({ hasText: tag }).last().getByRole("button", { name: /^disconnect$/i });
+      const btn = p.locator("div", { hasText: /● CONNECTED|○ LAST USED/ }).filter({ hasText: tag }).last().getByRole("button", { name: /^disconnect$/i });
       const box = await btn.boundingBox();
       rec(`${T} ${tag} Disconnect button is on screen and tappable`, !!box && box.x >= 0 && box.x + box.width <= vw.width + 1 && box.height >= 20, box ? `${Math.round(box.width)}x${Math.round(box.height)} at x=${Math.round(box.x)}` : "no box");
       const rowBox = await btn.locator("xpath=ancestor::div[2]").boundingBox();

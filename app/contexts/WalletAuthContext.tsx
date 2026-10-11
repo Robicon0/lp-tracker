@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { isDisconnected } from "../lib/walletDisconnectFlag";
 
 interface WalletAuthContextValue {
   // EVM: the effective EVM identity every page reads (2026-07-19, owner-requested
@@ -39,6 +40,24 @@ interface WalletAuthContextValue {
   // setEvmAddress so a call site cannot accidentally promote a cached address
   // to authoritative — the bug above in one line.
   restoreEvmAddress: (addr: string) => void;
+  // The chosen wallet stopped reporting an account mid-session (locked, or the
+  // site was disconnected inside the extension): keep the address on screen,
+  // but as LAST USED, not as a live connection.
+  demoteEvmIdentity: () => void;
+
+  // The connector the user PICKED in a Connect EVM dialog. It is the only EVM
+  // identity source: on load only this connector is asked to reconnect, and a
+  // live address is adopted only from this connector's own connection.
+  //
+  // Why it exists (found 2026-10-12): the wallet library reconnects to EVERY
+  // extension that already trusts the site, and the first one to answer became
+  // the identity. A second extension that trusted the site only because its
+  // Solana side had been connected took over whenever the chosen wallet was
+  // locked, was shown as "connected", and overwrote the saved address.
+  //
+  // null = no connector chosen (never connected, or explicitly disconnected).
+  evmConnectorId: string | null;
+  chooseEvmConnector: (id: string | null) => void;
 
   // Solana: only set after user-initiated connect — never read publicKey/connected
   // from the adapter directly (Wallet Standard silently reconnects locked wallets).
@@ -53,12 +72,37 @@ interface WalletAuthContextValue {
 }
 
 const EVM_ADDR_KEY = "defidesh-evm-addr";
+export const EVM_CONNECTOR_KEY = "defidesh-evm-connector";
+
+// An explicit disconnect leaves no choice behind (the flag always wins).
+// Otherwise: the stored choice, or — for a browser that connected before the choice was
+// stored — the connector of the library's last explicit connect
+// (`wagmi.recentConnectorId`, written by a Connect click). Nothing on record
+// means no connector: the saved address then shows as LAST USED and no live
+// account is adopted until the user picks a wallet.
+function readStoredEvmConnector(): string | null {
+  if (typeof window === "undefined" || isDisconnected("evm")) return null;
+  try {
+    const own = localStorage.getItem(EVM_CONNECTOR_KEY);
+    if (own) return own;
+    if (!localStorage.getItem(EVM_ADDR_KEY)) return null;
+    const recent = localStorage.getItem("wagmi.recentConnectorId");
+    if (!recent) return null;
+    const id: unknown = JSON.parse(recent);
+    return typeof id === "string" && id ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 const WalletAuthContext = createContext<WalletAuthContextValue>({
   evmAddress: null,
   setEvmAddress: () => {},
   evmIdentitySource: null,
   restoreEvmAddress: () => {},
+  demoteEvmIdentity: () => {},
+  evmConnectorId: null,
+  chooseEvmConnector: () => {},
   solanaAddress: null,
   setSolanaAddress: () => {},
   suiAddress: null,
@@ -68,13 +112,32 @@ const WalletAuthContext = createContext<WalletAuthContextValue>({
 export function WalletAuthProvider({ children }: { children: React.ReactNode }) {
   const [evmAddress, setEvmAddressState] = useState<string | null>(null);
   const [evmIdentitySource, setEvmIdentitySource] = useState<"live" | "restored" | null>(null);
+  // Read once, on the client. It drives effects only (which connector is asked
+  // to reconnect), never markup, so the server's null cannot mismatch.
+  const [evmConnectorId, setEvmConnectorId] = useState<string | null>(readStoredEvmConnector);
   const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
   const [suiAddress, setSuiAddress] = useState<string | null>(null);
 
+  // A choice taken over from the library's record is stored as ours, once.
+  useEffect(() => {
+    try {
+      if (evmConnectorId && !localStorage.getItem(EVM_CONNECTOR_KEY)) localStorage.setItem(EVM_CONNECTOR_KEY, evmConnectorId);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const chooseEvmConnector = useCallback((id: string | null) => {
+    setEvmConnectorId(id);
+    try {
+      if (id) localStorage.setItem(EVM_CONNECTOR_KEY, id);
+      else localStorage.removeItem(EVM_CONNECTOR_KEY);
+    } catch {}
+  }, []);
+
   // Persistence rides the setter so an explicit disconnect (null) always removes
   // the saved identity and a confirmed connect always records it. An address set
-  // here is LIVE — it came from an active wagmi connection or an explicit
-  // user connect — so it overwrites whatever was restored.
+  // here is LIVE — it came from the CHOSEN connector's active connection or an
+  // explicit user connect — so it overwrites whatever was restored.
   const setEvmAddress = useCallback((addr: string | null) => {
     setEvmAddressState(addr);
     setEvmIdentitySource(addr ? "live" : null);
@@ -93,9 +156,13 @@ export function WalletAuthProvider({ children }: { children: React.ReactNode }) 
     setEvmIdentitySource((prev) => (prev === "live" ? prev : "restored"));
   }, []);
 
+  const demoteEvmIdentity = useCallback(() => {
+    setEvmIdentitySource((prev) => (prev === "live" ? "restored" : prev));
+  }, []);
+
   return (
     <WalletAuthContext.Provider
-      value={{ evmAddress, setEvmAddress, evmIdentitySource, restoreEvmAddress, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress }}
+      value={{ evmAddress, setEvmAddress, evmIdentitySource, restoreEvmAddress, demoteEvmIdentity, evmConnectorId, chooseEvmConnector, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress }}
     >
       {children}
     </WalletAuthContext.Provider>

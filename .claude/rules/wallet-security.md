@@ -69,6 +69,31 @@ another's data is a correctness and trust failure.
 
 Any future chain that gains session persistence inherits this requirement.
 
+### The EVM identity comes only from the chosen connector
+_(added 2026-10-12 after a confirmed production bug.)_
+
+A Solana-only (or Sui-only) connect must never bring an EVM account in; the EVM
+identity comes only from the chosen connector; the disconnect flag is cleared
+only by a Connect click.
+
+- **Chosen connector** = the wallet the user picked in a Connect EVM dialog
+  (`defidesh-evm-connector`). It changes only when the user picks another
+  (Switch wallet), and is forgotten on Disconnect.
+- **Reconnect only that connector.** The wallet library's reconnect-on-mount asks
+  every extension that trusts the site and makes the first to answer current. It
+  stays off.
+- **Adopt only from that connector's own connection**, never from the library's
+  "current" account. When it reports no account, the saved address is shown as
+  LAST USED; another extension's account is never shown or saved.
+- **A "connected" event is not a user action.** The library connects on its own
+  when any trusting extension emits an account event, so the EVM disconnect flag
+  is cleared in exactly one place: a successful Connect pick.
+
+Why: with two extensions installed, a multi-chain wallet connected for Solana
+became the EVM identity whenever the chosen EVM wallet was locked at load. Its
+account was shown as "connected" and every figure on the page was computed for
+it. Harness: `scripts/wallet-e2e/two-wallets.cjs`.
+
 ### Why
 Wallets that auto-connect on refresh expose user addresses without consent.
 Even though DefiDesh is read-only, surprise connections violate user
@@ -81,7 +106,7 @@ Per-chain localStorage flags:
 - `defidesh_sui_disconnected`
 
 Connection watchers in `providers.tsx`:
-- `EvmConnectionWatcher`
+- `EvmIdentitySync` (EVM: restore, reconnect the chosen connector, adopt)
 - `SolanaConnectionWatcher`
 - `SuiConnectionWatcher`
 

@@ -39,7 +39,8 @@ export default function WatchedPage() {
   function handleAdd() {
     const err = validateAddress(addInput.trim(), addChain);
     if (err) { setAddError(err); return; }
-    addWallet(addInput.trim(), addChain, addLabel.trim() || undefined);
+    const added = addWallet(addInput.trim(), addChain, addLabel.trim() || undefined);
+    if (!added.ok) { setAddError(added.message); return; }
     setAddInput(""); setAddLabel(""); setAddError("");
   }
 

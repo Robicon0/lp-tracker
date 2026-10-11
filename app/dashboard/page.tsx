@@ -10,11 +10,12 @@ import { getTokenLogo } from "../lib/tokenLogos";
 import { useWalletTokens } from "../hooks/useWalletTokens";
 import { useLendingPositions } from "../hooks/useLendingPositions";
 import { usePositions } from "../contexts/PositionsContext";
-import { useAccount, useConnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount, useWallets, useConnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWalletDisconnect } from "../hooks/useWalletDisconnect";
+import { useEvmConnect } from "../hooks/useEvmConnect";
+import { sameWalletAddress } from "../contexts/WatchedWalletsContext";
 import { useSolanaConnect } from "../hooks/useSolanaConnect";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
@@ -269,7 +270,7 @@ export default function Dashboard() {
   // activity fetch + computePositionPnL() resolves; rows for positions that
   // haven't landed yet (or were excluded by computePositionPnL) fall back to
   // the existing fees-only / "—" placeholders.
-  const { evmAddress: address, setEvmAddress, solanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress: address, evmIdentitySource, solanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
   const { watchedWallets, addWallet, removeWallet, updateLabel, scanAddress, setScanAddress } = useWatchedWallets();
   // Sprint 4: pass the Sui/Solana wallet sets so this hook instance fetches
   // CLOSED (reconstructed) positions too — required for the Closed-tab rows.
@@ -289,7 +290,9 @@ export default function Dashboard() {
     return [...new Set(addrs)]; // Solana base58 is case-sensitive — never lowercase
   }, [scanAddress, solanaAddress, watchedWallets]);
   const lpPnl = useLpPnl(allPositions, dashSuiWallets, dashSolanaWallets);
-  const { connect: evmConnect, connectors } = useConnect();
+  // The pick in the EVM picker goes through the ONE shared connect, which
+  // records the chosen connector (the only EVM identity source).
+  const { connectEvm, connectors } = useEvmConnect();
   // Explicit disconnect goes through the ONE shared implementation — the
   // modal's old inline handlers only called the adapter and left the wallet
   // on screen (see useWalletDisconnect).
@@ -578,7 +581,8 @@ export default function Dashboard() {
     if (!addr) { setAddWalletError("Address is required"); return; }
     const chain = detectChain(addr);
     if (!chain) { setAddWalletError("Invalid address format. Please enter a valid EVM, Solana, or SUI address."); return; }
-    addWallet(addr, chain, addWalletLabel.trim() || undefined);
+    const added = addWallet(addr, chain, addWalletLabel.trim() || undefined);
+    if (!added.ok) { setAddWalletError(added.message); return; }
     setAddWalletAddress("");
     setAddWalletLabel("");
     setAddWalletError("");
@@ -2489,7 +2493,11 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {address ? (
-                    <ConnectedRow tagColor={C.cyan} tagLabel="EVM" addr={address} onDisconnect={disconnectEvm} />
+                    <ConnectedRow
+                      tagColor={C.cyan} tagLabel="EVM" addr={address} onDisconnect={disconnectEvm}
+                      restored={evmIdentitySource === "restored"}
+                      onSwitch={() => setShowEvmConnectors(true)}
+                    />
                   ) : (
                     <ConnectButton onClick={() => setShowEvmConnectors(true)} label="Connect EVM Wallet" tagColor={C.cyan} tagLabel="EVM" />
                   )}
@@ -2517,7 +2525,13 @@ export default function Dashboard() {
                 if (solanaAddress) solWalletList.push({ addr: solanaAddress, type: "browser" });
                 if (suiAddress) suiWalletList.push({ addr: suiAddress, type: "browser" });
 
+                // One row per wallet: an address that is both connected and
+                // watched (saved before the paste was rejected, or connected
+                // after it was pasted) is listed once, as the browser wallet.
+                const connectedOn = { evm: address, solana: solanaAddress, sui: suiAddress } as Record<string, string | null | undefined>;
                 for (const w of watchedWallets) {
+                  const live = connectedOn[w.chain];
+                  if (live && sameWalletAddress(live, w.address, w.chain)) continue;
                   const entry: WalletEntry = { addr: w.address, label: w.label, type: "watched" };
                   if (w.chain === "evm") evmWalletList.push(entry);
                   else if (w.chain === "solana") solWalletList.push(entry);
@@ -2708,7 +2722,7 @@ export default function Dashboard() {
                 {connectors.map((connector, i) => (
                   <button
                     key={connector.id}
-                    onClick={() => { evmConnect({ connector: connectors[i] }); setShowEvmConnectors(false); }}
+                    onClick={() => { void connectEvm(connectors[i]); setShowEvmConnectors(false); }}
                     style={{
                       display: "flex", alignItems: "center", gap: 10,
                       background: C.bg1, border: `1px solid ${C.border}`,
@@ -2851,8 +2865,14 @@ function ChartMeta({ label, value, colour }: { label: string; value: string; col
 }
 
 function ConnectedRow({
-  tagColor, tagLabel, addr, onDisconnect,
-}: { tagColor: string; tagLabel: string; addr: string; onDisconnect: () => void }) {
+  tagColor, tagLabel, addr, onDisconnect, restored, onSwitch,
+}: {
+  tagColor: string; tagLabel: string; addr: string; onDisconnect: () => void;
+  // A saved address the wallet is not reporting right now: never "connected".
+  restored?: boolean;
+  // Change wallets without disconnecting first (opens the same picker).
+  onSwitch?: () => void;
+}) {
   return (
     <div
       style={{
@@ -2886,8 +2906,38 @@ function ConnectedRow({
           {addr.slice(0, 8)}…{addr.slice(-6)}
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-        <span style={{ color: C.green, fontSize: 14, fontWeight: 600, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>● CONNECTED</span>
+      {/* Status + Switch wallet + Disconnect do not fit beside the address at
+          phone width: the group wraps inside the row instead of overflowing it. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8, marginLeft: "auto", maxWidth: "100%" }}>
+        {restored ? (
+          <span
+            title="Your wallet is locked or not connected, so this may not be your current account. Unlock it and this updates automatically."
+            style={{ color: C.amber, fontSize: 14, fontWeight: 600, letterSpacing: "0.08em", whiteSpace: "nowrap" }}
+          >
+            ○ LAST USED
+          </span>
+        ) : (
+          <span style={{ color: C.green, fontSize: 14, fontWeight: 600, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>● CONNECTED</span>
+        )}
+        {onSwitch && (
+          <button
+            onClick={onSwitch}
+            style={{
+              background: "transparent",
+              border: `1px solid ${C.border}`,
+              color: C.textBright,
+              padding: "7px 10px",
+              fontSize: 12,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              fontFamily: FONT,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Switch wallet
+          </button>
+        )}
         <button
           onClick={onDisconnect}
           style={{

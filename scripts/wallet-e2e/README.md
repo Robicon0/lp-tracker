@@ -10,6 +10,16 @@ Run from this directory. Every script takes `<label> [base-url]` (default
 | `mobile-test.cjs` | Manage Wallets flow on iPhone 14 + iPad (WebKit) and Pixel 7 (Chromium). Needs `npx playwright install webkit`. |
 | `real-extension.cjs` | The same flow with a REAL wallet extension. Takes `[base-url]` only. |
 
+## Two EVM extensions (the chosen wallet must stick)
+
+`node two-wallets.cjs [base]` simulates two EVM extensions on one site: wallet A
+(picked by the user) and wallet B, which trusts the site without an EVM Connect
+click, as a multi-chain wallet does after a Solana-only connect. It checks that
+the EVM identity comes only from the picked connector, that the disconnect flag
+is cleared only by a pick, the migration of an older browser, Switch wallet, and
+the pasted-address rules (duplicate, 20 per chain, one row). All `/api` calls are
+answered locally. Exit code 1 on any failure.
+
 ## Real extension
 
 Simulated wallets are too slow and too simple to show real races — the real

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCurrentAccount, useWallets, useConnectWallet, useDisconnectWallet } from "@mysten/dapp-kit";
 import { useWalletAuth } from "./contexts/WalletAuthContext";
 import { setDisconnected } from "./lib/walletDisconnectFlag";
 import { useSolanaConnect } from "./hooks/useSolanaConnect";
+import { useEvmConnect } from "./hooks/useEvmConnect";
+import { useWalletDisconnect } from "./hooks/useWalletDisconnect";
 import Link from "next/link";
 import CalculatorMenu from "./components/CalculatorMenu";
 import { CALCULATOR_LINKS, CALCULATOR_MENU_LABEL } from "./config/calculatorLinks";
@@ -31,9 +32,10 @@ export default function Navbar() {
   // wagmi = connect/disconnect MECHANICS only. Display identity comes from
   // WalletAuthContext.evmAddress (live wagmi when unlocked, else the persisted
   // last-confirmed address — EVM session persistence, parity with Solana/Sui).
-  useAccount(); // keeps wagmi state subscribed; identity read via context below
-  const { connect, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
+  // Connect and disconnect go through the shared hooks, so the chosen
+  // connector is recorded (and forgotten) the same way on every surface.
+  const { connectEvm, connectors } = useEvmConnect();
+  const { disconnectEvm } = useWalletDisconnect();
 
   // Solana adapter — used ONLY for mechanics: wallet list, select, connect, disconnect.
   // Never read connected or publicKey from the adapter for display: a locked Phantom
@@ -49,7 +51,7 @@ export default function Navbar() {
   const { mutate: disconnectSui } = useDisconnectWallet();
 
   // Our source of truth — only set after explicit user-initiated connect.
-  const { evmAddress, setEvmAddress, evmIdentitySource, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
+  const { evmAddress, evmIdentitySource, solanaAddress, setSolanaAddress, suiAddress, setSuiAddress } = useWalletAuth();
   const address = evmAddress;
   const isConnected = !!evmAddress;
   // A RESTORED address is a cached best guess, not a live connection, and it
@@ -116,17 +118,15 @@ export default function Navbar() {
   // would then silently reconnect from the adapter's cached session on the
   // next click without prompting for password. The flag is cleared by the
   // provider-side connection watchers (see app/providers.tsx) which fire ONLY
-  // on a confirmed `connected` transition AFTER mount.
+  // on a confirmed `connected` transition AFTER mount. (Solana and Sui. For
+  // EVM a "connected" transition is not evidence of a user action, so its flag
+  // is cleared only when a pick in the Connect dialog SUCCEEDS — useEvmConnect.)
   const handleEvmConnect = (connectorIndex: number) => {
-    connect({ connector: connectors[connectorIndex] });
+    void connectEvm(connectors[connectorIndex]);
     setShowEvmModal(false);
   };
 
-  const handleEvmDisconnect = () => {
-    setDisconnected("evm");
-    setEvmAddress(null); // clears the persisted identity too (setter removes the key)
-    disconnect();
-  };
+  const handleEvmDisconnect = () => disconnectEvm();
 
   const handleSolanaConnect = (walletName: string) => {
     setShowSolanaModal(false);
