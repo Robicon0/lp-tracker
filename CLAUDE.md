@@ -963,6 +963,41 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(Fee totals, 2026-10-11)** — **Fee totals say when they are not whole,
+  and the by-protocol panel and the lifetime total are read from one merged list.**
+  Both open B7 readings are traced, from server logs and instrumented loads:
+  **(1) Fees Collected 14,186.23 against 14,490.45 was MOMENTUM, not Solana** (the earlier
+  "Solana 3,243" was arithmetic on the wrong assumption that every other source was whole). At
+  22:30 and 22:33 UTC `/api/momentum/activity` logged `resolvedClaims 9, failedClaims 31` with
+  `pending_pool_unresolved: 10` (normal: 18 / 22, total 370.76): the pool could not be read for
+  a moment (the Sui position routes logged failed reads in the same minutes), ten claims were
+  returned unpriced, the page left them out with no mark on the figure, and the route cache kept
+  that answer for 5 minutes, so three loads over seven minutes read the same low total. The
+  Solana closed list answered in full (43 positions, 3,502.37) on every captured load.
+  **(2) The Uniswap V3 row is a failed block-timestamp lookup.** A throttled
+  `eth_getBlockByNumber` left `timestamp: 0`; the claim is then dated 1970: inside the lifetime
+  total, outside every time window. One load returned all three Uniswap claims undated (no row),
+  another two of six copies dated (120.80); nine Aerodrome claims were undated on the same loads.
+  **Fix:** the analytics fee memo builds ONE record per claim from both scans (price from the
+  first copy that has one, date from the first copy that has one) and counts what it cannot
+  show: `pendingClaimCount` (unpriced, in no total) and `undatedClaimCount` / `undatedUsd`
+  (in lifetime, in no window). `useWalletLevelFees` returns `failedSources`, passes unpriced
+  Solana claims through, and no longer keeps a failed request's empty answer for the session.
+  Fees Collected, Lifetime, Net P&L and the time-window figures show `≈` plus a note while a fee
+  source is loading, failed, or holds unpriced claims; the panel says how many claims it could
+  not date. Server: `app/lib/blockTimestamps.ts` re-asks for a block timestamp that came back
+  empty (five EVM activity routes), and the route cache keeps an answer with an unpriced claim
+  or an undated event for 60 s instead of 5 minutes. No snapshot is saved while a fee source has
+  failed. Forced on a local build: ten Momentum claims unpriced → `≈ … 10 claims not priced
+  yet`; Uniswap undated in one copy → row whole at 168.09, no mark; undated in both → `≈ 3 claims
+  ($168.09) could not be dated`; Solana closed list failing → `≈ … couldn't load Solana closed
+  history`; healthy → 14,490.20, no mark; 0 page errors. Methodology rule (g).
+  **Historical-price scan (read-only, 2026-10-11):** 211 `evm_hist_price_v1`, 912
+  `price:historical`, 27 `cg_spot_v1` keys; none zero or non-numeric; no pool holds one price
+  for distant blocks. Against DeFiLlama at the block's own time: median 0.08% apart, three keys
+  over 5% (Base pool `0xc5e51044…`, 2024-11-15, stored 0.909 against 1.057). CoinGecko keys
+  against DeFiLlama by id: none over 15%. Nothing deleted.
+
 - **`56d06b7`** (Sprint 2a follow-up, 2026-10-11) — **A failed ownership read is never "owns
   nothing"; first-row timing measured properly; Solana closed route held to one 60 s budget.**
   **Ownership reads (Methodology rule (e)).** On production the first Cetus call after the 2a
@@ -3017,6 +3052,18 @@ with similar position shapes. Never wallet-specific framing.
   filled from a fallback endpoint** — if the designated source is not configured, skip the tier,
   do not substitute another endpoint and store its answer; (2) after any preview or local test
   run, compare the store's key counts per prefix before and after, and explain every new key.
+
+- **(g) A total that depends on a pending or partial source shows `≈` and says why; a total
+  and its breakdown are read from ONE list.** A source is partial when it has not answered, when
+  its request failed, when a scan is still reading, or when it returned claims it could not
+  price. None of these may lower a figure silently: the figure carries `≈` and a note naming the
+  reason, exactly as Capital G/L does. A breakdown (by protocol, by range, by position) is
+  computed from the same merged list as the total it breaks down, and anything the breakdown
+  cannot place (an event with no date) is counted on screen, never dropped. An event field that
+  could not be read (`timestamp`, a price) is left empty and counted; it is never filled with a
+  value that makes the event look complete (`0` as a timestamp dates the event 1970). When a
+  figure moves between loads, read the server log for the low load before attributing it to a
+  source: subtracting today's per-source figures from yesterday's total named the wrong source.
 
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind

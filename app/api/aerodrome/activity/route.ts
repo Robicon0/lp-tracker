@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { fillMissingTimestamps } from '../../../lib/blockTimestamps';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
@@ -532,7 +533,7 @@ async function GET_impl(request: Request) {
 
     // Fetch timestamps for all unique block numbers
     const blockNumbers = logs.map(l => parseInt(l.blockNumber, 16));
-    const timestamps = await fetchTimestamps(blockNumbers);
+    const timestamps = await fillMissingTimestamps(await fetchTimestamps(blockNumbers), blockNumbers, fetchTimestamps);
 
     const scale0 = BigInt(10) ** BigInt(t0d);
     const scale1 = BigInt(10) ** BigInt(t1d);

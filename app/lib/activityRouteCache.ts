@@ -104,6 +104,26 @@ function isIncompletePayload(body: unknown): boolean {
   return t.some((n) => isLookupFailureReason((n as { reason?: unknown })?.reason));
 }
 
+// A DEGRADED answer: a fee or reward claim left unpriced, or an event with no
+// block timestamp. Both are usually transient (a pool or price read that failed,
+// a throttled block lookup), and the next computation usually has them. Kept for
+// the short TTL only: measured on production 2026-10-11, a Momentum answer with
+// 10 claims unpriced (the pool could not be read for a moment) was served to
+// three page loads over seven minutes, each showing Fees Collected 304.22 low.
+function isDegradedPayload(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as { events?: unknown; positions?: unknown };
+  const lists: unknown[] = [];
+  if (Array.isArray(b.events)) lists.push(b.events);
+  if (Array.isArray(b.positions)) for (const p of b.positions) { const ev = (p as { events?: unknown })?.events; if (Array.isArray(ev)) lists.push(ev); }
+  for (const list of lists) for (const e of list as Array<{ type?: unknown; usdAtTime?: unknown; timestamp?: unknown }>) {
+    if (!e || typeof e !== 'object') continue;
+    if (!(typeof e.timestamp === 'number' && e.timestamp > 0)) return true;
+    if ((e.type === 'fee_claim' || e.type === 'reward_claim') && e.usdAtTime == null) return true;
+  }
+  return false;
+}
+
 // An error result must NEVER be cached (cache-versioning Rule 3): a transient RPC
 // failure or CoinGecko rate-limit should not poison the next request.
 function isErrorPayload(status: number, body: unknown): boolean {
@@ -179,7 +199,7 @@ export function withActivityRouteCache(
 
     const incomplete = isIncompletePayload(result.body);
     if (!isErrorPayload(result.status, result.body) && !incomplete) {
-      const ttl = isEmptyPayload(result.body) ? EMPTY_TTL_MS : SUCCESS_TTL_MS;
+      const ttl = isEmptyPayload(result.body) || isDegradedPayload(result.body) ? EMPTY_TTL_MS : SUCCESS_TTL_MS;
       cache.set(key, { res: result, expiresAt: Date.now() + ttl });
       prune();
     }

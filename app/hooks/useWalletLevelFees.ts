@@ -190,8 +190,13 @@ export function useWalletLevelFees(
   // Orca/Solana and deduped by (protocol, txHash, amount0, amount1) against the
   // per-position OPEN Orca fees — so closed and open fees never double-count.
   solanaWalletAddresses?: string[],
-): { events: TaggedFeeEvent[]; isLoading: boolean } {
+): { events: TaggedFeeEvent[]; isLoading: boolean; failedSources: string[] } {
   const [events, setEvents] = useState<TaggedFeeEvent[]>([]);
+  // Fee sources whose request FAILED (non-200 or network). Their fees are
+  // missing, not zero: the page marks every fee total `≈` and names them.
+  // Keyed by URL so a later success of the same request clears it.
+  const failedUrlRef = useRef<Map<string, string>>(new Map());
+  const [failedSources, setFailedSources] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fetchedKeyRef = useRef<string>("");
   // Sprint PERFORMANCE: per-URL result/in-flight dedup. Positions now STREAM in
@@ -454,6 +459,8 @@ export function useWalletLevelFees(
           // wallet's ever-owned positions. Disclosed under a source label
           // distinct from the positions fetchers', so the banner says the
           // shortfall is in the HISTORY scan, not in the position list.
+          if (j.failed) { failedUrlRef.current.set(url, protocol); urlCacheRef.current.delete(url); }
+          else failedUrlRef.current.delete(url);
           if (account && !j.failed) {
             const truncated = (j as { truncated?: RouteTruncation[] }).truncated;
             applyTruncationNotices(`${protocol} history scan`, account, truncated);
@@ -465,6 +472,7 @@ export function useWalletLevelFees(
         })
         .catch((err) => {
           console.error(`[wallet-fees ${protocol.toLowerCase()}] fetch failed:`, err);
+          failedUrlRef.current.set(url, protocol);
           urlCacheRef.current.delete(url);
           return [] as TaggedFeeEvent[];
         });
@@ -595,8 +603,11 @@ export function useWalletLevelFees(
       const cached = urlCacheRef.current.get(solUrl);
       if (cached) { fetches.push(cached); continue; }
       const p = whenFirstRowsPainted().then(() => fetch(solUrl))
-        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[] }>) : { positions: [] }))
-        .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[] }) => {
+        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[]; failed?: boolean }>) : { positions: [], failed: true }))
+        .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[]; failed?: boolean }) => {
+          // A non-200 is a failed source, not "no closed positions": named, and asked again next run.
+          if (j.failed) { failedUrlRef.current.set(solUrl, "Solana closed history"); urlCacheRef.current.delete(solUrl); }
+          else failedUrlRef.current.delete(solUrl);
           if (isScanInProgress(j.truncated)) { urlCacheRef.current.delete(solUrl); continueRef.current = true; }
           const out: TaggedFeeEvent[] = [];
           for (const pos of j.positions ?? []) {
@@ -605,7 +616,8 @@ export function useWalletLevelFees(
             const protocol = pos.protocol === "raydium" ? "Raydium" : "Orca";
             for (const e of pos.events ?? []) {
               if (e.type !== "fee_claim") continue;
-              if (e.usdAtTime == null) continue; // pending (Rule 1a) — surfaced elsewhere, not counted
+              // A claim with no price yet (Rule 1a) is passed through unvalued: the
+              // page never adds it to a total, but it must be able to COUNT it.
               out.push({ event: e, protocol, chain: "Solana" });
             }
           }
@@ -613,6 +625,7 @@ export function useWalletLevelFees(
         })
         .catch((err) => {
           console.error("[wallet-fees orca-closed] fetch failed:", err);
+          failedUrlRef.current.set(solUrl, "Solana closed history");
           urlCacheRef.current.delete(solUrl);
           return [] as TaggedFeeEvent[];
         });
@@ -645,6 +658,7 @@ export function useWalletLevelFees(
     Promise.all(fetches).then(() => {
       if (superseded()) return;
       setEvents([...acc]);
+      setFailedSources([...new Set(failedUrlRef.current.values())].sort());
       // A history scan said it is still reading: run again in a moment. Settled
       // URLs are served from the per-URL cache, so only the unfinished scans are
       // asked again. Bounded, so a history that cannot finish stops asking.
@@ -662,5 +676,5 @@ export function useWalletLevelFees(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions, suiWalletAddresses, suiPrice, solanaWalletAddresses, continueTick]);
 
-  return { events, isLoading };
+  return { events, isLoading, failedSources };
 }

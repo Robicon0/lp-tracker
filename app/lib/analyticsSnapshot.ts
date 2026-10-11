@@ -61,6 +61,11 @@ export interface SnapshotFeeIncome {
   dailyAvg: number;
   annualizedAtRate: number;
   peakDay: number;
+  /** Claims found but not priced yet: in no total. Optional (absent on older snapshots). */
+  pendingClaimCount?: number;
+  /** Priced claims with no block date: in the lifetime total, in no time window. */
+  undatedClaimCount?: number;
+  undatedUsd?: number;
 }
 
 export interface SnapshotLpPnl {

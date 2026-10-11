@@ -722,7 +722,7 @@ export default function Analytics() {
       .catch(() => { /* graceful — leave suiPrice at 0 */ });
     return () => { cancelled = true; };
   }, []);
-  const { events: walletLevelFees, isLoading: walletFeesLoading } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
+  const { events: walletLevelFees, isLoading: walletFeesLoading, failedSources: feeFailedSources } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
   // Sprint INSTANT-LOAD: the LIVE pipeline result. What the page RENDERS is the
   // `lpPnl` selector below — snapshot values while the pipeline settles, live
   // values once it settles cleanly (stale-while-revalidate).
@@ -800,32 +800,40 @@ export default function Analytics() {
       return `${protocol}::ts${e.timestamp}::${e.amount0}::${e.amount1}`;
     };
 
+    // ONE merged record per claim. The same claim can arrive twice: from the
+    // position's own scan and from the wallet-wide scan. Either copy can be
+    // degraded on its own: left unpriced (a pool or price read failed) or
+    // undated (the block-timestamp lookup was throttled, `timestamp` 0). The
+    // record takes the price from the first copy that has one (the position's
+    // own scan is offered first, so its value wins when both are priced) and
+    // the date from the first copy that has one.
+    //
+    // The lifetime total and the by-protocol panel are both read from this one
+    // list (standing rule: one list, never two). What cannot be shown is
+    // COUNTED, never dropped silently:
+    //   • no priced copy  → in no total; `pendingClaimCount` (Rule 1a: a claim
+    //     is never valued at spot and never coerced to $0);
+    //   • priced, no date → in the lifetime total, in no time window;
+    //     `undatedClaimCount` / `undatedUsd`. Measured 2026-10-11: this is why
+    //     the panel showed Uniswap V3 at 84.73, 120.80 or not at all while
+    //     lifetime Fees Collected always held its 168.09.
+    interface MergedClaim { ts: number; usd: number | null; protocol: string; chain: string; dedupeKey: string; }
+    const merged = new Map<string, MergedClaim>();
+    let __dedupDropped = 0;
     const push = (
       protocol: string,
       chain: string,
       e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string; logIndex?: number },
     ) => {
       if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
-      // A fee claim with no historical valuation arrives here with
-      // usdAtTime === null (pricing-invariants Rule 1a — the activity route
-      // leaves it UNRESOLVED rather than coercing to $0 or valuing at current
-      // spot). Skip it from Fee Income: it must not understate as $0 and must
-      // not inflate at spot. The user is told about it separately via the
-      // "N claims pending price resolution" banner (lpPnl.pendingClaimCount),
-      // so it's surfaced, not silently dropped. A genuinely $0 claim never
-      // reaches here — zero-amount artifacts are filtered at the source by
-      // cleanRawEvents in each activity route — so any usd === 0 below has
-      // real on-chain amounts (legitimately tiny), and we still admit it.
-      if (e.usdAtTime == null) return;
-      const usd = e.usdAtTime;
-      if (!Number.isFinite(usd) || usd < 0) return;
-      flat.push({
-        ts: e.timestamp * 1000,
-        usd,
-        protocol,
-        chain,
-        dedupeKey: buildKey(protocol, e),
-      });
+      const usd = e.usdAtTime != null && Number.isFinite(e.usdAtTime) && e.usdAtTime >= 0 ? e.usdAtTime : null;
+      const ts = e.timestamp > 0 ? e.timestamp * 1000 : 0;
+      const dedupeKey = buildKey(protocol, e);
+      const prev = merged.get(dedupeKey);
+      if (!prev) { merged.set(dedupeKey, { ts, usd, protocol, chain, dedupeKey }); return; }
+      if (prev.usd != null && usd != null) __dedupDropped += 1;
+      if (prev.usd == null && usd != null) prev.usd = usd;
+      if (!(prev.ts > 0) && ts > 0) prev.ts = ts;
     };
 
     for (const [posId, events] of eventsMap.entries()) {
@@ -847,29 +855,21 @@ export default function Analytics() {
     }
     for (const t of walletLevelFees) push(t.protocol, t.chain, t.event);
 
-    const seen = new Set<string>();
-    // Sprint 2.1b: per-position events are pushed BEFORE wallet-scope ones
-    // above, so for a (protocol, txHash, logIndex) collision the per-position
-    // (accurate) value is kept and the wallet-scope (single-context, possibly
-    // mis-scaled) duplicate is dropped here. Count drops for visibility — the
-    // dedup happens client-side, so this is a browser-console signal (the
-    // server-side proof of correct per-position pricing is each per-position
-    // route's route_summary).
-    let __dedupDropped = 0;
-    const deduped = flat.filter((f) => {
-      if (seen.has(f.dedupeKey)) { __dedupDropped += 1; return false; }
-      seen.add(f.dedupeKey);
-      return true;
-    });
     if (__dedupDropped > 0) {
       console.debug(`[feeIncome] dedup dropped ${__dedupDropped} duplicate claim(s) (per-position value wins over wallet-scope)`);
     }
-    deduped.sort((a, b) => a.ts - b.ts);
-    flat.length = 0;
-    flat.push(...deduped);
+    let pendingClaimCount = 0;
+    for (const m of merged.values()) {
+      if (m.usd == null) { pendingClaimCount += 1; continue; }
+      flat.push({ ts: m.ts, usd: m.usd, protocol: m.protocol, chain: m.chain, dedupeKey: m.dedupeKey });
+    }
+    flat.sort((a, b) => a.ts - b.ts);
+    const undated = flat.filter((f) => !(f.ts > 0));
+    const undatedClaimCount = undated.length;
+    const undatedUsd = undated.reduce((s, f) => s + f.usd, 0);
 
     const totalAllTime = flat.reduce((s, f) => s + f.usd, 0);
-    const inWindow = flat.filter((f) => f.ts >= rangeCutoff);
+    const inWindow = flat.filter((f) => f.ts > 0 && f.ts >= rangeCutoff);
     const totalWindow = inWindow.reduce((s, f) => s + f.usd, 0);
 
     const now = Date.now();
@@ -918,7 +918,7 @@ export default function Analytics() {
     }
     const peakDay = Math.max(0, ...Array.from(byDay.values()));
 
-    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay };
+    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay, pendingClaimCount, undatedClaimCount, undatedUsd };
   }, [eventsMap, positions, selectedChains, selectedProtocols, rangeCutoff, activeRange, walletLevelFees, activityMetaMap]);
 
   // Unfiltered lifetime claimed-fees total — reference for the filter banner.
@@ -1071,6 +1071,31 @@ export default function Analytics() {
   const useSnap = !!snapshot && !liveTrustworthy && !snapshotContradictsLive;
 
   const feeIncome = useSnap && snapshot ? snapshot.feeIncome : feeIncomeLive;
+  // Fee totals say when they are not whole (standing rule: a total that depends
+  // on a pending or partial source shows `≈` and says why, like Capital G/L).
+  //   loading — a fee source has not answered yet, or a history scan is still reading
+  //   failed  — a fee source's request failed (its fees are missing, not zero)
+  //   pending — claims were found but have no price yet (in no total)
+  //   undated — priced claims with no date (in lifetime, in no time window)
+  // A saved snapshot is a settled compute, so only its own counts apply to it.
+  const feesPendingClaims = feeIncome.pendingClaimCount ?? 0;
+  const feesUndatedClaims = feeIncome.undatedClaimCount ?? 0;
+  const feesStillLoading = !useSnap && (walletFeesLoading || activityLoading);
+  const feesFailed = useSnap ? [] : feeFailedSources;
+  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPendingClaims > 0;
+  const feesNote = feesStillLoading
+    ? "still loading fee history"
+    : feesFailed.length > 0
+      ? `incomplete — couldn't load ${feesFailed.join(" · ")}`
+      : feesPendingClaims > 0
+        ? `incomplete — ${feesPendingClaims} claim${feesPendingClaims === 1 ? "" : "s"} not priced yet`
+        : null;
+  const feesApprox = feesIncomplete ? "≈ " : "";
+  // The time-window figures also miss the undated claims.
+  const feeWindowIncomplete = feesIncomplete || feesUndatedClaims > 0;
+  const feeWindowNote = feesNote ?? (feesUndatedClaims > 0
+    ? `${feesUndatedClaims} claim${feesUndatedClaims === 1 ? "" : "s"} (${fmt$(feeIncome.undatedUsd ?? 0)}) could not be dated — in Lifetime, not in this range`
+    : null);
   const lpPnl = useSnap && snapshot
     ? {
         ...lpPnlLive,
@@ -1161,6 +1186,7 @@ export default function Analytics() {
     //     positions and Total Deposited 0;
     //   • every LP total is zero while closed rows exist (ITEM 0i).
     if (failedSources.length > 0) return;
+    if (feeFailedSources.length > 0) return; // a fee source failed: its fees are missing, not zero
     if (lpPnlLive.included + lpPnlLive.excluded + lpPnlLive.errored < filteredPositions.length) return;
     if (lpPnlLive.aggregateSelfContradictory) return;
     if (snapshotWrittenForRef.current === walletSetKey) return;
@@ -1213,7 +1239,7 @@ export default function Analytics() {
       .then((r) => { if (r.ok) setSnapshot(payload); }) // status line → "updated just now"
       .catch(() => { /* quiet — next visit recomputes as usual */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveTrustworthy, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory]);
+  }, [liveTrustworthy, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory, feeFailedSources.length]);
 
   // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {
@@ -1557,7 +1583,7 @@ export default function Analytics() {
                 {([
                   { label: "Portfolio", val: fmtCompact(totalPortfolioValue), total: fmtCompact(allPortfolioValue) },
                   { label: "Daily Income", val: fmt$(totalDailyIncome), total: fmt$(allDailyIncome) },
-                  { label: "Fees Collected", val: fmt$(feeIncome.totalAllTime), total: fmt$(feesAllTime) },
+                  { label: "Fees Collected", val: `${feesApprox}${fmt$(feeIncome.totalAllTime)}`, total: fmt$(feesAllTime) },
                 ]).map((c) => (
                   <span key={c.label} style={{ fontSize: 12, color: C.textMid, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>
                     {c.label}:{" "}
@@ -1765,10 +1791,10 @@ export default function Analytics() {
                 }}
               >
                 {[
-                  { label: `In Last ${activeRange.label}`, val: fmt$(feeIncome.totalWindow), green: true,  sub: `${feeIncome.protocols.length} protocols`, subUp: feeIncome.totalWindow > 0 },
+                  { label: `In Last ${activeRange.label}`, val: `${feeWindowIncomplete ? "≈ " : ""}${fmt$(feeIncome.totalWindow)}`, green: true,  sub: `${feeIncome.protocols.length} protocols`, subUp: feeIncome.totalWindow > 0 },
                   { label: "Hourly Rate",                  val: fmt$(feeIncome.hourlyRate, 3), green: false, sub: "avg over period",     subUp: false },
                   { label: "Annualized",                   val: fmt$(feeIncome.annualizedAtRate, 0), green: true, sub: "at current rate",    subUp: false },
-                  { label: "Lifetime",                     val: fmt$(feeIncome.totalAllTime), green: false, sub: "since inception",     subUp: false },
+                  { label: "Lifetime",                     val: `${feesApprox}${fmt$(feeIncome.totalAllTime)}`, green: false, sub: feesNote ?? "since inception",     subUp: false },
                 ].map((c, i, arr) => (
                   <div
                     key={c.label}
@@ -1882,7 +1908,9 @@ export default function Analytics() {
                       <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.18em", textTransform: "uppercase" }}>
                         By Protocol
                       </span>
-                      <span style={{ fontSize: 11, color: C.text }}>scroll →</span>
+                      <span data-fee-window-note={feeWindowNote ? "1" : undefined} style={{ fontSize: 11, color: feeWindowNote ? C.amber : C.text }}>
+                        {feeWindowNote ? `≈ ${feeWindowNote}` : "scroll →"}
+                      </span>
                     </div>
                     <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }} className="scroll-thin">
                       {feeIncome.protocols.map((p) => {
@@ -2035,6 +2063,7 @@ export default function Analytics() {
                     val: `+${fmt$(lifetimeFeesCollected)}`,
                     color: C.green,
                     sub: "claimed lifetime (at claim-time price)",
+                    feesPending: true,
                   },
                   { label: "Fees Unclaimed",  val: `+${fmt$(lpPnl.feesUnclaimed)}`, color: C.green, sub: "open positions, pending on-chain" },
                   {
@@ -2059,8 +2088,9 @@ export default function Analytics() {
                     color: adjustedNetPnl >= 0 ? C.cyan : C.red,
                     sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
                     pendingClosed: true,
+                    feesPending: true,
                   },
-                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; pendingOpen?: boolean; expandable?: boolean }>);
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; pendingOpen?: boolean; expandable?: boolean; feesPending?: boolean }>);
                 })().map((c, i, arr) => (
                   <div
                     key={c.label}
@@ -2111,7 +2141,7 @@ export default function Analytics() {
                           color: c.color,
                           fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
                           textShadow: c.color === C.green ? "0 0 12px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
-                          opacity: (lpPnl.aggregateSelfContradictory || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete))) ? 0.6 : 1,
+                          opacity: (lpPnl.aggregateSelfContradictory || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading || !lpPnl.capitalGLComplete)) || (c.feesPending && feesIncomplete)) ? 0.6 : 1,
                         }}
                       >
                         {/* An incompletely-priced Capital G/L is a PARTIAL sum,
@@ -2132,7 +2162,10 @@ export default function Analytics() {
                           // sources are loading has nothing in it yet — a dash,
                           // not "≈ $0.00", which reads as an estimate of zero.
                           : (c.pendingOpen && loadingMore && c.val === fmt$(0)) ? "—"
-                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) ? `≈ ${c.val}` : c.val}
+                          // Fee totals follow the same rule: a fee source that is
+                          // still loading, failed, or holds unpriced claims makes
+                          // Fees Collected and Net P&L a partial sum, shown as one.
+                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.feesPending && feesIncomplete) ? `≈ ${c.val}` : c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>
@@ -2170,6 +2203,8 @@ export default function Analytics() {
                             ? "incomplete — some history couldn't be loaded"
                           : (c.pendingClosed && lpPnl.capitalGLPricingPending > 0)
                             ? `incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`
+                            : (c.feesPending && feesIncomplete && feesNote)
+                              ? (c.pendingClosed ? `fees ${feesNote}` : feesNote)
                             : (c.pendingClosed && lpPnl.capitalGLApproximate > 0)
                               ? `approximate — ${lpPnl.capitalGLApproximate} position${lpPnl.capitalGLApproximate === 1 ? "" : "s"} priced from estimates`
                               : c.sub}
