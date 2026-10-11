@@ -74,7 +74,7 @@ async function acquire<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-interface EndpointOutcome { ok: boolean; status: number; result?: unknown; rpcError?: boolean }
+interface EndpointOutcome { ok: boolean; status: number; result?: unknown; rpcError?: boolean; timedOut?: boolean }
 
 async function callEndpoint(url: string, method: string, params: unknown[], timeoutMs: number): Promise<EndpointOutcome> {
   const controller = new AbortController();
@@ -95,11 +95,16 @@ async function callEndpoint(url: string, method: string, params: unknown[], time
     return { ok: true, status: 200, result: json.result };
   } catch {
     // AbortError (timeout) or network error — both retryable via the next endpoint.
-    return { ok: false, status: 0 };
+    return { ok: false, status: 0, timedOut: controller.signal.aborted };
   } finally {
     clearTimeout(timer);
   }
 }
+
+const RETRY_PAUSES_MS = [350, 1000, 2500];
+let retries = 0, recovered = 0, exhausted = 0;
+/** Process-wide retry counts (diagnostics): rounds retried, calls a retry saved, calls that failed anyway. */
+export function suiRpcRetryStats() { return { retries, recovered, exhausted }; }
 
 export interface SuiRpcOptions { timeoutMs?: number }
 
@@ -112,18 +117,36 @@ export interface SuiRpcOptions { timeoutMs?: number }
 export async function suiRpc(method: string, params: unknown[], opts: SuiRpcOptions = {}): Promise<unknown> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return acquire(async () => {
-    for (let i = 0; i < SUI_ENDPOINTS.length; i++) {
-      const url = SUI_ENDPOINTS[i];
-      const outcome = await callEndpoint(url, method, params, timeoutMs);
-      if (outcome.ok) return outcome.result;
-      // A genuine RPC-level error (bad params, etc.) is deterministic — failing
-      // over won't help and would just waste the fallback's budget. Only retry
-      // the next endpoint for transport failures (429 / 5xx / timeout / network).
-      if (outcome.rpcError) return undefined;
-      // Back off briefly on a rate-limit before hitting the fallback.
-      if (outcome.status === 429 && i < SUI_ENDPOINTS.length - 1) await sleep(150);
+    // Sprint 2b — retry with backoff. Before this, ONE throttled or timed-out
+    // call ended the read: the fallback (the public fullnode) no longer serves
+    // JSON-RPC ("Method not found … deprecated", measured 2026-10-07 and again
+    // 2026-10-11), so in practice there is a single endpoint and a single
+    // attempt. A brief 429 from it surfaced as a failed pool read, a 503 from a
+    // position route, or ten Momentum claims left unpriced. Rounds are spaced
+    // 0.35 s, 1 s and 2.5 s apart; only transport failures are retried.
+    let gaveUpOnTimeout = false;
+    for (let round = 0; round <= RETRY_PAUSES_MS.length; round++) {
+      if (round > 0) { if (gaveUpOnTimeout) break; retries += 1; await sleep(RETRY_PAUSES_MS[round - 1]); }
+      for (let i = 0; i < SUI_ENDPOINTS.length; i++) {
+        const url = SUI_ENDPOINTS[i];
+        const outcome = await callEndpoint(url, method, params, timeoutMs);
+        if (outcome.ok) { if (round > 0) recovered += 1; return outcome.result; }
+        // A genuine RPC-level error from the PRIMARY (bad params, etc.) is
+        // deterministic — retrying would only waste the budget. The same answer
+        // from a fallback only says that endpoint cannot serve the method.
+        if (outcome.rpcError && i === 0) return undefined;
+        // A TIMEOUT on the primary already cost the full per-call budget (12 s).
+        // It is not retried: under a real outage every call would otherwise take
+        // several times as long and a route would hang instead of failing fast
+        // (the pre-retry behaviour, kept exactly). Only fast failures — 429, 5xx,
+        // a refused connection — get the backoff rounds.
+        if (outcome.timedOut && i === 0) gaveUpOnTimeout = true;
+        // Back off briefly on a rate-limit before hitting the fallback.
+        if (outcome.status === 429 && i < SUI_ENDPOINTS.length - 1) await sleep(150);
+      }
     }
-    return undefined; // all endpoints exhausted
+    exhausted += 1;
+    return undefined; // every endpoint failed on every round
   });
 }
 

@@ -138,7 +138,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // from a historically-priced one.
 // v22 → v23 (Sprint 1b): lockstep with lp-pnl-events-v31 — Sui events come from
 // the full history and Cetus/Bluefin deposits are valued from the event's pool price.
-function cacheKey(id: string) { return `analytics-activity-v23-${id}`; }
+// v23 → v24 (Sprint 2b): lockstep with lp-pnl-events-v32 — Orca legs priced at
+// the event's own time instead of a range estimate.
+function cacheKey(id: string) { return `analytics-activity-v24-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

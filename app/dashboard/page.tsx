@@ -258,6 +258,10 @@ function ScanModeListener() {
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch, pendingSources, failedSources } = usePositions();
+  // Open-position sources still outstanding (the closed-history halves do not
+  // feed the headline value, so they are not named here).
+  const pendingOpenSources = pendingSources.filter((s) => !/history$/i.test(s));
+  const headlinePartial = !isLoading && (failedSources.length > 0 || pendingOpenSources.length > 0);
   // Per-position activity events — used for proper P&L calculation per row.
   // Per-row P&L on the positions table comes from the SAME on-chain pipeline
   // that feeds the analytics LP P&L totals — no parallel calculation, no
@@ -880,9 +884,22 @@ export default function Dashboard() {
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
+                  {/* A positions source that has not answered, or failed, is not in
+                      this sum. The headline says so instead of showing a clean
+                      lower total (measured 2026-10-11 with the Cetus pool read
+                      failing: $15,269.89 shown unmarked for a $26.8k wallet, the
+                      only notice below the fold). */}
+                  {mounted && headlinePartial && <span style={{ fontSize: 32, color: C.amber, fontWeight: 500, marginRight: 8 }}>≈</span>}
                   ${splitTotal.whole}
                   <span style={{ fontSize: 32, color: C.textMid, fontWeight: 500 }}>.{splitTotal.cents}</span>
                 </div>
+                {mounted && headlinePartial && (
+                  <div data-headline-partial="1" style={{ marginTop: 8, fontSize: 12, color: C.amber, letterSpacing: "0.04em" }}>
+                    {failedSources.length > 0
+                      ? `incomplete — couldn't load ${failedSources.join(" · ")}`
+                      : `still loading ${pendingOpenSources.join(" · ")}`}
+                  </div>
+                )}
                 {chartPnlAvailable && (
                   <div
                     style={{

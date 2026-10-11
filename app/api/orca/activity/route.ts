@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { createHash } from 'crypto';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
-import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
+import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice, prewarmDefillamaPricesAtTime, getCachedOnlyDefillamaPriceAtTime } from '../../../lib/defillamaPriceHistory';
 import { logPrice } from '../../../lib/priceLogger';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
@@ -354,6 +354,25 @@ async function GET_impl(request: Request) {
       if (__dl.length > 0) await prewarmDefillamaPrices(__dl);
     }
 
+    // Sprint 2b — a deposit or withdrawal is valued at the market price at the
+    // event's OWN time (DeFiLlama historical by mint, ±1 h). Before this the
+    // route had no historical step for them: every open Orca position was valued
+    // from a range-boundary estimate or current spot and always reported
+    // "priced from estimates". The estimate and spot steps below remain as the
+    // marked fallbacks when no historical point exists.
+    {
+      const __legTs = rawEvents.filter((e) => e.type === 'deposit' || e.type === 'withdrawal').map((e) => e.timestamp);
+      const __dl: Array<{ chain: 'solana'; contract: string; timestamps: number[] }> = [];
+      if (__legTs.length > 0 && mintA && !STABLECOINS.has(mintA.toLowerCase())) __dl.push({ chain: 'solana', contract: mintA, timestamps: __legTs });
+      if (__legTs.length > 0 && mintB && !STABLECOINS.has(mintB.toLowerCase())) __dl.push({ chain: 'solana', contract: mintB, timestamps: __legTs });
+      if (__dl.length > 0) await prewarmDefillamaPricesAtTime(__dl);
+    }
+    const __legPrice = (mint: string | null | undefined, ts: number): number | null => {
+      if (!mint) return null;
+      if (STABLECOINS.has(mint.toLowerCase())) return 1;
+      return getCachedOnlyDefillamaPriceAtTime('solana', mint, ts).price;
+    };
+
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
     const events: ActivityEvent[] = rawEvents.map((ev) => {
@@ -365,7 +384,18 @@ async function GET_impl(request: Request) {
       let usdAtTime: number | null = null;
       let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
 
-      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
+      if (ev.type === 'deposit' || ev.type === 'withdrawal') {
+        const pxA = __legPrice(mintA, ev.timestamp);
+        const pxB = __legPrice(mintB, ev.timestamp);
+        // Both sides priced historically, or the unpriced side has no amount.
+        if ((pxA != null || amount0 === 0) && (pxB != null || amount1 === 0)) {
+          price0AtTime = pxA;
+          price1AtTime = pxB;
+          usdAtTime = amount0 * (pxA ?? 0) + amount1 * (pxB ?? 0);
+        }
+      }
+
+      if (usdAtTime == null && (ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
         const derived = deriveDepositPrices(
           amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
           mintA, mintB, STABLECOINS,

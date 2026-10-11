@@ -52,7 +52,7 @@ import { Redis } from '@upstash/redis';
 import { PublicKey } from '@solana/web3.js';
 import { createHash } from 'crypto';
 import type { ActivityEventForPnL } from './positionPnl';
-import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillamaPriceHistory';
+import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice, prewarmDefillamaPricesAtTime, getCachedOnlyDefillamaPriceAtTime } from './defillamaPriceHistory';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from './cgPriceHistory';
 import { resolveToken } from './tokenResolver';
 import { logPrice } from './priceLogger';
@@ -628,7 +628,30 @@ export interface SolanaClosedPosition {
   // POSITION-DETAIL-2 / a future reward-valuation sprint can read them without
   // re-scanning. Absent for Orca positions (rewards separate instrs there).
   rewardAmountsRaw?: [string, string, string];
+  // Sprint 2b — the price basis of the deposit and withdrawal legs.
+  //   'exact-time' : every non-stable leg is priced at its own timestamp (±1 h);
+  //   'daily'      : at least one leg has no exact-time point and keeps the day
+  //                  price (looked for and established missing, so not retried);
+  //   absent       : valued before Sprint 2b, or an exact lookup failed
+  //                  transiently — the position is valued again on a later load.
+  // Fee claims are on the claim-day basis in every case (Rule 1).
+  legPriceBasis?: 'exact-time' | 'daily';
 }
+
+/**
+ * Weight of a stored record for the never-shrink guard: more events always wins,
+ * and between two records with the same events the better-priced one wins, so a
+ * record valued before Sprint 2b is replaced once by its re-valued self and
+ * never the other way round.
+ */
+export function closedPositionWeight(p: Pick<SolanaClosedPosition, 'events' | 'legPriceBasis'>): number {
+  return p.events.length + (p.legPriceBasis === 'exact-time' ? 0.5 : p.legPriceBasis === 'daily' ? 0.25 : 0);
+}
+// A stored record at or above this weight for its event count is not valued again.
+const SETTLED_BASIS_WEIGHT = 0.25;
+// Part of the guard's mark: changing it makes every stored list due for ONE
+// re-valuation pass (records already on the new basis are skipped by weight).
+const VALUATION_MARK = 'legs-exact-1';
 
 function isStableMint(mint: string): boolean { return STABLE_MINTS.has(mint.toLowerCase()); }
 
@@ -660,11 +683,33 @@ function histSidePrice(mint: string, ts: number): { px: number; src: string } | 
   return null; // → pending (never spot)
 }
 
-interface EventValue { usd: number | null; p0: number | null; p1: number | null; source: string }
+// A deposit or withdrawal leg: the price at the leg's OWN time first (Sprint 2b),
+// the day price as the fallback. `settled` is false when the exact lookup failed
+// transiently (neither a price nor an established miss).
+function legSidePrice(mint: string, ts: number): { px: number; src: string; exact: boolean; settled: boolean } | null {
+  if (isStableMint(mint)) return { px: 1, src: 'stablecoin-fixed', exact: true, settled: true };
+  const x = getCachedOnlyDefillamaPriceAtTime('solana', mint, ts);
+  if (x.price != null) return { px: x.price, src: 'defillama-exact', exact: true, settled: true };
+  const day = histSidePrice(mint, ts);
+  return day ? { ...day, exact: false, settled: x.known } : null;
+}
+
+interface EventValue { usd: number | null; p0: number | null; p1: number | null; source: string; legExact?: boolean; legSettled?: boolean }
 function valueEvent(ev: SolanaPositionEvent, ctx: PoolContext): EventValue {
   const amtA = Number(ev.amountARaw) / 10 ** ctx.decimalsA;
   const amtB = Number(ev.amountBRaw) / 10 ** ctx.decimalsB;
   if (amtA === 0 && amtB === 0) return { usd: 0, p0: 0, p1: 0, source: 'zero_amount' };
+  if (ev.kind === 'deposit' || ev.kind === 'withdrawal') {
+    // A side with no amount needs no price and cannot make the leg inexact.
+    const la = amtA === 0 ? { px: 0, src: 'zero_side', exact: true, settled: true } : legSidePrice(ctx.mintA, ev.timestamp);
+    const lb = amtB === 0 ? { px: 0, src: 'zero_side', exact: true, settled: true } : legSidePrice(ctx.mintB, ev.timestamp);
+    if (la && lb) {
+      const srcs = [la.src, lb.src].filter((x) => x !== 'zero_side');
+      const src = srcs.length === 2 && srcs[0] !== srcs[1] ? `${srcs[0]}+${srcs[1]}` : (srcs[0] ?? 'zero_amount');
+      return { usd: amtA * la.px + amtB * lb.px, p0: amtA === 0 ? null : la.px, p1: amtB === 0 ? null : lb.px, source: src, legExact: la.exact && lb.exact, legSettled: la.settled && lb.settled };
+    }
+    return { usd: null, p0: la?.px ?? null, p1: lb?.px ?? null, source: 'pending', legExact: false, legSettled: false };
+  }
   const a = histSidePrice(ctx.mintA, ev.timestamp);
   const b = histSidePrice(ctx.mintB, ev.timestamp);
   if (a && b) {
@@ -695,7 +740,12 @@ async function valueClosedPosition(
   await Promise.all([...dlByMint.keys()].map((m) => resolveCgId(m)));
   for (const [mint, tsSet] of dlByMint) { const cgId = cgIdCache.get(mint); if (cgId) cgByMint.set(cgId, tsSet); }
 
+  // Exact-time points for the deposit and withdrawal legs only.
+  const legTs = events.filter((e) => e.kind === 'deposit' || e.kind === 'withdrawal').map((e) => e.timestamp);
   await Promise.all([
+    legTs.length > 0 && dlByMint.size > 0
+      ? prewarmDefillamaPricesAtTime([...dlByMint.keys()].map((contract) => ({ chain: 'solana' as const, contract, timestamps: legTs })))
+      : Promise.resolve(),
     dlByMint.size > 0
       ? prewarmDefillamaPrices([...dlByMint].map(([contract, ts]) => ({ chain: 'solana' as const, contract, timestamps: [...ts] })))
       : Promise.resolve(),
@@ -707,11 +757,16 @@ async function valueClosedPosition(
   const outEvents: ActivityEventForPnL[] = [];
   const sourceBreakdown: Record<string, number> = {};
   let depositUSD = 0, withdrawalUSD = 0, feesUSD = 0, pendingEventCount = 0;
+  let legsExact = true, legsSettled = true;
   for (const ev of events) {
     const amount0 = Number(ev.amountARaw) / 10 ** ctx.decimalsA;
     const amount1 = Number(ev.amountBRaw) / 10 ** ctx.decimalsB;
     const v = valueEvent(ev, ctx);
     sourceBreakdown[v.source] = (sourceBreakdown[v.source] ?? 0) + 1;
+    if (ev.kind === 'deposit' || ev.kind === 'withdrawal') {
+      if (v.legExact === false) legsExact = false;
+      if (v.legSettled === false) legsSettled = false;
+    }
     if (v.usd == null) pendingEventCount += 1;
     else if (ev.kind === 'deposit') depositUSD += v.usd;
     else if (ev.kind === 'withdrawal') withdrawalUSD += v.usd;
@@ -747,6 +802,8 @@ async function valueClosedPosition(
     depositUSD, withdrawalUSD, feesUSD, capitalGL, pendingEventCount,
     events: outEvents, sourceBreakdown,
     ...(rewardAmountsRaw ? { rewardAmountsRaw } : {}),
+    // Recorded only when the basis is settled; otherwise the position is valued again later.
+    ...(legsExact ? { legPriceBasis: 'exact-time' as const } : legsSettled ? { legPriceBasis: 'daily' as const } : {}),
   };
 }
 
@@ -884,8 +941,9 @@ async function getSolanaWalletHistory(wallet: string, stats: ScanStats): Promise
   }
 }
 
-// `known` maps a stored position id to its event count: an immutable closed
-// position that is already stored with as many events is not valued again.
+// `known` maps a stored position id to its weight (`closedPositionWeight`): a
+// closed position already stored with as many events AND a settled leg-price
+// basis is not valued again.
 // `deadlineMs` bounds valuation; what is valued by then is returned.
 async function closedPositionsFromHistory(
   wallet: string,
@@ -935,7 +993,7 @@ async function closedPositionsFromHistory(
     if (owned.orca.has(pid)) continue;                       // still open — not closed
     if (!events.some((e) => e.kind === 'deposit')) continue; // nothing to reconstruct
     const stored = known?.get(pid);
-    if (stored !== undefined && stored >= events.length) continue;
+    if (stored !== undefined && stored >= events.length + SETTLED_BASIS_WEIGHT) continue;
     const ctx = poolCtx.get(events.find((e) => e.pool)?.pool ?? '');
     if (!ctx) { whole = false; continue; }                   // pool unreadable: short, not skipped silently
     if (pastDeadline()) { settled = false; break; }
@@ -962,7 +1020,7 @@ async function closedPositionsFromHistory(
       if (owned.raydium.has(pid)) continue;
       if (!events.some((e) => e.kind === 'deposit')) continue;
       const stored = known?.get(pid);
-      if (stored !== undefined && stored >= events.length) continue;
+      if (stored !== undefined && stored >= events.length + SETTLED_BASIS_WEIGHT) continue;
       const ctx = rayPoolCtx.get(events.find((e) => e.pool)?.pool ?? '');
       if (!ctx) { whole = false; continue; }
       if (pastDeadline()) { settled = false; break; }
@@ -1106,17 +1164,17 @@ export function getCachedClosedPositionsGuarded(wallet: string): Promise<SolanaC
         { name: 'raydium', key: closedPosKey('raydium', wallet) },
       ],
       scan: async (cached) => {
-        const known = new Map([...(cached.orca ?? []), ...(cached.raydium ?? [])].map((x) => [x.positionId, x.events.length] as const));
+        const known = new Map([...(cached.orca ?? []), ...(cached.raydium ?? [])].map((x) => [x.positionId, closedPositionWeight(x)] as const));
         const fresh = await closedPositionsFromHistory(wallet, hist, stats, known, deadline);
         scanStatus = fresh.status;
         return { bySlot: { orca: fresh.orca, raydium: fresh.raydium }, complete: fresh.stats.complete, settled: fresh.settled };
       },
       idOf: (x) => x.positionId,
-      weightOf: (x) => x.events.length,
+      weightOf: closedPositionWeight,
       isValid: isCachedSolanaPosition,
       emptyTtlSeconds: CLOSED_POS_EMPTY_TTL_SECONDS,
       legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
-      mark: hist.mark,
+      mark: `${hist.mark}:${VALUATION_MARK}`,
       storePartial: true,
       log: (m) => console.warn(`[solanaClosedPositions] ${m}`),
     });

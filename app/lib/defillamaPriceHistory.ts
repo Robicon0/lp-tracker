@@ -321,3 +321,110 @@ export function getCachedOnlyDefillamaPrice(
   if (!DEFILLAMA_CHAIN[chain]) return null;
   return cache.get(memKey(chain, contract, timestampSeconds)) ?? null;
 }
+
+// ── EXACT-TIME prices (Sprint 2b) ────────────────────────────────────────────
+// The lookups above are keyed by UTC DAY: the first timestamp asked for on a day
+// fixes the price every other event of that day gets. That is the documented
+// basis for FEE CLAIMS (pricing-invariants Rule 1: the claim date's price) and
+// they stay on it. It is the wrong basis for a position's DEPOSIT and
+// WITHDRAWAL legs: a position opened and closed on one day got one price on
+// both sides and a Capital G/L of exactly 0.00, with the whole move landing on
+// the neighbouring leg (measured on Account 1: 13 one-sided Orca legs total
+// −728.48 on the day basis and −842.03 at each leg's own time).
+//
+// `…AtTime` asks DeFiLlama for the point nearest the event's OWN timestamp and
+// accepts it only within ±1 hour; outside that window it is a miss and the
+// caller falls back to the day price. Historical only, never current (Rule 1a).
+// Own keys (`price:historical:defillama_t:{chain}:{contract}:{unix}`), so a day
+// price and an exact price can never be read for one another.
+const EXACT_MAX_DRIFT_SEC = 60 * 60;
+const exactCache = new Map<string, number>();
+const exactMissing = new Set<string>();
+const exactInFlight = new Map<string, Promise<number | null>>();
+const exactStats = { hit: 0, missing: 0, error: 0 };
+/** Process-wide counts for the exact-time tier (diagnostics). */
+export function defillamaExactStats() { return { ...exactStats }; }
+
+function exactKey(chain: Chain, contract: string, ts: number): string {
+  return `${chain}:${normalizeIdentifier(chain, contract)}:t${Math.floor(ts)}`;
+}
+function exactRedisKey(chain: Chain, contract: string, ts: number): string {
+  return `price:historical:defillama_t:${chain}:${normalizeIdentifier(chain, contract)}:${Math.floor(ts)}`;
+}
+
+async function fetchExactOnce(chain: Chain, contract: string, ts: number): Promise<FetchOutcome> {
+  const dlChain = DEFILLAMA_CHAIN[chain];
+  if (!dlChain) return { kind: 'missing' };
+  return gate(async () => {
+    try {
+      const res = await fetch(`${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${contract}?searchWidth=1h`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return res.status === 404 ? { kind: 'missing' } : { kind: 'error', reason: `http_${res.status}` };
+      const json = (await res.json()) as { coins?: Record<string, { price?: number; timestamp?: number }> };
+      const entry = json?.coins ? Object.values(json.coins)[0] : undefined;
+      if (!entry || typeof entry.price !== 'number' || !Number.isFinite(entry.price) || entry.price <= 0) return { kind: 'missing' };
+      // The point must be the event's own hour. Without a timestamp the point cannot be placed: a miss.
+      if (typeof entry.timestamp !== 'number' || Math.abs(entry.timestamp - ts) > EXACT_MAX_DRIFT_SEC) return { kind: 'missing' };
+      return { kind: 'price', price: entry.price, dlTs: entry.timestamp };
+    } catch (err) {
+      return { kind: 'error', reason: String(err).slice(0, 80) };
+    }
+  });
+}
+
+/** Price at the event's own time (±1 h), or null. `'error'` results are not remembered. */
+export async function fetchDefillamaPriceAtTime(chain: Chain, contract: string, ts: number): Promise<number | null> {
+  if (!contract || !Number.isFinite(ts) || ts <= 0 || !DEFILLAMA_CHAIN[chain]) return null;
+  const k = exactKey(chain, contract, ts);
+  const hit = exactCache.get(k);
+  if (hit != null) return hit;
+  if (exactMissing.has(k)) return null;
+  const running = exactInFlight.get(k);
+  if (running) return running;
+  const p = (async (): Promise<number | null> => {
+    const rk = exactRedisKey(chain, contract, ts);
+    const stored = await redisGet(rk);
+    if (stored != null) { exactCache.set(k, stored); exactStats.hit += 1; return stored; }
+    const outcome = await fetchExactOnce(chain, contract, ts);
+    if (outcome.kind === 'price' && typeof outcome.price === 'number') { const px: number = outcome.price; exactCache.set(k, px); redisSet(rk, px); exactStats.hit += 1; return px; }
+    if (outcome.kind === 'missing') { exactMissing.add(k); exactStats.missing += 1; } else exactStats.error += 1;
+    return null;
+  })();
+  exactInFlight.set(k, p);
+  try { return await p; } finally { exactInFlight.delete(k); }
+}
+
+export async function prewarmDefillamaPricesAtTime(
+  items: Array<{ chain: Chain; contract: string; timestamps: number[] }>,
+): Promise<void> {
+  const seen = new Set<string>();
+  const work: Array<Promise<unknown>> = [];
+  for (const { chain, contract, timestamps } of items) {
+    if (!contract || !DEFILLAMA_CHAIN[chain]) continue;
+    for (const ts of timestamps) {
+      if (!Number.isFinite(ts) || ts <= 0) continue;
+      const k = exactKey(chain, contract, ts);
+      if (seen.has(k) || exactCache.has(k) || exactMissing.has(k)) continue;
+      seen.add(k);
+      work.push(fetchDefillamaPriceAtTime(chain, contract, ts).catch(() => null));
+    }
+  }
+  await Promise.all(work);
+}
+
+/**
+ * Synchronous read after `prewarmDefillamaPricesAtTime`.
+ * `price` — the exact-time price; `known` — false when the lookup neither found
+ * a price nor established that none exists (a transient failure: ask again).
+ */
+export function getCachedOnlyDefillamaPriceAtTime(chain: Chain, contract: string, ts: number): { price: number | null; known: boolean } {
+  if (!contract || !Number.isFinite(ts) || ts <= 0 || !DEFILLAMA_CHAIN[chain]) return { price: null, known: true };
+  const k = exactKey(chain, contract, ts);
+  const hit = exactCache.get(k);
+  if (hit != null) return { price: hit, known: true };
+  return { price: null, known: exactMissing.has(k) };
+}
+

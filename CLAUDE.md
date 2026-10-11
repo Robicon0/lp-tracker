@@ -963,6 +963,44 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(Commit B — Sprint 2b, 2026-10-11, local, not pushed)** — **Orca legs priced at their own
+  hour; Sui reads retried; a failed positions source marks the headline.**
+  **(1) Orca / Raydium closed legs.** Deposit and withdrawal legs were priced per UTC DAY (the
+  first timestamp asked for on a day fixed the price for that day), so a position opened and
+  closed on one day read Capital G/L 0.00. `defillamaPriceHistory.ts` gains an exact-time lookup
+  (`…AtTime`, nearest point within ±1 h, own keys `price:historical:defillama_t:*`); legs use it
+  first and fall back to the day price. FEE CLAIMS stay on the claim-day basis (Rule 1).
+  A stored record is re-valued once: `legPriceBasis` (`exact-time` | `daily`) is recorded,
+  `closedPositionWeight` makes a re-valued record outrank its stored self in the never-shrink
+  guard, and the guard's mark carries `legs-exact-1` so every stored list is due for one pass
+  (resumable; about 10 positions per request). `closed_pos_solana` is NOT bumped.
+  Account 1, local build: Orca Capital G/L −2,509.97 → −2,591.03 (43 positions, fees unchanged
+  3,502.37); 8 legs that read 0.00 now carry a figure; the 12 still at 0.00 are USDC-only round
+  trips. Against exchange 1-minute prices at each leg's own time (a second source): total −2,645.46;
+  summed per-position difference 259.93 (was 819.15 on the day basis). **The basis is the leg's
+  own HOUR, not its minute:** single positions differ from the minute price by up to 1.4% of
+  the deposit. Account 1 Capital G/L becomes ≈ −12,768.74 (was −12,687.68).
+  **(2) Orca open positions.** `/api/orca/activity` had no historical step for deposits; it now
+  uses the same exact-time price before the range estimate. Account 1 reads "1 position priced
+  from estimates" (ProjectX only; was 3) and Total Deposited 27,890.81 (was 27,899.78).
+  Cache bumps: `lp-pnl-events` v31 → v32, `analytics-activity` v23 → v24. Raydium's activity
+  route has the same gap and is NOT changed (no test position).
+  **(3) Sui reads retry.** Cause of the brief Sui / Momentum pool-read failures: the fallback
+  endpoint (the public fullnode) answers "Method not found … JSON-RPC deprecated", so there was
+  ONE endpoint and ONE attempt, and a single 429 failed the read. `suiRpc` now retries fast
+  failures (429 / 5xx / refused) after 0.35 s, 1 s and 2.5 s. A TIMEOUT is not retried (it
+  already cost 12 s; retrying made an outage hang instead of failing fast). Forced locally: the
+  first three pool reads answer 429 → `/api/cetus` still answers 200 with the position.
+  **(4) The 503 guard, end to end.** With every Sui pool read failing, `/api/cetus` answers 503
+  `position-read-failed`. The page did NOT show it properly: the dashboard headline read
+  $15,269.89 unmarked for a $26.8k wallet (notice below the fold) and analytics showed Current
+  Value unmarked. Fixed: the dashboard headline shows `≈` and "incomplete — couldn't load Cetus"
+  (or "still loading …") and analytics treats a failed positions source like a pending one
+  (`≈` + the same note on Total Deposited, Current Value, Capital G/L, Net P&L).
+  **Listed, not written:** one stored Sui pool context holds a guessed 9 decimals — pool
+  `0xa7417fb5…9a56`, side B (USDSUI), stored 9, on chain 6, written about 33 days ago. The other
+  32 entries (22 coin types) match on-chain metadata.
+
 - **(Commit A — fee reliability, 2026-10-11, local, not pushed)** — **Three changes after the
   `b1fae66` B7 failed on an unmarked dip and on undated claims.**
   **(1) The fee mark reads history notices.** A fee source that answers but reports a failed,

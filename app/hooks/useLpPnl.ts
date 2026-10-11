@@ -682,7 +682,10 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // itself instead of a range-boundary estimate, and a position whose deposit was
 // missing (history source returned one week) now has it. A v30 entry holds the
 // estimate-marked or deposit-less events.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v31-";
+// v31 → v32 (Sprint 2b): Orca deposits and withdrawals are valued at the market
+// price at the event's own time; a v31 entry holds the range-estimate value and
+// its "estimate" mark.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v32-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

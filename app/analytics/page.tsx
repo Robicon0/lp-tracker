@@ -1146,7 +1146,10 @@ export default function Analytics() {
   // for several seconds before another chain's closed positions arrived and
   // made it -$3,524.86). A snapshot-backed render is exempt — those figures are
   // a complete earlier result, not a sum in progress.
-  const loadingMore = !useSnap && (lpPnl.inflightCount > 0 || pendingSources.length > 0);
+  // A positions source that FAILED is in the same state as one that has not
+  // answered: its positions are missing from these sums. It keeps the mark, and
+  // the note names it (standing rule (g)).
+  const loadingMore = !useSnap && (lpPnl.inflightCount > 0 || pendingSources.length > 0 || failedSources.length > 0);
   const nothingYet = !useSnap && lpPnl.included === 0 && (lpPnl.isLoading || pendingSources.length > 0);
   // With no position mid-computation, what is outstanding is a whole source.
   // When every such source is a history half (closed positions), say that —
@@ -1154,7 +1157,9 @@ export default function Analytics() {
   const onlyHistoryPending = pendingSources.length > 0 && pendingSources.every((s) => /history$/i.test(s));
   const loadingNote = lpPnl.inflightCount > 0
     ? `${lpPnl.inflightCount} position${lpPnl.inflightCount === 1 ? "" : "s"} still loading`
-    : onlyHistoryPending ? "closed history still loading" : "positions still loading";
+    : pendingSources.length > 0
+      ? (onlyHistoryPending ? "closed history still loading" : "positions still loading")
+      : failedSources.length > 0 ? `incomplete — couldn't load ${failedSources.join(" · ")}` : "positions still loading";
 
   // Status line for the LP P&L header slot (replaces the machinery counter):
   //   snapshot shown → "updated N min ago · refreshing…"
