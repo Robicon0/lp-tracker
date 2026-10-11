@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { mergeNeverShrink } from "../lib/feeEventsNeverShrink";
 import type { AerodromePosition } from "../lib/aerodrome";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -357,6 +358,8 @@ export function useAllPositionsActivity(
   const [eventsMap, setEventsMap] = useState<Map<string, ActivityEvent[]>>(new Map());
   const [metaMap, setMetaMap] = useState<Map<string, PositionMeta>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
+  // What each position last returned, for the never-shrink rule below.
+  const eventsRef = useRef<Map<string, ActivityEvent[]>>(new Map());
   // Track which set of position IDs we've already fetched for
   const fetchedForRef = useRef<string>("");
   // Sprint PERFORMANCE: positions now STREAM into the array per source (the
@@ -426,6 +429,7 @@ export function useAllPositionsActivity(
     if (eligible.length === 0) {
       setPerfMap(new Map());
       setEventsMap(new Map());
+      eventsRef.current = new Map();
       return;
     }
 
@@ -556,6 +560,18 @@ export function useAllPositionsActivity(
     for (const f of fetches) {
       f.then(([id, perf, events]) => {
         if (!mountedRef.current) return;
+        // A refresh never shrinks what this position already has on the page
+        // (feeEventsNeverShrink.ts): a failed or empty re-read keeps the earlier
+        // events and the performance figures computed from them.
+        const held = eventsRef.current.get(id);
+        const m = mergeNeverShrink(held, events);
+        if (held && (m.retained > 0 || m.repaired > 0)) {
+          console.warn(`[activity] ${id}: refresh returned less than the page already had; kept ${m.retained} event(s), restored price/date on ${m.repaired}`);
+          eventsRef.current.set(id, m.events);
+          setEventsMap((prev) => new Map(prev).set(id, m.events));
+          return; // perf stays as computed from the fuller set
+        }
+        eventsRef.current.set(id, events);
         setPerfMap((prev) => new Map(prev).set(id, perf));
         setEventsMap((prev) => new Map(prev).set(id, events));
       });

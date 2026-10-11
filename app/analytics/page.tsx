@@ -722,7 +722,7 @@ export default function Analytics() {
       .catch(() => { /* graceful — leave suiPrice at 0 */ });
     return () => { cancelled = true; };
   }, []);
-  const { events: walletLevelFees, isLoading: walletFeesLoading, failedSources: feeFailedSources } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
+  const { events: walletLevelFees, isLoading: walletFeesLoading, failedSources: feeFailedSources, partialSources: feePartialSources } = useWalletLevelFees(positions, suiWalletAddresses, suiPrice, solanaWalletAddresses);
   // Sprint INSTANT-LOAD: the LIVE pipeline result. What the page RENDERS is the
   // `lpPnl` selector below — snapshot values while the pipeline settles, live
   // values once it settles cleanly (stale-while-revalidate).
@@ -1082,11 +1082,16 @@ export default function Analytics() {
   const feesUndatedClaims = feeIncome.undatedClaimCount ?? 0;
   const feesStillLoading = !useSnap && (walletFeesLoading || activityLoading);
   const feesFailed = useSnap ? [] : feeFailedSources;
-  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPendingClaims > 0;
+  // partial — a fee source answered, but said its history lookup failed, is
+  //           unavailable or was capped (the same notice the banner shows).
+  const feesPartial = useSnap ? [] : feePartialSources;
+  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0;
   const feesNote = feesStillLoading
     ? "still loading fee history"
     : feesFailed.length > 0
       ? `incomplete — couldn't load ${feesFailed.join(" · ")}`
+      : feesPartial.length > 0
+        ? `incomplete — ${feesPartial.join(" · ")} not fully read`
       : feesPendingClaims > 0
         ? `incomplete — ${feesPendingClaims} claim${feesPendingClaims === 1 ? "" : "s"} not priced yet`
         : null;

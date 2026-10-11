@@ -963,7 +963,30 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Fee totals, 2026-10-11)** — **Fee totals say when they are not whole,
+- **(Commit A — fee reliability, 2026-10-11, local, not pushed)** — **Three changes after the
+  `b1fae66` B7 failed on an unmarked dip and on undated claims.**
+  **(1) The fee mark reads history notices.** A fee source that answers but reports a failed,
+  unavailable or capped lookup is a partial answer: `useWalletLevelFees` returns
+  `partialSources`, and Fees Collected, Lifetime and Net P&L show `≈` + "… history not fully
+  read". A failed lookup is asked again on the next run.
+  **(2) Fee data on the page never shrinks on a refresh** (`app/lib/feeEventsNeverShrink.ts`,
+  used by `useWalletLevelFees` per source and `useAllPositionsActivity` per position): an event
+  the page already has is kept when a later answer from the same source lacks it, and a claim
+  that comes back without its price or date keeps the earlier one. A whole new copy still wins.
+  A failed request also leaves the earlier events in place (it used to replace them with
+  nothing at the end of the run). Test: `npx tsx scripts/fee-never-shrink-test.ts` (10).
+  **(3) Block times from two sources, stored once** (`app/lib/blockTimestamps.ts`,
+  `resolveBlockTimestamps`): memory → shared store `evm_block_ts_v1:{chain}:{blockHex}` (no
+  expiry) → the route's own source (Alchemy) → the chain's public endpoint → the route's source
+  once more. The public endpoint's reply is accepted only when the block number it returns is
+  the block asked for; only blocks at least an hour old are stored; `CLOSED_POS_CACHE_READONLY=1`
+  stops the writes. HyperEVM has no second source.
+  **Also fixed, found in review:** the failed-source flag from `b1fae66` was keyed by request
+  URL. The URL carries live prices, so the next request could never clear the flag and a single
+  failure would have left `≈ … couldn't load` up for the session. Flags are keyed by source
+  (protocol, chain, wallet) now.
+
+- **`b1fae66`** (Fee totals, 2026-10-11) — **Fee totals say when they are not whole,
   and the by-protocol panel and the lifetime total are read from one merged list.**
   Both open B7 readings are traced, from server logs and instrumented loads:
   **(1) Fees Collected 14,186.23 against 14,490.45 was MOMENTUM, not Solana** (the earlier
@@ -997,6 +1020,28 @@ shorthand.
   for distant blocks. Against DeFiLlama at the block's own time: median 0.08% apart, three keys
   over 5% (Base pool `0xc5e51044…`, 2024-11-15, stored 0.909 against 1.057). CoinGecko keys
   against DeFiLlama by id: none over 15%. Nothing deleted.
+
+  **PRODUCTION B7 on `b1fae66` (2026-10-11) — NOT a pass; Sprint 2b not started.** Passed: first
+  row on a returning visit 2.07 / 1.96 / 1.98 s; Capital G/L ≈ −12,687.68 on three devices; Net
+  P&L ties out to the cent with Fees Unclaimed; `≈ … still loading fee history` shows from 6–8 s
+  and clears at 13–20 s; Fees Collected 14,490.31–14,490.36 with no mark once settled; no
+  overflow at 1440 / 390 / 810 px; 0 page errors; harness PASS (−3,524.86, 2,924.13); heavy
+  wallet 10.8 / 5.8 / 6.0 / 5.7 s, 2,500 of 2,616 positions with the cap notices, 3.7 MB; store
+  1,611 → 1,619 (4 prices, 4 heavy-wallet history chunks), Account 1's lists unchanged. The
+  dashboard page shows no lifetime fee total: its only fee figure is Uncollected Fees (live
+  pending fees, 380.35 against analytics' 380.76 a few seconds apart) plus per-row P&L.
+  **Two failures:** (1) on the phone load Fees Collected read 14,322.27 (exactly the Uniswap
+  168.09 lower) from 70 s to 133 s with NO mark, then recovered; not reproduced on a fourth
+  instrumented load, cause not proven (suspect: the Uniswap wallet-wide scan answered 200 with no
+  events during a refresh, which sets a history notice but not the fee mark). (2) The Uniswap
+  claims were undated on every load (panel note "3 claims ($168.09) could not be dated"): the
+  block-time lookup has ONE source (Alchemy), it was throttled all session, and two retries
+  0.4 s and 1.2 s apart do not get through. Disclosed, not fixed.
+  **Checks reported with it:** the ten Momentum fee claims the low loads' logs named sum to
+  304.27 (gap 304.22). Base pool `0xc5e51044…` is EURC/USDC: an archive read at the three stored
+  blocks returns 0.9099 / 0.9097 / 0.9087 USDC per EURC, equal to the stored values, while
+  DeFiLlama has EURC at 1.053 that day — the stored values are the pool's real on-chain price;
+  the POOL stood about 14% off the market. Nothing deleted.
 
 - **`56d06b7`** (Sprint 2a follow-up, 2026-10-11) — **A failed ownership read is never "owns
   nothing"; first-row timing measured properly; Solana closed route held to one 60 s budget.**
@@ -3050,7 +3095,9 @@ with similar position shapes. Never wallet-specific framing.
   that Production has (`HYPEREVM_ARCHIVE_RPC`, `SUI_RPC_URL`), so code runs down fallback paths
   there that production never takes. Two consequences: (1) **an immutable cache must never be
   filled from a fallback endpoint** — if the designated source is not configured, skip the tier,
-  do not substitute another endpoint and store its answer; (2) after any preview or local test
+  do not substitute another endpoint and store its answer. The one exception is an answer that
+  proves itself: a block timestamp is accepted from a second endpoint only when the reply names
+  the block that was asked for (`blockTimestamps.ts`); (2) after any preview or local test
   run, compare the store's key counts per prefix before and after, and explain every new key.
 
 - **(g) A total that depends on a pending or partial source shows `≈` and says why; a total

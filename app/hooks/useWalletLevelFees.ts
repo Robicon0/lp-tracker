@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { ActivityEvent } from "./useAllPositionsActivity";
-import { applyTruncationNotices, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
+import { applyTruncationNotices, isScanInProgress, isLookupFailureReason, type RouteTruncation } from "../lib/enumerationTruncation";
+import { mergeNeverShrink } from "../lib/feeEventsNeverShrink";
 // Wallet-wide fee scans start after the first open-position row has painted.
 import { whenFirstRowsPainted } from "../lib/firstRowsGate";
 
@@ -190,13 +191,43 @@ export function useWalletLevelFees(
   // Orca/Solana and deduped by (protocol, txHash, amount0, amount1) against the
   // per-position OPEN Orca fees — so closed and open fees never double-count.
   solanaWalletAddresses?: string[],
-): { events: TaggedFeeEvent[]; isLoading: boolean; failedSources: string[] } {
+): { events: TaggedFeeEvent[]; isLoading: boolean; failedSources: string[]; partialSources: string[] } {
   const [events, setEvents] = useState<TaggedFeeEvent[]>([]);
-  // Fee sources whose request FAILED (non-200 or network). Their fees are
-  // missing, not zero: the page marks every fee total `≈` and names them.
-  // Keyed by URL so a later success of the same request clears it.
-  const failedUrlRef = useRef<Map<string, string>>(new Map());
+  // Per-SOURCE state (a source = protocol + chain + wallet, NOT the request
+  // URL: the URL carries live prices and changes on every refresh, so a flag
+  // keyed by URL could never be cleared by the next request).
+  //   failed  — the request failed (non-200 or network): fees missing, not zero.
+  //   partial — the source answered but said its history lookup failed, is
+  //             unavailable or was capped: the answer is not the whole history.
+  //   lastGood — what the source last returned. A refresh never shrinks it
+  //             (feeEventsNeverShrink.ts): an empty or shorter answer keeps the
+  //             events already on the page.
+  const failedSrcRef = useRef<Map<string, string>>(new Map());
+  const partialSrcRef = useRef<Map<string, string>>(new Map());
+  const lastGoodRef = useRef<Map<string, TaggedFeeEvent[]>>(new Map());
   const [failedSources, setFailedSources] = useState<string[]>([]);
+  const [partialSources, setPartialSources] = useState<string[]>([]);
+  const keepNeverShrink = (sourceKey: string, fresh: TaggedFeeEvent[] | null): TaggedFeeEvent[] => {
+    const prev = lastGoodRef.current.get(sourceKey);
+    if (fresh == null) return prev ?? []; // failed request: what the source last returned stays
+    if (!prev || prev.length === 0) { lastGoodRef.current.set(sourceKey, fresh); return fresh; }
+    const tag = fresh[0] ?? prev[0];
+    const m = mergeNeverShrink(prev.map((t) => t.event), fresh.map((t) => t.event));
+    if (m.retained > 0 || m.repaired > 0) {
+      console.warn(`[wallet-fees] ${sourceKey}: refresh returned less than the page already had; kept ${m.retained} event(s), restored price/date on ${m.repaired}`);
+    }
+    // Events keep the tag of the copy they came from where known; a source has one protocol/chain.
+    const byEvent = new Map<ActivityEvent, TaggedFeeEvent>();
+    for (const t of prev) byEvent.set(t.event, t);
+    for (const t of fresh) byEvent.set(t.event, t);
+    const out = m.events.map((e) => byEvent.get(e) ?? { event: e, protocol: tag.protocol, chain: tag.chain });
+    lastGoodRef.current.set(sourceKey, out);
+    return out;
+  };
+  const notePartial = (sourceKey: string, label: string, truncated: RouteTruncation[] | undefined | null) => {
+    const short = !!truncated && truncated.some((t) => isLookupFailureReason(t.reason) && !isScanInProgress([t]));
+    if (short) partialSrcRef.current.set(sourceKey, label); else partialSrcRef.current.delete(sourceKey);
+  };
   const [isLoading, setIsLoading] = useState(false);
   const fetchedKeyRef = useRef<string>("");
   // Sprint PERFORMANCE: per-URL result/in-flight dedup. Positions now STREAM in
@@ -446,6 +477,7 @@ export function useWalletLevelFees(
     const dedupFetch = (url: string, protocol: string, chain: string, account?: string): Promise<TaggedFeeEvent[]> => {
       const hit = urlCacheRef.current.get(url);
       if (hit) return hit;
+      const sourceKey = `${protocol}|${chain}|${(account ?? url.split("?")[0]).toLowerCase()}`;
       const p = whenFirstRowsPainted().then(() => fetch(url))
         // `failed` marks a non-OK response. It must NOT reach
         // applyTruncationNotices: passing "no truncated field" there CLEARS the
@@ -454,27 +486,35 @@ export function useWalletLevelFees(
           ? (r.json() as Promise<RawActivityResponse & { truncated?: RouteTruncation[]; failed?: boolean }>)
           : ({ events: [], failed: true } as RawActivityResponse & { truncated?: RouteTruncation[]; failed?: boolean })))
         .then((j) => {
+          if (j.failed) {
+            // Named, asked again next run, and the events already on the page stay.
+            failedSrcRef.current.set(sourceKey, protocol);
+            urlCacheRef.current.delete(url);
+            return keepNeverShrink(sourceKey, null);
+          }
+          failedSrcRef.current.delete(sourceKey);
+          const truncated = (j as { truncated?: RouteTruncation[] }).truncated;
           // Queue item C Phase 1 — a wallet-scope scan that hit its id cap
           // computed Capital G/L and Fee Income over a PARTIAL set of the
           // wallet's ever-owned positions. Disclosed under a source label
           // distinct from the positions fetchers', so the banner says the
           // shortfall is in the HISTORY scan, not in the position list.
-          if (j.failed) { failedUrlRef.current.set(url, protocol); urlCacheRef.current.delete(url); }
-          else failedUrlRef.current.delete(url);
-          if (account && !j.failed) {
-            const truncated = (j as { truncated?: RouteTruncation[] }).truncated;
-            applyTruncationNotices(`${protocol} history scan`, account, truncated);
-            // A resumable scan that is still reading: show what it has, and ask
-            // again shortly (the answer is not kept as this URL's final result).
-            if (isScanInProgress(truncated)) { urlCacheRef.current.delete(url); continueRef.current = true; }
-          }
-          return (j.events ?? []).map((e) => ({ event: e, protocol, chain }));
+          if (account) applyTruncationNotices(`${protocol} history scan`, account, truncated);
+          // A history lookup that failed or was capped makes this answer a
+          // partial one: the fee totals are marked (rule (g)), and a failed
+          // lookup is asked again next run instead of being kept for the session.
+          notePartial(sourceKey, `${protocol} history`, truncated);
+          if (truncated?.some((t) => t.reason === "lookup-failed")) urlCacheRef.current.delete(url);
+          // A resumable scan that is still reading: show what it has, and ask
+          // again shortly (the answer is not kept as this URL's final result).
+          if (isScanInProgress(truncated)) { urlCacheRef.current.delete(url); continueRef.current = true; }
+          return keepNeverShrink(sourceKey, (j.events ?? []).map((e) => ({ event: e, protocol, chain })));
         })
         .catch((err) => {
           console.error(`[wallet-fees ${protocol.toLowerCase()}] fetch failed:`, err);
-          failedUrlRef.current.set(url, protocol);
+          failedSrcRef.current.set(sourceKey, protocol);
           urlCacheRef.current.delete(url);
-          return [] as TaggedFeeEvent[];
+          return keepNeverShrink(sourceKey, null);
         });
       urlCacheRef.current.set(url, p);
       return p;
@@ -602,12 +642,15 @@ export function useWalletLevelFees(
       const solUrl = `/api/solana-closed-positions?account=${encodeURIComponent(acct)}`;
       const cached = urlCacheRef.current.get(solUrl);
       if (cached) { fetches.push(cached); continue; }
+      const solKey = `solana-closed|${acct.toLowerCase()}`;
       const p = whenFirstRowsPainted().then(() => fetch(solUrl))
         .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[]; failed?: boolean }>) : { positions: [], failed: true }))
         .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[]; failed?: boolean }) => {
-          // A non-200 is a failed source, not "no closed positions": named, and asked again next run.
-          if (j.failed) { failedUrlRef.current.set(solUrl, "Solana closed history"); urlCacheRef.current.delete(solUrl); }
-          else failedUrlRef.current.delete(solUrl);
+          // A non-200 is a failed source, not "no closed positions": named, asked
+          // again next run, and the events already on the page stay.
+          if (j.failed) { failedSrcRef.current.set(solKey, "Solana closed history"); urlCacheRef.current.delete(solUrl); return keepNeverShrink(solKey, null); }
+          failedSrcRef.current.delete(solKey);
+          notePartial(solKey, "Solana closed history", j.truncated);
           if (isScanInProgress(j.truncated)) { urlCacheRef.current.delete(solUrl); continueRef.current = true; }
           const out: TaggedFeeEvent[] = [];
           for (const pos of j.positions ?? []) {
@@ -621,13 +664,13 @@ export function useWalletLevelFees(
               out.push({ event: e, protocol, chain: "Solana" });
             }
           }
-          return out;
+          return keepNeverShrink(solKey, out);
         })
         .catch((err) => {
           console.error("[wallet-fees orca-closed] fetch failed:", err);
-          failedUrlRef.current.set(solUrl, "Solana closed history");
+          failedSrcRef.current.set(solKey, "Solana closed history");
           urlCacheRef.current.delete(solUrl);
-          return [] as TaggedFeeEvent[];
+          return keepNeverShrink(solKey, null);
         });
       urlCacheRef.current.set(solUrl, p);
       fetches.push(p);
@@ -658,7 +701,8 @@ export function useWalletLevelFees(
     Promise.all(fetches).then(() => {
       if (superseded()) return;
       setEvents([...acc]);
-      setFailedSources([...new Set(failedUrlRef.current.values())].sort());
+      setFailedSources([...new Set(failedSrcRef.current.values())].sort());
+      setPartialSources([...new Set(partialSrcRef.current.values())].sort());
       // A history scan said it is still reading: run again in a moment. Settled
       // URLs are served from the per-URL cache, so only the unfinished scans are
       // asked again. Bounded, so a history that cannot finish stops asking.
@@ -676,5 +720,5 @@ export function useWalletLevelFees(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions, suiWalletAddresses, suiPrice, solanaWalletAddresses, continueTick]);
 
-  return { events, isLoading, failedSources };
+  return { events, isLoading, failedSources, partialSources };
 }

@@ -1,0 +1,30 @@
+// npx tsx scripts/fee-never-shrink-test.ts
+import { mergeNeverShrink, type NeverShrinkEvent } from '../app/lib/feeEventsNeverShrink';
+let pass = 0, fail = 0;
+const ok = (name: string, cond: boolean) => { if (cond) pass++; else { fail++; console.log('FAIL', name); } };
+const ev = (tx: string, usd: number | null, ts = 1700000000, li?: number): NeverShrinkEvent => ({ type: 'fee_claim', timestamp: ts, amount0: 1, amount1: 2, usdAtTime: usd, txHash: tx, ...(li != null ? { logIndex: li } : {}) });
+const sum = (a: NeverShrinkEvent[]) => a.reduce((s, e) => s + (e.usdAtTime ?? 0), 0);
+
+let r = mergeNeverShrink(undefined, [ev('a', 10)]);
+ok('first answer is taken as is', r.events.length === 1 && r.retained === 0);
+r = mergeNeverShrink([ev('a', 10), ev('b', 20)], []);
+ok('an empty refresh keeps everything', r.events.length === 2 && r.retained === 2 && sum(r.events) === 30);
+r = mergeNeverShrink([ev('a', 10), ev('b', 20)], [ev('a', 10)]);
+ok('a shorter refresh keeps the missing claim', r.events.length === 2 && r.retained === 1 && sum(r.events) === 30);
+r = mergeNeverShrink([ev('a', 10)], [ev('a', null)]);
+ok('a claim that lost its price keeps the earlier price', r.repaired === 1 && r.events[0].usdAtTime === 10);
+r = mergeNeverShrink([ev('a', 10, 1700000000)], [ev('a', 10, 0)]);
+ok('a claim that lost its date keeps the earlier date', r.repaired === 1 && r.events[0].timestamp === 1700000000);
+r = mergeNeverShrink([ev('a', 10)], [ev('a', 12)]);
+ok('a whole new copy wins (a real re-pricing is taken)', r.events[0].usdAtTime === 12 && r.repaired === 0 && r.retained === 0);
+r = mergeNeverShrink([ev('a', 10)], [ev('a', 10), ev('c', 5)]);
+ok('new claims are added', r.events.length === 2 && sum(r.events) === 15);
+r = mergeNeverShrink([ev('t', 10, 1700000000, 3), ev('t', 20, 1700000000, 4)], [ev('t', 10, 1700000000, 3)]);
+ok('two claims in one transaction are told apart by log index', r.events.length === 2 && r.retained === 1);
+r = mergeNeverShrink([ev('a', null)], [ev('a', null)]);
+ok('nothing is invented for a claim that never had a price', r.events[0].usdAtTime === null && r.repaired === 0);
+const dep: NeverShrinkEvent = { type: 'deposit', timestamp: 1, amount0: 1, amount1: 2, usdAtTime: 5, txHash: 'a' };
+r = mergeNeverShrink([dep], [ev('a', 10)]);
+ok('a deposit and a claim in one transaction are different events', r.events.length === 2);
+console.log(`${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
