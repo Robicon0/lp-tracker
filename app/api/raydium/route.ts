@@ -4,6 +4,7 @@ import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { PublicKey } from '@solana/web3.js';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { resolveToken } from '../../lib/tokenResolver';
+import { POOL_STATS_UNAVAILABLE, type RouteTruncation } from '../../lib/enumerationTruncation';
 
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const SOLANA_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`;
@@ -295,24 +296,113 @@ interface RaydiumPoolStats {
   tvl: number;        // USD
 }
 
-// Fetch per-pool APY + TVL from Raydium's own API (keyed by pool id)
-async function fetchRaydiumPoolStats(): Promise<Record<string, RaydiumPoolStats>> {
+// Fee APR + TVL for the wallet's OWN pools, asked for by pool id.
+//
+// This used to download Raydium's whole pool list (`/v2/ammV3/ammPools`):
+// 234.7 MB of JSON, 194,980 pools, for two numbers per pool. One parse peaks
+// near 1.2 GB; the function instance was killed for running out of memory, and
+// every wallet with a Raydium position got HTTP 500 instead of its positions
+// (measured 2026-10-12; first logged 2026-08-29). The by-id endpoint answers
+// about 2.4 KB per pool with the same two fields in the same units.
+//
+// Pool statistics are decoration: a failed lookup NEVER fails the route. The
+// positions are returned without a fee APR and the response says so (`failed`).
+const RAYDIUM_POOL_INFO_URL = 'https://api-v3.raydium.io/pools/info/ids';
+const POOL_IDS_PER_REQUEST = 50;          // ids per request (URL length, bounded reply)
+const POOL_STATS_TIMEOUT_MS = 8_000;
+const POOL_STATS_TTL_MS = 5 * 60_000;     // same freshness the old list had (revalidate: 300)
+const POOL_STATS_MAX_REPLY_CHARS = 2_000_000; // 50 pools is about 120 KB; anything far larger is not this reply
+const POOL_STATS_CACHE_MAX = 2_000;
+
+const poolStatsCache = new Map<string, { stats: RaydiumPoolStats | null; expiresAt: number }>();
+const poolStatsInFlight = new Map<string, Promise<boolean>>();
+
+// One request for up to POOL_IDS_PER_REQUEST ids. Resolves true when the reply
+// was read (every asked id is then cached, with null for a pool the API does not
+// list), false when it could not be read (nothing cached, asked again next time).
+async function requestPoolStats(ids: string[]): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), POOL_STATS_TIMEOUT_MS);
   try {
-    const res = await fetch('https://api.raydium.io/v2/ammV3/ammPools', { next: { revalidate: 300 } });
-    const data = await res.json();
-    const stats: Record<string, RaydiumPoolStats> = {};
-    for (const pool of data.data || []) {
-      if (pool.id && pool.week?.feeApr != null && pool.tvl != null) {
-        stats[pool.id] = { feeAprWeek: pool.week.feeApr, tvl: pool.tvl };
+    const res = await fetch(`${RAYDIUM_POOL_INFO_URL}?ids=${ids.join(',')}`, { cache: 'no-store', signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    if (text.length > POOL_STATS_MAX_REPLY_CHARS) throw new Error(`reply too large (${text.length} chars)`);
+    const json = JSON.parse(text) as { success?: boolean; data?: Array<{ id?: string; tvl?: number; week?: { feeApr?: number } } | null> };
+    if (!json.success || !Array.isArray(json.data)) throw new Error('unexpected reply');
+    const found = new Map<string, RaydiumPoolStats>();
+    for (const pool of json.data) {
+      if (pool?.id && typeof pool.tvl === 'number' && typeof pool.week?.feeApr === 'number') {
+        found.set(pool.id, { feeAprWeek: pool.week.feeApr, tvl: pool.tvl });
       }
     }
-    return stats;
-  } catch {
-    return {};
+    const expiresAt = Date.now() + POOL_STATS_TTL_MS;
+    for (const id of ids) poolStatsCache.set(id, { stats: found.get(id) ?? null, expiresAt });
+    while (poolStatsCache.size > POOL_STATS_CACHE_MAX) {
+      const oldest = poolStatsCache.keys().next().value;
+      if (oldest === undefined) break;
+      poolStatsCache.delete(oldest);
+    }
+    return true;
+  } catch (error) {
+    console.error(`[Raydium] pool statistics could not be read for ${ids.length} pool(s):`, String(error));
+    return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
+async function fetchRaydiumPoolStats(poolIds: string[]): Promise<{ stats: Record<string, RaydiumPoolStats>; failed: boolean }> {
+  const now = Date.now();
+  const need = poolIds.filter((id) => { const hit = poolStatsCache.get(id); return !hit || hit.expiresAt <= now; });
+  // A pool already being asked for by another request is awaited, not asked for again.
+  const waits = new Set<Promise<boolean>>();
+  const ask: string[] = [];
+  for (const id of need) {
+    const pending = poolStatsInFlight.get(id);
+    if (pending) waits.add(pending); else ask.push(id);
+  }
+  for (let i = 0; i < ask.length; i += POOL_IDS_PER_REQUEST) {
+    const batch = ask.slice(i, i + POOL_IDS_PER_REQUEST);
+    const p = requestPoolStats(batch).finally(() => { for (const id of batch) poolStatsInFlight.delete(id); });
+    for (const id of batch) poolStatsInFlight.set(id, p);
+    waits.add(p);
+  }
+  const answers = await Promise.all(waits);
+  const stats: Record<string, RaydiumPoolStats> = {};
+  for (const id of poolIds) {
+    const hit = poolStatsCache.get(id);
+    if (hit?.stats) stats[id] = hit.stats;
+  }
+  return { stats, failed: answers.some((ok) => !ok) };
+}
+
+// The page asks for this route from more than one place at once and retries a
+// failure. Identical requests that overlap share ONE run; nothing is kept after
+// it answers, so position values are never served stale.
+const inFlightRequests = new Map<string, Promise<{ status: number; body: unknown }>>();
+
 export async function GET(request: Request) {
+  const account = new URL(request.url).searchParams.get('account') ?? '';
+  const pending = inFlightRequests.get(account);
+  if (pending) {
+    const shared = await pending;
+    return NextResponse.json(shared.body, { status: shared.status });
+  }
+  const run = (async () => {
+    const res = await handleGet(request);
+    return { status: res.status, body: await res.clone().json().catch(() => null) };
+  })();
+  inFlightRequests.set(account, run);
+  try {
+    const result = await run;
+    return NextResponse.json(result.body, { status: result.status });
+  } finally {
+    inFlightRequests.delete(account);
+  }
+}
+
+async function handleGet(request: Request): Promise<Response> {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
 
@@ -358,11 +448,12 @@ export async function GET(request: Request) {
     const unknownMints = [...allMints].filter((m) => !TOKENS[m]);
 
     // 4. Fetch prices + Raydium pool stats + DAS token info in parallel
-    const [prices, raydiumPoolStats, dasTokens] = await Promise.all([
+    const [prices, poolStatsResult, dasTokens] = await Promise.all([
       fetchPrices(),
-      fetchRaydiumPoolStats(),
+      fetchRaydiumPoolStats(uniquePools),
       fetchDasTokenInfo(unknownMints),
     ]);
+    const raydiumPoolStats = poolStatsResult.stats;
 
     // Merge DAS prices for tokens not in TOKENS
     const allPrices: Record<string, number> = { ...prices };
@@ -481,7 +572,12 @@ export async function GET(request: Request) {
 
     const unreadable = readGuard.response();
     if (unreadable) return unreadable;
-    return NextResponse.json({ positions, count: positions.length, account });
+    // Pool statistics that could not be read are reported, never silently shown
+    // as "no APR". Not a `lookup-*` reason: no position, value or fee is missing.
+    const truncated: RouteTruncation[] = poolStatsResult.failed
+      ? [{ scope: 'pool statistics', cap: 0, returned: 0, knownTotal: null, reason: POOL_STATS_UNAVAILABLE }]
+      : [];
+    return NextResponse.json({ positions, count: positions.length, account, ...(truncated.length > 0 ? { truncated } : {}) });
   } catch (error) {
     if (error instanceof PositionListReadError) {
       logPositionListReadFailure('Raydium', account, error);

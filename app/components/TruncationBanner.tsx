@@ -1,7 +1,7 @@
 "use client";
 
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
-import { describeTruncation, isLookupFailureReason } from "../lib/enumerationTruncation";
+import { describeTruncation, isInfoReason, isLookupFailureReason } from "../lib/enumerationTruncation";
 
 /**
  * Renders the enumeration-truncation notice (queue item C, Phase 1).
@@ -17,8 +17,23 @@ import { describeTruncation, isLookupFailureReason } from "../lib/enumerationTru
  * itself as a complete one.
  */
 export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
-  const notices = useTruncationNotices();
-  if (notices.length === 0) return null;
+  const all = useTruncationNotices();
+  // Information lines (pool statistics not loaded) are not "something is
+  // missing from the totals" and must not borrow that heading.
+  const info = all.filter((n) => isInfoReason(n.reason));
+  const notices = all.filter((n) => !isInfoReason(n.reason));
+  const infoBlock = info.length === 0 ? null : (
+    <div
+      role="status"
+      data-info-notice
+      style={{ border: "1px solid var(--line)", color: "var(--fg-muted)", padding: "8px 14px", fontSize: 12, lineHeight: 1.6, letterSpacing: "0.03em", ...(notices.length === 0 ? style : { marginTop: 8 }) }}
+    >
+      {info.map((n) => (
+        <div key={`${n.source}|${n.scope}|${n.address}`}>ⓘ {describeTruncation(n)}</div>
+      ))}
+    </div>
+  );
+  if (notices.length === 0) return infoBlock;
 
   // A cap and a failed lookup share this banner but are different events, and
   // the heading must not describe one as the other: "a scan limit was reached"
@@ -43,6 +58,7 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
   );
 
   return (
+    <>
     <div
       role="status"
       style={{
@@ -69,5 +85,7 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
         ))}
       </ul>
     </div>
+    {infoBlock}
+    </>
   );
 }

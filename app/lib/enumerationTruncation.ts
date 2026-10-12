@@ -83,6 +83,18 @@ export const LOOKUP_IN_PROGRESS = 'lookup-in-progress';
  */
 export const LOOKUP_CAPPED = 'lookup-capped';
 
+/**
+ * Pool statistics (fee APR, TVL) could not be read. NOT a `lookup-*` reason and
+ * not a cap: every position, value and fee is present, only the APR is missing.
+ * It is shown as an information line, never under "positions could not be listed".
+ */
+export const POOL_STATS_UNAVAILABLE = 'pool-stats-unavailable';
+
+/** True for a notice that reports missing decoration, not missing positions or money. */
+export function isInfoReason(reason: unknown): boolean {
+  return reason === POOL_STATS_UNAVAILABLE;
+}
+
 export type LookupReason =
   | typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE | typeof LOOKUP_IN_PROGRESS | typeof LOOKUP_CAPPED;
 
@@ -237,6 +249,8 @@ export function describeTruncation(n: TruncationNotice): string {
       return `${where}: still reading this wallet's history — more positions and fees will appear as it loads`;
     case LOOKUP_CAPPED:
       return `${where}: this wallet's history is too long to read in full — only its most recent activity is included`;
+    case POOL_STATS_UNAVAILABLE:
+      return `${where}: fee APR and pool TVL couldn't be loaded right now — positions, values and fees are not affected`;
     case 'pool-scan-ceiling':
       return `${where}: this contract can only scan the first ${n.cap} pools — a position staked in a newer pool would not be listed`;
     case 'page-revert-skipped':
