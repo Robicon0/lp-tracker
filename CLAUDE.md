@@ -963,7 +963,47 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Wallet persistence, 2026-10-12, local, not pushed)** — **The
+- **(Production push of `b6e70a1` + `6a86000` + `eb91146`, 2026-10-12)** — **Live on
+  defidesh.com as `dpl_DX3ruFAos5h2GjpY7sRw7hPCZowB` after one rollback and a re-promotion.**
+  **B7, Account 1, production:** Closed (115), 4 open; Total Deposited 27,890.81; Capital G/L
+  ≈ −12,768.74 ("1 position priced from estimates", ProjectX only); Fees Collected 14,490.14 to
+  14,490.30 across loads (only the CETUS reward claims move, they are valued at today's price);
+  Net P&L ties out to the cent with Fees Unclaimed; 0 page errors; returning visit median 2.12 s.
+  `evm_block_ts_v1` went 0 → 95 keys on the first load and did not grow on the second.
+  **The rollback (00:23 UTC) and its cause.** A pasted Solana wallet got HTTP 500 "instance was
+  killed because it ran out of available memory" on `/api/raydium` and
+  `/api/solana-closed-positions`, so production was rolled back to `b1fae66` under the stop rule.
+  The old build then failed the same way: the failure is NOT from this push (first logged
+  2026-08-29). Old and new builds were then compared wallet by wallet (Account 1, a pasted Sui,
+  Solana and EVM wallet, the new build on its own deployment URL): same positions and the same
+  failures on both, so the new build was promoted again at 02:23 UTC and domain auto-assignment
+  is back on (`autoAssignCustomDomains: true`).
+  **Cause of the memory failure (traced, NOT fixed):** `fetchRaydiumPoolStats` in
+  `app/api/raydium/route.ts` downloads Raydium's whole pool list
+  (`api.raydium.io/v2/ammV3/ammPools`: 234.7 MB of JSON, 194,980 pools) for the fee APR of the
+  wallet's own pools. One parse peaks at about 1.2 GB; the function has 2 GB; the page asks for
+  the route more than once at a time. It runs only when the wallet has at least one Raydium
+  position account, so ANY Raydium user gets no Raydium rows; the wallet that showed it has 11
+  token accounts and one Raydium position. The instance kill also takes down whatever else is
+  running on it (that is why the closed-history route failed with it). Account 1 has no Raydium
+  position and returns before that line. See Known limitations.
+  **Pool-context decimals fix.** `sui_pool_ctx_v1:0xa7417f…9a56` (Cetus USDC / USDSUI) held a
+  guessed 9 decimals for USDSUI (6 on chain) and was read by the wallet-wide Cetus fee scan. The
+  one key was deleted with the owner's approval (backup:
+  `~/Documents/defidesh-reports/2026-10-12-deleted-sui-pool-ctx-key.json`); the next read stores
+  the on-chain value.
+  **Testing note:** this Mac goes to idle sleep during long unattended runs (three loads were
+  frozen for minutes and one read an unhydrated page as all zeros). Wrap long measurement runs in
+  `caffeinate -i`, and check `pmset -g log` before trusting a stalled load.
+  **Open, found in the comparison (both builds):** the pasted EVM wallet with 65 closed Aerodrome
+  positions never finishes on analytics: about half of its `/api/aerodrome/activity` requests
+  answer 500 ("chunked scan: first batch 100% error" on the last-resort public endpoint) and the
+  page keeps retrying; totals stay marked `≈ … still loading`. Bluefin reward claims paid in a
+  token that is not a stablecoin, SUI or one of the pool's two tokens (BLUE, stSUI) are never
+  priced ("38 claims not priced yet" on a pasted Sui wallet); the event carries `reward_type` and
+  the route does not read it. Real-extension wallet checks on production are still to run.
+
+- **`eb91146`** (Wallet persistence, 2026-10-12) — **The
   wallet the user chose sticks; another extension can no longer become the EVM identity.**
   Reported on production: the page showed an old EVM address (0x2654…f23c) instead of the wallet
   connected in the extension (0xD99a…4F20). Cause, read from the saved state in the owner's
@@ -990,7 +1030,7 @@ shorthand.
   switches; picking the same wallet again asks it for an account, and what it then offers is up to
   the wallet.
 
-- **(Commit B — Sprint 2b, 2026-10-11, local, not pushed)** — **Orca legs priced at their own
+- **`6a86000`** (Commit B — Sprint 2b, 2026-10-11) — **Orca legs priced at their own
   hour; Sui reads retried; a failed positions source marks the headline.**
   **(1) Orca / Raydium closed legs.** Deposit and withdrawal legs were priced per UTC DAY (the
   first timestamp asked for on a day fixed the price for that day), so a position opened and
@@ -1028,7 +1068,7 @@ shorthand.
   `0xa7417fb5…9a56`, side B (USDSUI), stored 9, on chain 6, written about 33 days ago. The other
   32 entries (22 coin types) match on-chain metadata.
 
-- **(Commit A — fee reliability, 2026-10-11, local, not pushed)** — **Three changes after the
+- **`b6e70a1`** (Commit A — fee reliability, 2026-10-11) — **Three changes after the
   `b1fae66` B7 failed on an unmarked dip and on undated claims.**
   **(1) The fee mark reads history notices.** A fee source that answers but reports a failed,
   unavailable or capped lookup is a partial answer: `useWalletLevelFees` returns
@@ -3324,6 +3364,15 @@ Because the degrade is silent and the var is `type: sensitive` (unreadable), the
 way to verify this path is a forced cold scan — delete the wallet's
 `closed_pos_solana_v1:{protocol}:{wallet}` Redis key and confirm the request takes
 40–120 s rather than returning fast-and-empty.
+
+**Raydium route runs out of memory for any wallet with a Raydium position (open, traced
+2026-10-12, not fixed).** `/api/raydium` downloads Raydium's full pool list (234.7 MB) to read
+the fee APR of the wallet's pools; one parse peaks near 1.2 GB against a 2 GB function, and the
+instance is killed (HTTP 500), which also fails any other request running on that instance. The
+page names Raydium and Solana closed history as not loaded and marks the totals, so nothing is
+shown as complete, but the wallet's Raydium positions, closed Solana positions and their fees
+are missing. Fix proposed, not built: ask Raydium for the wallet's pools by id instead of the
+whole list. Raising function memory does not fix it (two requests at once still exceed 4 GB).
 
 **Suilend APY not showing.** Reserve interest rate fields need parsing.
 AlphaFi and Dolomite APY now working from on-chain data.
