@@ -963,6 +963,56 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`cd45675`** (Raydium memory fix, 2026-10-12, live as `dpl_4h5sTcwfprRQUdJFR15VzGiSopK1`) —
+  **`/api/raydium` asks for the wallet's own pools by id instead of downloading the whole list.**
+  Cause, corrected: ONE request was enough. `fetchRaydiumPoolStats` downloaded Raydium's full
+  pool list (234.7 MB, 194,980 pools) for two numbers per pool; the instance ran out of memory
+  and was killed, and the page's three automatic retries died the same way, one after another
+  (the "four requests" were one request plus three retries, never concurrent). Any wallet with a
+  Raydium position got HTTP 500; the closed-history request on the same instance died with it.
+  **Fix:** `api-v3.raydium.io/pools/info/ids`, 50 ids per request, 8 s timeout, reply size guard,
+  5-minute per-pool memory, one shared lookup per pool; overlapping identical requests for a
+  wallet share one run (nothing kept after it answers, so values are never served stale). A
+  failed lookup never fails the route: positions come back with `apy: 0` and
+  `truncated: [pool-stats-unavailable]`, shown as an information line
+  (`isInfoReason` in `enumerationTruncation.ts`; NOT a `lookup-*` reason, marks no money total).
+  **Local:** peak server memory 118 MB under four concurrent requests (141 MB for the
+  closed-history route); endpoint blocked → position shown, APR N/A, information line.
+  **Production B7:** Solana wallet 2rr3SF…JTpn, three loads: no 500s, Out of Range (1) (the
+  Raydium SOL/USDC position, $20.94), Closed (216), Fees ≈ 275.98 ("2 claims not priced yet"),
+  Capital G/L ≈ −355.16, first row 8.1 / 11.3 / 5.5 s; no "out of available memory" in the log.
+  Chain check (program log lines, 2,287 transactions): Orca 215 opened / 215 closed, 183 fee
+  collections; Raydium 3 opened / 2 closed; all equal to DefiDesh, Raydium token amounts to the
+  unit. Account 1: 4 open, Closed (115), Deposited 27,890.81, Capital G/L ≈ −12,768.74, Fees
+  14,486.90, Net ties out; claim by claim against the 10-12 list only CETUS reward claims differ,
+  only in price (0.02669 → 0.02517). Sui 0x15ac…2eff: Closed (40), 38 claims not priced, Capital
+  G/L ≈ −2,140.09. Store 2,850 → 2,852 keys (the Solana wallet's Raydium list and its meta);
+  its Orca list went 126 → 215, complete.
+  **Five findings from this work, none fixed:**
+  **(1) A closed position with no priced event is hidden.** The Solana wallet's 217th closed
+  position (Orca BXyR / USDC, 5 events, no price for BXyR) is in the route's answer with
+  `pendingEventCount: 5`; the page leaves it out of the Closed tab and the totals and names it
+  nowhere. Traced separately (report of 2026-10-13).
+  **(2) Aerodrome history fails for CONTRACT wallets under load.** Pasted wallet 0x844e…7c97 (66
+  positions): about half of its `/api/aerodrome/activity` requests answer 500. Upstream cause:
+  Alchemy 429 on `alchemy_getAssetTransfers`. It is per wallet scan, not per position: one 429 in
+  step 2 of `getWalletNftHistory` sets `receiptsComplete = false`, every position is then
+  unverified for that run, and each request walks four dead fallback endpoints for 25–36 s before
+  the 500. A contract wallet never takes the "unchanged" fast path, so EVERY request on EVERY
+  instance rescans with up to 11 transfer queries (Account 1, an ordinary wallet, reuses its
+  stored scan). Counts for comparison: 132 failed requests in 240 s on 10-12, 107 on `cd45675`;
+  84 Alchemy 429 log lines in that window. Client retries are bounded (12 rounds, about 320 s).
+  **(3) A zero-liquidity Sui position whose object still exists is valued at today's prices.**
+  Cetus DEEP / SUI `0xd7eb48ed…` on 0x15ac…2eff: its 2025-03 deposit and 2026-02 withdrawal have
+  no historical price, are marked `current-spot-substituted`, and move Capital G/L by cents on
+  every load ("incomplete — pricing 1 position…" never clears).
+  **(4) The DefiLlama pools list (11.6 MB, 2.3 MB compressed) is downloaded on every positions
+  request by 7 routes** (aerodrome, uniswap/v3, velodrome, pancakeswap, hyperswap, cetus,
+  pool-stats). Queue item b.
+  **(5) Orca fee APR is silently absent.** `fetchOrcaPoolStats` fetches
+  `api.mainnet.orca.so/v1/whirlpool/list`; that host name does not resolve (checked from the dev
+  machine) and the failure is swallowed (`catch → {}`).
+
 - **(Production push of `b6e70a1` + `6a86000` + `eb91146`, 2026-10-12)** — **Live on
   defidesh.com as `dpl_DX3ruFAos5h2GjpY7sRw7hPCZowB` after one rollback and a re-promotion.**
   **B7, Account 1, production:** Closed (115), 4 open; Total Deposited 27,890.81; Capital G/L
@@ -981,8 +1031,8 @@ shorthand.
   **Cause of the memory failure (traced, NOT fixed):** `fetchRaydiumPoolStats` in
   `app/api/raydium/route.ts` downloads Raydium's whole pool list
   (`api.raydium.io/v2/ammV3/ammPools`: 234.7 MB of JSON, 194,980 pools) for the fee APR of the
-  wallet's own pools. One parse peaks at about 1.2 GB; the function has 2 GB; the page asks for
-  the route more than once at a time. It runs only when the wallet has at least one Raydium
+  wallet's own pools. One parse peaks at about 1.2 GB in plain Node; the function has 2 GB. (Fixed
+  in `cd45675`; one request was enough, see that entry.) It runs only when the wallet has at least one Raydium
   position account, so ANY Raydium user gets no Raydium rows; the wallet that showed it has 11
   token accounts and one Raydium position. The instance kill also takes down whatever else is
   running on it (that is why the closed-history route failed with it). Account 1 has no Raydium
@@ -3365,14 +3415,13 @@ way to verify this path is a forced cold scan — delete the wallet's
 `closed_pos_solana_v1:{protocol}:{wallet}` Redis key and confirm the request takes
 40–120 s rather than returning fast-and-empty.
 
-**Raydium route runs out of memory for any wallet with a Raydium position (open, traced
-2026-10-12, not fixed).** `/api/raydium` downloads Raydium's full pool list (234.7 MB) to read
-the fee APR of the wallet's pools; one parse peaks near 1.2 GB against a 2 GB function, and the
-instance is killed (HTTP 500), which also fails any other request running on that instance. The
-page names Raydium and Solana closed history as not loaded and marks the totals, so nothing is
-shown as complete, but the wallet's Raydium positions, closed Solana positions and their fees
-are missing. Fix proposed, not built: ask Raydium for the wallet's pools by id instead of the
-whole list. Raising function memory does not fix it (two requests at once still exceed 4 GB).
+**Raydium route out of memory — RESOLVED `cd45675` (2026-10-12).** See Recent fixes.
+
+**Open, found 2026-10-12 (details in the `cd45675` entry):** a closed position with no priced
+event is hidden from the Closed tab and totals with no notice; Aerodrome history answers 500 for
+contract wallets with many positions (Alchemy 429 on the transfer index); a zero-liquidity Sui
+position object is valued at today's prices; Orca fee APR is silently absent (dead pool-list
+host); Bluefin and non-CETUS Cetus reward claims in a third token are never priced.
 
 **Suilend APY not showing.** Reserve interest rate fields need parsing.
 AlphaFi and Dolomite APY now working from on-chain data.
