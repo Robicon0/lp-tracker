@@ -26,7 +26,12 @@ export interface ActivityEventForPnL {
   // Set ONLY when the route actually substituted. Absent = priced on its own
   // historical basis (sqrtPriceX96 at the event block, tick-derived, or
   // claim-date historical).
-  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
+  //
+  // 'pool-implied' is NOT a substitute: the leg is valued at the pool's own
+  // price at its instruction, and the token with no USD price of its own is
+  // priced through the pool's other token. It is the standing basis for a leg;
+  // the mark only says how the USD figure was reached ("priced from pool").
+  priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate' | 'pool-implied';
 }
 
 export interface PositionPnLInput {
@@ -40,7 +45,7 @@ export interface PositionPnLInput {
 
 export type PositionPnLStatus =
   | { ok: true; data: PositionPnLData }
-  | { ok: false; reason: 'no_deposits' | 'missing_deposit_prices' | 'missing_current_prices' | 'value_overflow' };
+  | { ok: false; reason: 'no_deposits' | 'missing_deposit_prices' | 'missing_withdrawal_prices' | 'missing_current_prices' | 'value_overflow' };
 
 // Sanity ceiling for any single position's USD-denominated metric.
 // $10M per position is comfortably above any realistic retail LP — anything
@@ -109,6 +114,8 @@ export interface PositionPnLData {
    * and NOT retried — the estimate does not change on a re-fetch.
    */
   estimatedBasisEventCount?: number;
+  /** Deposit/withdrawal events valued through the pool price ('pool-implied'). Display only. */
+  poolImpliedEventCount?: number;
 }
 
 export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
@@ -219,6 +226,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
   let pendingClaimCount = 0;
   let spotFallbackEventCount = 0;
   let estimatedBasisEventCount = 0;
+  let poolImpliedEventCount = 0;
   for (const e of sorted) {
     if (e.type !== 'fee_claim' && e.type !== 'reward_claim') continue;
     if (e.usdAtTime != null) {
@@ -265,6 +273,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     if (e.type !== 'deposit' && e.type !== 'withdrawal') continue;
     if (e.priceBasis === 'current-spot-substituted') spotFallbackEventCount += 1;
     else if (e.priceBasis === 'tick-derived-estimate') estimatedBasisEventCount += 1;
+    else if (e.priceBasis === 'pool-implied') poolImpliedEventCount += 1;
   }
 
   // Calculation detail fields
@@ -295,6 +304,7 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
     pendingClaimCount,
     spotFallbackEventCount,
     estimatedBasisEventCount,
+    poolImpliedEventCount,
   };
 
   // ── IL formula (concentrated liquidity, exact) ────────────────────────
@@ -336,6 +346,13 @@ export function computePositionPnL(input: PositionPnLInput): PositionPnLStatus {
         // Counting it lets the caller mark the position "not finally priced yet"
         // so Capital G/L declares itself incomplete and retries, instead of
         // presenting a spot-derived figure as a settled historical total.
+        //
+        // With no current price either, the sum below would be 0 and the
+        // position would read as a loss the size of its deposit. That is not a
+        // valuation: the position is reported unpriced instead.
+        if ((w.amount0 > 0 && !(price0 > 0)) || (w.amount1 > 0 && !(price1 > 0))) {
+          return { ok: false, reason: 'missing_withdrawal_prices' };
+        }
         spotFallbackEventCount += 1;
         closingValue += w.amount0 * price0 + w.amount1 * price1;
       }

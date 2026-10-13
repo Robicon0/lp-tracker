@@ -90,6 +90,49 @@ export const LOOKUP_CAPPED = 'lookup-capped';
  */
 export const POOL_STATS_UNAVAILABLE = 'pool-stats-unavailable';
 
+/**
+ * Positions a scan KNEW about and left out (standing rule (i): no position and
+ * no fee scan result is dropped silently). `returned` is how many were left
+ * out, `knownTotal` how many the scan covered, and the suffix says why. The
+ * `lookup-` prefix puts it in the same class as a failed lookup, so every total
+ * that depends on the scan shows `≈`.
+ */
+export const LOOKUP_EXCLUDED_PREFIX = 'lookup-excluded:';
+export type ExcludedCause = 'pool-unresolved' | 'position-error' | 'time-budget' | 'no-archive' | 'holder-check';
+const EXCLUDED_CAUSE_TEXT: Record<ExcludedCause, string> = {
+  'pool-unresolved': "the position's pool could not be identified",
+  'position-error': 'its history request failed',
+  'time-budget': 'the scan reached its time limit first',
+  'no-archive': 'no history source is configured for this chain',
+  'holder-check': 'the check of who holds it now failed',
+};
+
+function excludedCauseOf(reason: string): ExcludedCause | null {
+  if (reason === 'wallet-scope-id-cap') return null; // has its own cap notice
+  if (reason === 'pool-context-unresolved') return 'pool-unresolved';
+  if (reason === 'wallet-scope-time-budget') return 'time-budget';
+  if (reason === 'no-archive-rpc-for-chain') return 'no-archive';
+  return 'position-error';
+}
+
+/** One counted notice per cause for the positions a wallet-wide scan left out. */
+export function excludedPositionNotices(
+  scope: string,
+  excluded: ReadonlyArray<{ reason: string }>,
+  total: number,
+): RouteTruncation[] {
+  const counts = new Map<ExcludedCause, number>();
+  for (const e of excluded) {
+    const cause = excludedCauseOf(e.reason);
+    if (cause) counts.set(cause, (counts.get(cause) ?? 0) + 1);
+  }
+  return [...counts].map(([cause, n]) => excludedNotice(scope, cause, n, total));
+}
+
+export function excludedNotice(scope: string, cause: ExcludedCause, count: number, total: number): RouteTruncation {
+  return { scope, cap: 0, returned: count, knownTotal: total, reason: `${LOOKUP_EXCLUDED_PREFIX}${cause}` };
+}
+
 /** True for a notice that reports missing decoration, not missing positions or money. */
 export function isInfoReason(reason: unknown): boolean {
   return reason === POOL_STATS_UNAVAILABLE;
@@ -237,6 +280,13 @@ export function describeTruncation(n: TruncationNotice): string {
   // Queue item C Phase 3 — the Sugar reasons are not "position caps", and
   // saying so would misdescribe what was missed. Each gets its own wording so
   // the notice states the real limit the user ran into.
+  if (n.reason.startsWith(LOOKUP_EXCLUDED_PREFIX)) {
+    const why = EXCLUDED_CAUSE_TEXT[n.reason.slice(LOOKUP_EXCLUDED_PREFIX.length) as ExcludedCause] ?? 'they could not be read';
+    const of = n.knownTotal != null && n.knownTotal > 0 ? ` of ${n.knownTotal}` : '';
+    const one = n.returned === 1;
+    return `${where}: ${n.returned}${of} position${one ? '' : 's'} left out — ${one ? why : why.replace(/^its /, 'their ').replace("the position's pool", 'their pools').replace('who holds it', 'who holds them')}. ${one ? 'Its' : 'Their'} fees and Capital G/L are not in the totals`;
+  }
+
   switch (n.reason) {
     // Queue item B / ITEM 0i — a FAILED lookup, not a cap. These must be worded
     // as "we could not verify", never as a count, because we do not know the

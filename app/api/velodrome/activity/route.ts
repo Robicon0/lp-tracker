@@ -14,6 +14,7 @@ import { getVerifiedPositionLogs } from '../../../lib/evmAssetTransferHistory';
 import {
   type RouteTruncation,
   lookupFailureNotice,
+  excludedPositionNotices,
   LOOKUP_FAILED,
 } from '../../../lib/enumerationTruncation';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
@@ -356,6 +357,10 @@ async function GET_impl(request: Request) {
           excluded.push({ tokenId: id, reason: String(err).slice(0, 80) });
         }
       }
+
+      // A position left out of the sums above is counted and named by cause
+      // (standing rule (i)); it used to be in `excluded[]` only, which no page reads.
+      scanNotices.push(...excludedPositionNotices('Optimism history scan', excluded, ids.length));
 
       console.log(`[velodrome/activity] positionId=all account=${account} → ${ids.length} tokenIds, ${perPosition.length} resolved, ${excluded.length} excluded`);
 

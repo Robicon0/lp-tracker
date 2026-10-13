@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import type { ActivityEvent } from "./useAllPositionsActivity";
 import { applyTruncationNotices, isScanInProgress, isLookupFailureReason, type RouteTruncation } from "../lib/enumerationTruncation";
+import { classifyReconstructedClosed } from "../lib/closedPositionClassify";
+import type { ActivityEventForPnL } from "../lib/positionPnl";
 import { mergeNeverShrink } from "../lib/feeEventsNeverShrink";
 // Wallet-wide fee scans start after the first open-position row has painted.
 import { whenFirstRowsPainted } from "../lib/firstRowsGate";
@@ -644,8 +646,8 @@ export function useWalletLevelFees(
       if (cached) { fetches.push(cached); continue; }
       const solKey = `solana-closed|${acct.toLowerCase()}`;
       const p = whenFirstRowsPainted().then(() => fetch(solUrl))
-        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[]; failed?: boolean }>) : { positions: [], failed: true }))
-        .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[] }>; truncated?: RouteTruncation[]; failed?: boolean }) => {
+        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[]; pendingEventCount?: number }>; truncated?: RouteTruncation[]; failed?: boolean }>) : { positions: [], failed: true }))
+        .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[]; pendingEventCount?: number }>; truncated?: RouteTruncation[]; failed?: boolean }) => {
           // A non-200 is a failed source, not "no closed positions": named, asked
           // again next run, and the events already on the page stay.
           if (j.failed) { failedSrcRef.current.set(solKey, "Solana closed history"); urlCacheRef.current.delete(solUrl); return keepNeverShrink(solKey, null); }
@@ -657,6 +659,12 @@ export function useWalletLevelFees(
             // Sprint RAYDIUM: tag by the position's protocol (orca | raydium) so
             // Fee Income attributes closed-position fees to the right protocol.
             const protocol = pos.protocol === "raydium" ? "Raydium" : "Orca";
+            // Standing rule (i): a closed position that cannot be valued is in
+            // NO total, its fee claims included. It is a row marked "not priced"
+            // on the page (useLpPnl applies the same test to the same list), and
+            // the fee totals carry `≈` with the count.
+            const verdict = classifyReconstructedClosed({ events: (pos.events ?? []) as ActivityEventForPnL[], pendingEventCount: pos.pendingEventCount });
+            if (verdict.kind !== "priced") continue;
             for (const e of pos.events ?? []) {
               if (e.type !== "fee_claim") continue;
               // A claim with no price yet (Rule 1a) is passed through unvalued: the

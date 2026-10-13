@@ -42,7 +42,11 @@
 //   2. Non-stable side                   → DeFiLlama historical-by-MINT at the
 //      event timestamp (Sprint 1.12) → CoinGecko historical (by the resolver's
 //      cgId) at the event timestamp (Sprint 1.6) → pending.
-//   3. If every source fails → the event stays PENDING (usdAtTime null); it is
+//   3. A deposit or withdrawal leg where ONE token has no historical USD price
+//      and the pool's other token has → the POOL price at the leg's own
+//      instruction (whirlpoolEventPrice.ts), marked `pool-implied`. Orca only.
+//      Fee claims are never valued this way (Rule 1).
+//   4. If every source fails → the event stays PENDING (usdAtTime null); it is
 //      surfaced, never spot-valued (Rule 1a).
 // There is NO current-spot fallback anywhere in this module. All mints are read
 // from ON-CHAIN pool state, never a hardcoded map (invariant i — this is why the
@@ -59,6 +63,7 @@ import { logPrice } from './priceLogger';
 import { rpcUrlFromEnv } from './rpcEnv';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
 import { runResumableScan, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
+import { parseWhirlpoolEvents, poolPriceForLeg, lastTradedSqrtPrice, consistentWithOneSided, usdPricesFromPool } from './whirlpoolEventPrice';
 
 // rpcUrlFromEnv: a malformed value (bare API key) behaves like UNSET → the
 // engine's existing graceful degrade (empty result, stats.complete=false so
@@ -636,6 +641,10 @@ export interface SolanaClosedPosition {
   //                  transiently — the position is valued again on a later load.
   // Fee claims are on the claim-day basis in every case (Rule 1).
   legPriceBasis?: 'exact-time' | 'daily';
+  // Set when the history holds withdrawals or fee claims for this position but
+  // NO deposit: its deposit could not be read, so it cannot be valued. It is
+  // returned (and shown as "history incomplete"), never skipped.
+  historyIncomplete?: true;
 }
 
 /**
@@ -651,7 +660,8 @@ export function closedPositionWeight(p: Pick<SolanaClosedPosition, 'events' | 'l
 const SETTLED_BASIS_WEIGHT = 0.25;
 // Part of the guard's mark: changing it makes every stored list due for ONE
 // re-valuation pass (records already on the new basis are skipped by weight).
-const VALUATION_MARK = 'legs-exact-1';
+// 'legs-pool-1': legs with one unpriced token are tried against the pool price.
+const VALUATION_MARK = 'legs-pool-1';
 
 function isStableMint(mint: string): boolean { return STABLE_MINTS.has(mint.toLowerCase()); }
 
@@ -719,11 +729,89 @@ function valueEvent(ev: SolanaPositionEvent, ctx: PoolContext): EventValue {
   return { usd: null, p0: a?.px ?? null, p1: b?.px ?? null, source: 'pending' };
 }
 
+// ── Pool-implied leg prices (Orca) ───────────────────────────────────────────
+// For a deposit / withdrawal leg where exactly ONE token has a historical USD
+// price: read the leg's transaction, take the pool price at the leg from the
+// program's own events, and price the other token through it. Only such legs
+// cost anything (one transaction read each; a one-sided leg with no swap beside
+// it also reads the pool's last few transactions before it).
+const POOL_HISTORY_LOOKBACK = 20;
+const POOL_IMPLIED_BUDGET_MS = 15_000;
+// A position whose legs could not be derived is not asked again for a while.
+const poolImpliedMiss = new Map<string, number>();
+const POOL_IMPLIED_MISS_MS = 10 * 60_000;
+
+/** √price after the pool's last swap before `signature`, or null when it cannot be established. */
+async function lastSwapSqrtBefore(pool: string, signature: string, stats: ScanStats, giveUpAtMs: number): Promise<number | null> {
+  const page = (await alchemyRpc('getSignaturesForAddress', [pool, { before: signature, limit: POOL_HISTORY_LOOKBACK }], stats)) as SigInfo[] | null;
+  if (!Array.isArray(page)) return null;
+  const sigs = page.filter((x) => !x.err).map((x) => x.signature); // newest first; a failed transaction moves no price
+  if (sigs.length === 0) return null;
+  const txs = await fetchTransactions(sigs, stats, giveUpAtMs);
+  for (const sig of sigs) {
+    const tx = txs.get(sig);
+    // A transaction that could not be read might hold the swap: stop, do not skip it.
+    if (!tx?.meta) return null;
+    const logs = tx.meta.logMessages ?? [];
+    const sqrt = lastTradedSqrtPrice(logs, pool);
+    if (sqrt != null) return sqrt;
+    if (logs.some((l) => l.includes('Log truncated'))) return null;
+  }
+  return null; // no swap in the last POOL_HISTORY_LOOKBACK transactions
+}
+
+async function poolImpliedLegPrices(
+  positionId: string,
+  events: SolanaPositionEvent[],
+  ctx: PoolContext,
+  stats: ScanStats,
+): Promise<Map<number, { p0: number; p1: number; method: string }>> {
+  const out = new Map<number, { p0: number; p1: number; method: string }>();
+  const wanted: Array<{ i: number; known: { side: 'a' | 'b'; usd: number } }> = [];
+  events.forEach((ev, i) => {
+    if (ev.kind !== 'deposit' && ev.kind !== 'withdrawal') return;
+    if (ev.amountARaw === 0n && ev.amountBRaw === 0n) return;
+    const la = legSidePrice(ctx.mintA, ev.timestamp);
+    const lb = legSidePrice(ctx.mintB, ev.timestamp);
+    // Priced already (a zero side needs no price), or nothing to anchor on.
+    if ((la || ev.amountARaw === 0n) && (lb || ev.amountBRaw === 0n)) return;
+    if (!la && !lb) return;
+    wanted.push({ i, known: la ? { side: 'a', usd: la.px } : { side: 'b', usd: lb!.px } });
+  });
+  if (wanted.length === 0) return out;
+  const missAt = poolImpliedMiss.get(positionId);
+  if (missAt && Date.now() - missAt < POOL_IMPLIED_MISS_MS) return out;
+
+  const giveUpAt = Date.now() + POOL_IMPLIED_BUDGET_MS;
+  const sigs = [...new Set(wanted.map((w) => events[w.i].txHash).filter(Boolean))];
+  const txs = await fetchTransactions(sigs, stats, giveUpAt);
+  for (const w of wanted) {
+    const ev = events[w.i];
+    const tx = txs.get(ev.txHash);
+    if (!tx?.meta) continue;
+    const leg = { pool: ev.pool, position: positionId, dir: ev.kind === 'deposit' ? 'in' as const : 'out' as const, amountARaw: ev.amountARaw, amountBRaw: ev.amountBRaw };
+    const r = poolPriceForLeg(parseWhirlpoolEvents(tx.meta.logMessages), leg);
+    let rawPrice: number | null = null;
+    let method = '';
+    if (r.status === 'priced') { rawPrice = r.rawPrice; method = r.method; }
+    else if (r.status === 'need-pool-history' && Date.now() < giveUpAt) {
+      const sqrt = await lastSwapSqrtBefore(ev.pool, ev.txHash, stats, giveUpAt);
+      if (sqrt != null && consistentWithOneSided(sqrt, r.side, r.tickLower, r.tickUpper)) { rawPrice = sqrt * sqrt; method = 'pool-history'; }
+    }
+    if (rawPrice == null) continue;
+    const px = usdPricesFromPool(rawPrice, w.known, ctx.decimalsA, ctx.decimalsB);
+    if (px) out.set(w.i, { ...px, method });
+  }
+  if (out.size < wanted.length) poolImpliedMiss.set(positionId, Date.now());
+  return out;
+}
+
 async function valueClosedPosition(
   positionId: string,
   events: SolanaPositionEvent[],
   ctx: PoolContext,
   protocol: SolanaClmmProtocol,
+  stats: ScanStats,
   rewardAmountsRaw?: [string, string, string],
 ): Promise<SolanaClosedPosition> {
   // Prewarm historical caches for every non-stable side at every event ts.
@@ -754,14 +842,23 @@ async function valueClosedPosition(
       : Promise.resolve(),
   ]);
 
+  // Legs with exactly one unpriced token: the pool price at the leg (Orca).
+  const implied = protocol === 'orca'
+    ? await poolImpliedLegPrices(positionId, events, ctx, stats).catch(() => new Map<number, { p0: number; p1: number; method: string }>())
+    : new Map<number, { p0: number; p1: number; method: string }>();
+
   const outEvents: ActivityEventForPnL[] = [];
   const sourceBreakdown: Record<string, number> = {};
   let depositUSD = 0, withdrawalUSD = 0, feesUSD = 0, pendingEventCount = 0;
   let legsExact = true, legsSettled = true;
-  for (const ev of events) {
+  for (let idx = 0; idx < events.length; idx++) {
+    const ev = events[idx];
     const amount0 = Number(ev.amountARaw) / 10 ** ctx.decimalsA;
     const amount1 = Number(ev.amountBRaw) / 10 ** ctx.decimalsB;
-    const v = valueEvent(ev, ctx);
+    const viaPool = implied.get(idx);
+    const v: EventValue = viaPool
+      ? { usd: amount0 * viaPool.p0 + amount1 * viaPool.p1, p0: viaPool.p0, p1: viaPool.p1, source: `pool-implied:${viaPool.method}`, legExact: true, legSettled: true }
+      : valueEvent(ev, ctx);
     sourceBreakdown[v.source] = (sourceBreakdown[v.source] ?? 0) + 1;
     if (ev.kind === 'deposit' || ev.kind === 'withdrawal') {
       if (v.legExact === false) legsExact = false;
@@ -779,6 +876,7 @@ async function valueClosedPosition(
       price0AtTime: v.p0,
       price1AtTime: v.p1,
       txHash: ev.txHash,
+      ...(viaPool ? { priceBasis: 'pool-implied' as const } : {}),
     });
   }
 
@@ -804,8 +902,16 @@ async function valueClosedPosition(
     ...(rewardAmountsRaw ? { rewardAmountsRaw } : {}),
     // Recorded only when the basis is settled; otherwise the position is valued again later.
     ...(legsExact ? { legPriceBasis: 'exact-time' as const } : legsSettled ? { legPriceBasis: 'daily' as const } : {}),
+    ...(events.some((e) => e.kind === 'deposit') ? {} : { historyIncomplete: true as const }),
   };
 }
+
+// A position with withdrawals or fee claims but no deposit in a history that has
+// been read to its end: its deposit could not be read. It is valued as far as it
+// goes and returned flagged, so the page can show it. While the history is still
+// being read the deposit may simply not have been reached yet.
+function lacksDeposit(events: SolanaPositionEvent[]): boolean { return !events.some((e) => e.kind === 'deposit'); }
+function hasAmounts(events: SolanaPositionEvent[]): boolean { return events.some((e) => e.amountARaw > 0n || e.amountBRaw > 0n); }
 
 // Human symbol for a mint: stables/SOL are labelled; others fall back to a short
 // mint prefix. Symbols are display-only (pricing is by mint), so a prefix is safe.
@@ -982,6 +1088,8 @@ async function closedPositionsFromHistory(
   let whole = true;       // every closed position found could be reconstructed
   let settled = true;     // valuation was not cut by the deadline
   const pastDeadline = () => deadlineMs !== undefined && Date.now() >= deadlineMs;
+  // The history has been read as far as it will be (to its start, or to the cap).
+  const historyRead = hist.status === 'complete' || hist.status === 'capped';
   const lastTs = (evs: SolanaPositionEvent[]) => evs.reduce((m, e) => Math.max(m, e.timestamp), 0);
 
   const poolCtx = await fetchPoolContexts([...pools], decHint, stats);
@@ -991,13 +1099,13 @@ async function closedPositionsFromHistory(
   // Most recently active first, so a deadline leaves the recent history valued.
   for (const [pid, events] of [...grouped].sort((a, b) => lastTs(b[1]) - lastTs(a[1]))) {
     if (owned.orca.has(pid)) continue;                       // still open — not closed
-    if (!events.some((e) => e.kind === 'deposit')) continue; // nothing to reconstruct
+    if (lacksDeposit(events) && (!historyRead || !hasAmounts(events))) continue;
     const stored = known?.get(pid);
     if (stored !== undefined && stored >= events.length + SETTLED_BASIS_WEIGHT) continue;
     const ctx = poolCtx.get(events.find((e) => e.pool)?.pool ?? '');
     if (!ctx) { whole = false; continue; }                   // pool unreadable: short, not skipped silently
     if (pastDeadline()) { settled = false; break; }
-    orca.push(await valueClosedPosition(pid, events, ctx, 'orca'));
+    orca.push(await valueClosedPosition(pid, events, ctx, 'orca', stats));
   }
 
   // ── RAYDIUM (same transactions, zero extra scan) ────────────────────────────
@@ -1018,14 +1126,14 @@ async function closedPositionsFromHistory(
     const rayGrouped = reconstructRaydiumEvents(txs, rayPoolCtx, posMintByPda);
     for (const [pid, { events, rewardsRaw }] of [...rayGrouped].sort((a, b) => lastTs(b[1].events) - lastTs(a[1].events))) {
       if (owned.raydium.has(pid)) continue;
-      if (!events.some((e) => e.kind === 'deposit')) continue;
+      if (lacksDeposit(events) && (!historyRead || !hasAmounts(events))) continue;
       const stored = known?.get(pid);
       if (stored !== undefined && stored >= events.length + SETTLED_BASIS_WEIGHT) continue;
       const ctx = rayPoolCtx.get(events.find((e) => e.pool)?.pool ?? '');
       if (!ctx) { whole = false; continue; }
       if (pastDeadline()) { settled = false; break; }
       const rewards: [string, string, string] = [rewardsRaw[0].toString(), rewardsRaw[1].toString(), rewardsRaw[2].toString()];
-      raydium.push(await valueClosedPosition(pid, events, ctx, 'raydium', rewards));
+      raydium.push(await valueClosedPosition(pid, events, ctx, 'raydium', stats, rewards));
     }
   }
 

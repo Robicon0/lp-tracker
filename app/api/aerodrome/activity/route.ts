@@ -12,8 +12,8 @@ import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
 import {
   type RouteTruncation,
   lookupFailureNotice,
+  excludedPositionNotices,
   LOOKUP_FAILED,
-  LOOKUP_UNAVAILABLE,
 } from '../../../lib/enumerationTruncation';
 import { evmRpcPost, isEvmRpcThrottle } from '../../../lib/evmRpc';
 import { archiveRpcUrl, archiveServesWideLogs } from '../../../lib/evmArchiveRpc';
@@ -486,9 +486,8 @@ async function GET_impl(request: Request) {
       // A position whose history could not be loaded or verified is left out of
       // the sums above. Say so — a total that silently omits a position is the
       // failure this channel exists to prevent.
-      if (excluded.length > 0 && scanNotices.length === 0) {
-        scanNotices.push(lookupFailureNotice('Base history scan', LOOKUP_UNAVAILABLE));
-      }
+      // Counted, with the reason, one notice per cause (standing rule (i)).
+      scanNotices.push(...excludedPositionNotices('Base history scan', excluded, ids.length));
 
       console.log(`[aerodrome/activity] positionId=all account=${account} → ${ids.length} tokenIds, ${perPosition.length} resolved, ${excluded.length} excluded`);
 

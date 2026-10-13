@@ -12,6 +12,7 @@ import {
 import {
   type RouteTruncation,
   lookupFailureNotice,
+  excludedNotice,
   LOOKUP_FAILED,
 } from '../../lib/enumerationTruncation';
 
@@ -148,7 +149,7 @@ async function buildClosedPositions(
   account: string,
   heldIds: Set<string>,
   prices: Record<string, number>,
-): Promise<{ positions: Record<string, unknown>[]; notice: RouteTruncation | null }> {
+): Promise<{ positions: Record<string, unknown>[]; notice: RouteTruncation | null; holderNotice?: RouteTruncation }> {
   // Queue item B — identical treatment to the Aerodrome route: a failed
   // enumeration is disclosed, never published as "this wallet owns nothing".
   let enumeration: EverOwnedResult;
@@ -301,7 +302,16 @@ async function buildClosedPositions(
 
   // Genuinely-burned positions keep their existing Closed behaviour; staked
   // ones ride along in the OPEN shape.
-  return { positions: [...closedBuilt, ...stakedOut], notice };
+  // A position whose current holder could not be read is neither shown as
+  // closed nor as open. It is counted on the page (standing rule (i)); it was
+  // logged on the server only. `third-party` (sold or transferred) is left out
+  // by design and is not counted.
+  const unresolvedCount = verdicts.filter(({ v }) => v.kind === 'unresolved').length;
+  const holderNotice = unresolvedCount > 0
+    ? excludedNotice('Optimism closed-position recovery', 'holder-check', unresolvedCount, closedIds.length)
+    : undefined;
+  if (holderNotice) console.error(`[velodrome] closed-scan: holder check failed for ${unresolvedCount} of ${closedIds.length} positions for ${account}`);
+  return { positions: [...closedBuilt, ...stakedOut], notice, ...(holderNotice ? { holderNotice } : {}) };
 }
 
 // Fetch prices from CoinGecko
@@ -561,6 +571,7 @@ export async function GET(request: Request) {
     const closed = await buildClosedPositions(account, heldIds, prices);
     const closedPositions = closed.positions;
     if (closed.notice) truncated.push(closed.notice);
+    if (closed.holderNotice) truncated.push(closed.holderNotice);
 
     return NextResponse.json({
       positions: [...positions, ...closedPositions],

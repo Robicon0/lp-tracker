@@ -442,6 +442,12 @@ export default function Dashboard() {
         fees: 0,
         status: "Closed" as const,
         closedTs: r.closedTs,
+        // Standing rule (i): a closed position that could not be valued is
+        // still a row, and says so.
+        rowMark: r.unpriced
+          ? (r.unpriced.kind === "history-incomplete" ? "history incomplete" : "not priced")
+          : r.pricedFromPool ? "priced from pool" : undefined,
+        rowMarkWarn: !!r.unpriced,
       }));
   }, [lpPnl.closedRows]);
 
@@ -1947,6 +1953,11 @@ export default function Dashboard() {
                                   {closedDate && (
                                     <span style={{ fontSize: 10, color: C.text, opacity: 0.45 }}>
                                       closed {closedDate}
+                                    </span>
+                                  )}
+                                  {(pos as { rowMark?: string }).rowMark && (
+                                    <span data-row-mark style={{ fontSize: 10, color: (pos as { rowMarkWarn?: boolean }).rowMarkWarn ? "var(--warn)" : C.text, opacity: (pos as { rowMarkWarn?: boolean }).rowMarkWarn ? 1 : 0.6 }}>
+                                      {(pos as { rowMark?: string }).rowMark}
                                     </span>
                                   )}
                                   {chainTok && (

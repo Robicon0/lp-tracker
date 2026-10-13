@@ -138,6 +138,15 @@ type RangeKey = typeof TIME_RANGES[number]["key"];
 const fmt$ = (n: number, dec = 2) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 
+// A leg of a closed position that could not be valued: its token amounts, and
+// the part that IS priced (when there is one). Never a bare $0.00.
+const fmtAmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: n >= 1000 ? 0 : n >= 1 ? 2 : 6 });
+const unpricedLeg = (pair: string, a0: number, a1: number, pricedUSD: number) => {
+  const [s0, s1] = pair.split(" / ");
+  const parts = [a0 > 0 ? `${fmtAmt(a0)} ${s0 ?? "token A"}` : "", a1 > 0 ? `${fmtAmt(a1)} ${s1 ?? "token B"}` : ""].filter(Boolean);
+  if (parts.length === 0) return "—";
+  return `${parts.join(" + ")}${pricedUSD > 0 ? ` (${fmt$(pricedUSD)} priced)` : ""}`;
+};
 const fmt$Signed = (n: number, dec = 2) =>
   `${n >= 0 ? "+" : "-"}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 
@@ -1065,7 +1074,7 @@ export default function Analytics() {
   // on screen beneath it and must not be shown as the wallet's figures — the
   // live (progressive, self-checking) values render instead.
   const snapshotContradictsLive = !!snapshot && (
-    isAggregateSelfContradictory(snapshot.lpPnl, lpPnlLive.closedRows.length) ||
+    isAggregateSelfContradictory(snapshot.lpPnl, lpPnlLive.closedRows.filter((r) => !r.unpriced).length) ||
     (snapshot.lpPnl.included + snapshot.lpPnl.excluded === 0 && filteredPositions.length > 0)
   );
   const useSnap = !!snapshot && !liveTrustworthy && !snapshotContradictsLive;
@@ -1085,7 +1094,13 @@ export default function Analytics() {
   // partial — a fee source answered, but said its history lookup failed, is
   //           unavailable or was capped (the same notice the banner shows).
   const feesPartial = useSnap ? [] : feePartialSources;
-  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0;
+  // not priced — a closed position that could not be valued is in NO total,
+  //              its fee claims included (standing rule (i)). Always live.
+  const closedNotPriced = lpPnlLive.unpricedClosed.length;
+  const closedNotPricedNote = closedNotPriced > 0
+    ? `${closedNotPriced} closed position${closedNotPriced === 1 ? "" : "s"} not priced — not in this total`
+    : null;
+  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedNotPriced > 0;
   const feesNote = feesStillLoading
     ? "still loading fee history"
     : feesFailed.length > 0
@@ -1094,7 +1109,7 @@ export default function Analytics() {
         ? `incomplete — ${feesPartial.join(" · ")} not fully read`
       : feesPendingClaims > 0
         ? `incomplete — ${feesPendingClaims} claim${feesPendingClaims === 1 ? "" : "s"} not priced yet`
-        : null;
+        : closedNotPricedNote;
   const feesApprox = feesIncomplete ? "≈ " : "";
   // The time-window figures also miss the undated claims.
   const feeWindowIncomplete = feesIncomplete || feesUndatedClaims > 0;
@@ -1116,14 +1131,15 @@ export default function Analytics() {
         // Sprint 4: breakdown rows are live-only detail (snapshots don't store
         // them) — same contract as perPosition above.
         closedRows: lpPnlLive.closedRows,
+        unpricedClosed: lpPnlLive.unpricedClosed,
         // The snapshot's totals sit above the LIVE breakdown, so the invariant
         // is evaluated on exactly that pairing (lpPnlLive's own flag describes
         // the live totals, which are not the ones on screen here).
-        aggregateSelfContradictory: isAggregateSelfContradictory(snapshot.lpPnl, lpPnlLive.closedRows.length),
+        aggregateSelfContradictory: isAggregateSelfContradictory(snapshot.lpPnl, lpPnlLive.closedRows.filter((r) => !r.unpriced).length),
         // Incomplete if EITHER the compute that wrote the snapshot had a failed
         // history lookup or this session's live lookups have reported one.
         historyLookupFailed: lpPnlLive.historyLookupFailed || snapshot.lpPnl.historyLookupFailed === true,
-        capitalGLComplete: lpPnlLive.capitalGLComplete && snapshot.lpPnl.historyLookupFailed !== true,
+        capitalGLComplete: lpPnlLive.capitalGLComplete && snapshot.lpPnl.historyLookupFailed !== true && lpPnlLive.unpricedClosed.length === 0,
       }
     : lpPnlLive;
   const totalPortfolioValue = useSnap && snapshot ? snapshot.header.totalPortfolioValue : totalPortfolioValueLive;
@@ -2213,6 +2229,10 @@ export default function Analytics() {
                             ? "incomplete — some history couldn't be loaded"
                           : (c.pendingClosed && lpPnl.capitalGLPricingPending > 0)
                             ? `incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`
+                          // A closed position that could not be valued is in
+                          // none of these sums (standing rule (i)).
+                          : (c.pendingClosed && closedNotPricedNote)
+                            ? closedNotPricedNote
                             : (c.feesPending && feesIncomplete && feesNote)
                               ? (c.pendingClosed ? `fees ${feesNote}` : feesNote)
                             : (c.pendingClosed && lpPnl.capitalGLApproximate > 0)
@@ -2230,7 +2250,7 @@ export default function Analytics() {
               {showCapGlBreakdown && (
                 <div style={{ borderTop: `1px solid ${C.border}`, background: "var(--surface-hover)" }}>
                   <div style={{ padding: "10px 20px 4px", fontSize: 10, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
-                    // Capital G/L breakdown · {lpPnl.closedRows.length} closed position{lpPnl.closedRows.length === 1 ? "" : "s"}
+                    // Capital G/L breakdown · {lpPnl.closedRows.length} closed position{lpPnl.closedRows.length === 1 ? "" : "s"}{closedNotPriced > 0 ? ` · ${closedNotPriced} not priced` : ""}
                     <span style={{ marginLeft: 10, opacity: 0.6, textTransform: "none", letterSpacing: "0.02em" }}>
                       Capital G/L = withdrawn − deposited (fees shown separately, not in G/L)
                     </span>
@@ -2248,12 +2268,22 @@ export default function Analytics() {
                       </thead>
                       <tbody>
                         {lpPnl.closedRows.map((r) => (
-                          <tr key={r.id} data-position-id={r.id} data-estimated={r.estimated ? "1" : undefined}>
+                          <tr key={r.id} data-position-id={r.id} data-estimated={r.estimated ? "1" : undefined} data-unpriced={r.unpriced ? r.unpriced.kind : undefined} data-priced-from-pool={r.pricedFromPool ? "1" : undefined}>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
                               <span style={{ color: C.textBright, fontWeight: 600 }}>{r.pair}</span>
                               <span style={{ marginLeft: 8, fontSize: 10, color: C.text, opacity: 0.6, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                                 {r.protocol} · {r.chain}
                               </span>
+                              {r.pricedFromPool && (
+                                <span title="A token with no market price of its own was valued through the pool's price at the deposit or withdrawal" style={{ marginLeft: 8, fontSize: 10, color: C.text, opacity: 0.75, letterSpacing: "0.04em" }}>
+                                  priced from pool
+                                </span>
+                              )}
+                              {r.unpriced && (
+                                <span style={{ marginLeft: 8, fontSize: 10, color: "var(--warn)", letterSpacing: "0.04em" }}>
+                                  {r.unpriced.kind === "history-incomplete" ? "history incomplete" : "not priced"} — {r.unpriced.why}
+                                </span>
+                              )}
                             </td>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 11.5, color: C.text }}>
                               {r.openedTs ? new Date(r.openedTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
@@ -2262,16 +2292,18 @@ export default function Analytics() {
                               {r.closedTs ? new Date(r.closedTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                             </td>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
-                              {fmt$(r.depositUSD)}
+                              {r.unpriced ? unpricedLeg(r.pair, r.unpriced.depositAmount0, r.unpriced.depositAmount1, r.unpriced.pricedDepositUSD) : fmt$(r.depositUSD)}
                             </td>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
-                              {fmt$(r.withdrawalUSD)}
+                              {r.unpriced ? unpricedLeg(r.pair, r.unpriced.withdrawalAmount0, r.unpriced.withdrawalAmount1, r.unpriced.pricedWithdrawalUSD) : fmt$(r.withdrawalUSD)}
                             </td>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", color: C.green, fontVariantNumeric: "tabular-nums" }}>
                               +{fmt$(r.feesUSD)}
                             </td>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", fontWeight: 700, color: r.capitalGL > 0 ? C.green : r.capitalGL < 0 ? C.red : C.textBright, fontVariantNumeric: "tabular-nums" }}>
-                              {fmt$Signed(r.capitalGL)}
+                              {r.unpriced
+                                ? <span style={{ color: "var(--warn)", fontWeight: 400 }}>{r.unpriced.kind === "history-incomplete" ? "history incomplete" : "not priced"}</span>
+                                : fmt$Signed(r.capitalGL)}
                             </td>
                           </tr>
                         ))}
@@ -2286,15 +2318,15 @@ export default function Analytics() {
                       {lpPnl.closedRows.length > 0 && (
                         <tfoot>
                           <tr>
-                            <td colSpan={3} style={{ padding: "10px 20px", fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase" }}>Total</td>
+                            <td colSpan={3} style={{ padding: "10px 20px", fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase" }}>Total{closedNotPriced > 0 ? ` (${closedNotPricedNote})` : ""}</td>
                             <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
-                              {fmt$(lpPnl.closedRows.reduce((t, r) => t + r.depositUSD, 0))}
+                              {fmt$(lpPnl.closedRows.filter((r) => !r.unpriced).reduce((t, r) => t + r.depositUSD, 0))}
                             </td>
                             <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
-                              {fmt$(lpPnl.closedRows.reduce((t, r) => t + r.withdrawalUSD, 0))}
+                              {fmt$(lpPnl.closedRows.filter((r) => !r.unpriced).reduce((t, r) => t + r.withdrawalUSD, 0))}
                             </td>
                             <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.green, fontVariantNumeric: "tabular-nums" }}>
-                              +{fmt$(lpPnl.closedRows.reduce((t, r) => t + r.feesUSD, 0))}
+                              +{fmt$(lpPnl.closedRows.filter((r) => !r.unpriced).reduce((t, r) => t + r.feesUSD, 0))}
                             </td>
                             <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 13.5, fontWeight: 700, color: lpPnl.capitalGL > 0 ? C.green : lpPnl.capitalGL < 0 ? C.red : C.textBright, fontVariantNumeric: "tabular-nums" }}>
                               {fmt$Signed(lpPnl.closedRows.filter((r) => r.inTotals).reduce((t, r) => t + r.capitalGL, 0))}
@@ -2366,6 +2398,45 @@ export default function Analytics() {
                         <span>{ep.reason}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Standing rule (i): closed positions that could not be valued.
+                  Each is a row in the breakdown and the Closed tab; none is in
+                  a total. Not gated on loading: they are known as soon as the
+                  closed list answers. */}
+              {lpPnl.unpricedClosed.length > 0 && (
+                <div
+                  data-testid="unpriced-closed-notice"
+                  style={{
+                    margin: "0 26px 18px",
+                    border: "1px solid color-mix(in srgb, var(--warn) 25%, transparent)",
+                    background: "color-mix(in srgb, var(--warn) 4%, transparent)",
+                    padding: "12px 16px",
+                    fontFamily: FONT,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "var(--warn)", letterSpacing: "0.04em", marginBottom: 8 }}>
+                    ⚠ {lpPnl.unpricedClosed.length} closed position{lpPnl.unpricedClosed.length === 1 ? "" : "s"} could
+                    not be valued and {lpPnl.unpricedClosed.length === 1 ? "is" : "are"} not in Capital G/L, Net P&L or Fees Collected:
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {lpPnl.unpricedClosed.slice(0, 25).map((u) => (
+                      <div key={u.id} style={{ fontSize: 11, color: "color-mix(in srgb, var(--warn) 85%, transparent)", letterSpacing: "0.02em", lineHeight: 1.55 }}>
+                        <span style={{ color: "var(--warn)", fontWeight: 600 }}>{u.pair}</span>
+                        <span style={{ opacity: 0.7 }}> ({u.protocol} · {u.chain}) — </span>
+                        <span>
+                          {u.detail.kind === "history-incomplete" ? "history incomplete" : "not priced"}: {u.detail.why}
+                          {u.detail.unpricedEvents > 0 ? ` (${u.detail.unpricedEvents} event${u.detail.unpricedEvents === 1 ? "" : "s"} without a price)` : ""}
+                        </span>
+                      </div>
+                    ))}
+                    {lpPnl.unpricedClosed.length > 25 && (
+                      <div style={{ fontSize: 11, color: "color-mix(in srgb, var(--warn) 85%, transparent)" }}>
+                        and {lpPnl.unpricedClosed.length - 25} more, listed in the Capital G/L breakdown
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
+import { classifyReconstructedClosed, type UnpricedClosedDetail } from "../lib/closedPositionClassify";
 import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
 import { useTruncationNotices } from "./useTruncationNotices";
 import { whenFirstRowsPainted } from "../lib/firstRowsGate";
@@ -43,7 +44,7 @@ export interface ExcludedPosition {
  * are "not priced yet", and Capital G/L must say so rather than quietly
  * omitting them from a total that looks authoritative.
  */
-const PRICING_PENDING_REASONS = new Set(["missing_deposit_prices"]);
+const PRICING_PENDING_REASONS = new Set(["missing_deposit_prices", "missing_withdrawal_prices"]);
 
 // Retry cadence for pricing-pending positions. The route's prewarm is
 // fire-and-forget, so the warmed price only becomes visible on a SUBSEQUENT
@@ -123,6 +124,14 @@ export interface LpPnlResult {
   // Sprint 4 — every CLOSED position as a display row (EVM + Sui + Solana),
   // newest close first. Sums of inTotals rows' capitalGL === capitalGL above.
   closedRows: ClosedPositionRow[];
+  /**
+   * Standing rule (i): reconstructed closed positions (Sui / Solana) the page
+   * cannot put in a total — `not-priced` (a leg has no USD value) or
+   * `history-incomplete` (no deposit found). Each is ALSO a row in `closedRows`
+   * (`unpriced` set, `inTotals: false`), is named in the notice, and makes
+   * Capital G/L, Net P&L and the fee totals show `≈`. None is ever dropped.
+   */
+  unpricedClosed: UnpricedClosedPosition[];
   // Every position that's NOT contributing to the totals — surfaced verbatim
   // in the analytics warning banner so the user knows why their totals look
   // lower than expected. Sprint SPOT-RESILIENCE-V2: this now contains ONLY
@@ -227,6 +236,7 @@ const EMPTY: LpPnlResult = {
   errored: 0, errorReasons: [], isLoading: false,
   inflightCount: 0, suiClosedLoading: false, solanaClosedLoading: false,
   closedRows: [],
+  unpricedClosed: [],
   perPosition: {},
   excludedPositions: [],
   capitalGLPricingPending: 0,
@@ -255,6 +265,7 @@ function userFriendlyReason(reason: string, protocol: string): string {
     return "No deposit events found on-chain";
   }
   if (reason === "missing_deposit_prices") return "Deposit price data unavailable";
+  if (reason === "missing_withdrawal_prices") return "Withdrawal price data unavailable";
   if (reason === "missing_current_prices") return "Current price data unavailable";
   if (reason === "value_overflow") return "Calculation overflow — implausible USD value (likely decimals mismatch)";
   if (reason === "no activity URL") return "P&L calculation not yet supported for this protocol";
@@ -1219,6 +1230,25 @@ export interface ClosedPositionRow {
   // position test `capitalGLApproximate` / the spot-fallback count use, so a row
   // can be named as the one behind the `≈`. Display/test only.
   estimated: boolean;
+  /** A deposit or withdrawal was valued through the pool price ("priced from pool"). Display only. */
+  pricedFromPool?: boolean;
+  /**
+   * Set on a row that is in NO total (standing rule (i)): the figures on it are
+   * the PRICED part only and `capitalGL` is 0. `detail` carries the token
+   * amounts and the reason.
+   */
+  unpriced?: UnpricedClosedDetail;
+}
+
+/** A reconstructed closed position that could not be valued. See `LpPnlResult.unpricedClosed`. */
+export interface UnpricedClosedPosition {
+  id: string;
+  pair: string;
+  protocol: string;
+  chain: string;
+  openedTs?: number;
+  closedTs?: number;
+  detail: UnpricedClosedDetail;
 }
 
 interface PositionMeta {
@@ -1256,6 +1286,9 @@ function aggregate(
   // they do NOT gate `isLoading`, which stays per-position-driven).
   suiClosedLoading = false,
   solanaClosedLoading = false,
+  // Standing rule (i): reconstructed closed positions that cannot be valued.
+  // In no total; a row each, and they make Capital G/L incomplete.
+  unpricedClosed: UnpricedClosedPosition[] = [],
 ): LpPnlResult {
   // Merge the external-closed map/meta (Sui + Solana) into the inputs the loop
   // iterates. Both sets are disjoint from resultsMap (destroyed objects / burned
@@ -1384,6 +1417,7 @@ function aggregate(
           capitalGL: d.closingValue - d.initialValue,
           inTotals: !!(chain && CAPITAL_GL_CHAINS.has(chain)),
           estimated: (d.estimatedBasisEventCount ?? 0) > 0 || (d.spotFallbackEventCount ?? 0) > 0,
+          ...((d.poolImpliedEventCount ?? 0) > 0 ? { pricedFromPool: true } : {}),
         });
       }
       included += 1;
@@ -1412,6 +1446,22 @@ function aggregate(
         excluded += 1;
       }
     }
+  }
+
+  // Positions that could not be valued: a row each (priced part only, no
+  // Capital G/L), in no total.
+  for (const u of unpricedClosed) {
+    closedRows.push({
+      id: u.id, pair: u.pair, protocol: u.protocol, chain: u.chain,
+      openedTs: u.openedTs, closedTs: u.closedTs,
+      depositUSD: u.detail.pricedDepositUSD,
+      withdrawalUSD: u.detail.pricedWithdrawalUSD,
+      feesUSD: u.detail.pricedFeesUSD,
+      capitalGL: 0,
+      inTotals: false,
+      estimated: false,
+      unpriced: u.detail,
+    });
   }
 
   // Append unsupported-protocol rejections (Momentum, etc.) — these
@@ -1498,7 +1548,7 @@ function aggregate(
   ).length;
   // Either state means the figure is not a settled historical total, so the
   // `≈` marker still applies to both — only the explanation differs.
-  const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0;
+  const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0 && unpricedClosed.length === 0;
 
   // ITEM 0i — the self-contradiction check. Every headline zero AND a non-empty
   // breakdown is impossible from consistent data, so it means the aggregate is
@@ -1507,7 +1557,7 @@ function aggregate(
   // no rows, which is consistent and must stay silent.
   const aggregateSelfContradictory = isAggregateSelfContradictory(
     { initialValue, currentValue, capitalGL, feesCollected, netPnl },
-    closedRows.length,
+    closedRows.filter((r) => !r.unpriced).length,
   );
   if (aggregateSelfContradictory) {
     console.warn(
@@ -1530,6 +1580,7 @@ function aggregate(
     perPosition,
     // Newest close first; rows without a close date (EVM) sort by open date.
     closedRows: closedRows.sort((a, b) => (b.closedTs ?? b.openedTs ?? 0) - (a.closedTs ?? a.openedTs ?? 0)),
+    unpricedClosed,
     excludedPositions,
     stalePositions,
     estimatedPositionCount,
@@ -1558,6 +1609,7 @@ interface SuiClosedPositionDTO {
   openedTs?: number;
   closedTs?: number;
   events: ActivityEventForPnL[];
+  pendingEventCount?: number;
 }
 
 // Closed Sui position protocol → display label (used for the Capital G/L
@@ -1585,6 +1637,7 @@ interface SolanaClosedPositionDTO {
   openedTs?: number;
   closedTs?: number;
   events: ActivityEventForPnL[];
+  pendingEventCount?: number;
 }
 const SOLANA_CLOSED_PROTOCOL_LABEL: Record<SolanaClosedPositionDTO["protocol"], string> = {
   orca: "Orca",
@@ -1631,6 +1684,16 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   // closed history…" badge instead of leaving Capital G/L silently pending.
   const suiClosedLoadingRef = useRef<boolean>(false);
   const solanaClosedLoadingRef = useRef<boolean>(false);
+  // Standing rule (i): reconstructed closed positions that could not be valued.
+  // Shown as rows and named in the notice; never dropped.
+  const suiUnpricedRef = useRef<UnpricedClosedPosition[]>([]);
+  const solanaUnpricedRef = useRef<UnpricedClosedPosition[]>([]);
+  const agg = () => aggregate(
+    resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current,
+    suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current,
+    suiClosedLoadingRef.current, solanaClosedLoadingRef.current,
+    [...suiUnpricedRef.current, ...solanaUnpricedRef.current],
+  );
 
   // Fetch + value closed Sui positions whenever the Sui address set changes.
   // Disjoint from the open/closed positions in `positions` (destroyed objects),
@@ -1638,16 +1701,17 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   useEffect(() => {
     const addrs = suiWalletAddresses.filter(Boolean);
     if (addrs.length === 0) {
-      if (suiClosedRef.current.size > 0) {
+      if (suiClosedRef.current.size > 0 || suiUnpricedRef.current.length > 0) {
         suiClosedRef.current = new Map();
         suiClosedMetaRef.current = new Map();
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+        suiUnpricedRef.current = [];
+        setResult(agg());
       }
       return;
     }
     let cancelled = false;
     suiClosedLoadingRef.current = true;
-    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+    setResult(agg());
     (async () => {
       await loadClosedProgressively<SuiClosedPositionDTO>({
         addrs,
@@ -1657,23 +1721,28 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         onUpdate: (byAddr) => {
           const newMap = new Map<string, PosResult>();
           const newMeta = new Map<string, PositionMeta>();
+          const unpriced: UnpricedClosedPosition[] = [];
           for (const list of byAddr.values()) for (const sp of list) {
             // Value via the SAME pure engine EVM closed positions use, so the
             // injected closingValue/initialValue/fees are byte-identical in shape.
-            const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
-            if (!pnl.ok) continue;
+            // A position that cannot be valued is kept as an unpriced row.
+            const verdict = classifyReconstructedClosed(sp);
+            if (verdict.kind === "empty") continue; // no amounts at all: nothing to show
             const id = `sui-closed-${sp.protocol}-${sp.positionId}`;
-            newMap.set(id, pnl);
-            newMeta.set(id, { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui", openedTs: sp.openedTs, closedTs: sp.closedTs });
+            const meta = { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui", openedTs: sp.openedTs, closedTs: sp.closedTs };
+            if (verdict.kind !== "priced") { unpriced.push({ id, ...meta, detail: verdict.detail }); continue; }
+            newMap.set(id, { ok: true, data: verdict.data });
+            newMeta.set(id, meta);
           }
           suiClosedRef.current = newMap;
           suiClosedMetaRef.current = newMeta;
-          setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+          suiUnpricedRef.current = unpriced;
+          setResult(agg());
         },
       });
       if (cancelled || !mountedRef.current) return;
       suiClosedLoadingRef.current = false;
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+      setResult(agg());
     })();
     return () => { cancelled = true; suiClosedLoadingRef.current = false; };
   }, [suiWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1685,10 +1754,11 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   useEffect(() => {
     const addrs = solanaWalletAddresses.filter(Boolean);
     if (addrs.length === 0) {
-      if (solanaClosedRef.current.size > 0) {
+      if (solanaClosedRef.current.size > 0 || solanaUnpricedRef.current.length > 0) {
         solanaClosedRef.current = new Map();
         solanaClosedMetaRef.current = new Map();
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+        solanaUnpricedRef.current = [];
+        setResult(agg());
       }
       return;
     }
@@ -1697,7 +1767,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     // "still scanning Solana closed history…" badge (Capital G/L stays partial-
     // but-shown, never a full-block spinner).
     solanaClosedLoadingRef.current = true;
-    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+    setResult(agg());
     (async () => {
       await loadClosedProgressively<SolanaClosedPositionDTO>({
         addrs,
@@ -1707,21 +1777,25 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         onUpdate: (byAddr) => {
           const newMap = new Map<string, PosResult>();
           const newMeta = new Map<string, PositionMeta>();
+          const unpriced: UnpricedClosedPosition[] = [];
           for (const list of byAddr.values()) for (const sp of list) {
-            const pnl = computePositionPnL({ currentValue: 0, unclaimedFeesUSD: 0, price0: 0, price1: 0, events: sp.events, isClosed: true });
-            if (!pnl.ok) continue;
+            const verdict = classifyReconstructedClosed(sp);
+            if (verdict.kind === "empty") continue; // no amounts at all: nothing to show
             const id = `solana-closed-${sp.protocol}-${sp.positionId}`;
-            newMap.set(id, pnl);
-            newMeta.set(id, { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana", openedTs: sp.openedTs, closedTs: sp.closedTs });
+            const meta = { pair: sp.pair, protocol: SOLANA_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Solana", openedTs: sp.openedTs, closedTs: sp.closedTs };
+            if (verdict.kind !== "priced") { unpriced.push({ id, ...meta, detail: verdict.detail }); continue; }
+            newMap.set(id, { ok: true, data: verdict.data });
+            newMeta.set(id, meta);
           }
           solanaClosedRef.current = newMap;
           solanaClosedMetaRef.current = newMeta;
-          setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+          solanaUnpricedRef.current = unpriced;
+          setResult(agg());
         },
       });
       if (cancelled || !mountedRef.current) return;
       solanaClosedLoadingRef.current = false;
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+      setResult(agg());
     })();
     return () => { cancelled = true; solanaClosedLoadingRef.current = false; };
   }, [solanaWalletAddresses.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1813,7 +1887,12 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     if (eligible.length === 0) {
       // Even with no eligible positions we may have unsupported ones to
       // surface — emit a result that includes them rather than EMPTY.
-      setResult({
+      // Reconstructed closed positions live in their own maps and do not depend
+      // on the open-positions array: a wallet with nothing open keeps them.
+      const hasReconstructed = suiClosedRef.current.size > 0 || solanaClosedRef.current.size > 0
+        || suiUnpricedRef.current.length > 0 || solanaUnpricedRef.current.length > 0
+        || suiClosedLoadingRef.current || solanaClosedLoadingRef.current;
+      setResult(hasReconstructed ? agg() : {
         ...EMPTY,
         excludedPositions: [...unsupportedRejectionsRef.current],
       });
@@ -1831,19 +1910,19 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
 
     // Find positions we haven't fetched or started fetching yet.
     const toFetch = eligible.filter(
-      (p) => !p.selfReportedPnl && !resultsRef.current.has(p.id) && !inflightRef.current.has(p.id),
+      (p) => !p.selfReportedPnl && (!resultsRef.current.has(p.id) || repriceIdsRef.current.has(p.id)) && !inflightRef.current.has(p.id),
     );
 
     if (toFetch.length === 0) {
       // All positions already fetched — just recompute totals (in case
       // positions array changed order but same IDs).
-      setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+      setResult(agg());
       return;
     }
 
     // Mark as inflight and update loading state.
     for (const p of toFetch) inflightRef.current.add(p.id);
-    setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+    setResult(agg());
 
     // Fetch each position, paced PER activity endpoint (paceByEndpoint /
     // MAX_PER_ENDPOINT). A wallet with many positions on one provider — e.g. 4
@@ -1876,7 +1955,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
-        setResult(aggregate(resultsRef.current, inflightRef.current.size, positionMetaRef.current, unsupportedRejectionsRef.current, suiClosedRef.current, suiClosedMetaRef.current, solanaClosedRef.current, solanaClosedMetaRef.current, suiClosedLoadingRef.current, solanaClosedLoadingRef.current));
+        setResult(agg());
       });
     }
   }, [positions, pricingRetry]);
@@ -1917,7 +1996,11 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         const pendingExclusion = !r.ok && PRICING_PENDING_REASONS.has(r.reason);
         const pendingSpotFallback = r.ok && (r.data.spotFallbackEventCount ?? 0) > 0;
         if (pendingExclusion || pendingSpotFallback) {
-          resultsRef.current.delete(id);
+          // Marked for a re-fetch, NOT removed: the result it has stays in the
+          // totals (with its `≈` and "pricing N positions…") until the new one
+          // lands. Removing it first took the position out of Capital G/L for
+          // the length of the re-fetch with no mark on the figure (measured
+          // 2026-10-13: −2,138.74 unmarked against ≈ −2,140.09).
           repriceIdsRef.current.add(id);
         }
       }

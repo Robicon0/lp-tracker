@@ -14,7 +14,9 @@ import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 import {
   type RouteTruncation,
   lookupFailureNotice,
+  excludedPositionNotices,
   LOOKUP_FAILED,
+  LOOKUP_UNAVAILABLE,
 } from '../../../lib/enumerationTruncation';
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
@@ -480,6 +482,8 @@ async function GET_impl(request: Request) {
         return NextResponse.json({
           events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
           positions: [], excluded: [{ tokenId: 'all', reason: 'no-archive-rpc-for-chain' }],
+          // Said out loud: with no history source the whole scan is missing.
+          truncated: [lookupFailureNotice(chain.charAt(0).toUpperCase() + chain.slice(1), LOOKUP_UNAVAILABLE)],
         });
       }
       // Anchored HERE, not at the loop: the ever-owned scan and the per-id
@@ -590,14 +594,12 @@ async function GET_impl(request: Request) {
           reason: 'wallet-scope-id-cap',
         });
       }
+      // Positions the scan knew about and left out (pool not identified, a
+      // failed request, the time budget): counted, one notice per cause, and
+      // the totals that depend on them show `≈` (standing rule (i)). The time
+      // budget used to travel as a cap notice, which marked no total.
+      truncated.push(...excludedPositionNotices(scopeName, excluded, ids.length));
       if (timedOutIds.length > 0) {
-        truncated.push({
-          scope: scopeName,
-          cap: ids.length - timedOutIds.length,
-          returned: perPosition.length,
-          knownTotal: allIds.length,
-          reason: 'wallet-scope-time-budget',
-        });
         console.warn(`[uniswap/activity] tokenId=all chain=${chain}: stopped at the ${WALLET_SCOPE_BUDGET_MS / 1000}s budget — ${timedOutIds.length} of ${ids.length} ids not scanned`);
       }
 

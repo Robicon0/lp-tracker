@@ -154,6 +154,10 @@ export interface SuiClosedPosition {
   // export). Keys are cascade tiers: stablecoin-fixed | sqrtprice-historical |
   // defillama-historical | cg-historical | pending. NEVER cg-spot.
   sourceBreakdown: Record<string, number>;
+  // Set when the history holds withdrawals or fee claims for this position but
+  // NO deposit: its deposit could not be read, so it cannot be valued. It is
+  // returned (and shown as "history incomplete"), never skipped.
+  historyIncomplete?: true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -489,7 +493,7 @@ function sqrtToHumanPriceAinB(sqrtX64: bigint, decA: number, decB: number): numb
   return priceRaw * 10 ** (decA - decB); // human B per human A
 }
 
-interface SideValue { usd: number | null; p0: number | null; p1: number | null; source: string }
+interface SideValue { usd: number | null; p0: number | null; p1: number | null; source: string; basis?: 'pool-implied' }
 
 // Historical per-side pricing (used for fee claims, and for deposits/withdrawals
 // when sqrt is missing or the pool has no stable anchor). SUI uses CoinGecko
@@ -518,6 +522,9 @@ function valueByHistoricalSides(
     const src = a.src === b.src ? a.src : `${a.src}+${b.src}`;
     return { usd: amtA * a.px + amtB * b.px, p0: a.px, p1: b.px, source: src };
   }
+  // A side with no amount needs no price: the other side values the event whole.
+  if (a && amtB === 0) return { usd: amtA * a.px, p0: a.px, p1: null, source: a.src };
+  if (b && amtA === 0) return { usd: amtB * b.px, p0: null, p1: b.px, source: b.src };
   return { usd: null, p0: a?.px ?? null, p1: b?.px ?? null, source: 'pending' };
 }
 
@@ -543,7 +550,21 @@ function valueEvent(ev: SuiPositionEvent, ctx: SuiPositionLifecycle): SideValue 
     }
   }
   // FALLBACK (and all fee claims): historical per side. NEVER current spot.
-  return valueByHistoricalSides(amtA, amtB, ctx.coinTypeA, ctx.coinTypeB, stA, stB, ev.timestamp);
+  const sides = valueByHistoricalSides(amtA, amtB, ctx.coinTypeA, ctx.coinTypeB, stA, stB, ev.timestamp);
+  // A leg where ONE token has no historical USD price and the other has: the
+  // pool price in the event prices the missing one (same basis as the stable
+  // anchor above, with a priced token as the anchor). Legs only, never fee claims.
+  if (sides.usd == null && ev.kind !== 'fee_claim' && ev.sqrtPriceX64 != null && (sides.p0 == null) !== (sides.p1 == null)) {
+    const hAinB = sqrtToHumanPriceAinB(ev.sqrtPriceX64, ctx.decimalsA, ctx.decimalsB);
+    if (Number.isFinite(hAinB) && hAinB > 0) {
+      const p0 = sides.p0 ?? hAinB * (sides.p1 as number);
+      const p1 = sides.p1 ?? (sides.p0 as number) / hAinB;
+      if (Number.isFinite(p0) && Number.isFinite(p1) && p0 > 0 && p1 > 0) {
+        return { usd: amtA * p0 + amtB * p1, p0, p1, source: 'pool-implied', basis: 'pool-implied' };
+      }
+    }
+  }
+  return sides;
 }
 
 // B3 — Apply the valuation cascade to a lifecycle, producing a fully-valued
@@ -599,6 +620,7 @@ export async function valuePositionLifecycle(
       price0AtTime: v.p0,
       price1AtTime: v.p1,
       txHash: ev.txDigest,
+      ...(v.basis ? { priceBasis: v.basis } : {}),
     });
   }
 
@@ -627,6 +649,7 @@ export async function valuePositionLifecycle(
     closedTs: lifecycle.closedTs,
     depositUSD, withdrawalUSD, feesUSD, capitalGL, pendingEventCount,
     events, sourceBreakdown,
+    ...(lifecycle.events.some((e) => e.kind === 'deposit') ? {} : { historyIncomplete: true as const }),
   };
 }
 
@@ -658,13 +681,19 @@ export async function getClosedPositionsForWalletWithStatus(
   const history = await loadProtocolHistory(walletAddress, protocol, given);
   const { blocks, owned, unresolved } = history;
   let complete = history.complete;
+  const historyRead = history.status === 'complete' || history.status === 'capped';
   const grouped = groupEventsByPosition(protocol, blocks);
 
   const todo: Array<[string, SuiPositionEvent[]]> = [];
   for (const [pid, evs] of grouped) {
     if (owned.has(pid)) continue;
     if (unresolved.has(pid)) continue;
-    if (!evs.some((e) => e.kind === 'deposit')) continue;
+    // Withdrawals or fee claims but no deposit, in a history read to its end:
+    // the deposit could not be read. Returned flagged ("history incomplete"),
+    // not skipped. While the history is still being read it may not have been
+    // reached yet; with no amounts at all there is nothing to show.
+    if (!evs.some((e) => e.kind === 'deposit')
+      && (!historyRead || !evs.some((e) => e.amountARaw > 0n || e.amountBRaw > 0n))) continue;
     const stored = known?.get(pid);
     if (stored !== undefined && stored >= evs.length) continue;
     todo.push([pid, evs]);

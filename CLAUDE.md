@@ -963,6 +963,63 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(Silent-drop fix, 2026-10-13, committed locally, NOT pushed)** — **No position and no fee scan
+  result is dropped silently (Methodology rule (i)).**
+  **(1) Legs priced from the pool (Orca).** The Solana engine had NO pool-price step: a token with
+  no historical USD price left its legs unpriced even when the pool's other token was a
+  stablecoin. `app/lib/whirlpoolEventPrice.ts` reads the pool price at the leg from the Orca
+  program's own event logs: a two-sided leg from `LiquidityIncreased` / `Decreased`
+  (√P = amountB / L + √P_lower); a one-sided leg from a swap in the SAME pool in the same
+  transaction; else from the pool's last swap before the transaction (a pool's price only moves
+  on a swap; 20 transactions looked back). A price that contradicts the one-sided leg's range is
+  rejected. Only legs with exactly one unpriced token cost a chain read. Events are marked
+  `priceBasis: 'pool-implied'`, rows "priced from pool". FEE CLAIMS are never valued this way
+  (Rule 1). Sui: the event's pool price now also anchors on a priced non-stable token, and a side
+  with no amount needs no price. Raydium legs have no such step yet.
+  Orca BXyR / USDC (`Ca6vytcV…`, wallet 2rr3SF…JTpn): deposit 349.260777 BXyR + 3.868296 USDC at
+  0.00247541 = 4.73; deposit 1,189.799986 BXyR at 0.00182065 (post-price of the swap in its own
+  transaction) = 2.17; withdrawal 3,350.960246 BXyR at 0.00065411 (pool's last swap, 4 minutes
+  before) = 2.19; Capital G/L −4.71. Its 2 fee claims stay "not priced yet".
+  `VALUATION_MARK` is `legs-pool-1`: every stored Solana list gets one pass, and only records
+  without a settled leg basis are valued again. No `closed_pos_*` bump.
+  **(2) A closed Sui / Solana position that cannot be valued is a row**, marked "not priced" or
+  "history incomplete", with its token amounts and the priced part, in the Closed tab and the
+  breakdown; it is in NO total (its fee claims included, Solana list), and Capital G/L, Net P&L
+  and Fees Collected show `≈` + "N closed positions not priced — not in this total"; a notice
+  names each one and reads `pendingEventCount`. The one test is
+  `app/lib/closedPositionClassify.ts` (replaces the two bare `continue`s in `useLpPnl`). It is
+  on the LEGS: a half-priced deposit used to be valued on its priced side alone, and an unpriced
+  withdrawal at 0. `computePositionPnL` answers `missing_withdrawal_prices` instead of a
+  withdrawal worth 0. Total Deposited is NOT marked: it is open positions only.
+  **(3) Positions with withdrawals or fee claims but no deposit** are returned flagged
+  (`historyIncomplete`) by both engines once the history is read to its end, not skipped.
+  Count today: 0 on Account 1 (Solana, Sui), 0 on the Solana and Sui test wallets.
+  **(4) EVM.** `excluded[]` of the wallet-wide Aerodrome, Velodrome and Uniswap scans and a failed
+  holder check in the Aerodrome / Velodrome closed scans are counted notices with the reason
+  (`lookup-excluded:<cause>`; a `lookup-` reason, so the totals show `≈`). Uniswap's time-budget
+  notice moved to this form; a chain with no history source now says so.
+  **(5) Also fixed:** a position being re-priced stays in the totals with its mark until the new
+  answer lands (it was removed first: −2,138.74 unmarked against ≈ −2,140.09 on the Sui test
+  wallet); reconstructed closed rows survive a refresh with nothing open.
+  **Local B7 (production build, read-only store):** Solana wallet Closed (216) → (217), Capital
+  G/L ≈ −355.16 → ≈ −359.87, Fees ≈ 275.98 and Total Deposited 21.28 unchanged, "2 claims not
+  priced yet" unchanged. Account 1: 4 open, Closed (115), Deposited 27,890.81, Capital G/L
+  ≈ −12,768.74, no new notice. Sui 0x15ac…2eff: Closed (40), 38 claims not priced, no new
+  notice. EVM 0x844e…7c97: 1 open, Closed (65), no new notice (a single local server does not
+  reproduce the 429s). Store 2,877 keys before and after. Tests:
+  `npx tsx scripts/silent-drop-test.ts` (28); forced page test, five paths, each a row or notice.
+  **Stored lists of other wallets hold unpriced positions that were hidden until now** (replay of
+  the page rule over the store): 15 of 86 on one Sui wallet, 3 of 2,616 on the heavy wallet, 2 of
+  31 and 1 of 1,006 on two more. They become "not priced" rows on deploy.
+  **Corrections to the `cd45675` entry:** the Orca pool list DOES load in production (24.0 MB per
+  `/api/orca` request, "items over 2MB can not be cached"); "host does not resolve" was this
+  machine only. So Orca APR is not absent, but every request downloads 24 MB.
+  **Known issue recorded:** `/api/pancakeswap` answers 500 "Unexpected end of JSON input" now and
+  then (error group since 2026-07-28). The route parses the BNB RPC reply without checking the
+  HTTP status, so an empty body fails the whole route. The two on 2026-10-12 19:43 UTC came in a
+  20-second window with 17 other warnings and errors on routes that use the same Alchemy key; no
+  log line says 429, so the cause is likely throttling but not proven.
+
 - **`cd45675`** (Raydium memory fix, 2026-10-12, live as `dpl_4h5sTcwfprRQUdJFR15VzGiSopK1`) —
   **`/api/raydium` asks for the wallet's own pools by id instead of downloading the whole list.**
   Cause, corrected: ONE request was enough. `fetchRaydiumPoolStats` downloaded Raydium's full
@@ -3280,6 +3337,15 @@ with similar position shapes. Never wallet-specific framing.
   `node scripts/wallet-e2e/two-wallets.cjs` (two simulated extensions), then the real-extension
   checks, before any wallet-flow change is called done.
 
+- **(i) No closed or open position and no fee scan result may be dropped silently.** Every skip
+  path produces a row or a counted notice, and totals depending on it show `≈`. A reconstructed
+  closed position the page cannot value is a row marked "not priced" or "history incomplete"
+  (`app/lib/closedPositionClassify.ts`, the one test, used by `useLpPnl` and
+  `useWalletLevelFees`); a position a wallet-wide scan knew about and left out is a counted
+  notice with its reason (`excludedPositionNotices` / `excludedNotice` in
+  `enumerationTruncation.ts`, reason `lookup-excluded:<cause>`). A bare `continue` on a position
+  is a bug. Check with `npx tsx scripts/silent-drop-test.ts`.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
@@ -3417,8 +3483,8 @@ way to verify this path is a forced cold scan — delete the wallet's
 
 **Raydium route out of memory — RESOLVED `cd45675` (2026-10-12).** See Recent fixes.
 
-**Open, found 2026-10-12 (details in the `cd45675` entry):** a closed position with no priced
-event is hidden from the Closed tab and totals with no notice; Aerodrome history answers 500 for
+**Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
+see the silent-drop entry):** Aerodrome history answers 500 for
 contract wallets with many positions (Alchemy 429 on the transfer index); a zero-liquidity Sui
 position object is valued at today's prices; Orca fee APR is silently absent (dead pool-list
 host); Bluefin and non-CETUS Cetus reward claims in a third token are never priced.
