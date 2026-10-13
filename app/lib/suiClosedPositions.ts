@@ -653,6 +653,106 @@ export async function valuePositionLifecycle(
   };
 }
 
+// ── Re-valuing a stored record that still has unpriced events ────────────────
+export function unpricedEventCount(p: Pick<SuiClosedPosition, 'events'>): number {
+  let n = 0;
+  for (const e of p.events) if (e.usdAtTime == null) n += 1;
+  return n;
+}
+
+/**
+ * Weight for the never-shrink merge: the event count first, then how many of
+ * the events are priced (a fraction below 1, so it never outranks an event).
+ * A stored record is replaced only by one with more events, or with the same
+ * events and MORE of them priced; never the reverse.
+ */
+export function suiClosedWeight(p: Pick<SuiClosedPosition, 'events'>): number {
+  const n = p.events.length;
+  return n + (n - unpricedEventCount(p)) / (n + 1);
+}
+
+/**
+ * The stored record with ONLY its unpriced events taken from a fresh valuation.
+ * An event that already has a value keeps it to the cent (a second look-up of
+ * the same day can answer from the other historical source and differ by that
+ * day's spread). When the fresh record has more events, or its events do not
+ * line up with the stored ones, the fresh record is returned as it is.
+ */
+export function fillUnpricedFromFresh(stored: SuiClosedPosition, fresh: SuiClosedPosition): SuiClosedPosition {
+  if (fresh.events.length !== stored.events.length) return fresh;
+  const same = stored.events.every((e, i) => {
+    const f = fresh.events[i];
+    return f.type === e.type && f.timestamp === e.timestamp && f.txHash === e.txHash && f.amount0 === e.amount0 && f.amount1 === e.amount1;
+  });
+  if (!same) return fresh;
+  let filled = 0;
+  const events = stored.events.map((e, i) => {
+    if (e.usdAtTime != null || fresh.events[i].usdAtTime == null) return e;
+    filled += 1;
+    return fresh.events[i];
+  });
+  if (filled === 0) return stored;
+  return { ...stored, ...sumEvents(events), events, sourceBreakdown: fresh.sourceBreakdown };
+}
+
+function sumEvents(events: ActivityEventForPnL[]): Pick<SuiClosedPosition, 'depositUSD' | 'withdrawalUSD' | 'feesUSD' | 'capitalGL' | 'pendingEventCount'> {
+  let depositUSD = 0, withdrawalUSD = 0, feesUSD = 0, pendingEventCount = 0;
+  for (const e of events) {
+    if (e.usdAtTime == null) pendingEventCount += 1;
+    else if (e.type === 'deposit') depositUSD += e.usdAtTime;
+    else if (e.type === 'withdrawal') withdrawalUSD += e.usdAtTime;
+    else feesUSD += e.usdAtTime;
+  }
+  return { depositUSD, withdrawalUSD, feesUSD, capitalGL: withdrawalUSD - depositUSD, pendingEventCount };
+}
+
+/**
+ * A stored record's unpriced events valued again FROM THE RECORD ITSELF (its
+ * coin types, amounts and timestamps), by the historical price of each side.
+ * For a record whose events the wallet history no longer carries — a very
+ * active wallet's stored history holds only its most recent part — so it would
+ * otherwise stay unpriced for good. The pool price inside the event is not in
+ * the record, so a leg with one unpriceable token stays unpriced here.
+ * Historical prices only (Rule 1a); priced events are not touched.
+ */
+export async function revalueStoredRecord(stored: SuiClosedPosition): Promise<SuiClosedPosition> {
+  const gaps = stored.events.filter((e) => e.usdAtTime == null);
+  if (gaps.length === 0) return stored;
+  const stA = isStable(stored.coinTypeA);
+  const stB = isStable(stored.coinTypeB);
+  const suiTs = new Set<number>();
+  const dlByCoin = new Map<string, Set<number>>();
+  for (const e of gaps) {
+    for (const [ct, stable] of [[stored.coinTypeA, stA], [stored.coinTypeB, stB]] as const) {
+      if (stable) continue;
+      if (normalizeSuiType(ct).toLowerCase() === SUI_CANONICAL) suiTs.add(e.timestamp);
+      (dlByCoin.get(ct) ?? dlByCoin.set(ct, new Set()).get(ct)!).add(e.timestamp);
+    }
+  }
+  await Promise.all([
+    suiTs.size > 0 ? prewarmSuiPricesForTimestamps([...suiTs]) : Promise.resolve(),
+    dlByCoin.size > 0
+      ? prewarmDefillamaPrices([...dlByCoin].map(([contract, ts]) => ({ chain: 'sui' as const, contract, timestamps: [...ts] })))
+      : Promise.resolve(),
+  ]);
+  const sourceBreakdown = { ...stored.sourceBreakdown };
+  let filled = 0;
+  const events = stored.events.map((e) => {
+    if (e.usdAtTime != null) return e;
+    const v = valueByHistoricalSides(e.amount0, e.amount1, stored.coinTypeA, stored.coinTypeB, stA, stB, e.timestamp);
+    if (v.usd == null) return e;
+    filled += 1;
+    sourceBreakdown[v.source] = (sourceBreakdown[v.source] ?? 0) + 1;
+    return { ...e, usdAtTime: v.usd, price0AtTime: v.p0, price1AtTime: v.p1 };
+  });
+  if (filled === 0) return stored;
+  if (sourceBreakdown.pending != null) { sourceBreakdown.pending -= filled; if (sourceBreakdown.pending <= 0) delete sourceBreakdown.pending; }
+  return { ...stored, ...sumEvents(events), events, sourceBreakdown };
+}
+
+// A list that still holds an unpriced event is tried again at most this often.
+const UNPRICED_RETRY_MS = 6 * 60 * 60 * 1000;
+
 // ── Orchestrator: all closed positions for a wallet+protocol, fully valued ────
 // Fetches tx history + owned set ONCE (not per position), reconstructs and values
 // every closed position. This is what the Redis-cached entry point (B4) wraps.
@@ -667,14 +767,18 @@ export async function getClosedPositionsForWallet(
 // `complete: false` means the list may be missing positions — the cache must not
 // store it and the page must say so.
 //
-// `known` maps a position id to the number of events its STORED record holds.
-// A closed position is immutable, so one that is already stored with at least
-// as many events is not valued again (valuation is the slow part — it fetches
+// `known` maps a position id to its STORED record. A closed position is
+// immutable, so one that is already stored with at least as many events AND no
+// unpriced event is not valued again (valuation is the slow part — it fetches
 // claim-date prices). The cache merge keeps the stored record for it.
+//
+// A stored record that still holds an unpriced event IS valued again: a price
+// that did not exist minutes after the event, or that a request could not
+// reach, may exist now. Only the gaps are filled (`fillUnpricedFromFresh`).
 export async function getClosedPositionsForWalletWithStatus(
   walletAddress: string,
   protocol: SuiClmmProtocol,
-  known?: ReadonlyMap<string, number>,
+  known?: ReadonlyMap<string, SuiClosedPosition>,
   deadlineMs?: number,
   given?: SuiWalletHistory,
 ): Promise<{ positions: SuiClosedPosition[]; complete: boolean; status: ScanStatus; settled: boolean }> {
@@ -695,7 +799,7 @@ export async function getClosedPositionsForWalletWithStatus(
     if (!evs.some((e) => e.kind === 'deposit')
       && (!historyRead || !evs.some((e) => e.amountARaw > 0n || e.amountBRaw > 0n))) continue;
     const stored = known?.get(pid);
-    if (stored !== undefined && stored >= evs.length) continue;
+    if (stored !== undefined && stored.events.length >= evs.length && unpricedEventCount(stored) === 0) continue;
     todo.push([pid, evs]);
   }
   // Most recently active first: when the time budget cuts valuation short, what
@@ -709,11 +813,28 @@ export async function getClosedPositionsForWalletWithStatus(
   const out: SuiClosedPosition[] = [];
   const CONCURRENCY = 4;
   let settled = true;
+
+  // Stored records that still hold an unpriced event and that this pass will
+  // not rebuild from the history (the stored window no longer carries them, or
+  // they wait on an object lookup): their gaps are filled from the record
+  // itself. First, because they are few and the oldest thing owed.
+  if (known) {
+    const rebuilt = new Set(todo.map(([pid]) => pid));
+    const owed = [...known.values()].filter((p) => !rebuilt.has(p.positionId) && unpricedEventCount(p) > 0);
+    for (let i = 0; i < owed.length; i += CONCURRENCY) {
+      if (deadlineMs !== undefined && Date.now() >= deadlineMs) { settled = false; complete = false; break; }
+      const batch = await Promise.all(owed.slice(i, i + CONCURRENCY).map((p) => revalueStoredRecord(p).catch(() => p)));
+      batch.forEach((p, k) => { if (p !== owed[i + k]) out.push(p); });
+    }
+  }
   for (let i = 0; i < todo.length; i += CONCURRENCY) {
     if (deadlineMs !== undefined && Date.now() >= deadlineMs) { settled = false; complete = false; break; }
     const batch = await Promise.all(todo.slice(i, i + CONCURRENCY).map(async ([pid, evs]) => {
       const lifecycle = await buildLifecycle(protocol, pid, evs);
-      return lifecycle ? valuePositionLifecycle(lifecycle) : null;
+      if (!lifecycle) return null;
+      const fresh = await valuePositionLifecycle(lifecycle);
+      const stored = known?.get(pid);
+      return stored ? fillUnpricedFromFresh(stored, fresh) : fresh;
     }));
     for (const p of batch) { if (p) out.push(p); else complete = false; }
   }
@@ -813,17 +934,23 @@ export function getCachedClosedPositionsGuarded(
       backend: _backend,
       slots: [{ name: protocol, key: closedPosKey(protocol, walletAddress) }],
       scan: async (cached) => {
-        const known = new Map((cached[protocol] ?? []).map((x) => [x.positionId, x.events.length] as const));
+        const known = new Map((cached[protocol] ?? []).map((x) => [x.positionId, x] as const));
         const fresh = await getClosedPositionsForWalletWithStatus(walletAddress, protocol, known, deadline, hist);
         scanStatus = fresh.status;
         return { bySlot: { [protocol]: fresh.positions }, complete: fresh.complete, settled: fresh.settled };
       },
       idOf: (x) => x.positionId,
-      weightOf: (x) => x.events.length,
+      weightOf: suiClosedWeight,
       isValid: isCachedSuiPosition,
       emptyTtlSeconds: null,
       legacyTtlSeconds: CLOSED_POS_TTL_SECONDS,
-      mark: hist.mark,
+      // A list with no unpriced event keeps the plain history mark (nothing to
+      // do until the history moves). One that still holds an unpriced event
+      // also carries a time slot, so it is valued again once per slot — and the
+      // first load after this change, since no stored mark has the suffix.
+      mark: (list) => (list.some((x) => unpricedEventCount(x) > 0)
+        ? `${hist.mark}:unpriced:${Math.floor(Date.now() / UNPRICED_RETRY_MS)}`
+        : hist.mark),
       // The scan is resumable: positions a short scan found are kept (flagged).
       storePartial: true,
       log: (m) => console.warn(`[suiClosedPositions] ${protocol}: ${m}`),

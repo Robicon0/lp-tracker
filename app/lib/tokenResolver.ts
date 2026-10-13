@@ -56,6 +56,7 @@ import {
   CG_PLATFORM,
   DEFILLAMA_CHAIN,
   normalizeIdentifier,
+  defillamaRequestId,
   lookupHardcodedToken,
 } from './tokenConstants';
 
@@ -329,13 +330,15 @@ async function defiLlamaHasCoverage(chain: Chain, raw: string): Promise<boolean>
   const dlChain = DEFILLAMA_CHAIN[chain];
   if (!dlChain) return false;
   try {
-    const res = await fetch(`https://coins.llama.fi/prices/current/${dlChain}:${raw}`, {
+    // Sui: address in full, or a token whose address starts with a zero reads as not covered.
+    const id = defillamaRequestId(chain, raw);
+    const res = await fetch(`https://coins.llama.fi/prices/current/${dlChain}:${id}`, {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
     });
     if (!res.ok) return false;
     const json = (await res.json()) as { coins?: Record<string, { price?: number }> };
-    const entry = json?.coins?.[`${dlChain}:${raw}`];
+    const entry = json?.coins?.[`${dlChain}:${id}`] ?? (json?.coins ? Object.values(json.coins)[0] : undefined);
     return !!entry && typeof entry.price === 'number' && entry.price > 0;
   } catch {
     return false;

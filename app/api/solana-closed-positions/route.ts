@@ -1,6 +1,6 @@
 import { NextResponse, after } from 'next/server';
 import { getClosedPositionsWithinBudget, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
-import { scanStatusNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { scanStatusNotice, unreadableTxNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { capClosedPositions } from '../../lib/closedPositionResponse';
 import { withActivityRouteCache } from '../../lib/activityRouteCache';
 
@@ -47,17 +47,21 @@ async function GET_impl(request: Request) {
   try {
     // ONE budget per request (60 s). Past it the answer is the stored lists,
     // flagged in-progress, and the scan is kept alive to store its progress.
-    const { positions: all, status, stillRunning } = await getClosedPositionsWithinBudget(account);
+    const { positions: all, status, stillRunning, unreadableTx } = await getClosedPositionsWithinBudget(account);
     if (stillRunning) after(() => stillRunning);
     // A history scan that is not whole is reported, never passed off as the
     // whole list: `in-progress` (the resumable scan stopped at its time budget;
     // the next request continues), `capped` (history too long to read in full)
     // or unavailable. Carrying a lookup notice also keeps withActivityRouteCache
     // from holding this response (isIncompletePayload).
-    const notice = scanStatusNotice('closed-position history', status);
+    // Rule (j): transactions the provider would not return are a counted
+    // notice of their own (it replaces the generic "unavailable" line, which
+    // would say less).
+    const unread = unreadableTx && unreadableTx > 0 ? unreadableTxNotice('closed-position history', unreadableTx) : null;
+    const notice = unread && status === 'failed' ? null : scanStatusNotice('closed-position history', status);
     const { positions, notice: capNotice }: { positions: SolanaClosedPosition[]; notice: RouteTruncation | null } =
       capClosedPositions(all, (p) => p.closedTs);
-    const truncated: RouteTruncation[] = [...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])];
+    const truncated: RouteTruncation[] = [...(unread ? [unread] : []), ...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])];
     return NextResponse.json({
       positions, count: positions.length, account,
       ...(truncated.length > 0 ? { truncated } : {}),

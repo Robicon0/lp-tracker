@@ -88,6 +88,30 @@ export function normalizeSuiType(ct: string): string {
   return prefixed.replace(/^0x0+([0-9a-f]+::)/, '0x$1');
 }
 
+/**
+ * A Sui coin type with its address written in full (64 hex digits).
+ *
+ * `normalizeSuiType` strips the address's leading zeros, which is the form the
+ * engine stores and compares. DeFiLlama answers the stripped form ONLY when
+ * nothing was stripped or the address is a short framework one (`0x2::sui::SUI`):
+ * for a token whose address starts with a zero (CETUS `0x06864a…`, a WBTC
+ * `0x0041f9…`) the stripped form returns nothing at all, and every leg and fee
+ * claim in that token stayed unpriced. The full form is answered for every
+ * token checked (SUI, CETUS, USDC, DEEP, WAL: same price as the stripped form
+ * where both answer; measured 2026-10-14). Use it for the REQUEST only; cache
+ * keys and comparisons stay on `normalizeSuiType`.
+ */
+export function suiTypeFullAddress(ct: string): string {
+  if (!ct) return ct;
+  const prefixed = ct.startsWith('0x') ? ct : `0x${ct}`;
+  return prefixed.replace(/^0x([0-9a-fA-F]{1,64})(?=::)/, (_m, addr: string) => `0x${addr.toLowerCase().padStart(64, '0')}`);
+}
+
+/** The identifier to SEND to DeFiLlama for a token (see `suiTypeFullAddress`). */
+export function defillamaRequestId(chain: Chain, raw: string): string {
+  return chain === 'sui' ? suiTypeFullAddress(raw) : raw;
+}
+
 export function normalizeIdentifier(chain: Chain, raw: string): string {
   if (!raw) return raw;
   if (chain === 'sui') return normalizeSuiType(raw);

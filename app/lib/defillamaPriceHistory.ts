@@ -37,7 +37,7 @@
 
 import { Redis } from '@upstash/redis';
 import { logPrice } from './priceLogger';
-import { type Chain, DEFILLAMA_CHAIN, normalizeIdentifier } from './tokenConstants';
+import { type Chain, DEFILLAMA_CHAIN, normalizeIdentifier, defillamaRequestId } from './tokenConstants';
 
 export type { Chain } from './tokenConstants';
 
@@ -172,7 +172,9 @@ async function fetchOnce(chain: Chain, contract: string, ts: number): Promise<Fe
       // return that nearest point; the drift validation below still rejects
       // anything outside ±24h, so Rule 1c (same-UTC-day historical, never
       // spot) is unchanged.
-      const url = `${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${contract}?searchWidth=24h`;
+      // A Sui coin type is sent with its address in full: DeFiLlama returns
+      // nothing for one whose leading zero was stripped (the CETUS cause).
+      const url = `${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${defillamaRequestId(chain, contract)}?searchWidth=24h`;
       const res = await fetch(url, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
@@ -357,7 +359,7 @@ async function fetchExactOnce(chain: Chain, contract: string, ts: number): Promi
   if (!dlChain) return { kind: 'missing' };
   return gate(async () => {
     try {
-      const res = await fetch(`${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${contract}?searchWidth=1h`, {
+      const res = await fetch(`${ENDPOINT}/${Math.floor(ts)}/${dlChain}:${defillamaRequestId(chain, contract)}?searchWidth=1h`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000),

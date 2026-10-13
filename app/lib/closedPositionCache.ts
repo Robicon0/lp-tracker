@@ -88,8 +88,12 @@ export interface GuardedLoadOptions<T> {
    * from the mark stored with a list, the list is rebuilt and merged — this is
    * how a position closed today appears today without waiting for the 30-day
    * refresh. Omit it for a source that cannot tell cheaply whether history grew.
+   *
+   * A function receives the slot's list (the stored one when deciding whether to
+   * scan, the merged one when recording) — for a mark that also depends on the
+   * list itself, e.g. "still holds unpriced records; try again after …".
    */
-  mark?: string;
+  mark?: string | ((list: readonly T[]) => string);
   /**
    * Keep the positions found by a SHORT scan (merged, never shrinking), stored
    * flagged incomplete. For resumable scans, whose progress must not be lost
@@ -230,8 +234,10 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
 
   const isStale = (s: SlotState<T>) => !!s.meta && now - s.meta.refreshedAt > refreshAfterMs;
   const isDue = (s: SlotState<T>) => isStale(s) && now - (s.meta?.lastAttemptAt ?? 0) > retryAfterMs;
+  const markFor = (list: readonly T[]): string | undefined =>
+    typeof opts.mark === 'function' ? opts.mark(list) : opts.mark;
   const markMoved = (s: SlotState<T>) =>
-    opts.mark !== undefined && (s.cached?.length ?? 0) > 0 && s.meta?.mark !== opts.mark;
+    opts.mark !== undefined && (s.cached?.length ?? 0) > 0 && s.meta?.mark !== markFor(s.cached ?? []);
   const needScan = states.some((s) => s.cached === null || isDue(s) || markMoved(s));
 
   if (!needScan) {
@@ -270,7 +276,7 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
         // what makes every later load report it incomplete.
         const meta: ClosedCacheMeta = {
           refreshedAt: s.meta?.refreshedAt ?? 0, lastAttemptAt: now, lastAttemptComplete: false,
-          ...(opts.mark !== undefined && settled ? { mark: opts.mark } : {}),
+          ...(opts.mark !== undefined && settled ? { mark: markFor(merged) } : {}),
         };
         if (merged.length !== cached.length || merged.some((p, i) => p !== cached[i])) {
           await write(() => backend!.set(s.slot.key, JSON.stringify(merged)));
@@ -293,7 +299,7 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
     // Rule 1 holds by construction: `merged` contains every cached id.
     const meta: ClosedCacheMeta = {
       refreshedAt: now, lastAttemptAt: now, lastAttemptComplete: true,
-      ...(opts.mark !== undefined ? { mark: opts.mark } : {}),
+      ...(opts.mark !== undefined ? { mark: markFor(merged) } : {}),
     };
     await write(() => backend!.set(s.slot.key, JSON.stringify(merged)));
     await write(() => backend!.set(closedMetaKey(s.slot.key), JSON.stringify(meta)));

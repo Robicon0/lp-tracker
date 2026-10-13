@@ -64,6 +64,7 @@ import { rpcUrlFromEnv } from './rpcEnv';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
 import { runResumableScan, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
 import { parseWhirlpoolEvents, poolPriceForLeg, lastTradedSqrtPrice, consistentWithOneSided, usdPricesFromPool } from './whirlpoolEventPrice';
+import { SOLANA_GET_TX_OPTIONS, SOLANA_MAX_TX_VERSION, isUnsupportedTxVersion, unreadableCause } from './solanaTxVersion';
 
 // rpcUrlFromEnv: a malformed value (bare API key) behaves like UNSET → the
 // engine's existing graceful degrade (empty result, stats.complete=false so
@@ -200,7 +201,7 @@ function parseRaydiumEventLogs(tx: SolTx): RayLogEvent[] {
 }
 
 // ── Alchemy JSON-RPC with throttle backoff (Phase A pacing) ───────────────────
-export interface ScanStats { signatures: number; validSignatures: number; txFetched: number; throttleEvents: number; wallMs: number; billedCalls: number; complete: boolean; /** A signature page failed or the page cap was hit — the list is not the wallet's whole history. */ signaturesIncomplete?: boolean; }
+export interface ScanStats { signatures: number; validSignatures: number; txFetched: number; throttleEvents: number; wallMs: number; billedCalls: number; complete: boolean; /** A signature page failed or the page cap was hit — the list is not the wallet's whole history. */ signaturesIncomplete?: boolean; /** Transactions the provider would not return this request (rule (j)). */ unreadableTx?: number; }
 
 async function alchemyRpc(method: string, params: unknown[], stats: ScanStats): Promise<unknown> {
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -217,7 +218,7 @@ async function alchemyRpc(method: string, params: unknown[], stats: ScanStats): 
   return null;
 }
 
-interface SigInfo { signature: string; err: unknown; }
+interface SigInfo { signature: string; err: unknown; blockTime?: number | null; }
 
 interface SolTx {
   transaction: { message: { instructions: RawInstr[]; accountKeys: Array<{ pubkey: string } | string> }; signatures?: string[] };
@@ -229,6 +230,13 @@ interface SolTx {
     logMessages?: string[]; // Anchor "Program data:" event logs (Raydium exact fees)
   } | null;
   blockTime: number | null;
+  /**
+   * Set on a MARKER kept in the stored history for a transaction the provider
+   * would not return (standing rule (j)). It has no instructions and no meta:
+   * the reconstruction never reads it, the scan counts it and is not complete
+   * while one remains.
+   */
+  unreadable?: string;
 }
 interface RawInstr { programId: string; data?: string; accounts?: string[] }
 interface ParsedInner { parsed?: { type?: string; info?: Record<string, unknown> } }
@@ -238,10 +246,19 @@ interface TokenBalance { accountIndex: number; mint: string; owner: string; uiTo
 // serial, 120ms gap, exponential backoff on 429; a naive burst dropped 37% of
 // txs, this achieves 100%. Returns a Map(signature → tx). Retries throttled
 // items until the queue drains (bounded by attempt cap inside the batch).
-async function fetchTransactions(sigs: string[], stats: ScanStats, giveUpAtMs?: number): Promise<Map<string, SolTx | null>> {
+//
+// A signature the provider answers WITHOUT a transaction is not "no
+// transaction" (rule (j)): a version above the one asked for is unreadable at
+// once; any other error, or an empty result, is asked again and is unreadable
+// after UNREADABLE_ATTEMPTS. Each one is recorded in `unreadable` with its
+// cause and maps to null in the result. A caller that passes no collector must
+// treat a null as "could not be read", never as "not there".
+const UNREADABLE_ATTEMPTS = 3;
+async function fetchTransactions(sigs: string[], stats: ScanStats, giveUpAtMs?: number, unreadable?: Map<string, string>): Promise<Map<string, SolTx | null>> {
   const out = new Map<string, SolTx | null>();
   let queue = [...sigs];
   let outerGuard = 0;
+  const tries = new Map<string, number>();
   // Past `giveUpAtMs` the batch loop stops; the caller sees fewer results than
   // signatures and treats the page as not read (it is retried next request).
   const late = () => giveUpAtMs !== undefined && Date.now() >= giveUpAtMs;
@@ -251,7 +268,7 @@ async function fetchTransactions(sigs: string[], stats: ScanStats, giveUpAtMs?: 
     for (let i = 0; i < queue.length; i += 20) {
       if (late()) { next.push(...queue.slice(i)); break; }
       const batch = queue.slice(i, i + 20);
-      const body = batch.map((s, k) => ({ jsonrpc: '2.0', id: k, method: 'getTransaction', params: [s, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }] }));
+      const body = batch.map((s, k) => ({ jsonrpc: '2.0', id: k, method: 'getTransaction', params: [s, SOLANA_GET_TX_OPTIONS] }));
       stats.billedCalls += batch.length;
       const res = await fetch(ALCHEMY_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.status === 429) { stats.throttleEvents += 1; next.push(...batch); await sleep(800); continue; }
@@ -262,10 +279,20 @@ async function fetchTransactions(sigs: string[], stats: ScanStats, giveUpAtMs?: 
         if (err && (err.code === 429 || err.code === -32005)) stats.throttleEvents += 1;
         next.push(...batch); await sleep(800); continue;
       }
-      for (const r of j as Array<{ id: number; result?: SolTx | null; error?: { code?: number } }>) {
+      for (const r of j as Array<{ id: number; result?: SolTx | null; error?: { code?: number; message?: string } }>) {
         const s = batch[r.id];
-        if (r.error && (r.error.code === 429 || r.error.code === -32005)) { stats.throttleEvents += 1; next.push(s); }
-        else { out.set(s, r.result ?? null); }
+        if (r.error && (r.error.code === 429 || r.error.code === -32005)) { stats.throttleEvents += 1; next.push(s); continue; }
+        if (r.result) { out.set(s, r.result); continue; }
+        // No transaction came back. A version the engine does not ask for will
+        // not change on a retry; anything else gets UNREADABLE_ATTEMPTS.
+        const n = (tries.get(s) ?? 0) + 1;
+        tries.set(s, n);
+        if (!isUnsupportedTxVersion(r.error) && n < UNREADABLE_ATTEMPTS) { next.push(s); continue; }
+        const cause = unreadableCause(r.error);
+        unreadable?.set(s, cause);
+        stats.unreadableTx = (stats.unreadableTx ?? 0) + 1;
+        console.warn(`[solanaClosedPositions] transaction ${s.slice(0, 8)}… could not be read (${cause})`);
+        out.set(s, null);
       }
       await sleep(120);
     }
@@ -999,6 +1026,10 @@ function reduceTx(signature: string, tx: SolTx): SolTx | null {
 }
 const sigOf = (tx: SolTx) => tx.transaction.signatures?.[0] ?? '';
 
+function unreadableMarker(signature: string, blockTime: number | null, cause: string): SolTx {
+  return { transaction: { signatures: [signature], message: { accountKeys: [], instructions: [] } }, meta: null, blockTime, unreadable: cause };
+}
+
 function walletSource(wallet: string, stats: ScanStats): ScanSource<SolTx, string> {
   return {
     async page({ until, cursor, deadlineMs }) {
@@ -1011,12 +1042,17 @@ function walletSource(wallet: string, stats: ScanStats): ScanSource<SolTx, strin
       stats.signatures += page.length;
       const valid = page.filter((x) => !x.err).map((x) => x.signature);
       stats.validSignatures += valid.length;
-      const txMap = valid.length ? await fetchTransactions(valid, stats, deadlineMs + PAGE_GRACE_MS) : new Map<string, SolTx | null>();
+      const unreadable = new Map<string, string>();
+      const txMap = valid.length ? await fetchTransactions(valid, stats, deadlineMs + PAGE_GRACE_MS, unreadable) : new Map<string, SolTx | null>();
       if (txMap.size !== valid.length) throw new Error(`transactions not returned (${txMap.size} of ${valid.length})`);
+      const timeOf = new Map(page.map((x) => [x.signature, x.blockTime ?? null] as const));
       const items: SolTx[] = [];
       for (let i = valid.length - 1; i >= 0; i--) { // oldest first within the page
         const tx = txMap.get(valid[i]);
-        const reduced = tx ? reduceTx(valid[i], tx) : null;
+        // Rule (j): a transaction that could not be read is KEPT as a marker, so
+        // the stored history knows it is short and a later load can ask again.
+        if (!tx) { items.push(unreadableMarker(valid[i], timeOf.get(valid[i]) ?? null, unreadable.get(valid[i]) ?? 'not-returned')); continue; }
+        const reduced = reduceTx(valid[i], tx);
         if (reduced) items.push(reduced);
       }
       return {
@@ -1028,11 +1064,70 @@ function walletSource(wallet: string, stats: ScanStats): ScanSource<SolTx, strin
   };
 }
 
-interface SolanaWalletHistory { txs: SolTx[]; complete: boolean; status: ScanStatus; reason?: string; mark: string }
+interface SolanaWalletHistory {
+  txs: SolTx[]; complete: boolean; status: ScanStatus; reason?: string; mark: string;
+  /** Transactions of this wallet that could not be read. The history is not complete while this is above 0. */
+  unreadable: number;
+}
+
+// ── Unreadable transactions: asked again on later loads (rule (j)) ───────────
+// A marker stays in the stored history. What a later read finds for it lives in
+// a side key (`…:reread` → signature → the reduced transaction, or 0 when the
+// transaction turned out to touch neither program), read only when the history
+// holds a marker. Under CLOSED_POS_CACHE_READONLY the side key is not written.
+const REREAD_MAX_PER_LOAD = 60;
+const REREAD_BUDGET_MS = 8_000;
+const REREAD_EVERY_MS = 10 * 60_000;
+const _rereadAt = new Map<string, number>();
+const _rereadLocal = new Map<string, Record<string, SolTx | 0>>();
+const readOnlyStore = () => process.env.CLOSED_POS_CACHE_READONLY === '1';
+
+async function resolveUnreadable(histKey: string, txs: SolTx[], stats: ScanStats): Promise<SolTx[]> {
+  if (!txs.some((t) => t.unreadable)) return txs;
+  const sideKey = `${histKey}:reread`;
+  let found: Record<string, SolTx | 0> = { ...(_rereadLocal.get(sideKey) ?? {}) };
+  if (_scanStore) {
+    try {
+      const raw = await _scanStore.get(sideKey);
+      const stored = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (stored && typeof stored === 'object') found = { ...(stored as Record<string, SolTx | 0>), ...found };
+    } catch { /* a failed read: the markers simply stay */ }
+  }
+  // A marker for a version above the one the engine asks for cannot change
+  // until the engine reads that version: it is not asked again before then.
+  const askable = (cause: string) => { const v = /^version-(\d+)$/.exec(cause)?.[1]; return v === undefined || Number(v) <= SOLANA_MAX_TX_VERSION; };
+  const open = txs.filter((t) => t.unreadable && askable(t.unreadable) && !(sigOf(t) in found)).map(sigOf);
+  const last = _rereadAt.get(sideKey) ?? 0;
+  if (open.length > 0 && Date.now() - last >= REREAD_EVERY_MS) {
+    _rereadAt.set(sideKey, Date.now());
+    const ask = open.slice(0, REREAD_MAX_PER_LOAD);
+    const got = await fetchTransactions(ask, stats, Date.now() + REREAD_BUDGET_MS, new Map());
+    let changed = false;
+    for (const sig of ask) {
+      const tx = got.get(sig);
+      if (!tx) continue;
+      found[sig] = reduceTx(sig, tx) ?? 0;
+      changed = true;
+    }
+    if (changed) {
+      _rereadLocal.set(sideKey, found);
+      if (_scanStore && !readOnlyStore()) { try { await _scanStore.set(sideKey, JSON.stringify(found)); } catch { /* kept in memory for this instance */ } }
+    }
+  }
+  const out: SolTx[] = [];
+  for (const t of txs) {
+    if (!t.unreadable) { out.push(t); continue; }
+    const f = found[sigOf(t)];
+    if (f === undefined) out.push(t);       // still unreadable
+    else if (f !== 0) out.push(f);          // read now, and it touches a program
+  }
+  return out;
+}
 
 async function getSolanaWalletHistory(wallet: string, stats: ScanStats): Promise<SolanaWalletHistory> {
+  const key = `solana_wallet_hist_v1:${wallet.toLowerCase()}`;
   const r = await runResumableScan<SolTx, string>({
-    key: `solana_wallet_hist_v1:${wallet.toLowerCase()}`,
+    key,
     store: _scanStore,
     source: walletSource(wallet, stats),
     idOf: sigOf,
@@ -1041,9 +1136,20 @@ async function getSolanaWalletHistory(wallet: string, stats: ScanStats): Promise
     log: (m) => console.warn(`[solanaClosedPositions] ${m}`),
   });
   try {
-    return { txs: await r.items(), complete: r.complete, status: r.status, reason: r.reason, mark: r.mark };
+    const all = await resolveUnreadable(key, await r.items(), stats);
+    const txs = all.filter((t) => !t.unreadable);
+    const unreadable = all.length - txs.length;
+    if (unreadable === 0) return { txs, complete: r.complete, status: r.status, reason: r.reason, mark: r.mark, unreadable: 0 };
+    // Rule (j): never complete while a transaction is unread. The mark carries
+    // the count, so the stored lists are rebuilt when one is read at last.
+    console.error(`[solanaClosedPositions] ${unreadable} transaction(s) of this wallet could not be read; the history is not complete`);
+    return {
+      txs, complete: false, status: r.status === 'complete' ? 'failed' : r.status,
+      reason: `${unreadable} transaction${unreadable === 1 ? '' : 's'} could not be read`,
+      mark: `${r.mark}:u${unreadable}`, unreadable,
+    };
   } catch (err) {
-    return { txs: [], complete: false, status: 'failed', reason: String(err).slice(0, 160), mark: '0:failed' };
+    return { txs: [], complete: false, status: 'failed', reason: String(err).slice(0, 160), mark: '0:failed', unreadable: 0 };
   }
 }
 
@@ -1233,6 +1339,8 @@ export interface SolanaClosedPositionsResult {
   incomplete: boolean;
   /** Why: `in-progress` (more on the next load), `capped` (history larger than the limit) or `failed`. */
   status: ScanStatus;
+  /** Transactions of this wallet that could not be read (rule (j)); the list is incomplete while above 0. */
+  unreadableTx?: number;
 }
 
 // Redis-cached top-level entry point (mirrors the Sui one, but returns BOTH
@@ -1290,7 +1398,7 @@ export function getCachedClosedPositionsGuarded(wallet: string): Promise<SolanaC
     const status: ScanStatus = !incomplete ? 'complete'
       : scanStatus === 'in-progress' || hist.status === 'in-progress' ? 'in-progress'
       : hist.status === 'capped' ? 'capped' : 'failed';
-    return { positions: [...(r.bySlot.orca ?? []), ...(r.bySlot.raydium ?? [])], incomplete, status };
+    return { positions: [...(r.bySlot.orca ?? []), ...(r.bySlot.raydium ?? [])], incomplete, status, ...(hist.unreadable > 0 ? { unreadableTx: hist.unreadable } : {}) };
   })();
   _inFlightScans.set(key, p);
   return p.finally(() => { _inFlightScans.delete(key); });
@@ -1344,3 +1452,12 @@ export async function getClosedPositionsWithinBudget(
 export function getCachedClosedPositionCapitalGL(wallet: string): Promise<SolanaClosedPosition[]> {
   return getCachedClosedPositionsGuarded(wallet).then((r) => r.positions);
 }
+
+/** Script and test hooks; not used by product code. */
+export const _solanaEngineTestHooks = {
+  newStats,
+  lastSwapSqrtBefore,
+  getSolanaWalletHistory,
+  /** Let the next load ask again for transactions that could not be read. */
+  allowReread: () => { _rereadAt.clear(); },
+};

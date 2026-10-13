@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
+import { SOLANA_GET_TX_OPTIONS } from '../../../lib/solanaTxVersion';
 import { createHash } from 'crypto';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice, prewarmDefillamaPricesAtTime, getCachedOnlyDefillamaPriceAtTime } from '../../../lib/defillamaPriceHistory';
@@ -147,21 +148,29 @@ interface SolTransaction {
   blockTime: number | null;
 }
 
+// Every signature passed in is a SUCCESSFUL transaction of this position, so
+// each one must come back. A transaction the provider does not return is asked
+// again; if it still does not come back the request FAILS (standing rule (j)):
+// skipping it would drop a deposit, withdrawal or fee claim with no sign, and
+// the page keeps the position's last good figures instead.
 async function fetchTransactions(signatures: string[]): Promise<(SolTransaction | null)[]> {
   const BATCH = 20;
-  const results: (SolTransaction | null)[] = [];
-
-  for (let i = 0; i < signatures.length; i += BATCH) {
-    const batch = signatures.slice(i, i + BATCH);
-    const batchResults = await Promise.all(
-      batch.map((sig) =>
-        solanaRpc('getTransaction', [
-          sig,
-          { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 },
-        ]) as Promise<SolTransaction | null>
-      )
-    );
-    results.push(...batchResults);
+  const results: (SolTransaction | null)[] = new Array(signatures.length).fill(null);
+  let pending = signatures.map((_, i) => i);
+  for (let attempt = 0; attempt < 3 && pending.length > 0; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, attempt === 1 ? 400 : 1200));
+    const missing: number[] = [];
+    for (let i = 0; i < pending.length; i += BATCH) {
+      const batch = pending.slice(i, i + BATCH);
+      const got = await Promise.all(batch.map((idx) =>
+        (solanaRpc('getTransaction', [signatures[idx], SOLANA_GET_TX_OPTIONS]) as Promise<SolTransaction | null>).catch(() => null)));
+      batch.forEach((idx, k) => { if (got[k]) results[idx] = got[k]; else missing.push(idx); });
+    }
+    pending = missing;
+  }
+  if (pending.length > 0) {
+    console.error(`[activity] ${pending.length} of ${signatures.length} transactions could not be read`);
+    throw new Error(`${pending.length} of ${signatures.length} transactions could not be read`);
   }
   return results;
 }

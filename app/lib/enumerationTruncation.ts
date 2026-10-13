@@ -133,6 +133,16 @@ export function excludedNotice(scope: string, cause: ExcludedCause, count: numbe
   return { scope, cap: 0, returned: count, knownTotal: total, reason: `${LOOKUP_EXCLUDED_PREFIX}${cause}` };
 }
 
+/**
+ * Transactions of the wallet that the provider would not return (standing rule
+ * (j)): `returned` is how many. A `lookup-` reason, so every total that depends
+ * on the scan shows `≈`; the scan is not complete while one remains.
+ */
+export const LOOKUP_UNREADABLE_TX = 'lookup-unreadable-tx';
+export function unreadableTxNotice(scope: string, count: number): RouteTruncation {
+  return { scope, cap: 0, returned: count, knownTotal: null, reason: LOOKUP_UNREADABLE_TX };
+}
+
 /** True for a notice that reports missing decoration, not missing positions or money. */
 export function isInfoReason(reason: unknown): boolean {
   return reason === POOL_STATS_UNAVAILABLE;
@@ -285,6 +295,11 @@ export function describeTruncation(n: TruncationNotice): string {
     const of = n.knownTotal != null && n.knownTotal > 0 ? ` of ${n.knownTotal}` : '';
     const one = n.returned === 1;
     return `${where}: ${n.returned}${of} position${one ? '' : 's'} left out — ${one ? why : why.replace(/^its /, 'their ').replace("the position's pool", 'their pools').replace('who holds it', 'who holds them')}. ${one ? 'Its' : 'Their'} fees and Capital G/L are not in the totals`;
+  }
+
+  if (n.reason === LOOKUP_UNREADABLE_TX) {
+    const one = n.returned === 1;
+    return `${where}: ${n.returned} transaction${one ? '' : 's'} could not be read — any position or fee in ${one ? 'it' : 'them'} is missing from the totals`;
   }
 
   switch (n.reason) {
