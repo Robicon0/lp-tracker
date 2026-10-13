@@ -963,6 +963,92 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`cd7f637`** (Unreadable transactions and Sui re-valuation, 2026-10-14, live as
+  `dpl_CKbAbKpeLQR26gGnwZUcvjWeR3Av`) — **Solana version-1 transactions are read; a transaction
+  the provider does not return is counted, never skipped (Methodology rule (j)); Sui prices keep
+  the address's leading zero; stored Sui records with unpriced events are valued again.**
+  **(1) Solana transaction version 1** (first seen 2026-09-19). `getTransaction` returns a
+  transaction only at or below `maxSupportedTransactionVersion`; the engine and the Orca / Raydium
+  activity routes asked with 0, got error −32015 and skipped the transaction. Measured on Alchemy,
+  Helius and the public endpoint: identical answers (error at 0 or unset; the transaction at 1 and
+  at 2, with the same instruction, inner-instruction, balance and log fields as version 0).
+  `app/lib/solanaTxVersion.ts` holds the ONE number (`SOLANA_MAX_TX_VERSION = 1`): the highest
+  version the engine has been checked against, not "as high as the node allows".
+  **Unreadable transactions.** `fetchTransactions` asks three times for a transaction that comes
+  back empty or with another error (a version above the one asked for is not retried). What still
+  does not come back is kept in the stored history as a MARKER (`unreadable: <cause>`), counted,
+  and asked again on later loads (at most every 10 minutes per instance; the answer is kept in
+  `solana_wallet_hist_v1:{wallet}:reread`). While one remains the history is not complete, the
+  mark carries `:u{n}`, the lists are stored flagged, and the route sends
+  `lookup-unreadable-tx` ("N transactions could not be read — any position or fee in them is
+  missing from the totals"), which marks Capital G/L, Net P&L and Fees Collected `≈`. The activity
+  routes fail the request (the page keeps the position's last good figures). In the pool
+  look-back an unreadable transaction still stops the look-back: the leg stays unpriced.
+  **Stored histories needed no repair:** every wallet with a stored Solana history was checked
+  (4 wallets, 66 successful transactions since 09-19): none is version 1. With version 1 asked,
+  Alchemy returned every successful transaction of Account 1 (773) and of 2rr3SF…JTpn (2,287).
+  The version-1 transactions met so far are bot and aggregator transactions that name a pool
+  (84 read: 7 signers, 5 with a Whirlpool swap inside, none a position instruction).
+  **Effect on the look-back** (Account 1, 86 legs, engine's own look-back on the live chain): the
+  14 legs that stopped at a version-1 transaction now read it; 9 find the pool's last swap (0.01%
+  to 0.34% from the price actually used) and 5 have no swap in the 20 transactions. Legs the
+  look-back can price: 60 → 69 of 86. The 17 left: 9 no swap in 20, 7 all 20 earlier transactions
+  failed, 1 none. (The page of 20 counts FAILED transactions too, so the look-back is often
+  shorter than 20 successful ones. Not changed.)
+  **(2) Sui leading zero.** DeFiLlama answers a coin type whose address starts with a zero only
+  in its full 64-digit form (CETUS, one WBTC); the engine sent the stripped form and got nothing.
+  `defillamaRequestId` / `suiTypeFullAddress` (`tokenConstants.ts`) write the address in full for
+  the REQUEST only, in both historical look-ups and the resolver's coverage check; stored forms,
+  cache keys and comparisons are unchanged. The full form returns the same price as the stripped
+  one for SUI, USDC, DEEP and WAL. The CETUS reward path (spot + LKG) is untouched.
+  **(3) Re-valuing stored Sui records.** A stored closed record that still holds an unpriced event
+  is valued again when its list is next loaded: once after this deploy, then at most once per six
+  hours (`mark` in `closedPositionCache.ts` can now depend on the list; a fully priced list keeps
+  the plain history mark and is not scanned). Only the gaps are filled
+  (`fillUnpricedFromFresh`): an event that has a value keeps it to the cent. A record the stored
+  history no longer carries (a very active wallet keeps only its recent part) is filled from the
+  record itself by the historical price of each side (`revalueStoredRecord`). The merge weight is
+  the event count plus the share of priced events (`suiClosedWeight`), so a record is replaced
+  only by one with more events or more priced events. Time-budgeted (25 s), resumable, stored
+  flagged while unfinished. `closed_pos_sui` NOT bumped.
+  **The 21 "not priced" positions, production store after the loads:** 19 priced, 2 still "not
+  priced" as expected (USDC / ETH on 0x9d6e…b1f9: Sui-bridge ETH has no price Dec 2024 to Feb
+  2025; HAWAL / WAL on 0x0256…e6ea: no HAWAL price Aug 2025). 0x9d6e…b1f9: 14 priced (CETUS / SUI
+  ×12, DEEP / CETUS, USDC / CETUS; e.g. CETUS / SUI `0xc71ef106`: deposit 1,303.12, withdrawal
+  386.69, fees 96.73), its fee claims too ("302 claims not priced" → 183). 0x0256…e6ea: BTC / WBTC
+  priced (deposit 8,558.10, withdrawal 7,832.85, Capital G/L −725.25) and 16 of 17 USDC / WBTC
+  positions' WBTC fee claims (fees on the list 25.59 → about 1,454; one $0.07 claim missed this
+  pass and is due again in the next six-hour slot). Heavy 0x9dae…89cb: WAL / SUI ×3 priced
+  (each in and out within a minute: Capital G/L 0.00), wallet Capital G/L +635.75 unchanged, no
+  unpriced notice. 0x81e1…1695: USDSUI / SUI priced (338.97 in, 338.97 out). Against DeFiLlama
+  asked directly: CETUS, BTC, WBTC and WAL prices equal to the last digit; the SUI side differs
+  by up to 9% on one leg (2025-10-12: 2.544 used, 2.799 at the leg's minute) because SUI is one
+  CoinGecko price per day (Rule 1c, unchanged). No priced event changed, no list shrank
+  (0x81e1…1695 grew 1,006 → 2,668 from its own new history).
+  **Production B7:** Solana 2rr3SF…JTpn identical (Closed 217, Capital G/L ≈ −359.87, Fees
+  ≈ 275.98, Deposited 21.28). Account 1: 4 open, Closed (115), Deposited 27,890.81, Capital G/L
+  ≈ −12,768.74, Fees 14,485.13 (378 claims; the 26 CETUS reward claims differ, price 0.02496 →
+  0.02440, nothing else), Net ties to the cent, no new notice. Sui 0x15ac…2eff: Closed (40), 38
+  claims not priced, Capital G/L ≈ −2,138.85. No failed request except `/api/prices` 429 (twice,
+  on 0x9d6e…b1f9; seen on the previous build).
+  Tests: `npx tsx scripts/unreadable-tx-test.ts` (24), `npx tsx scripts/sui-revalue-test.ts` (35).
+  **Found, not fixed (read-only trace):**
+  **(a) Sui wallet 0x9d6e…b1f9's +1,055,757 Capital G/L is a VAULT's positions, not missing
+  deposits.** Three stored "closed positions" (DEEP / SUI `0xa1d965f5`, USDC / SUI `0x08f9035a`,
+  DEEP / SUI `0x76c215cc`) are Cetus positions owned by a vault (package `0xc4ebf35b…1d05`,
+  module `pool`: `DepositEvent` with `lp_amount`, `RebalanceEvent`; shares staked through
+  `0xd5b301aa…::core`). They were opened and closed by the vault's operators (other senders; the
+  wallet's balance does not change in those transactions). The wallet only DEPOSITED INTO THE
+  VAULT (15.13 DEEP + 0.90 SUI; 927.96 USDC + 368.7 SUI; 214.5 DEEP + 9.7 SUI); that transaction
+  emits a Cetus add-liquidity event naming the vault's position, and the engine then completes
+  the position from its OBJECT history, which is every depositor's liquidity. Without the three:
+  −1,074.19 on 83 priced positions. The third has a ratio of 1.10, so a withdrawn-to-deposited
+  multiple alone would not catch it; the test is who opened and who holds the position.
+  **(b) `/api/prices`:** 3 calls per session (dashboard 1, analytics 2), each to CoinGecko's
+  free endpoint, cached 60 s per instance by URL; on a 429 the instance's last answer is served
+  if it has one, otherwise the 429 goes to the page, and `useWalletTokens` then prices every
+  wallet token at 0 with no mark. The route does not use the shared spot store (`cg_spot_v1`).
+
 - **`8421493`** (Silent-drop fix, 2026-10-13, live as `dpl_53wKh6wGizVU5qN14SmmsTFMm5ob`) — **No position and
   no fee scan result is dropped silently (Methodology rule (i)).**
   **Validation of pool pricing before the push (read-only).** For every leg that ALREADY has a
@@ -3401,6 +3487,15 @@ with similar position shapes. Never wallet-specific framing.
   `enumerationTruncation.ts`, reason `lookup-excluded:<cause>`). A bare `continue` on a position
   is a bug. Check with `npx tsx scripts/silent-drop-test.ts`.
 
+- **(j) A transaction the engine cannot read is a visible incomplete-scan notice with a count,
+  never a skip. A scan with unreadable transactions is never marked complete.** A provider answer
+  without a transaction (a version above the one asked for, any other error, an empty result) is
+  "could not be read", never "not there". The Solana engine keeps a marker for it in the stored
+  history, counts it, asks again on later loads and reports `lookup-unreadable-tx`; a route that
+  reads one position's transactions fails the request instead. The version asked for is the ONE
+  constant in `app/lib/solanaTxVersion.ts`; raise it only after checking the new version's
+  fields against the parsers. Check with `npx tsx scripts/unreadable-tx-test.ts`.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
@@ -3538,11 +3633,15 @@ way to verify this path is a forced cold scan — delete the wallet's
 
 **Raydium route out of memory — RESOLVED `cd45675` (2026-10-12).** See Recent fixes.
 
-**Open, found 2026-10-13 (details in the `8421493` entry):** Solana version-1 transactions cannot
-be read by the history scan; Sui tokens whose address starts with a zero (CETUS) have no
-historical price; a stored Sui record with an unpriced event is not valued again; `/api/orca`
-downloads a 24 MB pool list per request; `/api/pancakeswap` 500s when the BNB RPC answers an
-empty body.
+**Open, found 2026-10-14 (details in the `cd7f637` entry):** Cetus positions held by a vault are
+attributed whole to a wallet that deposited into the vault (Sui wallet 0x9d6e…b1f9 reads Capital
+G/L +1,055,757); `/api/prices` passes a CoinGecko 429 to the page and wallet token prices then
+read 0; the Orca pool look-back counts failed transactions in its 20.
+
+**Open, found 2026-10-13 (details in the `8421493` entry):** `/api/orca` downloads a 24 MB pool
+list per request; `/api/pancakeswap` 500s when the BNB RPC answers an empty body. (Resolved in
+`cd7f637`: Solana version-1 transactions, the Sui leading-zero address, re-valuing stored Sui
+records.)
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
 see the silent-drop entry):** Aerodrome history answers 500 for
