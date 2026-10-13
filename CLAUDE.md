@@ -963,7 +963,62 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Silent-drop fix, 2026-10-13, committed locally, NOT pushed)** — **No position and no fee scan
+- **`8421493`** (Silent-drop fix, 2026-10-13, live as `dpl_53wKh6wGizVU5qN14SmmsTFMm5ob`) — **No position and
+  no fee scan result is dropped silently (Methodology rule (i)).**
+  **Validation of pool pricing before the push (read-only).** For every leg that ALREADY has a
+  historical price, the pool price was derived by each route and compared with the price used
+  (ratio of the two tokens; a zero side taken from DeFiLlama at the leg's own time):
+
+  | Route | Wallet | Legs | Median | Max | Over 3% |
+  |---|---|---:|---:|---:|---:|
+  | Two-sided (liquidity event) | Account 1 | 12 | 0.07% | 0.62% | 0 |
+  | Two-sided (liquidity event) | 2rr3SF…JTpn | 137 | 0.11% | 1.68% | 0 |
+  | Swap in the same transaction | 2rr3SF…JTpn | 30 | 0.20% | 0.79% | 0 |
+  | 20-transaction lookback | Account 1 | 69 | 0.09% | 0.61% | 0 |
+
+  Mean signed difference −0.03% to +0.21%: nothing systematic. Account 1 has no leg with a swap
+  in its own transaction, so that route was checked on the test wallet. All 59 one-sided legs with
+  a lookback price pass the range check. Of Account 1's 86 legs the lookback, read as the engine
+  reads it, finds a price for 60; the other 26 would stay unpriced (14 a version-1 transaction in
+  the way, 7 all 20 earlier transactions failed, 4 no swap in 20, 1 none). Forced test through the
+  engine's own `valueClosedPosition` (chain stubbed): a leg with a historical price causes no
+  chain read and is never marked `pool-implied`; no swap in 20 transactions, an unreadable
+  transaction before the swap, or a price inside a one-sided leg's range all leave the leg
+  unpriced and the position "not priced". One lookback costs 21 transaction reads (one batch).
+  **Production B7 (2026-10-13):** Solana 2rr3SF…JTpn: Closed (217), Capital G/L ≈ −359.87, Fees
+  ≈ 275.98 ("2 claims not priced yet"), Deposited 21.28, BXyR row "priced from pool" (6.90 / 2.19 /
+  −4.71), no non-200; the re-pricing pass took 1.2 s on its first load, 214 of 215 stored Orca
+  records byte-identical and only BXyR changed. Account 1: 4 open, Closed (115), Deposited
+  27,890.81, Capital G/L ≈ −12,768.74, Fees 14,486.46 (378 claims before and after; only 10 CETUS
+  reward claims differ, price 0.02517 → 0.02496), Net P&L equals the displayed parts within one
+  cent, no new notice, no non-200. Sui 0x15ac…2eff: Closed (40), 38 claims not priced, Capital G/L
+  ≈ −2,138.96. Sui 0x9d6e…b1f9: 15 "not priced" rows and the notice. Heavy 0x9dae…89cb: 3 "not
+  priced" rows and the notice, Capital G/L ≈ +635.75, cap notices as before. EVM 0x844e…7c97: 1
+  open, Closed (65), 120 `/api/aerodrome/activity` 500s in 240 s (132 and 146 on the previous
+  build), nothing else failed. Store 2,877 → 2,891 keys, none removed (12 heavy-wallet history
+  chunks, 1 spot price, 1 token). No out-of-memory line in the log.
+  **Why the stored Sui positions are "not priced" (21 on four wallets), found in this validation:**
+  **(1) 15 — the engine cannot price a Sui token whose address starts with a zero.** Coin types
+  are stored with leading zeros stripped (`normalizeSuiType`) and sent to DeFiLlama in that form;
+  DeFiLlama answers only the 64-digit form. CETUS (`0x06864a…`) and one WBTC (`0x0041f9…`) are
+  affected: every CETUS leg AND fee claim outside the reward path is unpriced. Padding the address
+  in `defillamaPriceHistory.ts` fixes legs and claims at the true historical price. Not done.
+  **(2) 4 — valued minutes after the event** (WAL / SUI ×3, USDSUI / SUI): neither token had a
+  price yet, and a stored Sui record is only valued again when the wallet's history changes.
+  **(3) 2 — real coverage gaps:** Sui-bridge ETH 2024-12 to 2025-02 (Cetus V1 events carry no pool
+  price), HAWAL 2025-08.
+  **Other findings, none fixed:**
+  **(a) Solana version-1 transactions (first seen 2026-09-19) cannot be read.** Every
+  `getTransaction` asks with `maxSupportedTransactionVersion: 0`; a version-1 transaction answers
+  error −32015, is stored as "no transaction" and skipped, and the wallet scan still reports
+  complete. A wallet's own version-1 transaction would be dropped silently (rule (i)). 34% of the
+  other pool transactions read in the lookback were version 1. Account 1: 0 of its 49 transactions
+  since 09-19; the test wallet has none since then.
+  **(b) Sui wallet 0x9d6e…b1f9 reads closed Capital G/L +1,057,205.** Three stored positions have
+  withdrawals far above their deposits (DEEP / SUI: 40 DEEP in, 4,032,413 DEEP out): deposits are
+  missing from their history. Shown as priced, with no mark.
+  **(c)** `/api/prices` answered 429 (CoinGecko) once on the heavy wallet's dashboard.
+  _(Entry as written at commit time follows.)_ **No position and no fee scan
   result is dropped silently (Methodology rule (i)).**
   **(1) Legs priced from the pool (Orca).** The Solana engine had NO pool-price step: a token with
   no historical USD price left its legs unpriced even when the pool's other token was a
@@ -3482,6 +3537,12 @@ way to verify this path is a forced cold scan — delete the wallet's
 40–120 s rather than returning fast-and-empty.
 
 **Raydium route out of memory — RESOLVED `cd45675` (2026-10-12).** See Recent fixes.
+
+**Open, found 2026-10-13 (details in the `8421493` entry):** Solana version-1 transactions cannot
+be read by the history scan; Sui tokens whose address starts with a zero (CETUS) have no
+historical price; a stored Sui record with an unpriced event is not valued again; `/api/orca`
+downloads a 24 MB pool list per request; `/api/pancakeswap` 500s when the BNB RPC answers an
+empty body.
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
 see the silent-drop entry):** Aerodrome history answers 500 for
