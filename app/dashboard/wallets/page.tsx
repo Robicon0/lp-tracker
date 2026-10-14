@@ -211,6 +211,9 @@ function TokenRow({ token }: { token: TokenItem }) {
               style={{ fontSize: 11, color: "var(--fg-muted)", opacity: 0.55, letterSpacing: "0.04em" }}
             >
               {fmtBalance(token.balance)} {token.symbol} @ {fmt$(token.price, token.price < 0.01 ? 6 : 2)}
+              {token.priceState === "last-known" && (
+                <span className="ml-1.5" style={{ color: "var(--warn)" }}>last known price</span>
+              )}
             </div>
           </>
         ) : (
@@ -222,7 +225,7 @@ function TokenRow({ token }: { token: TokenItem }) {
             >
               {fmtBalance(token.balance)} {token.symbol}
               <span className="ml-1.5" style={{ color: "var(--neg)", opacity: 0.7 }}>
-                no price data
+                {token.priceState === "unavailable" ? "price unavailable" : "no price data"}
               </span>
             </div>
           </>
@@ -316,7 +319,7 @@ export default function TokensPage() {
     scanAddress !== null ||
     !!(address || solanaAddress || suiAddress) ||
     watchedWallets.length > 0;
-  const { tokens, totalTokenValue, tokenCount, isLoading } = useWalletTokens();
+  const { tokens, totalTokenValue, tokenCount, isLoading, priceUnavailableCount, lastKnownPriceCount } = useWalletTokens();
 
   const [search, setSearch] = useState("");
   const [hideDust, setHideDust] = useState(true);
@@ -335,8 +338,10 @@ export default function TokensPage() {
         (t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q),
       );
     }
-    if (hideDust) list = list.filter((t) => t.usdValue >= 0.01);
-    if (hideUnknown) list = list.filter((t) => t.price > 0 || t.usdValue > 0);
+    if (hideDust) list = list.filter((t) => t.usdValue >= 0.01 || t.priceState === "unavailable");
+    // A token we price whose price could not be read this time is not "unknown":
+    // it stays, marked "price unavailable".
+    if (hideUnknown) list = list.filter((t) => t.price > 0 || t.usdValue > 0 || t.priceState === "unavailable");
     return list;
   }, [regularTokens, search, hideDust, hideUnknown]);
 
@@ -506,6 +511,7 @@ export default function TokensPage() {
                         textShadow: "0 0 22px color-mix(in srgb, var(--accent) 22%, transparent)",
                       }}
                     >
+                      {(priceUnavailableCount > 0 || lastKnownPriceCount > 0) && "≈ "}
                       <AnimatedCount target={totalTokenValue} prefix="$" decimals={2} />
                     </div>
                   )}
@@ -521,7 +527,11 @@ export default function TokensPage() {
                 >
                   {isLoading
                     ? "Fetching balances…"
-                    : `${tokenCount} token${tokenCount === 1 ? "" : "s"} across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}`}
+                    : [
+                        `${tokenCount} token${tokenCount === 1 ? "" : "s"} across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}`,
+                        priceUnavailableCount > 0 ? `${priceUnavailableCount} price${priceUnavailableCount === 1 ? "" : "s"} unavailable — not in this total` : null,
+                        lastKnownPriceCount > 0 ? `${lastKnownPriceCount} at last known price` : null,
+                      ].filter(Boolean).join(" · ")}
                 </div>
               </div>
 

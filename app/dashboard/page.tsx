@@ -1,5 +1,6 @@
 "use client";
 
+import { unpricedShortLabel } from "../lib/closedPositionClassify";
 import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSProperties } from "react";
 import { TruncationBanner } from "../components/TruncationBanner";
 import Link from "next/link";
@@ -371,7 +372,11 @@ export default function Dashboard() {
     totalTokenValue, totalLendingValue,
     tokenCount, lendingCount,
     isLoading: walletTokensLoading,
+    tokens: walletTokenItems,
   } = useWalletTokens();
+  // A lending token whose price could not be read is not in the lending total;
+  // one at its last known price is in it, marked.
+  const lendingPriceGap = walletTokenItems.some((t) => t.isLending && t.balance > 0 && (t.priceState === "unavailable" || t.priceState === "last-known"));
 
   const { positions: externalLendingPositions } = useLendingPositions();
   const externalLendingValue = externalLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);
@@ -445,7 +450,7 @@ export default function Dashboard() {
         // Standing rule (i): a closed position that could not be valued is
         // still a row, and says so.
         rowMark: r.unpriced
-          ? (r.unpriced.kind === "history-incomplete" ? "history incomplete" : "not priced")
+          ? (r.unpriced.kind === "not-held" ? "vault - not this wallet's" : unpricedShortLabel(r.unpriced.kind))
           : r.pricedFromPool ? "priced from pool" : undefined,
         rowMarkWarn: !!r.unpriced,
       }));
@@ -1277,7 +1282,7 @@ export default function Dashboard() {
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {walletTokensLoading ? "—" : fmt$(combinedLendingValue)}
+                  {walletTokensLoading ? "—" : `${lendingPriceGap ? "≈ " : ""}${fmt$(combinedLendingValue)}`}
                 </div>
                 <div style={{ marginTop: 20 }}>
                   {topLending.length === 0 ? (

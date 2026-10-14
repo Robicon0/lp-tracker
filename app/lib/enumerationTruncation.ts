@@ -143,9 +143,21 @@ export function unreadableTxNotice(scope: string, count: number): RouteTruncatio
   return { scope, cap: 0, returned: count, knownTotal: null, reason: LOOKUP_UNREADABLE_TX };
 }
 
+/**
+ * Standing rule (k): OPEN positions that appear in the wallet's history but
+ * were never held by it (a vault's positions, named by the wallet's vault
+ * deposits). They are not the wallet's, so they are in no list and no total;
+ * the count is shown so nothing found disappears without a word. Information,
+ * not a gap: it marks nothing `≈`.
+ */
+export const NOT_HELD_OPEN = 'not-held-open';
+export function notHeldOpenNotice(scope: string, count: number): RouteTruncation {
+  return { scope, cap: 0, returned: count, knownTotal: null, reason: NOT_HELD_OPEN };
+}
+
 /** True for a notice that reports missing decoration, not missing positions or money. */
 export function isInfoReason(reason: unknown): boolean {
-  return reason === POOL_STATS_UNAVAILABLE;
+  return reason === POOL_STATS_UNAVAILABLE || reason === NOT_HELD_OPEN;
 }
 
 export type LookupReason =
@@ -316,6 +328,8 @@ export function describeTruncation(n: TruncationNotice): string {
       return `${where}: this wallet's history is too long to read in full — only its most recent activity is included`;
     case POOL_STATS_UNAVAILABLE:
       return `${where}: fee APR and pool TVL couldn't be loaded right now — positions, values and fees are not affected`;
+    case NOT_HELD_OPEN:
+      return `${where}: ${n.returned} open position${n.returned === 1 ? "" : "s"} named in this wallet's history ${n.returned === 1 ? "is" : "are"} held by a vault, not by this wallet — not shown and in no total`;
     case 'pool-scan-ceiling':
       return `${where}: this contract can only scan the first ${n.cap} pools — a position staked in a newer pool would not be listed`;
     case 'page-revert-skipped':

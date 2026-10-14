@@ -147,6 +147,14 @@ export interface TokenItem {
   balance: number;
   usdValue: number;
   price: number;
+  /**
+   * Where `price` came from. `live`: CoinGecko now. `last-known`: CoinGecko did
+   * not answer and the last known price is used (the page marks it).
+   * `unavailable`: a token we price, with no price this time — its value is NOT
+   * 0, it is unknown, and the page says "price unavailable". `none`: no price
+   * source for the token at all (unchanged behaviour). Stablecoins are `live`.
+   */
+  priceState?: "live" | "last-known" | "unavailable" | "none";
   /** 24h price change percentage (signed). null when unknown. */
   change24h: number | null;
   chain: string;
@@ -164,6 +172,10 @@ export interface WalletTokensData {
   tokenCount: number;
   lendingCount: number;
   isLoading: boolean;
+  /** Tokens (wallet + lending) whose price could not be read: not in any total. */
+  priceUnavailableCount: number;
+  /** Tokens valued at a last known price because the live read failed. */
+  lastKnownPriceCount: number;
 }
 
 export function useWalletTokens(): WalletTokensData {
@@ -205,6 +217,8 @@ export function useWalletTokens(): WalletTokensData {
     tokenCount: 0,
     lendingCount: 0,
     isLoading: false,
+    priceUnavailableCount: 0,
+    lastKnownPriceCount: 0,
   });
 
   const evmKey = evmAddresses.join(",");
@@ -236,16 +250,26 @@ export function useWalletTokens(): WalletTokensData {
         // Fetch prices for every token we know a CoinGecko ID for, in one call.
         // Covers majors, LSTs/LRTs, DeFi blue chips, and a handful of memes — so
         // AAVE reserves like wstETH, LINK, AAVE, LDO all render with correct USD.
+        // A failed price read is never a price of 0: an id with no price this
+        // time is "unavailable" (no entry here), and one served from the last
+        // known price is recorded as such so the page can mark it.
         const priceById: Record<string, number> = {};
         const changeById: Record<string, number> = {};
+        const lastKnownIds = new Set<string>();
         try {
           const uniqueIds = Array.from(new Set(Object.values(SYMBOL_TO_CG_ID)));
-          const res = await fetch(
+          const r = await fetch(
             `/api/prices?endpoint=simple/price&ids=${uniqueIds.join(",")}&vs_currencies=usd&include_24hr_change=true`,
-          ).then((r) => r.json());
+          );
+          const res = r.ok ? await r.json() : null;
+          if (!r.ok) console.error(`[useWalletTokens] price fetch answered ${r.status} — token prices unavailable`);
           for (const id of uniqueIds) {
-            priceById[id]  = res?.[id]?.usd ?? 0;
-            changeById[id] = res?.[id]?.usd_24h_change ?? 0;
+            const usd = res?.[id]?.usd;
+            if (typeof usd === "number" && usd > 0) {
+              priceById[id] = usd;
+              if (typeof res?.[id]?.last_known_at === "number") lastKnownIds.add(id);
+            }
+            if (typeof res?.[id]?.usd_24h_change === "number") changeById[id] = res[id].usd_24h_change;
           }
         } catch (err) { console.error("[useWalletTokens] price fetch failed:", err); }
 
@@ -268,6 +292,15 @@ export function useWalletTokens(): WalletTokensData {
           const id = cgIdFor(s);
           if (!id) return 0;
           return priceById[id] ?? 0;
+        }
+
+        function priceStateOf(symbol: string): TokenItem["priceState"] {
+          const s = symbol.toUpperCase();
+          if (STABLE_SYMBOLS.has(s)) return "live";
+          const id = cgIdFor(s);
+          if (!id) return "none";
+          if (!(priceById[id] > 0)) return "unavailable";
+          return lastKnownIds.has(id) ? "last-known" : "live";
         }
 
         const tokens: TokenItem[] = [];
@@ -593,9 +626,16 @@ export function useWalletTokens(): WalletTokensData {
         const lending  = tokens.filter((t) => t.isLending);
         const debt     = tokens.filter((t) => t.isDebt);
 
+        // Every token carries where its price came from (set here, once, from
+        // the symbol every builder above priced it by).
+        for (const t of tokens) {
+          if (!t.priceState) t.priceState = t.price > 0 && priceStateOf(t.symbol) === "unavailable" ? "live" : priceStateOf(t.symbol);
+        }
         fetchCompleted = true;
         clearTimeout(timeoutId);
         setData({
+          priceUnavailableCount: tokens.filter((t) => t.priceState === "unavailable" && t.balance > 0).length,
+          lastKnownPriceCount: tokens.filter((t) => t.priceState === "last-known" && t.balance > 0).length,
           tokens,
           totalTokenValue:   regular.reduce((s, t) => s + t.usdValue, 0),
           totalLendingValue: lending.reduce((s, t) => s + t.usdValue, 0),

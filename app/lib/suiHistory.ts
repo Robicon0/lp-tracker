@@ -337,6 +337,80 @@ export function getSuiObjectHistory(objectId: string): Promise<SuiHistoryBlock[]
   return p;
 }
 
+/**
+ * Who created a position object and who has held it, read from the chain
+ * (input to `ownershipVerdict` in positionOwnership.ts):
+ *  - `creatorSender`: sender of the object's first transaction (the one that
+ *    created it), and the event types that transaction emitted;
+ *  - `senders`: every sender of a transaction that touched the object;
+ *  - `addressOwners`: every address that owned a version of it. A version held
+ *    inside another object (a vault, a wrapper) has no address owner and is
+ *    not listed: it was never in a wallet.
+ * THROWS when either list cannot be read in full: "could not read" must never
+ * become "never held".
+ */
+export interface SuiObjectOwnershipFacts {
+  creatorSender: string | null;
+  creationEventTypes: string[];
+  senders: string[];
+  addressOwners: string[];
+}
+const _ownershipMemo = new Map<string, Memo<SuiObjectOwnershipFacts>>();
+export function getSuiObjectOwnership(objectId: string): Promise<SuiObjectOwnershipFacts> {
+  const key = objectId.toLowerCase();
+  const hit = _ownershipMemo.get(key);
+  if (memoFresh(hit)) return hit.p;
+  const p = (async () => {
+    const senders = new Set<string>();
+    let creatorSender: string | null = null;
+    let creationEventTypes: string[] = [];
+    let cursor: string | null = null;
+    let ended = false;
+    for (let page = 0; page < MAX_TX_PAGES; page++) {
+      const after: string = cursor ? `, after:"${cursor}"` : '';
+      const d = await gql<{ page: { pageInfo: { hasNextPage: boolean; endCursor?: string | null }; nodes: Array<{ sender?: { address?: string } | null; effects?: { events?: { nodes: GqlEvent[] } | null } | null }> } }>(
+        `{ page: transactions(first:${TX_PAGE}${after}, filter:{affectedObject:"${objectId}"}){ pageInfo{ hasNextPage endCursor } nodes{ sender{ address } ${page === 0 ? `effects{ events(first:${EVENT_PAGE}){ nodes{ contents{ type{ repr } } } } }` : ''} } } }`,
+      );
+      d.page.nodes.forEach((n, i) => {
+        const s = n.sender?.address;
+        if (s) senders.add(s);
+        if (page === 0 && i === 0) {
+          creatorSender = s ?? null;
+          creationEventTypes = (n.effects?.events?.nodes ?? []).map((e) => e.contents?.type?.repr ?? '').filter(Boolean);
+        }
+      });
+      if (!d.page.pageInfo.hasNextPage) { ended = true; break; }
+      cursor = d.page.pageInfo.endCursor ?? null;
+      if (!cursor) break;
+    }
+    if (!ended) throw new SuiHistoryUnavailableError(`paging did not end for object ${objectId}`);
+    const owners = new Set<string>();
+    cursor = null;
+    ended = false;
+    for (let page = 0; page < MAX_TX_PAGES; page++) {
+      const after: string = cursor ? `, after:"${cursor}"` : '';
+      const d = await gql<{ objectVersions: { pageInfo: { hasNextPage: boolean; endCursor?: string | null }; nodes: Array<{ owner?: { __typename?: string; address?: { address?: string } | null } | null }> } | null }>(
+        `{ objectVersions(first:50${after}, address:"${objectId}"){ pageInfo{ hasNextPage endCursor } nodes{ owner{ __typename ... on AddressOwner{ address{ address } } ... on ConsensusAddressOwner{ address{ address } } } } } }`,
+      );
+      const v = d.objectVersions;
+      if (!v) throw new SuiHistoryUnavailableError(`object versions missing for ${objectId}`);
+      for (const n of v.nodes) {
+        const a = n.owner?.address?.address;
+        if (a && (n.owner?.__typename === 'AddressOwner' || n.owner?.__typename === 'ConsensusAddressOwner')) owners.add(a);
+      }
+      if (!v.pageInfo.hasNextPage) { ended = true; break; }
+      cursor = v.pageInfo.endCursor ?? null;
+      if (!cursor) break;
+    }
+    if (!ended) throw new SuiHistoryUnavailableError(`version paging did not end for object ${objectId}`);
+    return { creatorSender, creationEventTypes, senders: [...senders], addressOwners: [...owners] };
+  })();
+  const memo: Memo<SuiObjectOwnershipFacts> = { doneAt: null, p };
+  _ownershipMemo.set(key, memo);
+  p.then(() => { memo.doneAt = Date.now(); }, () => { if (_ownershipMemo.get(key) === memo) _ownershipMemo.delete(key); });
+  return p;
+}
+
 /** Object ids of one type the wallet owns NOW. Throws rather than return a partial set. */
 export async function getSuiOwnedObjectIds(wallet: string, type: string): Promise<Set<string>> {
   const ids = new Set<string>();
@@ -412,4 +486,5 @@ export function _setSuiHistoryStoreForTests(store: ScanStore | null): void {
   _store = store;
   _resetHistoryScanOverlay();
   _objectMemo.clear();
+  _ownershipMemo.clear();
 }

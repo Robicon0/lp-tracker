@@ -43,8 +43,10 @@ import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from './defillama
 import { logPrice } from './priceLogger';
 import { suiRpc } from './suiRpc';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
-import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, mergeSuiBlocks, type SuiHistoryBlock, type SuiWalletHistory } from './suiHistory';
+import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, getSuiObjectOwnership, mergeSuiBlocks, type SuiHistoryBlock, type SuiWalletHistory } from './suiHistory';
 import type { ScanStatus } from './historyScan';
+import { ownershipVerdict, type OwnershipVerdict } from './positionOwnership';
+import { readOwnershipVerdicts, recordOwnershipVerdicts, type StoredVerdict } from './suiOwnershipStore';
 
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
@@ -158,6 +160,13 @@ export interface SuiClosedPosition {
   // NO deposit: its deposit could not be read, so it cannot be valued. It is
   // returned (and shown as "history incomplete"), never skipped.
   historyIncomplete?: true;
+  // Standing rule (k): set when the wallet never held this position (another
+  // address created it, the wallet never sent a transaction on it, and no
+  // version of it was ever the wallet's — e.g. a vault's position, completed
+  // from its object history because the wallet's vault deposit named it). Shown
+  // as a row in no total. Added on every read from the stored verdicts; it is
+  // not part of the stored record.
+  notHeld?: { creator: string; vaultPackage: string | null };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -227,6 +236,7 @@ async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProto
   const owned = ownedOrNull ?? new Set<string>();
   let blocks: SuiTxBlock[] = hist.blocks;
   const unresolved = new Set<string>();
+  const notHeld = new Map<string, Extract<OwnershipVerdict, { held: false }>>();
 
   let m = positionMarkers(protocol, blocks);
   if (ownedOrNull === null) {
@@ -255,12 +265,49 @@ async function loadProtocolHistory(walletAddress: string, protocol: SuiClmmProto
     if (extra.some((x) => x === null)) complete = false;
     blocks = mergeSuiBlocks(blocks, ...extra.filter((x): x is NonNullable<typeof x> => x !== null));
     m = positionMarkers(protocol, blocks);
+    // Rule (k): these are exactly the positions the wallet did not open in its
+    // own transactions, so they are the only ones that can be someone else's.
+    // Owned now = held.
+    await checkOwnership(protocol, walletAddress, ids.filter((id) => !owned.has(id)), m.closed, notHeld);
   }
 
-  for (const id of m.opened) if (!m.closed.has(id) && !owned.has(id)) { unresolved.add(id); complete = false; }
-  for (const id of m.touched) if (!m.opened.has(id)) { unresolved.add(id); complete = false; }
+  // A position the wallet never held is not missing: it does not make the scan
+  // short. One that is still open is not a closed position either — it is kept
+  // out of the closed list (`notHeldOpen`) and only counted in a notice.
+  const notHeldOpen = new Set<string>();
+  for (const id of notHeld.keys()) if (!m.closed.has(id)) notHeldOpen.add(id);
+  for (const id of m.opened) if (!m.closed.has(id) && !owned.has(id) && !notHeld.has(id)) { unresolved.add(id); complete = false; }
+  for (const id of m.touched) if (!m.opened.has(id) && !notHeld.has(id)) { unresolved.add(id); complete = false; }
   for (const id of owned) if (!m.opened.has(id)) complete = false;
+  for (const id of notHeldOpen) unresolved.add(id);
   return { blocks, owned, unresolved, complete, status: hist.status, mark: hist.mark };
+}
+
+const ALL_CLMM_PKGS = [...CETUS_PKGS, BLUEFIN_PKG, MOMENTUM_PKG];
+
+// Ownership of the positions a wallet did not open itself (rule (k)). A stored
+// verdict is used as it is; otherwise the chain is read. A read that fails
+// leaves the position as it was (held) and is asked again on the next scan.
+async function checkOwnership(
+  protocol: SuiClmmProtocol, wallet: string, ids: string[], closed: ReadonlySet<string>,
+  notHeld: Map<string, Extract<OwnershipVerdict, { held: false }>>,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const known = await readOwnershipVerdicts(protocol, wallet);
+  const fresh: Record<string, StoredVerdict> = {};
+  await Promise.all(ids.map(async (id) => {
+    // A stored "not held" for a position that was open then is read again: it
+    // may have closed, or (rarely) moved into the wallet since.
+    const stored = known[id];
+    let v: OwnershipVerdict | undefined = stored && (stored.held || (!stored.open && closed.has(id))) ? stored : undefined;
+    if (!v) {
+      try { v = ownershipVerdict(await getSuiObjectOwnership(id), wallet, ALL_CLMM_PKGS); }
+      catch (err) { console.warn(`[suiClosedPositions] ownership read failed for ${id.slice(0, 10)}: ${String(err).slice(0, 100)}`); return; }
+      fresh[id] = v.held ? v : { ...v, ...(closed.has(id) ? {} : { open: true as const }) };
+    }
+    if (!v.held) notHeld.set(id, v);
+  }));
+  await recordOwnershipVerdicts(protocol, wallet, fresh);
 }
 
 async function fetchWalletBlocks(account: string): Promise<SuiTxBlock[]> {
@@ -898,6 +945,8 @@ export interface SuiClosedPositionsResult {
   incomplete: boolean;
   /** Why: `in-progress` (more on the next load), `capped` (history larger than the limit) or `failed`. */
   status: ScanStatus;
+  /** Rule (k): open positions named in the wallet's history that it never held (in no list). */
+  notHeldOpen?: number;
 }
 
 // Time left for valuing new positions once the history is in hand. Past it the
@@ -948,9 +997,11 @@ export function getCachedClosedPositionsGuarded(
       // do until the history moves). One that still holds an unpriced event
       // also carries a time slot, so it is valued again once per slot — and the
       // first load after this change, since no stored mark has the suffix.
+      // `:own1` gives every stored list one scan after rule (k) shipped, so the
+      // positions it completed from object history get an ownership verdict.
       mark: (list) => (list.some((x) => unpricedEventCount(x) > 0)
-        ? `${hist.mark}:unpriced:${Math.floor(Date.now() / UNPRICED_RETRY_MS)}`
-        : hist.mark),
+        ? `${hist.mark}:own1:unpriced:${Math.floor(Date.now() / UNPRICED_RETRY_MS)}`
+        : `${hist.mark}:own1`),
       // The scan is resumable: positions a short scan found are kept (flagged).
       storePartial: true,
       log: (m) => console.warn(`[suiClosedPositions] ${protocol}: ${m}`),
@@ -960,7 +1011,16 @@ export function getCachedClosedPositionsGuarded(
     const status: ScanStatus = !incomplete ? 'complete'
       : scanStatus === 'in-progress' || hist.status === 'in-progress' ? 'in-progress'
       : hist.status === 'capped' ? 'capped' : 'failed';
-    return { positions: r.bySlot[protocol] ?? [], incomplete, status };
+    // Rule (k): a position the wallet never held is marked on every read, and
+    // the open ones (in no list) are counted.
+    const verdicts = await readOwnershipVerdicts(protocol, walletAddress);
+    const positions = (r.bySlot[protocol] ?? []).map((x) => {
+      const v = verdicts[x.positionId];
+      return v && !v.held ? { ...x, notHeld: { creator: v.creator, vaultPackage: v.vaultPackage } } : x;
+    });
+    const listed = new Set(positions.map((x) => x.positionId));
+    const notHeldOpen = Object.entries(verdicts).filter(([id, v]) => !v.held && v.open && !listed.has(id)).length;
+    return { positions, incomplete, status, notHeldOpen };
   })();
   _inFlightSuiScans.set(key, p);
   return p.finally(() => { _inFlightSuiScans.delete(key); });

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCachedClosedPositionsGuarded, type SuiClosedPosition } from '../../lib/suiClosedPositions';
-import { scanStatusNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { scanStatusNotice, notHeldOpenNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { capClosedPositions } from '../../lib/closedPositionResponse';
 
 // Sprint LPPNL-PERF (Part B1): pin to the Vercel Pro ceiling so the tx-history
@@ -49,7 +49,12 @@ export async function GET(request: Request) {
       : statuses.includes('failed') ? 'failed' : 'complete';
     const notice = scanStatusNotice('closed-position history', status);
     const { positions, notice: capNotice } = capClosedPositions(all, (p) => p.closedTs);
-    const truncated: RouteTruncation[] = [...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])];
+    // Rule (k): open positions named in the history that the wallet never held.
+    const notHeldOpen = (cetus.notHeldOpen ?? 0) + (bluefin.notHeldOpen ?? 0) + (momentum.notHeldOpen ?? 0);
+    const truncated: RouteTruncation[] = [
+      ...(notice ? [notice] : []), ...(capNotice ? [capNotice] : []),
+      ...(notHeldOpen > 0 ? [notHeldOpenNotice('closed-position history', notHeldOpen)] : []),
+    ];
     return NextResponse.json({
       positions, count: positions.length, account,
       ...(truncated.length > 0 ? { truncated } : {}),

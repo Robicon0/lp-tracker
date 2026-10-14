@@ -18,6 +18,7 @@ import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 // (@upstash/redis) into the client bundle.
 import type { AnalyticsSnapshot } from "../lib/analyticsSnapshot";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
+import { unpricedRowText, unpricedShortLabel } from "../lib/closedPositionClassify";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 
 // ── Scan-mode listener (same pattern as the dashboard's) ─────────────────────
@@ -1096,11 +1097,18 @@ export default function Analytics() {
   const feesPartial = useSnap ? [] : feePartialSources;
   // not priced — a closed position that could not be valued is in NO total,
   //              its fee claims included (standing rule (i)). Always live.
-  const closedNotPriced = lpPnlLive.unpricedClosed.length;
-  const closedNotPricedNote = closedNotPriced > 0
-    ? `${closedNotPriced} closed position${closedNotPriced === 1 ? "" : "s"} not priced — not in this total`
-    : null;
-  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedNotPriced > 0;
+  // A position the wallet never held (rule (k)) is in no total but is not a
+  // gap: it does not mark anything `≈`. "check history" rows do.
+  const closedNotHeld = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind === "not-held");
+  const closedToCheck = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind === "check-history").length;
+  const closedNotPriced = lpPnlLive.unpricedClosed.length - closedNotHeld.length - closedToCheck;
+  const closedNotPricedNote = [
+    closedNotPriced > 0 ? `${closedNotPriced} closed position${closedNotPriced === 1 ? "" : "s"} not priced — not in this total` : null,
+    closedToCheck > 0 ? `${closedToCheck} closed position${closedToCheck === 1 ? "" : "s"} to check — not in this total` : null,
+  ].filter(Boolean).join(" · ") || null;
+  const closedOutOfTotals = closedNotPriced + closedToCheck;
+  const closedGaps = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind !== "not-held");
+  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0;
   const feesNote = feesStillLoading
     ? "still loading fee history"
     : feesFailed.length > 0
@@ -1139,7 +1147,7 @@ export default function Analytics() {
         // Incomplete if EITHER the compute that wrote the snapshot had a failed
         // history lookup or this session's live lookups have reported one.
         historyLookupFailed: lpPnlLive.historyLookupFailed || snapshot.lpPnl.historyLookupFailed === true,
-        capitalGLComplete: lpPnlLive.capitalGLComplete && snapshot.lpPnl.historyLookupFailed !== true && lpPnlLive.unpricedClosed.length === 0,
+        capitalGLComplete: lpPnlLive.capitalGLComplete && snapshot.lpPnl.historyLookupFailed !== true && closedOutOfTotals === 0,
       }
     : lpPnlLive;
   const totalPortfolioValue = useSnap && snapshot ? snapshot.header.totalPortfolioValue : totalPortfolioValueLive;
@@ -1176,6 +1184,28 @@ export default function Analytics() {
     : pendingSources.length > 0
       ? (onlyHistoryPending ? "closed history still loading" : "positions still loading")
       : failedSources.length > 0 ? `incomplete — couldn't load ${failedSources.join(" · ")}` : "positions still loading";
+
+  // The sub-note of one headline cell: EVERY reason that applies, in order, so
+  // no reason hides another (a failed history lookup used to take the cell and
+  // hide "N closed positions not priced"). Empty when the figure is settled.
+  const cellNotes = (c: { pendingOpen?: boolean; pendingClosed?: boolean; feesPending?: boolean }): string[] => {
+    const notes: string[] = [];
+    const add = (n: string | null | undefined) => { if (n && !notes.includes(n)) notes.push(n); };
+    if ((c.pendingOpen || c.pendingClosed) && loadingMore) add(loadingNote);
+    if (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading)) add("scanning closed positions…");
+    if (c.pendingClosed && lpPnl.historyLookupFailed) add("incomplete — some history couldn't be loaded");
+    if (c.pendingClosed && lpPnl.capitalGLPricingPending > 0) {
+      add(`incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`);
+    }
+    if (c.pendingClosed) add(closedNotPricedNote);
+    if (c.feesPending && feesIncomplete && feesNote && feesNote !== closedNotPricedNote) {
+      add(c.pendingClosed ? `fees ${feesNote}` : feesNote);
+    } else if (c.feesPending && feesIncomplete && !c.pendingClosed) add(feesNote);
+    if (c.pendingClosed && lpPnl.capitalGLApproximate > 0) {
+      add(`approximate — ${lpPnl.capitalGLApproximate} position${lpPnl.capitalGLApproximate === 1 ? "" : "s"} priced from estimates`);
+    }
+    return notes;
+  };
 
   // Status line for the LP P&L header slot (replaces the machinery counter):
   //   snapshot shown → "updated N min ago · refreshing…"
@@ -2208,36 +2238,12 @@ export default function Analytics() {
                         // confident lower figure for as long as the slowest
                         // position takes (measured: one $9k position missing
                         // for up to a minute).
-                        : ((c.pendingOpen || c.pendingClosed) && loadingMore)
-                          ? loadingNote
-                        : (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading))
-                          ? "scanning closed positions…"
-                          // ITEM 0g (G3) — two DIFFERENT reasons a Capital G/L
-                          // is not a settled total, and they must not share a
-                          // sentence. PENDING is work in progress that the
-                          // background retry resolves on its own. APPROXIMATE
-                          // is finished work valued from a tick-boundary
-                          // estimate because the historical price source was
-                          // unavailable for that position — waiting will never
-                          // change it, so the copy must not imply it might.
-                          // Pending wins when both apply: it is the part that
-                          // is still moving.
-                          // A failed history lookup outranks both: rows are
-                          // MISSING, which no amount of pricing detail about
-                          // the rows we do have can describe.
-                          : (c.pendingClosed && lpPnl.historyLookupFailed)
-                            ? "incomplete — some history couldn't be loaded"
-                          : (c.pendingClosed && lpPnl.capitalGLPricingPending > 0)
-                            ? `incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`
-                          // A closed position that could not be valued is in
-                          // none of these sums (standing rule (i)).
-                          : (c.pendingClosed && closedNotPricedNote)
-                            ? closedNotPricedNote
-                            : (c.feesPending && feesIncomplete && feesNote)
-                              ? (c.pendingClosed ? `fees ${feesNote}` : feesNote)
-                            : (c.pendingClosed && lpPnl.capitalGLApproximate > 0)
-                              ? `approximate — ${lpPnl.capitalGLApproximate} position${lpPnl.capitalGLApproximate === 1 ? "" : "s"} priced from estimates`
-                              : c.sub}
+                        // Every reason that applies is shown, joined (composable
+                        // notes): a failed history lookup must not hide that some
+                        // closed positions are not priced, nor the reverse. Order:
+                        // what is still moving first, then what is missing, then
+                        // what is approximate.
+                        : (cellNotes(c).join(" · ") || c.sub)}
                     </div>
                   </div>
                 ))}
@@ -2250,7 +2256,7 @@ export default function Analytics() {
               {showCapGlBreakdown && (
                 <div style={{ borderTop: `1px solid ${C.border}`, background: "var(--surface-hover)" }}>
                   <div style={{ padding: "10px 20px 4px", fontSize: 10, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
-                    // Capital G/L breakdown · {lpPnl.closedRows.length} closed position{lpPnl.closedRows.length === 1 ? "" : "s"}{closedNotPriced > 0 ? ` · ${closedNotPriced} not priced` : ""}
+                    // Capital G/L breakdown · {lpPnl.closedRows.length} closed position{lpPnl.closedRows.length === 1 ? "" : "s"}{closedNotPriced > 0 ? ` · ${closedNotPriced} not priced` : ""}{closedToCheck > 0 ? ` · ${closedToCheck} to check` : ""}{closedNotHeld.length > 0 ? ` · ${closedNotHeld.length} not this wallet's` : ""}
                     <span style={{ marginLeft: 10, opacity: 0.6, textTransform: "none", letterSpacing: "0.02em" }}>
                       Capital G/L = withdrawn − deposited (fees shown separately, not in G/L)
                     </span>
@@ -2281,7 +2287,7 @@ export default function Analytics() {
                               )}
                               {r.unpriced && (
                                 <span style={{ marginLeft: 8, fontSize: 10, color: "var(--warn)", letterSpacing: "0.04em" }}>
-                                  {r.unpriced.kind === "history-incomplete" ? "history incomplete" : "not priced"} — {r.unpriced.why}
+                                  {unpricedRowText(r.unpriced)}
                                 </span>
                               )}
                             </td>
@@ -2302,7 +2308,7 @@ export default function Analytics() {
                             </td>
                             <td style={{ padding: "8px 20px", borderBottom: `1px solid ${C.border}`, fontSize: 12.5, textAlign: "right", fontWeight: 700, color: r.capitalGL > 0 ? C.green : r.capitalGL < 0 ? C.red : C.textBright, fontVariantNumeric: "tabular-nums" }}>
                               {r.unpriced
-                                ? <span style={{ color: "var(--warn)", fontWeight: 400 }}>{r.unpriced.kind === "history-incomplete" ? "history incomplete" : "not priced"}</span>
+                                ? <span style={{ color: "var(--warn)", fontWeight: 400 }}>{unpricedShortLabel(r.unpriced.kind)}</span>
                                 : fmt$Signed(r.capitalGL)}
                             </td>
                           </tr>
@@ -2318,7 +2324,7 @@ export default function Analytics() {
                       {lpPnl.closedRows.length > 0 && (
                         <tfoot>
                           <tr>
-                            <td colSpan={3} style={{ padding: "10px 20px", fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase" }}>Total{closedNotPriced > 0 ? ` (${closedNotPricedNote})` : ""}</td>
+                            <td colSpan={3} style={{ padding: "10px 20px", fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase" }}>Total{closedNotPricedNote ? ` (${closedNotPricedNote})` : ""}</td>
                             <td style={{ padding: "10px 20px", textAlign: "right", fontSize: 12.5, color: C.textMid, fontVariantNumeric: "tabular-nums" }}>
                               {fmt$(lpPnl.closedRows.filter((r) => !r.unpriced).reduce((t, r) => t + r.depositUSD, 0))}
                             </td>
@@ -2406,7 +2412,7 @@ export default function Analytics() {
                   Each is a row in the breakdown and the Closed tab; none is in
                   a total. Not gated on loading: they are known as soon as the
                   closed list answers. */}
-              {lpPnl.unpricedClosed.length > 0 && (
+              {closedGaps.length > 0 && (
                 <div
                   data-testid="unpriced-closed-notice"
                   style={{
@@ -2418,26 +2424,37 @@ export default function Analytics() {
                   }}
                 >
                   <div style={{ fontSize: 12, color: "var(--warn)", letterSpacing: "0.04em", marginBottom: 8 }}>
-                    ⚠ {lpPnl.unpricedClosed.length} closed position{lpPnl.unpricedClosed.length === 1 ? "" : "s"} could
-                    not be valued and {lpPnl.unpricedClosed.length === 1 ? "is" : "are"} not in Capital G/L, Net P&L or Fees Collected:
+                    ⚠ {closedGaps.length} closed position{closedGaps.length === 1 ? "" : "s"} could
+                    not be valued and {closedGaps.length === 1 ? "is" : "are"} not in Capital G/L, Net P&L or Fees Collected:
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {lpPnl.unpricedClosed.slice(0, 25).map((u) => (
+                    {closedGaps.slice(0, 25).map((u) => (
                       <div key={u.id} style={{ fontSize: 11, color: "color-mix(in srgb, var(--warn) 85%, transparent)", letterSpacing: "0.02em", lineHeight: 1.55 }}>
                         <span style={{ color: "var(--warn)", fontWeight: 600 }}>{u.pair}</span>
                         <span style={{ opacity: 0.7 }}> ({u.protocol} · {u.chain}) — </span>
                         <span>
-                          {u.detail.kind === "history-incomplete" ? "history incomplete" : "not priced"}: {u.detail.why}
+                          {unpricedShortLabel(u.detail.kind)}: {u.detail.why}
                           {u.detail.unpricedEvents > 0 ? ` (${u.detail.unpricedEvents} event${u.detail.unpricedEvents === 1 ? "" : "s"} without a price)` : ""}
                         </span>
                       </div>
                     ))}
-                    {lpPnl.unpricedClosed.length > 25 && (
+                    {closedGaps.length > 25 && (
                       <div style={{ fontSize: 11, color: "color-mix(in srgb, var(--warn) 85%, transparent)" }}>
-                        and {lpPnl.unpricedClosed.length - 25} more, listed in the Capital G/L breakdown
+                        and {closedGaps.length - 25} more, listed in the Capital G/L breakdown
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Rule (k): positions the wallet never held (a vault's). Rows in
+                  the breakdown, in no total; information, not a gap. */}
+              {closedNotHeld.length > 0 && (
+                <div data-testid="not-held-notice" style={{ margin: "0 26px 18px", border: `1px solid ${C.border}`, padding: "10px 16px", fontFamily: FONT, fontSize: 11, color: C.text, lineHeight: 1.6 }}>
+                  {closedNotHeld.length} closed position{closedNotHeld.length === 1 ? " was" : "s were"} found in this wallet&apos;s history but never held by it, and {closedNotHeld.length === 1 ? "is" : "are"} in no total:
+                  {closedNotHeld.slice(0, 10).map((u) => (
+                    <div key={u.id}><span style={{ color: C.textBright, fontWeight: 600 }}>{u.pair}</span> ({u.protocol} · {u.chain}) — {u.detail.why}</div>
+                  ))}
                 </div>
               )}
 

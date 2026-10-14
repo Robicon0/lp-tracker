@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
-import { classifyReconstructedClosed, type UnpricedClosedDetail } from "../lib/closedPositionClassify";
+import { classifyReconstructedClosed, impossibleClosedReason, type UnpricedClosedDetail } from "../lib/closedPositionClassify";
+import { notHeldNote } from "../lib/positionOwnership";
 import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
 import { useTruncationNotices } from "./useTruncationNotices";
 import { whenFirstRowsPainted } from "../lib/firstRowsGate";
@@ -1300,6 +1301,7 @@ function aggregate(
   let initialValue = 0, currentValue = 0, closingValue = 0, feesCollected = 0, feesUnclaimed = 0, ilUSD = 0;
   let capitalGL = 0;
   const closedRows: ClosedPositionRow[] = [];
+  const checkHistory: UnpricedClosedPosition[] = [];
   let included = 0, excluded = 0, errored = 0, estimatedPositionCount = 0;
   let pendingClaimCount = 0;
   // Chains whose closed-position withdrawal events we trust on-chain.
@@ -1386,6 +1388,26 @@ function aggregate(
       // `closingValue` aggregate is intentionally not summed here — the
       // per-position `perPosition[id].closingValue` still carries the close-
       // event value for any per-position UI that needs it (e.g. dashboard row).
+      // Rule (k) backstop: a closed position whose numbers look impossible is
+      // a "check history" row in no total (Sui / Solana rows are classified
+      // before they get here, so this is the EVM case).
+      if (d.isClosed) {
+        const impossible = impossibleClosedReason(d.initialValue, d.closingValue);
+        if (impossible) {
+          const m = meta.get(id);
+          checkHistory.push({
+            id, pair: m?.pair ?? id, protocol: m?.protocol ?? "", chain: m?.chain ?? "",
+            openedTs: m?.openedTs ?? (d.firstDepositTs > 0 ? d.firstDepositTs : undefined), closedTs: m?.closedTs,
+            detail: {
+              kind: "check-history", unpricedEvents: 0,
+              depositAmount0: 0, depositAmount1: 0, withdrawalAmount0: 0, withdrawalAmount1: 0,
+              pricedDepositUSD: d.initialValue, pricedWithdrawalUSD: d.closingValue, pricedFeesUSD: d.feesCollected,
+              why: impossible,
+            },
+          });
+          continue;
+        }
+      }
       feesCollected += d.feesCollected;
       if (!d.isClosed) {
         initialValue += d.initialValue;
@@ -1450,6 +1472,7 @@ function aggregate(
 
   // Positions that could not be valued: a row each (priced part only, no
   // Capital G/L), in no total.
+  unpricedClosed = [...unpricedClosed, ...checkHistory];
   for (const u of unpricedClosed) {
     closedRows.push({
       id: u.id, pair: u.pair, protocol: u.protocol, chain: u.chain,
@@ -1548,7 +1571,10 @@ function aggregate(
   ).length;
   // Either state means the figure is not a settled historical total, so the
   // `≈` marker still applies to both — only the explanation differs.
-  const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0 && unpricedClosed.length === 0;
+  // A position the wallet never held (rule (k)) is not missing data: it does
+  // not make the total incomplete.
+  const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0 &&
+    unpricedClosed.every((u) => u.detail.kind === "not-held");
 
   // ITEM 0i — the self-contradiction check. Every headline zero AND a non-empty
   // breakdown is impossible from consistent data, so it means the aggregate is
@@ -1610,6 +1636,8 @@ interface SuiClosedPositionDTO {
   closedTs?: number;
   events: ActivityEventForPnL[];
   pendingEventCount?: number;
+  /** Rule (k): the wallet never held this position (set by the route). */
+  notHeld?: { creator: string; vaultPackage: string | null };
 }
 
 // Closed Sui position protocol → display label (used for the Capital G/L
@@ -1726,7 +1754,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
             // Value via the SAME pure engine EVM closed positions use, so the
             // injected closingValue/initialValue/fees are byte-identical in shape.
             // A position that cannot be valued is kept as an unpriced row.
-            const verdict = classifyReconstructedClosed(sp);
+            const verdict = classifyReconstructedClosed({ ...sp, ...(sp.notHeld ? { notHeldNote: notHeldNote(sp.notHeld) } : {}) });
             if (verdict.kind === "empty") continue; // no amounts at all: nothing to show
             const id = `sui-closed-${sp.protocol}-${sp.positionId}`;
             const meta = { pair: sp.pair, protocol: SUI_CLOSED_PROTOCOL_LABEL[sp.protocol], chain: "Sui", openedTs: sp.openedTs, closedTs: sp.closedTs };
