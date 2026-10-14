@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
+import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+
+// DeFiLlama projects this route reads fee APR from.
+const LLAMA_PROJECTS = ['pancakeswap-v3'] as const;
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -151,8 +155,10 @@ async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, numbe
 
 async function fetchPancakeAPYs(): Promise<Record<string, number>> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
-    const data = await res.json();
+    // One shared, stored copy of DeFiLlama's pool list (app/lib/defillamaPools.ts).
+    // Rows keep the parsed-JSON typing the code below was written against.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: { data: any[] } = { data: (await getLlamaPools(LLAMA_PROJECTS)).pools };
     const pools = data.data?.filter((p: { project: string }) => p.project === 'pancakeswap-v3') || [];
 
     const apysByKey: Record<string, number[]> = {};
@@ -280,7 +286,8 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ positions, count: positions.length, account });
+    const truncated = positions.length > 0 ? llamaPoolsNotices(LLAMA_PROJECTS) : [];
+    return NextResponse.json({ positions, count: positions.length, account, ...(truncated.length > 0 ? { truncated } : {}) });
   } catch (err) {
     if (err instanceof PositionListReadError) {
       logPositionListReadFailure('PancakeSwap', account, err);

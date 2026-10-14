@@ -5,6 +5,10 @@ import { resolveToken } from '../../lib/tokenResolver';
 import { lookupFailureNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { ethCallMany } from '../../lib/evmBatchCall';
 import { evmRpcPost } from '../../lib/evmRpc';
+import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+
+// DeFiLlama projects this route reads fee APR from.
+const LLAMA_PROJECTS = ['hyperswap-v3', 'kittenswap', 'project-x'] as const;
 
 const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
 
@@ -455,8 +459,10 @@ async function fetchHyperSwapPoolData(): Promise<{
   stats: Record<string, { tvlUsd: number; volumeUsd1d: number }>;
 }> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
-    const data = await res.json();
+    // One shared, stored copy of DeFiLlama's pool list (app/lib/defillamaPools.ts).
+    // Rows keep the parsed-JSON typing the code below was written against.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: { data: any[] } = { data: (await getLlamaPools(LLAMA_PROJECTS)).pools };
     const pools: Array<{
       project: string; chain: string; apyBase?: number; apy?: number;
       tvlUsd?: number; volumeUsd1d?: number; underlyingTokens?: string[];
@@ -749,6 +755,7 @@ export async function GET(request: Request) {
     });
 
     // `truncated` is additive and present ONLY when a cap bound this request.
+    if (positions.some((p) => p.status !== 'Closed')) truncated.push(...llamaPoolsNotices(LLAMA_PROJECTS));
     return NextResponse.json({ positions, count: positions.length, account, ...(truncated.length > 0 ? { truncated } : {}) });
   } catch (error) {
     console.error('[HyperSwap] route error:', error);

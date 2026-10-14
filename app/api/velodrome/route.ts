@@ -15,6 +15,10 @@ import {
   excludedNotice,
   LOOKUP_FAILED,
 } from '../../lib/enumerationTruncation';
+import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+
+// DeFiLlama projects this route reads fee APR from.
+const LLAMA_PROJECTS = ['velodrome-slipstream', 'velodrome-v1'] as const;
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
@@ -328,8 +332,10 @@ async function fetchPrices(): Promise<Record<string, number>> {
 // Fetch APY data from DefiLlama yields API
 async function fetchPoolAPYs(): Promise<Record<string, number>> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
-    const data = await res.json();
+    // One shared, stored copy of DeFiLlama's pool list (app/lib/defillamaPools.ts).
+    // Rows keep the parsed-JSON typing the code below was written against.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: { data: any[] } = { data: (await getLlamaPools(LLAMA_PROJECTS)).pools };
     
     // Filter for Velodrome Slipstream (CL) pools on Optimism
     const aeroPools = data.data?.filter(
@@ -572,6 +578,7 @@ export async function GET(request: Request) {
     const closedPositions = closed.positions;
     if (closed.notice) truncated.push(closed.notice);
     if (closed.holderNotice) truncated.push(closed.holderNotice);
+    if (positions.length > 0) truncated.push(...llamaPoolsNotices(LLAMA_PROJECTS));
 
     return NextResponse.json({
       positions: [...positions, ...closedPositions],

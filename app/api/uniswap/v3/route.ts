@@ -11,6 +11,10 @@ import {
   LOOKUP_UNAVAILABLE,
 } from '../../../lib/enumerationTruncation';
 import { ethCallMany } from '../../../lib/evmBatchCall';
+import { getLlamaPools, llamaPoolsNotices } from '../../../lib/defillamaPools';
+
+// DeFiLlama projects this route reads fee APR from.
+const LLAMA_PROJECTS = ['uniswap-v3'] as const;
 
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
 
@@ -477,8 +481,10 @@ async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, numbe
 // Fetch APY from DefiLlama
 async function fetchUniswapAPYs(): Promise<Record<string, number>> {
   try {
-    const res = await fetch('https://yields.llama.fi/pools', { next: { revalidate: 300 } });
-    const data = await res.json();
+    // One shared, stored copy of DeFiLlama's pool list (app/lib/defillamaPools.ts).
+    // Rows keep the parsed-JSON typing the code below was written against.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: { data: any[] } = { data: (await getLlamaPools(LLAMA_PROJECTS)).pools };
     
     const uniPools = data.data?.filter(
       (p: any) => p.project === 'uniswap-v3'
@@ -841,7 +847,10 @@ export async function GET(request: Request) {
     );
     
     const allPositions = results.flatMap((r) => r.positions);
-    const truncated = results.flatMap((r) => r.truncated);
+    const truncated = [
+      ...results.flatMap((r) => r.truncated),
+      ...(allPositions.some((p) => (p as { status?: string }).status !== 'Closed') ? llamaPoolsNotices(LLAMA_PROJECTS) : []),
+    ];
     
     return NextResponse.json({
       positions: allPositions,

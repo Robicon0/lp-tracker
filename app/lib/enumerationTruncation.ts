@@ -89,6 +89,8 @@ export const LOOKUP_CAPPED = 'lookup-capped';
  * It is shown as an information line, never under "positions could not be listed".
  */
 export const POOL_STATS_UNAVAILABLE = 'pool-stats-unavailable';
+/** Pool statistics served from the last known copy (the source could not be read). Information only. */
+export const POOL_STATS_LAST_KNOWN = 'pool-stats-last-known';
 
 /**
  * Positions a scan KNEW about and left out (standing rule (i): no position and
@@ -157,7 +159,7 @@ export function notHeldOpenNotice(scope: string, count: number): RouteTruncation
 
 /** True for a notice that reports missing decoration, not missing positions or money. */
 export function isInfoReason(reason: unknown): boolean {
-  return reason === POOL_STATS_UNAVAILABLE || reason === NOT_HELD_OPEN;
+  return reason === POOL_STATS_UNAVAILABLE || reason === POOL_STATS_LAST_KNOWN || reason === NOT_HELD_OPEN;
 }
 
 export type LookupReason =
@@ -328,6 +330,8 @@ export function describeTruncation(n: TruncationNotice): string {
       return `${where}: this wallet's history is too long to read in full — only its most recent activity is included`;
     case POOL_STATS_UNAVAILABLE:
       return `${where}: fee APR and pool TVL couldn't be loaded right now — positions, values and fees are not affected`;
+    case POOL_STATS_LAST_KNOWN:
+      return `${where}: fee APR and pool TVL are the last known figures (the source couldn't be read right now) — positions, values and fees are not affected`;
     case NOT_HELD_OPEN:
       return `${where}: ${n.returned} open position${n.returned === 1 ? "" : "s"} named in this wallet's history ${n.returned === 1 ? "is" : "are"} held by a vault, not by this wallet — not shown and in no total`;
     case 'pool-scan-ceiling':

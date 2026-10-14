@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { POOL_STATS_UNAVAILABLE, type RouteTruncation } from '../../lib/enumerationTruncation';
+import { fetchOrcaPoolStats } from '../../lib/orcaPoolStats';
 import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { createPositionReadGuard } from '../../lib/positionReadGuard';
 import { PublicKey } from '@solana/web3.js';
@@ -433,29 +435,32 @@ async function fetchDasTokenInfo(mints: string[]): Promise<Record<string, DasTok
   }
 }
 
-interface OrcaPoolStats {
-  feeAprWeek: number; // annualized decimal (e.g. 0.458 = 45.8%)
-  tvl: number;        // USD
-}
+// The page asks for this route from more than one place at once and retries a
+// failure. Identical requests that overlap share ONE run; nothing is kept after
+// it answers, so position values are never served stale.
+const inFlightRequests = new Map<string, Promise<{ status: number; body: unknown }>>();
 
-// Fetch per-pool APY + TVL from Orca's own API (keyed by pool address)
-async function fetchOrcaPoolStats(): Promise<Record<string, OrcaPoolStats>> {
+export async function GET(request: Request) {
+  const account = new URL(request.url).searchParams.get('account') ?? '';
+  const pending = inFlightRequests.get(account);
+  if (pending) {
+    const shared = await pending;
+    return NextResponse.json(shared.body, { status: shared.status });
+  }
+  const run = (async () => {
+    const res = await handleGet(request);
+    return { status: res.status, body: await res.clone().json().catch(() => null) };
+  })();
+  inFlightRequests.set(account, run);
   try {
-    const res = await fetch('https://api.mainnet.orca.so/v1/whirlpool/list', { next: { revalidate: 300 } });
-    const data = await res.json();
-    const stats: Record<string, OrcaPoolStats> = {};
-    for (const pool of data.whirlpools || []) {
-      if (pool.address && pool.feeApr?.week != null && pool.tvl != null) {
-        stats[pool.address] = { feeAprWeek: pool.feeApr.week, tvl: pool.tvl };
-      }
-    }
-    return stats;
-  } catch {
-    return {};
+    const result = await run;
+    return NextResponse.json(result.body, { status: result.status });
+  } finally {
+    inFlightRequests.delete(account);
   }
 }
 
-export async function GET(request: Request) {
+async function handleGet(request: Request): Promise<Response> {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
 
@@ -565,9 +570,9 @@ export async function GET(request: Request) {
     }
     const unknownMints = [...allMints].filter((m) => !KNOWN_TOKENS[m]);
 
-    const [prices, orcaPoolStats, dasTokens] = await Promise.all([
+    const [prices, orcaPoolStatsResult, dasTokens] = await Promise.all([
       fetchPrices(),
-      fetchOrcaPoolStats(),
+      fetchOrcaPoolStats([...new Set(Object.keys(poolDataMap))]),
       fetchDasTokenInfo(unknownMints),
     ]);
 
@@ -686,7 +691,7 @@ export async function GET(request: Request) {
       const inRange = pos.liquidity > 0n && tickCurrent >= pos.tickLowerIndex && tickCurrent < pos.tickUpperIndex;
 
       // Position-specific APY: pool_feeApr × (pool_tvl / position_value) × (pos_liq / pool_liq)
-      const poolStats = orcaPoolStats[pos.whirlpool];
+      const poolStats = orcaPoolStatsResult.stats[pos.whirlpool];
       let apy = 0;
       if (poolStats && value > 0 && pool && pool.liquidity > 0n) {
         const posLiqShare = Number(pos.liquidity) / Number(pool.liquidity);
@@ -723,7 +728,12 @@ export async function GET(request: Request) {
 
     const unreadable = readGuard.response();
     if (unreadable) return unreadable;
-    return NextResponse.json({ positions, count: positions.length, account });
+    // Pool statistics that could not be read are reported, never silently shown
+    // as "no APR". Not a `lookup-*` reason: no position, value or fee is missing.
+    const truncated: RouteTruncation[] = orcaPoolStatsResult.failed
+      ? [{ scope: 'pool statistics', cap: 0, returned: 0, knownTotal: null, reason: POOL_STATS_UNAVAILABLE }]
+      : [];
+    return NextResponse.json({ positions, count: positions.length, account, ...(truncated.length > 0 ? { truncated } : {}) });
   } catch (error) {
     if (error instanceof PositionListReadError) {
       logPositionListReadFailure('Orca', account, error);

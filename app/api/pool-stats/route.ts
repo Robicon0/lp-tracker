@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const LLAMA_YIELDS = 'https://yields.llama.fi/pools';
+import { getLlamaPools } from '../../lib/defillamaPools';
 
 // DefiLlama project names per protocol
 const PROJECT_MAP: Record<string, string[]> = {
@@ -51,11 +51,14 @@ export async function GET(request: Request) {
   const normalizedPair = normalizePair(pair);
 
   try {
-    const res = await fetch(LLAMA_YIELDS, { next: { revalidate: 300 } });
-    if (!res.ok) {
-      return NextResponse.json({ tvlUsd: null, volumeUsd1d: null, feesUsd1d: null });
+    // One shared, stored copy of DeFiLlama's pool list (app/lib/defillamaPools.ts).
+    // `basis` says whether the figures are live, the last known copy, or unavailable.
+    const ll = await getLlamaPools(projects);
+    if (ll.basis === 'unavailable') {
+      return NextResponse.json({ tvlUsd: null, volumeUsd1d: null, feesUsd1d: null, basis: ll.basis });
     }
-    const json = await res.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json: { data: any[] } = { data: ll.pools };
     const pools: Array<{
       project: string;
       chain: string;
@@ -81,6 +84,8 @@ export async function GET(request: Request) {
       tvlUsd: pool.tvlUsd,
       volumeUsd1d: pool.volumeUsd1d ?? null,
       feesUsd1d: Math.round(feesUsd1d * 100) / 100,
+      basis: ll.basis,
+      ...(ll.basis === 'last-known' && ll.at ? { asOf: ll.at } : {}),
     });
   } catch (err) {
     console.error('[pool-stats] Error fetching DefiLlama:', err);
