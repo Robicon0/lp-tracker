@@ -963,6 +963,54 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`75411c3`** (Vault-held positions, composable notes, last-known prices, 2026-10-15, live as
+  `dpl_FiW5AVfVtbAAWSRZJ5T9jLxjNBPn`) — **Methodology rule (k).**
+  **(1) Positions the wallet never held.** See rule (k). Sui 0x9d6e…b1f9: exactly the 3 vault
+  positions (package `0xc4ebf35b…1d05`; DEEP / SUI `0xa1d965f5`, USDC / SUI `0x08f9035a`, DEEP / SUI
+  `0x76c215cc`, +1,060,546.27 together) are rows out of every total; the closed list's other 82
+  priced positions sum to −2,528.55 (USDC / ETH stays "not priced"); the page's Capital G/L also
+  holds 7 zero-liquidity positions the wallet still owns (−2,267.56 on the B7 load, partly at
+  today's price). Capital G/L ≈ −4,796.11 = footer = Σ rows (was ≈ +1,055,752). The vault's fee
+  claims (8.44) leave the breakdown's fee column (3,880.02 → 3,871.74 with drift); they were never in
+  Fees Collected (the wallet-wide scan only counts positions the wallet owns or opened). Two more
+  vault positions on 0x9d6e (`0xe02cc820`, `0xdbdfaf12`) are still OPEN: in no list, counted in the
+  information notice (a first version valued them as closed at −139,550 / −40,259; caught in local
+  B7). 0x0256…e6ea: one open vault position (`0x1f723097`, package `0x11ea791d…f526`, created by
+  `0x0c7b26…5aca` on 2025-11-20; one transaction ever, no address owner ever, the wallet never a
+  sender), named by the wallet's three vault deposits on 2026-10-08: information notice only.
+  Guard replay over every stored closed list: it trips only on two of the three vault positions.
+  **(2) Composable notes.** A headline cell shows every reason that applies, joined (`cellNotes` in
+  `app/analytics/page.tsx`); the combined silent-drop page test passes 18 of 18.
+  **(3) `/api/prices`.** On a CoinGecko failure simple/price answers each id's last known price
+  (this instance, then `cg_spot_v1`) with `last_known_at`, header `x-price-basis: last-known`; with
+  none, 503. Every success writes `cg_spot_v1`. `useWalletTokens` never prices a failed read at 0:
+  `priceState` `unavailable` reads "price unavailable" (no longer hidden by the dust / unknown
+  filters), `last-known` is marked, and the wallets-page total and dashboard lending total show `≈`.
+  **Production B7:** Solana 2rr3SF…JTpn identical; Account 1 Closed (115), Deposited 27,890.81,
+  Capital G/L ≈ −12,768.74, Fees 14,486.34 (378 claims; only Cetus moves), Net ties; Sui
+  0x15ac…2eff Closed (40), only its spot-valued position moves; heavy +635.75, 0x0256 −3,642.61,
+  0x81e1 +56.13 identical; no non-200; errors only Kamino; store 3,043 → 3,076 (32 `cg_spot_v1`, 2
+  `sui_pos_owner_v1`), no closed list changed. Tests: `vault-held-test` (21),
+  `prices-last-known-test` (6, `CLOSED_POS_CACHE_READONLY=1`), forced page tests 18 + 7.
+  **Read-only findings (not changed):**
+  **(a) Unpriced claims.** 0x9d6e…b1f9 (route 196, page 183 after its merge): Cetus reward claims in
+  DEEP (129), NS (55), HAEDAL (2), and 10 fee claims of the USDC / ETH position (Sui-bridge ETH, no
+  price Dec 2024 – Feb 2025, a real gap). 0x15ac…2eff (38): Bluefin rewards in BLUE (19) and stSUI
+  (19). Cause: the Cetus route prices a reward only when it is a stablecoin, SUI, a pool side or
+  CETUS (spot); Bluefin reads `reward_symbol` only. The events carry the coin type
+  (`rewarder_type`, `reward_type`), and DeFiLlama prices all five at their claim dates. Fix: value
+  rewards at claim date by the event's coin type (Rule 1c; CETUS keeps spot + LKG), both routes,
+  with cache bumps; about 4–6 h.
+  **(b) SUI day price vs hourly.** Account 1's 55 Sui closed positions, 63 SUI legs (60 with both
+  prices): Capital G/L on those legs −22,638.41 at the CoinGecko day price vs −22,060.64 at
+  DeFiLlama's price at each leg's time (−577.77; per leg median 3.14%, max 17.64%). Five largest
+  effects, all CETUS USDC / SUI legs of 18,029.32 SUI on 2026-06-04/05: +1,413.39, −1,232.77,
+  −1,172.15, −801.31, +774.51. As stored only 1 of the 60 legs uses the day price (+23.62 if hourly):
+  the rest use the pool price inside the event. The day price mainly reaches fee claims. Rule
+  unchanged.
+  **(c) Orca look-back** counts failed transactions in its 20: page `getSignaturesForAddress` until
+  20 successful (bounded pages and time), re-measure the 86 legs: about 2–3 h.
+
 - **`cd7f637`** (Unreadable transactions and Sui re-valuation, 2026-10-14, live as
   `dpl_CKbAbKpeLQR26gGnwZUcvjWeR3Av`) — **Solana version-1 transactions are read; a transaction
   the provider does not return is counted, never skipped (Methodology rule (j)); Sui prices keep
@@ -3496,6 +3544,19 @@ with similar position shapes. Never wallet-specific framing.
   constant in `app/lib/solanaTxVersion.ts`; raise it only after checking the new version's
   fields against the parsers. Check with `npx tsx scripts/unreadable-tx-test.ts`.
 
+- **(k) A position the wallet never held is never part of its totals; a closed position whose
+  numbers look impossible is shown as 'check history', not as a result.** The test is ownership,
+  never a ratio: a Sui position the wallet did not open in its own history gets a chain read
+  (creator, every sender, every address owner; `getSuiObjectOwnership`, `ownershipVerdict` in
+  `app/lib/positionOwnership.ts`). One another address created, the wallet never acted on and never
+  owned is a row "held by a vault (package …) - not this wallet's position" in no total, its fee
+  claims included; a still-open one is in no list and is counted in an information notice
+  (`not-held-open`). A position the wallet opened (and later moved into a vault or wrapper),
+  received by transfer, or ever held stays the wallet's; a failed read is never "not held".
+  Verdicts are stored in `sui_pos_owner_v1`. Backstop (`impossibleClosedReason`): withdrawn more
+  than 3x deposited and over $1,000, or withdrawals against deposits worth nothing, is a "check
+  history" row out of totals (`≈`). Check with `npx tsx scripts/vault-held-test.ts`.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
@@ -3633,10 +3694,9 @@ way to verify this path is a forced cold scan — delete the wallet's
 
 **Raydium route out of memory — RESOLVED `cd45675` (2026-10-12).** See Recent fixes.
 
-**Open, found 2026-10-14 (details in the `cd7f637` entry):** Cetus positions held by a vault are
-attributed whole to a wallet that deposited into the vault (Sui wallet 0x9d6e…b1f9 reads Capital
-G/L +1,055,757); `/api/prices` passes a CoinGecko 429 to the page and wallet token prices then
-read 0; the Orca pool look-back counts failed transactions in its 20.
+**Open, found 2026-10-14/15 (details in the `cd7f637` and `75411c3` entries):** Cetus and Bluefin
+reward claims in a third token are never priced (sized, not built); the Orca pool look-back counts
+failed transactions in its 20. (Resolved in `75411c3`: vault-held positions, `/api/prices` 429.)
 
 **Open, found 2026-10-13 (details in the `8421493` entry):** `/api/orca` downloads a 24 MB pool
 list per request; `/api/pancakeswap` 500s when the BNB RPC answers an empty body. (Resolved in
