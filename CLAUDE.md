@@ -270,8 +270,7 @@ as a third endpoint. Note Alchemy has no `getAssetBatch`. Report:
 plan):**
 - **a. Closed Aerodrome positions for a wallet with no open Aerodrome position.** The
   empty-Sugar gate returns before the closed half runs, so such a wallet sees no closed rows.
-- **b. DefiLlama pools list (about 15 MB) is downloaded on every positions request.** It is too
-  big for Next's data cache ("items over 2MB can not be cached") and sits on the open path.
+- **b. ✅ DONE `3a4ca79`** — DefiLlama pools list read once and shared (see Recent fixes).
 - **c. Snapshot save is intermittent.** After a fully settled load the page sometimes never
   POSTs its snapshot. Find the blocking condition (suspects: the save effect's deps do not
   include `stalePositions` / `errored`). Cost today is only a slower first paint next visit.
@@ -962,6 +961,51 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`3a4ca79`** (Pool lists, 2026-10-15, live as `dpl_2MkMfhQiFb5DKQJnQQqS92BZP8Dw` since 07:40
+  AEST) — **Orca asks only for the wallet's pools; DeFiLlama's pool list is read once and shared.**
+  **Orca:** the route downloaded the whole v1 pool list (17-24 MB) per request; that list is frozen
+  (newest change 2025-03-31), so newer pools (Account 1's ZEC / USDC) had no APR. Now the v2
+  by-address endpoint (`app/lib/orcaPoolStats.ts`), 25 pools per request, 5-minute memory,
+  overlapping identical requests share one run. **DeFiLlama** (`app/lib/defillamaPools.ts`): seven
+  routes each downloaded `yields.llama.fi/pools` (11.6 MB) per request. Now fetched once, cut to the
+  nine fields of the tracked projects (1.38 MB), stored per project (`defillama_pools_v1:{project}`,
+  fresh 30 min, kept 7 days as last known) with a 30-minute in-process copy. Store limits checked:
+  10 MB per request, 100 MB per record; a 1.38 MB value written and read back intact. A failed
+  lookup is a notice, never silent: `pool-stats-last-known` (stored copy served) or
+  `pool-stats-unavailable` (none), information lines that mark no money total.
+  **Account 1 dashboard load, local production build:**
+
+  | | Before | After |
+  |---|---|---|
+  | Upstream bytes, cold | 142.9 MB (DeFiLlama 104.3 MB in 9 requests, Orca ~18 MB each) | 14.3 MB (DeFiLlama 11.6 MB in 1) |
+  | Upstream bytes, warm | 153.3 MB | 1.9 MB |
+  | Peak server memory | 413-505 MB | 243 MB |
+  | First row | 7.6 s cold / 8.2 s warm | 7.8 s cold / 5.4 s warm |
+
+  Over a whole session (dashboard + analytics, all seven wallets): DeFiLlama 28 requests / 324 MB →
+  1 / 11.6 MB; Orca 5 / 89.9 MB → 1 / 7.2 KB; peak 530 → 255 MB. Route times (same-time capture):
+  uniswap/v3 11.6 → 4.0 s, velodrome 11.7 → 3.9 s, cetus 7.4 → 3.9 s.
+  **APR / TVL, same-time before vs after:** every DeFiLlama value identical; Orca SOL / USDC 90.88 →
+  92.6 (+1.9%, different Orca endpoint); ZEC / USDC 0 → 405.11 (was absent: pool not in the frozen
+  list). Production an hour later: 81.11 / 377.98, and Cetus TVL 3.68 M → 4.36 M — live data moving.
+  **Production B7 (2026-10-15):** Solana 2rr3SF…JTpn identical (Closed 217, Capital G/L ≈ −359.87,
+  Fees ≈ 275.98); Account 1: 4 open, Closed (115), Deposited 27,890.81, Capital G/L ≈ −12,768.74,
+  Fees 14,485.85 (378 claims, 0 unpriced; only Cetus moved, CETUS reward price), no new notice,
+  first row 1.7 s; Sui 0x15ac…2eff Closed (40), 38 claims not priced, Capital G/L ≈ −2,133.58 (its
+  spot-valued position); 0x9d6e…b1f9 ≈ −4,787.50 (same-time old build vs new build −4,788.08 both),
+  183 claims not priced; heavy +635.75, 0x0256 −3,642.61, 0x81e1 +56.13 identical. No non-200 on
+  any load; 0 page errors. Production logs from the deploy to 18:30 AEST: 5 errors, all
+  `/api/lending/kamino` (known), no out-of-memory, no warnings. Store 3,076 → 3,071 over 11 h: +14
+  `defillama_pools_v1`, +1 `vfat_sickles_v1`, −22 price / token keys (TTL expiry); no closed list
+  changed. Tests: `npx tsx scripts/pool-lists-test.ts` (16) and the full suite green.
+  **Part 1 answers recorded with it:** (a) the business-pnl file had no uncommitted edits before
+  the 2026-10-14 pop: `git status` printed seconds earlier in the same tool call listed 9 modified
+  files without it, and after the pop it was the 10th, as `UU`; git also refuses to apply a stash
+  onto a file with local changes. (d) "27,768.74" was a copy error: every production load reads
+  Deposited 27,890.81. (e) 0x9d6e…b1f9's raw route has 196 unpriced claims; 13 of them (DEEP
+  rewards) are priced by two open positions' own scans, and the page merge takes the priced copy,
+  so 183 remain. Those 13 are priced at TODAY's DEEP price (see Known limitations).
 
 - **`75411c3`** (Vault-held positions, composable notes, last-known prices, 2026-10-15, live as
   `dpl_FiW5AVfVtbAAWSRZJ5T9jLxjNBPn`) — **Methodology rule (k).**
@@ -3557,6 +3601,14 @@ with similar position shapes. Never wallet-specific framing.
   than 3x deposited and over $1,000, or withdrawals against deposits worth nothing, is a "check
   history" row out of totals (`≈`). Check with `npx tsx scripts/vault-held-test.ts`.
 
+- **(l) Never pop, apply, drop or clear a stash entry you did not create in this task.** For a
+  before/after comparison (lint, build, a test against the old code) use a git worktree
+  (`git worktree add <dir> HEAD`) or a temporary copy outside the repo, never `git stash`. Why: on
+  2026-10-14 a stash push failed (zsh did not split a file list held in a variable) and the
+  following `git stash pop` applied the owner's own entry "clp-business-pnl-wip-before-phase3"; it
+  conflicted, git kept the entry, and the one file was restored to HEAD (it had no uncommitted edits).
+  See `.claude/rules/commit-protocol.md` Rule 7.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
@@ -3698,10 +3750,14 @@ way to verify this path is a forced cold scan — delete the wallet's
 reward claims in a third token are never priced (sized, not built); the Orca pool look-back counts
 failed transactions in its 20. (Resolved in `75411c3`: vault-held positions, `/api/prices` 429.)
 
-**Open, found 2026-10-13 (details in the `8421493` entry):** `/api/orca` downloads a 24 MB pool
-list per request; `/api/pancakeswap` 500s when the BNB RPC answers an empty body. (Resolved in
-`cd7f637`: Solana version-1 transactions, the Sui leading-zero address, re-valuing stored Sui
-records.)
+**Open, found 2026-10-13 (details in the `8421493` entry):** `/api/pancakeswap` 500s when the BNB
+RPC answers an empty body. (Resolved in `cd7f637`: Solana version-1 transactions, the Sui
+leading-zero address, re-valuing stored Sui records; in `3a4ca79`: the 24 MB Orca pool list.)
+
+**Open, found 2026-10-15 (details in the `3a4ca79` entry):** an OPEN Cetus position's own scan
+values DEEP reward claims at today's DEEP price (0.0240734 applied to claims from 2025-05 to
+2026-10), which the analytics merge then uses for the same claim the wallet-wide scan leaves
+unpriced. A reward valued at spot outside the designated CETUS exception (pricing Rule 1a).
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
 see the silent-drop entry):** Aerodrome history answers 500 for

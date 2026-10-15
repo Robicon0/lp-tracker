@@ -148,6 +148,25 @@ not updated, the next session starts blind to the work that just shipped.
 
 ---
 
+## Rule 7: Never touch a stash entry you did not create
+
+Never `git stash pop`, `apply`, `drop` or `clear` an entry you did not create in
+the current task. The stash list holds the owner's own unfinished work (entries
+named for other branches and features), and popping one onto a different base
+can conflict, overwrite or lose it.
+
+For any before/after comparison (lint against HEAD, building the old code,
+running a test on the previous version) use a git worktree
+(`git worktree add <dir> HEAD`, removed with `git worktree remove <dir>`) or a
+temporary copy outside the repo. Never use the stash for it.
+
+Why (2026-10-14): a `git stash push -- $FILES` failed because zsh did not split
+the variable, and the `git stash pop` after it applied the owner's entry
+"clp-business-pnl-wip-before-phase3" instead. It conflicted and git kept the
+entry; the one affected file was restored to HEAD. Nothing was lost, by luck.
+
+---
+
 ## Decision tree: "Should I commit now?"
 
 1. **Is the build clean?**
