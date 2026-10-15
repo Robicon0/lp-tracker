@@ -270,6 +270,14 @@ as a third endpoint. Note Alchemy has no `getAssetBatch`. Report:
 plan):**
 - **a. Closed Aerodrome positions for a wallet with no open Aerodrome position.** The
   empty-Sugar gate returns before the closed half runs, so such a wallet sees no closed rows.
+  **⚠️ LIVE ON ACCOUNT 1 SINCE 2026-10-15 09:00 UTC** (the owner burned the last open Aerodrome
+  position, 76833100): production shows Closed (106) with no Aerodrome row in it (the 14 closed
+  Aerodrome positions of the morning B7, plus 76833100, are gone from Capital G/L), and Fees
+  Collected has no Aerodrome row (2,533.41 on the morning B7), with NO
+  notice and no `≈`. The fee half is a second gate: `useWalletLevelFees` asks the wallet-wide
+  Aerodrome scan only for wallets that have an Aerodrome position in the positions list
+  (`aerodromeByWallet`), so with the closed half empty the scan is never requested. A silent drop
+  under rule (i); ranks first.
 - **b. ✅ DONE `3a4ca79`** — DefiLlama pools list read once and shared (see Recent fixes).
 - **c. Snapshot save is intermittent.** After a fully settled load the page sometimes never
   POSTs its snapshot. Find the blocking condition (suspects: the save effect's deps do not
@@ -961,6 +969,79 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`f170229`** (Alchemy hardening, stage 1, 2026-10-16, live as `dpl_2pv4vmoR9npjhXT4ZyejuGaojgH1`)
+  — **One limiter for every Alchemy call; PancakeSwap reply checks; immutable caches;
+  contract-wallet scan reuse; store writes only from production.** Methodology rules (m) and (f).
+  **(1) Limiter.** See rule (m). No shared limiter: a store counter costs at least one command per
+  Alchemy request, about 190-380 store commands per Account 1 load, and the stub test shows the
+  per-instance bucket plus the 429 slow-down is enough. Stub (Alchemy-like: 5,000 CU in any 10 s,
+  429 above), 20 wallets × one Account 1 dashboard load on 4 instances: without the limiter 2,058
+  of 2,260 calls answered 429; with it 2,260 of 2,260 complete, 104 of 2,364 sends answered 429
+  (4.4%), 500 CU/s over 10 s, about 2 minutes in all. With callers' 12 s timeouts (`evmRpc`,
+  `suiRpc`) 1,850 complete and 410 end as visible timeouts; none silent, none handed a 429.
+  **(2) PancakeSwap.** The BNB reply is checked (HTTP status, empty body, not JSON, no result),
+  retried twice, then a named 503 `position-list-read-failed`; a failed position read is never
+  skipped and decimals are never guessed as 18. The activity route's helper answers an error
+  envelope instead of throwing "Unexpected end of JSON input".
+  **(3) Caches** (90 d, positive answers only): `token_meta_v1` (Sui coin metadata for the Sui
+  routes, the balances route and the decimals helpers; BNB decimals / symbol), `evm_receipt_v1`
+  (a receipt once its block is 64 deep) and `evm_pool_tokens_v1` (the Aerodrome / Velodrome
+  closed builders' mint receipts and pool tokens). Removed: the 4 `suix_getCoinMetadata` calls
+  (80 CU) of every Account 1 dashboard load; for a wallet with 65 closed Aerodrome positions, 65
+  receipt reads (1,300 CU) per closed-history request and up to 130 pool-token reads (3,380 CU)
+  per cold instance. Production wrote 17 / 65 / 24 of these keys in the first hour.
+  **(4) Base history.** A contract wallet's settled scan is reused for 3 minutes on any instance
+  (`storedScanReuse`; production log: "unchanged since last scan", 20-136 ms instead of a 2-4.5 s
+  rescan). An unverified Base position answers 503 `history-unverified` at once instead of walking
+  four log endpoints that cannot serve wide ranges (25-36 s, then a bare 500). The page counts it:
+  "history couldn't be loaded (N positions unverified)", `≈`; after the 12-round pricing schedule
+  it says "N positions could not be priced" instead of "pricing N positions…".
+  **(5) Store guard.** Rule (f). Fails closed; production confirmed writing after the deploy
+  (`autoExposeSystemEnvs: true`; 3,082 → 3,189 keys, all from the new caches and one Sui history
+  chunk; no closed list changed, none removed).
+  **Alchemy documentation (read-only):** "Throughput is now configured at the account level (no
+  longer per app), meaning the combined usage of all your Alchemy apps counts toward your overall
+  throughput limit"; "Limits are evaluated over a 10-second rolling window using a token bucket";
+  429 may carry `Retry-After`. So separate apps do NOT get separate limits. The public pricing page
+  now lists the Free plan at 300 CU/s (15 requests/s); this account's dashboard shows 500.
+  **CU per Account 1 load (local production builds, same time, interleaved; CU from the meter):**
+
+  | Load | Before (`eb4c16c`) | After (`f170229`) |
+  |---|---|---|
+  | Dashboard, first | 191 calls, 5,098 CU, peak 478 CU in 1 s, 208 CU/s over 10 s | 192 calls, 4,804 CU, peak 390, 171 |
+  | Dashboard, second | 182 calls, 4,482 CU, peak 332, 143 | 96 calls, 2,342 CU, peak 346, 132 |
+  | Analytics | 232 calls, 5,698 CU, peak 410, 155 | 229 calls, 5,614 CU, peak 468, 144 |
+
+  The second "after" load fell between two dashboard refreshes, so half its position-route calls
+  are timing, not the change. By network, first load before → after: Optimism 1,690 → 1,664,
+  Base 1,204 → 808, Sui 660 → 840, Arbitrum 806 → 780, Solana 400 → 400, Ethereum 130 → 104,
+  Polygon 104, BNB 104. Account 1's cost is almost all live position enumeration (Optimism / Base
+  Sugar paging 0xefde4e64 / 0xedbd33bf / 0x0d0154a9 about 1,660 CU, `balanceOf` on six chains,
+  Arbitrum `tokenOfOwnerByIndex` + `positions`), which no cache may serve. The earlier "558/500"
+  peaks therefore come from several loads at once, the case the limiter is for.
+  **429 storm (routes, below the limiter, 30% and 80% of Alchemy sends):** 14 routes over Account
+  1, Sui 0x15ac, Solana and 0x844e: every answer the same as without the storm, or a notice
+  (`lookup-*`, `closed-recovery-time-budget-exhausted`), or a named 503; no silent loss, no bare
+  500. Forced unverified history (every transfer-index call 429, no store): the page shows
+  "≈ … history couldn't be loaded (1 position unverified)" and stops (28 requests in 150 s).
+  **Local B7 (same time, old build then new build):** every settled figure identical on the seven
+  gate wallets (Sui 0x15ac −2,134.62 / −2,134.59, its spot-valued position); notices identical; no
+  non-200; first row in alternating order 8.45 / 8.50 s (Account 1), 6.93 / 6.54 s (Sui), 5.29 /
+  5.36 s (Solana). The Account 1 gate against the morning B7 (27,890.81) could not pass on any
+  build (queue item a, above); pushed on the owner's decision with production-now as the band.
+  **Production B7 (2026-10-16, bands from production on the old build an hour earlier):** Solana
+  2rr3SF…JTpn identical (Closed 217, ≈ −359.87, ≈ 275.98, 21.28). Account 1: Closed (106),
+  Deposited 16,563.58, Capital G/L ≈ −13,103.34, Fees 12,540.91 (12,540.88 before the push; only
+  Cetus), same notices. Sui 0x15ac ≈ −2,135.71; 0x9d6e…b1f9 ≈ −4,791.86 (9 positions pricing);
+  heavy +635.75, 0x0256 −3,642.61, 0x81e1 +56.13 identical. No non-200, 0 page errors.
+  0x844e…7c97: 0 failed history requests in 420 s (120 in 240 s on 2026-10-13), 0 limiter 429 log
+  lines, final state "51 positions could not be priced". Logs since the deploy: 5 warnings / errors,
+  all `/api/lending/kamino`; no out-of-memory. First row on production tonight 6.6 s (Account 1)
+  and 6.6 s (Solana) over a 480 ms link (google.com 2.8 s from the same machine); the old build
+  read 10.7 s for Account 1 on the same link an hour earlier.
+  Tests: `alchemy-limiter-test`, `alchemy-hardening-test` (PancakeSwap empty body, contract-wallet
+  reuse, store guard, token metadata) and the full suite green.
 
 - **`3a4ca79`** (Pool lists, 2026-10-15, live as `dpl_2MkMfhQiFb5DKQJnQQqS92BZP8Dw` since 07:40
   AEST) — **Orca asks only for the wallet's pools; DeFiLlama's pool list is read once and shared.**
@@ -3544,6 +3625,13 @@ with similar position shapes. Never wallet-specific framing.
   proves itself: a block timestamp is accepted from a second endpoint only when the reply names
   the block that was asked for (`blockTimestamps.ts`); (2) after any preview or local test
   run, compare the store's key counts per prefix before and after, and explain every new key.
+  **Enforced since `f170229`:** every store client is created by `createSharedRedis`
+  (`app/lib/sharedStore.ts`). Writes reach the shared store only when `VERCEL_ENV` is
+  `production`; anywhere else, an unset or unknown value included, `set` / `del` / `mset` stay in
+  the process (read back by it), reads that miss come from the store, and any other command is
+  refused. A deliberate maintenance write from a laptop sets
+  `SHARED_STORE_WRITES=allow-nonproduction` for that one command. Not covered: Neon Postgres
+  (`app/lib/db.ts`: wallets, snapshots, subscribers). Never construct `new Redis(...)` directly.
 
 - **(g) A total that depends on a pending or partial source shows `≈` and says why; a total
   and its breakdown are read from ONE list.** A source is partial when it has not answered, when
@@ -3608,6 +3696,18 @@ with similar position shapes. Never wallet-specific framing.
   following `git stash pop` applied the owner's own entry "clp-business-pnl-wip-before-phase3"; it
   conflicted, git kept the entry, and the one file was restored to HEAD (it had no uncommitted edits).
   See `.claude/rules/commit-protocol.md` Rule 7.
+
+- **(m) Every server-side Alchemy call goes through the one limiter; a throttled read fails
+  visibly, never as an empty answer.** `app/lib/alchemyLimiter.ts`, installed once per server
+  process by `instrumentation.ts`, wraps `globalThis.fetch` and acts on `*.alchemy.com` only:
+  a per-instance compute-unit bucket (Alchemy's published per-method costs; 200 CU/s, 5 s burst,
+  16 in flight), and on HTTP 429 a slow-down of the instance (halved at most once a second, floor
+  80 CU/s, back by 5% a second), `Retry-After`, exponential backoff with jitter, at most 5 sends,
+  then `AlchemyThrottledError`. A caller does not retry that error again (`evmRpc`, `suiRpc` and
+  the Solana scan recognise it). The throughput limit is per ACCOUNT, shared by every app and key,
+  local runs and tests included (Alchemy docs). Do not burst-test against the real key: use the
+  stub in `scripts/alchemy-limiter-test.ts`. Check with `npx tsx scripts/alchemy-limiter-test.ts`
+  and `npx tsx scripts/alchemy-hardening-test.ts`.
 
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
@@ -3753,6 +3853,13 @@ failed transactions in its 20. (Resolved in `75411c3`: vault-held positions, `/a
 **Open, found 2026-10-13 (details in the `8421493` entry):** `/api/pancakeswap` 500s when the BNB
 RPC answers an empty body. (Resolved in `cd7f637`: Solana version-1 transactions, the Sui
 leading-zero address, re-valuing stored Sui records; in `3a4ca79`: the 24 MB Orca pool list.)
+
+**Open, found 2026-10-15/16 (details in the `f170229` entry):** queue item a is live on Account 1
+(Aerodrome closed rows and fees missing, no notice); contract wallet 0x844e…7c97 has 51 closed
+Aerodrome positions that can never be priced (`TOKEN0 / TOKEN1`) and the pricing retry still runs
+its 12 rounds on every page (about 700-940 requests per analytics load) before saying so; the
+`evmRpc` 12 s timeout includes the limiter's backoff, so under a sustained 429 storm a long scan
+(Base history) fails as a visible notice rather than finishing.
 
 **Open, found 2026-10-15 (details in the `3a4ca79` entry):** an OPEN Cetus position's own scan
 values DEEP reward claims at today's DEEP price (0.0240734 applied to claims from 2025-05 to
