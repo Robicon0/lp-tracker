@@ -45,6 +45,7 @@
 import { evmRpcPost } from './evmRpc';
 import { resolveToken } from './tokenResolver';
 import type { Chain } from './tokenConstants';
+import { createSharedRedis } from './sharedStore';
 
 export interface EvmPositionContext {
   tokenId: string;
@@ -71,10 +72,7 @@ try {
   const url = process.env.PRICE_CACHE_KV_REST_API_URL;
   const token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
   if (url && token) {
-    // Lazy require so this module stays importable in environments without the
-    // dep configured; same no-op-stub contract as redisSpotCache.
-    const { Redis } = require('@upstash/redis') as typeof import('@upstash/redis');
-    redis = new Redis({ url, token }) as unknown as typeof redis;
+    redis = createSharedRedis('evmPoolContext') as unknown as typeof redis;
   }
 } catch {
   redis = null;

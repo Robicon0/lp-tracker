@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+import { getCachedTokenMeta, setCachedTokenMeta } from '../../lib/tokenMetaCache';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['pancakeswap-v3'] as const;
@@ -38,19 +39,41 @@ function padUint256(value: bigint): string {
   return value.toString(16).padStart(64, '0');
 }
 
+// One eth_call to the BNB RPC. The reply is checked before it is read: an HTTP
+// error, an empty body or a body that is not JSON is retried (the BNB endpoint
+// now and then answers 200 with nothing, which used to fail the whole route as a
+// bare 500 "Unexpected end of JSON input"), and after RPC_ATTEMPTS it throws
+// PositionListReadError, which the route answers as a named 503. A JSON-RPC
+// error or a missing result is the same failed read, never "0x" read as an
+// answer. Throttling (429) is retried by the shared Alchemy limiter first.
+const RPC_ATTEMPTS = 3;
+const RPC_RETRY_MS = [300, 900];
 async function rpcCall(to: string, data: string): Promise<string> {
-  const res = await fetch(RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'eth_call',
-      params: [{ to, data }, 'latest'],
-      id: 1,
-    }),
-  });
-  const json = await res.json();
-  return json.result || '0x';
+  let why = 'no reply';
+  for (let attempt = 0; attempt < RPC_ATTEMPTS; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, RPC_RETRY_MS[attempt - 1]));
+    let res: Response;
+    try {
+      res = await fetch(RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to, data }, 'latest'], id: 1 }),
+      });
+    } catch (err) {
+      why = err instanceof Error && err.name === 'AlchemyThrottledError' ? 'throttled (429)' : 'network error';
+      if (why === 'throttled (429)') break; // the limiter has already backed off and retried
+      continue;
+    }
+    if (!res.ok) { why = `HTTP ${res.status}`; continue; }
+    const text = await res.text();
+    if (!text.trim()) { why = 'empty reply'; continue; }
+    let json: { result?: unknown; error?: { message?: string } };
+    try { json = JSON.parse(text); } catch { why = 'reply is not JSON'; continue; }
+    if (json.error) { why = `RPC error ${String(json.error.message ?? '').slice(0, 60)}`; continue; }
+    if (typeof json.result !== 'string') { why = 'reply without a result'; continue; }
+    return json.result;
+  }
+  throw new PositionListReadError('PancakeSwap', `BNB RPC read (${why})`);
 }
 
 async function getBalance(account: string): Promise<number> {
@@ -63,7 +86,8 @@ async function getBalance(account: string): Promise<number> {
 async function getTokenId(account: string, index: number): Promise<bigint> {
   const data = SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(index));
   const result = await rpcCall(POSITION_MANAGER, data);
-  if (!result || result === '0x') return 0n;
+  // An owned index always has a tokenId: no word is a failed read, never "skip it".
+  if (!result || result === '0x') throw new PositionListReadError('PancakeSwap', `position at index ${index}`);
   return BigInt(result);
 }
 
@@ -81,7 +105,9 @@ interface PositionData {
 async function getPosition(tokenId: bigint): Promise<PositionData | null> {
   const data = SELECTORS.positions + padUint256(tokenId);
   const result = await rpcCall(POSITION_MANAGER, data);
-  if (!result || result === '0x' || result.length < 770) return null;
+  // positions() of an owned tokenId always answers 12 words: a shorter reply is
+  // a failed read, never "no such position".
+  if (!result || result === '0x' || result.length < 770) throw new PositionListReadError('PancakeSwap', `position ${tokenId}`);
 
   const hex = result.startsWith('0x') ? result.slice(2) : result;
   const readWord = (i: number) => hex.slice(i * 64, (i + 1) * 64);
@@ -109,9 +135,17 @@ async function getPosition(tokenId: bigint): Promise<PositionData | null> {
 }
 
 async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
+  const cached = await getCachedTokenMeta('bnb', tokenAddress);
+  if (cached) return cached;
+  // decimals() is required: a guessed 18 mis-scales every amount by powers of
+  // ten, so a failed read fails the route (named 503) instead.
+  const decResult = await rpcCall(tokenAddress, SELECTORS.decimals);
+  const decimals = parseInt(decResult, 16);
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+    throw new PositionListReadError('PancakeSwap', `decimals of ${tokenAddress}`);
+  }
   try {
     const symResult = await rpcCall(tokenAddress, SELECTORS.symbol);
-    const decResult = await rpcCall(tokenAddress, SELECTORS.decimals);
 
     let symbol = 'UNKNOWN';
     if (symResult && symResult.length > 130) {
@@ -124,10 +158,12 @@ async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; d
         if (charCode > 0) symbol += String.fromCharCode(charCode);
       }
     }
-    const decimals = decResult && decResult !== '0x' ? parseInt(decResult, 16) : 18;
-    return { symbol, decimals };
+    const meta = { symbol, decimals };
+    if (symbol && symbol !== 'UNKNOWN') setCachedTokenMeta('bnb', tokenAddress, meta);
+    return meta;
   } catch {
-    return { symbol: 'UNKNOWN', decimals: 18 };
+    // The symbol is a label only; the amounts above are right without it.
+    return { symbol: 'UNKNOWN', decimals };
   }
 }
 
@@ -282,7 +318,11 @@ export async function GET(request: Request) {
           walletAddress: account,
         });
       } catch (err) {
+        // A failed read is never a dropped position: the whole answer fails
+        // (named 503) and the page keeps the last good rows.
+        if (err instanceof PositionListReadError) throw err;
         console.error(`PancakeSwap: error processing token ${tokenId}:`, err);
+        throw new PositionListReadError('PancakeSwap', `position ${tokenId}`);
       }
     }
 

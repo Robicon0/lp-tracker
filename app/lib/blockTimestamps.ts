@@ -1,3 +1,4 @@
+import { createSharedRedis } from './sharedStore';
 // Block timestamps for the EVM activity routes: two sources, stored once.
 //
 // Every EVM activity route dates its events by `eth_getBlockByNumber`. There
@@ -38,9 +39,7 @@ try {
   const url = process.env.PRICE_CACHE_KV_REST_API_URL;
   const token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
   if (url && token) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Redis } = require('@upstash/redis') as typeof import('@upstash/redis');
-    store = new Redis({ url, token }) as unknown as Store;
+    store = createSharedRedis('blockTimestamps') as unknown as Store;
   }
 } catch {
   store = null;

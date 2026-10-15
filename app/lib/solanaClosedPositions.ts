@@ -52,6 +52,7 @@
 // from ON-CHAIN pool state, never a hardcoded map (invariant i — this is why the
 // wrong ZEC / placeholder ORCA KNOWN_TOKENS entries are irrelevant here).
 
+import { isAlchemyThrottledError } from './alchemyLimiter';
 import { Redis } from '@upstash/redis';
 import { PublicKey } from '@solana/web3.js';
 import { createHash } from 'crypto';
@@ -65,6 +66,7 @@ import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPos
 import { runResumableScan, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
 import { parseWhirlpoolEvents, poolPriceForLeg, lastTradedSqrtPrice, consistentWithOneSided, usdPricesFromPool } from './whirlpoolEventPrice';
 import { SOLANA_GET_TX_OPTIONS, SOLANA_MAX_TX_VERSION, isUnsupportedTxVersion, unreadableCause } from './solanaTxVersion';
+import { createSharedRedis } from './sharedStore';
 
 // rpcUrlFromEnv: a malformed value (bare API key) behaves like UNSET → the
 // engine's existing graceful degrade (empty result, stats.complete=false so
@@ -206,10 +208,18 @@ export interface ScanStats { signatures: number; validSignatures: number; txFetc
 async function alchemyRpc(method: string, params: unknown[], stats: ScanStats): Promise<unknown> {
   for (let attempt = 0; attempt < 8; attempt++) {
     stats.billedCalls += 1;
-    const res = await fetch(ALCHEMY_RPC, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(ALCHEMY_RPC, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      });
+    } catch (err) {
+      // The shared Alchemy limiter gave up after its own backoff: one more
+      // throttle event for this loop, never an answer.
+      if (isAlchemyThrottledError(err)) { stats.throttleEvents += 1; await sleep(500 * (attempt + 1)); continue; }
+      throw err;
+    }
     if (res.status === 429) { stats.throttleEvents += 1; await sleep(500 * (attempt + 1)); continue; }
     const j = await res.json();
     if (j?.error && (j.error.code === 429 || j.error.code === -32005)) { stats.throttleEvents += 1; await sleep(500 * (attempt + 1)); continue; }
@@ -270,7 +280,13 @@ async function fetchTransactions(sigs: string[], stats: ScanStats, giveUpAtMs?: 
       const batch = queue.slice(i, i + 20);
       const body = batch.map((s, k) => ({ jsonrpc: '2.0', id: k, method: 'getTransaction', params: [s, SOLANA_GET_TX_OPTIONS] }));
       stats.billedCalls += batch.length;
-      const res = await fetch(ALCHEMY_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      let res: Response;
+      try {
+        res = await fetch(ALCHEMY_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      } catch (err) {
+        if (!isAlchemyThrottledError(err)) throw err;
+        stats.throttleEvents += 1; next.push(...batch); await sleep(800); continue;
+      }
       if (res.status === 429) { stats.throttleEvents += 1; next.push(...batch); await sleep(800); continue; }
       let j: unknown;
       try { j = await res.json(); } catch { stats.throttleEvents += 1; next.push(...batch); await sleep(800); continue; }
@@ -1277,7 +1293,7 @@ const _redisUrl = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _redisToken = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_redisUrl && _redisToken) {
-  try { _redis = new Redis({ url: _redisUrl, token: _redisToken }); }
+  try { _redis = createSharedRedis('solanaClosedPositions'); }
   catch (err) { console.warn('[solanaClosedPositions] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 // Per-protocol sub-keys: `closed_pos_solana_v1:orca:{wallet}` (pre-existing —

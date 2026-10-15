@@ -16,6 +16,7 @@ import {
   sugarCeilingTruncations,
 } from '../../lib/sugarPaging';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+import { cachedPoolTokens, cachedReceipt } from '../../lib/evmImmutableCache';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['aerodrome-slipstream', 'aerodrome-v1'] as const;
@@ -93,43 +94,13 @@ function getPoolTokens(poolAddress: string): Promise<{ token0: string; token1: s
 }
 
 async function fetchPoolTokens(poolAddress: string): Promise<{ token0: string; token1: string } | null> {
+  // Immutable: memory → shared store → token0() / token1() (app/lib/evmImmutableCache.ts).
   try {
-    // token0() selector: 0x0dfe1681
-    const res0 = await fetch(BASE_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_call',
-        params: [{ to: poolAddress, data: '0x0dfe1681' }, 'latest'],
-        id: 1,
-      }),
-    });
-    const r0 = await res0.json();
-
-    // token1() selector: 0xd21220a7
-    const res1 = await fetch(BASE_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_call',
-        params: [{ to: poolAddress, data: '0xd21220a7' }, 'latest'],
-        id: 2,
-      }),
-    });
-    const r1 = await res1.json();
-
-    if (r0.result && r1.result) {
-      return {
-        token0: '0x' + r0.result.slice(26).toLowerCase(),
-        token1: '0x' + r1.result.slice(26).toLowerCase(),
-      };
-    }
+    return await cachedPoolTokens('base', BASE_RPC, poolAddress);
   } catch (err) {
     console.error('Error fetching pool tokens:', err);
+    return null;
   }
-  return null;
 }
 
 // Minimal JSON-RPC helper (returns result or null on any failure).
@@ -293,7 +264,7 @@ async function buildClosedPositions(
         mintTx = incLogs[0].transactionHash;
       }
 
-      const receipt = await rpcResult(BASE_RPC, 'eth_getTransactionReceipt', [mintTx]) as
+      const receipt = await cachedReceipt('base', BASE_RPC, mintTx) as
         { logs?: Array<{ address: string; topics: string[] }> } | null;
       const mintLog = receipt?.logs?.find((l) =>
         l.topics?.[0]?.toLowerCase() === POOL_MINT_TOPIC &&

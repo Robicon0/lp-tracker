@@ -13,6 +13,7 @@
 
 import { Redis } from '@upstash/redis';
 import type { OwnershipVerdict } from './positionOwnership';
+import { createSharedRedis } from './sharedStore';
 
 /** `open`: the position still existed when this was read (re-read on the next scan). */
 export type StoredVerdict = { held: true; open?: undefined } | (Extract<OwnershipVerdict, { held: false }> & { open?: true });
@@ -22,7 +23,7 @@ const _url = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_url && _token) {
-  try { _redis = new Redis({ url: _url, token: _token }); }
+  try { _redis = createSharedRedis('suiOwnershipStore'); }
   catch (err) { console.warn('[suiOwnershipStore] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 const readOnly = () => process.env.CLOSED_POS_CACHE_READONLY === '1';

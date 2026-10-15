@@ -1,4 +1,5 @@
 import { rpcUrlFromEnv } from './rpcEnv';
+import { isAlchemyThrottledError } from './alchemyLimiter';
 
 // Sprint SUI-RPC-RELIABILITY — shared Sui JSON-RPC client with automatic
 // endpoint failover, per-call timeout, and a global concurrency semaphore.
@@ -74,7 +75,7 @@ async function acquire<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-interface EndpointOutcome { ok: boolean; status: number; result?: unknown; rpcError?: boolean; timedOut?: boolean }
+interface EndpointOutcome { ok: boolean; status: number; result?: unknown; rpcError?: boolean; timedOut?: boolean; throttledOut?: boolean }
 
 async function callEndpoint(url: string, method: string, params: unknown[], timeoutMs: number): Promise<EndpointOutcome> {
   const controller = new AbortController();
@@ -93,7 +94,10 @@ async function callEndpoint(url: string, method: string, params: unknown[], time
     const json = (await res.json()) as { result?: unknown; error?: unknown };
     if (json.error) return { ok: false, status: 200, rpcError: true };
     return { ok: true, status: 200, result: json.result };
-  } catch {
+  } catch (err) {
+    // The Alchemy limiter retried its 429s before throwing; another round of
+    // retries here would only multiply them.
+    if (isAlchemyThrottledError(err)) return { ok: false, status: 429, throttledOut: true };
     // AbortError (timeout) or network error — both retryable via the next endpoint.
     return { ok: false, status: 0, timedOut: controller.signal.aborted };
   } finally {
@@ -141,6 +145,7 @@ export async function suiRpc(method: string, params: unknown[], opts: SuiRpcOpti
         // (the pre-retry behaviour, kept exactly). Only fast failures — 429, 5xx,
         // a refused connection — get the backoff rounds.
         if (outcome.timedOut && i === 0) gaveUpOnTimeout = true;
+        if (outcome.throttledOut && i === 0) gaveUpOnTimeout = true;
         // Back off briefly on a rate-limit before hitting the fallback.
         if (outcome.status === 429 && i < SUI_ENDPOINTS.length - 1) await sleep(150);
       }
@@ -181,6 +186,7 @@ export async function suiRpcIndexed(method: string, params: unknown[], opts: Sui
       const outcome = await callEndpoint(primary, method, params, timeoutMs);
       if (outcome.ok) return outcome.result;
       if (outcome.rpcError) throw new SuiIndexUnavailableError('primary returned RPC error');
+      if (outcome.throttledOut) throw new SuiIndexUnavailableError('primary throttled (429)');
       if (attempt === 0) await sleep(outcome.status === 429 ? 500 : 150);
     }
     throw new SuiIndexUnavailableError('primary endpoint unreachable');

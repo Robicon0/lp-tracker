@@ -155,6 +155,19 @@ export interface LpPnlResult {
    */
   capitalGLApproximate: number;
   /**
+   * Positions whose history the server could not read and check against the
+   * chain (`history-unverified`, Base transfer index). They are not in the
+   * totals, and the page says "history couldn't be loaded (N positions
+   * unverified)". Counts toward `capitalGLComplete` being false.
+   */
+  historyUnverified: number;
+  /**
+   * True once the pricing retry schedule has run out while positions are still
+   * pricing-pending: the page stops saying "pricing N positions…" (which
+   * promises an answer) and says they could not be priced.
+   */
+  pricingRetriesExhausted: boolean;
+  /**
    * False while any position is pricing-pending. The UI must NOT present
    * Capital G/L as an authoritative total while this is false — that is
    * exactly the bug: an incomplete sum rendered as a confident figure, landing
@@ -242,6 +255,8 @@ const EMPTY: LpPnlResult = {
   excludedPositions: [],
   capitalGLPricingPending: 0,
   capitalGLApproximate: 0,
+  historyUnverified: 0,
+  pricingRetriesExhausted: false,
   capitalGLComplete: true,
   aggregateSelfContradictory: false,
   historyLookupFailed: false,
@@ -274,6 +289,7 @@ function userFriendlyReason(reason: string, protocol: string): string {
   if (reason.startsWith("HTTP ")) return `Failed to load — ${reason} after 3 attempts`;
   if (reason === "timeout") return "Failed to load — RPC timeout after 3 attempts";
   if (reason === "fetch error") return "Failed to load — network error after 3 attempts";
+  if (reason === HISTORY_UNVERIFIED) return "History couldn't be loaded — position unverified";
   return reason;
 }
 
@@ -814,8 +830,13 @@ export function collectLkgEntries(posIds: string[]): Record<string, LkgEntry> {
 // like `no_deposits`). These should retry on flaky RPCs and eventually
 // surface to the UI so the user knows the fetch failed rather than the
 // position just having no on-chain history.
+// A route answered 503 `history-unverified`: the position's history could not
+// be read and checked against the chain. Not retried by the fetch (the server
+// has already done its own retries); it degrades through the funnel like any
+// transport failure, and the page counts it.
+const HISTORY_UNVERIFIED = "history-unverified";
 const ERROR_REASONS = new Set([
-  "timeout", "fetch error", "no activity URL",
+  "timeout", "fetch error", "no activity URL", HISTORY_UNVERIFIED,
 ]);
 function isTransportError(reason: string): boolean {
   return ERROR_REASONS.has(reason) || reason.startsWith("HTTP ");
@@ -982,6 +1003,9 @@ async function fetchEventsAttempt(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.error(`${tag} HTTP ${res.status} ${body.slice(0, 300)}`);
+      if (res.status === 503 && body.includes(`"${HISTORY_UNVERIFIED}"`)) {
+        return { ok: false, reason: HISTORY_UNVERIFIED, cacheable: false };
+      }
       return { ok: false, reason: `HTTP ${res.status}`, cacheable: false };
     }
     const json: { events?: Array<Record<string, unknown>>; error?: string } = await res.json();
@@ -1022,7 +1046,7 @@ function degradeOnFailure(
   pos: AerodromePosition,
   reason: string,
   events?: ActivityEventForPnL[],
-): { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } } | { ok: false; reason: string } {
+): { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number }; failedWith?: string } | { ok: false; reason: string } {
   const isClosed = pos.status === "Closed";
 
   // 1. STALE — last-known-good computed values.
@@ -1036,7 +1060,7 @@ function degradeOnFailure(
       data.netPnlUSD = pos.value + data.feesCollected + pos.fees - data.initialValue;
       data.netPnlPct = data.initialValue > 0 ? (data.netPnlUSD / data.initialValue) * 100 : 0;
     }
-    return { ok: true, data, stale: { computedAt: lkg.computedAt } };
+    return { ok: true, data, stale: { computedAt: lkg.computedAt }, failedWith: reason };
   }
 
   // 2. ESTIMATED — value-proxy fallback (all chains).
@@ -1055,7 +1079,7 @@ function degradeOnFailure(
         fallback.netPnlPct = pos.value > 0 ? ((feesFromEvents + pos.fees) / pos.value) * 100 : 0;
       }
     }
-    return { ok: true, data: fallback, fallback: true };
+    return { ok: true, data: fallback, fallback: true, failedWith: reason };
   }
 
   // 3. EXCLUDED — genuinely never-loaded with no live value.
@@ -1207,7 +1231,9 @@ async function fetchAndCompute(
 // ── Aggregate per-position results into totals ─────────────────────────────
 
 type PosResult =
-  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } }
+  // `failedWith`: this load's fetch failed and the value shown is a degraded one
+  // (stale or estimated) — the reason is kept so the page can name it.
+  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number }; failedWith?: string }
   | { ok: false; reason: string };
 
 // Sprint 4 — one display row per CLOSED position, assembled in aggregate()
@@ -1573,8 +1599,14 @@ function aggregate(
   // `≈` marker still applies to both — only the explanation differs.
   // A position the wallet never held (rule (k)) is not missing data: it does
   // not make the total incomplete.
+  // Counted whether the position was left out or kept in the totals at a stale
+  // or estimated value: either way its history was not read this load.
+  let historyUnverified = 0;
+  for (const r of results.values()) {
+    if ((!r.ok && r.reason === HISTORY_UNVERIFIED) || (r.ok && r.failedWith === HISTORY_UNVERIFIED)) historyUnverified += 1;
+  }
   const capitalGLComplete = capitalGLPricingPending === 0 && capitalGLApproximate === 0 &&
-    unpricedClosed.every((u) => u.detail.kind === "not-held");
+    historyUnverified === 0 && unpricedClosed.every((u) => u.detail.kind === "not-held");
 
   // ITEM 0i — the self-contradiction check. Every headline zero AND a non-empty
   // breakdown is impossible from consistent data, so it means the aggregate is
@@ -1597,7 +1629,8 @@ function aggregate(
   return {
     initialValue, currentValue, closingValue, feesCollected, feesUnclaimed,
     ilUSD, capitalGL, netPnl, netPnlPct, included, excluded,
-    capitalGLPricingPending, capitalGLApproximate, capitalGLComplete,
+    capitalGLPricingPending, capitalGLApproximate, capitalGLComplete, historyUnverified,
+    pricingRetriesExhausted: false,
     errored, errorReasons: Array.from(errorReasons),
     isLoading: inflight > 0,
     inflightCount: inflight,
@@ -1682,6 +1715,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   // time to land; see the pricing-pending retry effect below.
   const [pricingRetry, setPricingRetry] = useState(0);
   const pricingAttemptsRef = useRef(0);
+  const [pricingGaveUp, setPricingGaveUp] = useState(false);
   // IDs evicted by the retry effect, awaiting a cache-bypassing refetch.
   const repriceIdsRef = useRef<Set<string>>(new Set());
   // Per-position results map — persists across renders, never reset.
@@ -2011,8 +2045,13 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   //      A REACTIVE dependency is required — `capitalGLPricingPending` goes
   //      0 → N as results arrive, which re-runs this effect and arms the timer.
   useEffect(() => {
-    if (result.capitalGLPricingPending === 0) { pricingAttemptsRef.current = 0; return; }
-    if (pricingAttemptsRef.current >= PRICING_RETRY_MAX) return;
+    if (result.capitalGLPricingPending === 0) { pricingAttemptsRef.current = 0; setPricingGaveUp(false); return; }
+    if (pricingAttemptsRef.current >= PRICING_RETRY_MAX) {
+      // The schedule has run out and positions are still not priced: stop
+      // promising an answer (the page says they could not be priced).
+      const t = setTimeout(() => setPricingGaveUp(true), pricingRetryDelay(PRICING_RETRY_MAX - 1));
+      return () => clearTimeout(t);
+    }
     const t = setTimeout(() => {
       pricingAttemptsRef.current += 1;
       for (const [id, r] of Array.from(resultsRef.current.entries())) {
@@ -2043,10 +2082,8 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   // Read from the same registry the banner renders, so the marker and the
   // banner can never disagree about whether a lookup failed.
   const historyLookupFailed = hasLookupFailure(useTruncationNotices());
-  return useMemo(
-    () => (historyLookupFailed
-      ? { ...result, historyLookupFailed: true, capitalGLComplete: false }
-      : result),
-    [result, historyLookupFailed],
-  );
+  return useMemo(() => {
+    const r = pricingGaveUp && result.capitalGLPricingPending > 0 ? { ...result, pricingRetriesExhausted: true } : result;
+    return historyLookupFailed ? { ...r, historyLookupFailed: true, capitalGLComplete: false } : r;
+  }, [result, historyLookupFailed, pricingGaveUp]);
 }

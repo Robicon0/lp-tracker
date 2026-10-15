@@ -34,10 +34,10 @@
 // transfers and receipts never change, so a repeat request only asks for what
 // happened since the last scan.
 
-import { Redis } from '@upstash/redis';
 import { evmRpcPost } from './evmRpc';
 import { LOOKUP_FAILED, LOOKUP_UNAVAILABLE } from './enumerationTruncation';
 import type { ArchiveChain } from './evmArchiveRpc';
+import { createSharedRedis } from './sharedStore';
 
 // Uniswap-V3-style NonfungiblePositionManager events (identical topic hashes on
 // Aerodrome / Velodrome Slipstream and Uniswap V3).
@@ -70,6 +70,7 @@ const KEY_PREFIX = 'evm_wallet_hist_v1:';
 const TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_PERSIST_BYTES = 900_000;
 const MAX_UNCHANGED_AGE_MS = 30 * 60 * 1000;
+const CONTRACT_REUSE_MS = 3 * 60 * 1000;
 const SEL_BALANCE_OF = '0x70a08231';
 
 export interface HistoryLog {
@@ -121,7 +122,7 @@ try {
   const url = process.env.PRICE_CACHE_KV_REST_API_URL;
   const token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
   if (url && token) {
-    redis = new Redis({ url, token }) as unknown as typeof redis;
+    redis = createSharedRedis('evmAssetTransferHistory') as unknown as typeof redis;
   }
 } catch {
   redis = null;
@@ -179,6 +180,25 @@ function nftTransfer(t: Record<string, unknown>, otherField: 'from' | 'to'): Tra
   }
 }
 
+/**
+ * Whether a stored scan can be served without the transfer queries:
+ * `eoa-unchanged` — an externally-owned wallet whose fingerprint (nonce : NFT
+ * balance) equals the stored one, within MAX_UNCHANGED_AGE_MS; `contract-recent`
+ * — a contract wallet's scan younger than CONTRACT_REUSE_MS. Either one only
+ * when the stored scan was settled (complete, nothing pending). Pure, for tests.
+ */
+export function storedScanReuse(
+  st: { eoa?: boolean; sig?: string; settled?: boolean; pending: string[]; at?: number },
+  now: number,
+  liveSig: string | null,
+): 'eoa-unchanged' | 'contract-recent' | null {
+  if (st.settled !== true || st.pending.length > 0 || !st.at) return null;
+  const age = now - st.at;
+  if (st.eoa === false && age < CONTRACT_REUSE_MS) return 'contract-recent';
+  if (st.eoa === true && liveSig != null && st.sig === liveSig && age < MAX_UNCHANGED_AGE_MS) return 'eoa-unchanged';
+  return null;
+}
+
 async function scan(chain: ArchiveChain, nftManager: string, wallet: string): Promise<WalletNftHistory> {
   const fail = (reason: typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE): WalletNftHistory =>
     ({ complete: false, reason, ids: [], mintTx: {}, burned: {}, logsByToken: {}, verified: {} });
@@ -205,27 +225,39 @@ async function scan(chain: ArchiveChain, nftManager: string, wallet: string): Pr
   // balance are both unchanged since a settled scan cannot have opened, closed,
   // staked or modified a position, so the stored history is still the whole
   // history — two cheap calls instead of the transfer queries. A contract wallet
-  // (its "nonce" does not track activity) always rescans, and so does anything
-  // older than MAX_UNCHANGED_AGE_MS.
-  const [nonceRes, balRes, codeRes] = await Promise.all([
-    evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount', params: [wallet, 'latest'] }),
-    evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: manager, data: SEL_BALANCE_OF + wallet.replace(/^0x/, '').padStart(64, '0') }, 'latest'] }),
-    st.eoa === undefined
-      ? evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_getCode', params: [wallet, 'latest'] })
-      : Promise.resolve(null),
-  ]);
-  const eoa = st.eoa ?? (codeRes && !codeRes.error && typeof codeRes.result === 'string' ? codeRes.result === '0x' : undefined);
-  const sig = typeof nonceRes.result === 'string' && typeof balRes.result === 'string'
-    ? `${nonceRes.result}:${balRes.result}`
-    : null;
-  const unchanged = !!sig && eoa === true && st.sig === sig && st.settled === true
-    && st.pending.length === 0 && Date.now() - (st.at ?? 0) < MAX_UNCHANGED_AGE_MS;
+  // (its "nonce" does not track activity) has no such fingerprint: its settled
+  // scan is reused for CONTRACT_REUSE_MS on every instance (Alchemy hardening,
+  // 2026-10-15 — a contract wallet with 66 positions used to rescan with up to
+  // 11 transfer queries on every request, on every instance), then rescanned.
+  // Anything older than MAX_UNCHANGED_AGE_MS is rescanned.
+  let unchanged = false;
+  let sig: string | null = null;
+  let eoa = st.eoa;
+  if (storedScanReuse(st, Date.now(), null) === 'contract-recent') {
+    unchanged = true;
+  } else {
+    const [nonceRes, balRes, codeRes] = await Promise.all([
+      evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount', params: [wallet, 'latest'] }),
+      evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: manager, data: SEL_BALANCE_OF + wallet.replace(/^0x/, '').padStart(64, '0') }, 'latest'] }),
+      st.eoa === undefined
+        ? evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_getCode', params: [wallet, 'latest'] })
+        : Promise.resolve(null),
+    ]);
+    eoa = st.eoa ?? (codeRes && !codeRes.error && typeof codeRes.result === 'string' ? codeRes.result === '0x' : undefined);
+    sig = typeof nonceRes.result === 'string' && typeof balRes.result === 'string'
+      ? `${nonceRes.result}:${balRes.result}`
+      : null;
+    unchanged = storedScanReuse({ ...st, eoa }, Date.now(), sig) === 'eoa-unchanged';
+  }
 
   let safeTo = 0;
   if (!unchanged) {
     const headRes = await evmRpcPost(url, { jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] });
     const head = typeof headRes.result === 'string' ? parseInt(headRes.result, 16) : NaN;
-    if (!Number.isFinite(head)) return fail(LOOKUP_FAILED);
+    if (!Number.isFinite(head)) {
+      console.warn(`[evmAssetTransferHistory] ${chain} head block could not be read (${headRes.error?.message ?? 'no result'}); scan not run`);
+      return fail(LOOKUP_FAILED);
+    }
     safeTo = Math.max(0, head - REORG_MARGIN_BLOCKS);
   }
 

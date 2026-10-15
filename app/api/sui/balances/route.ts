@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { suiRpc } from '../../../lib/suiRpc';
+import { suiCoinMetadataCached } from '../../../lib/tokenMetaCache';
 
 
 const KNOWN_COINS: Record<string, { symbol: string; name: string; decimals: number }> = {
@@ -48,10 +49,10 @@ export async function GET(request: Request) {
         let meta = KNOWN_COINS[coin.coinType];
         if (!meta) {
           try {
-            const result = await suiRpc('suix_getCoinMetadata', [coin.coinType]) as
-              { decimals: number; symbol: string; name: string } | null;
+            // Memory → shared store → chain (app/lib/tokenMetaCache.ts).
+            const result = await suiCoinMetadataCached(coin.coinType);
             if (result) {
-              meta = { symbol: result.symbol, name: result.name, decimals: result.decimals };
+              meta = { symbol: result.symbol, name: result.name ?? '', decimals: result.decimals };
             }
           } catch { /* skip */ }
         }

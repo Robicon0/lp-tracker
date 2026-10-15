@@ -1,3 +1,5 @@
+import { isAlchemyThrottledError } from './alchemyLimiter';
+
 // Sprint SPOT-RESILIENCE-V2 — shared EVM JSON-RPC transport with a per-call
 // timeout and a global concurrency semaphore. The direct EVM analogue of
 // app/lib/suiRpc.ts (Sprint SUI-RPC-RELIABILITY `8d82287`).
@@ -154,6 +156,9 @@ async function postWithRetry(url: string, body: object, timeoutMs: number): Prom
           out = (await res.json()) as EvmRpcEnvelope | EvmRpcEnvelope[];
         }
       } catch (err) {
+        // The Alchemy limiter (alchemyLimiter.ts) already retried its 429s with
+        // backoff before throwing: report the throttle, do not retry it again.
+        if (isAlchemyThrottledError(err)) return { error: { code: -32000, message: 'evm-rpc-http-429' } };
         const isAbort = err instanceof Error && err.name === 'AbortError';
         out = { error: { code: -32000, message: isAbort ? 'evm-rpc-timeout' : 'evm-rpc-network-error' } };
       } finally {

@@ -19,6 +19,7 @@
 // (use directly) from "stale" (LKG fallback only when a live fetch fails).
 
 import { Redis } from '@upstash/redis';
+import { createSharedRedis } from './sharedStore';
 
 // LKG retention. Long enough that a token priced earlier in the day survives a
 // CoinGecko outage across cold starts; freshness is judged by the entry's `at`,
@@ -40,7 +41,7 @@ const REST_TOKEN = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let redis: Redis | null = null;
 if (REST_URL && REST_TOKEN) {
   try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+    redis = createSharedRedis('redisSpotCache');
   } catch (err) {
     console.warn('[redisSpotCache] Redis client construction failed; no-op stub:', err);
     redis = null;

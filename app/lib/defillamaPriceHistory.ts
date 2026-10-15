@@ -38,6 +38,7 @@
 import { Redis } from '@upstash/redis';
 import { logPrice } from './priceLogger';
 import { type Chain, DEFILLAMA_CHAIN, normalizeIdentifier, defillamaRequestId } from './tokenConstants';
+import { createSharedRedis } from './sharedStore';
 
 export type { Chain } from './tokenConstants';
 
@@ -61,7 +62,7 @@ const REST_TOKEN = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let redis: Redis | null = null;
 if (REST_URL && REST_TOKEN) {
   try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+    redis = createSharedRedis('defillamaPriceHistory');
   } catch (err) {
     console.warn('[defillamaPriceHistory] Redis client construction failed; no-op stub:', err);
     redis = null;

@@ -1194,8 +1194,13 @@ export default function Analytics() {
     if ((c.pendingOpen || c.pendingClosed) && loadingMore) add(loadingNote);
     if (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading)) add("scanning closed positions…");
     if (c.pendingClosed && lpPnl.historyLookupFailed) add("incomplete — some history couldn't be loaded");
+    if (c.pendingClosed && lpPnl.historyUnverified > 0) {
+      add(`history couldn't be loaded (${lpPnl.historyUnverified} position${lpPnl.historyUnverified === 1 ? "" : "s"} unverified)`);
+    }
     if (c.pendingClosed && lpPnl.capitalGLPricingPending > 0) {
-      add(`incomplete — pricing ${lpPnl.capitalGLPricingPending} position${lpPnl.capitalGLPricingPending === 1 ? "" : "s"}…`);
+      const n = lpPnl.capitalGLPricingPending, s = n === 1 ? "" : "s";
+      // After the retry schedule the page stops promising an answer.
+      add(lpPnl.pricingRetriesExhausted ? `incomplete — ${n} position${s} could not be priced` : `incomplete — pricing ${n} position${s}…`);
     }
     if (c.pendingClosed) add(closedNotPricedNote);
     if (c.feesPending && feesIncomplete && feesNote && feesNote !== closedNotPricedNote) {

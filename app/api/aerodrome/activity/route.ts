@@ -233,12 +233,24 @@ async function fetchLogsViaTransfers(tokenId: number, owner: string): Promise<Ra
   return history.verified[id] ? history.logsByToken[id] : null;
 }
 
+// The position's history could not be read and checked against the chain (the
+// transfer index did not reconcile it, or a read failed). Answered as 503
+// `history-unverified`, which the page shows as "history couldn't be loaded".
+class HistoryUnverifiedError extends Error {
+  constructor() { super('history-unverified'); this.name = 'HistoryUnverifiedError'; }
+}
+
 async function fetchLogs(tokenIdHex: string, tokenId: number, owner: string): Promise<RawLog[]> {
   // Where the archive endpoint is known not to serve wide-range logs, asking it
   // first is a wasted call on every request.
   if (!archiveServesWideLogs('base')) {
     const viaTransfers = await fetchLogsViaTransfers(tokenId, owner);
     if (viaTransfers) return viaTransfers;
+    // Every fallback below asks for wide-range logs, which no configured Base
+    // endpoint serves (Tenderly's public gateway is capped at 1,000 blocks;
+    // Llama and publicnode refuse archive logs). Walking them cost 25-36 s per
+    // request and always ended in a bare 500. Say what happened instead, at once.
+    throw new HistoryUnverifiedError();
   }
 
   // Get current block to bound chunked scans
@@ -927,6 +939,10 @@ async function GET_impl(request: Request) {
 
     return NextResponse.json(response);
   } catch (err) {
+    if (err instanceof HistoryUnverifiedError) {
+      console.warn(`[aerodrome/activity] tokenId=${positionId}: history could not be verified (transfer index), answering 503`);
+      return NextResponse.json({ error: 'history-unverified' }, { status: 503 });
+    }
     console.error('[aerodrome/activity] Unexpected error:', err);
     return NextResponse.json(
       { error: 'Failed to fetch activity', details: String(err) },

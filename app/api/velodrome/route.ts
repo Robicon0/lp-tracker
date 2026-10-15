@@ -16,6 +16,7 @@ import {
   LOOKUP_FAILED,
 } from '../../lib/enumerationTruncation';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+import { cachedPoolTokens, cachedReceipt } from '../../lib/evmImmutableCache';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['velodrome-slipstream', 'velodrome-v1'] as const;
@@ -82,45 +83,15 @@ function padAddress(addr: string): string {
   return addr.toLowerCase().replace('0x', '').padStart(64, '0');
 }
 
-// Fetch token0 and token1 addresses from a CL pool contract
+// Fetch token0 and token1 addresses from a CL pool contract. Immutable: memory →
+// shared store → token0() / token1() (app/lib/evmImmutableCache.ts).
 async function getPoolTokens(poolAddress: string): Promise<{ token0: string; token1: string } | null> {
   try {
-    // token0() selector: 0x0dfe1681
-    const res0 = await fetch(OPTIMISM_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_call',
-        params: [{ to: poolAddress, data: '0x0dfe1681' }, 'latest'],
-        id: 1,
-      }),
-    });
-    const r0 = await res0.json();
-
-    // token1() selector: 0xd21220a7
-    const res1 = await fetch(OPTIMISM_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_call',
-        params: [{ to: poolAddress, data: '0xd21220a7' }, 'latest'],
-        id: 2,
-      }),
-    });
-    const r1 = await res1.json();
-
-    if (r0.result && r1.result) {
-      return {
-        token0: '0x' + r0.result.slice(26).toLowerCase(),
-        token1: '0x' + r1.result.slice(26).toLowerCase(),
-      };
-    }
+    return await cachedPoolTokens('optimism', OPTIMISM_RPC, poolAddress);
   } catch (err) {
     console.error('Error fetching pool tokens:', err);
+    return null;
   }
-  return null;
 }
 
 // Minimal JSON-RPC helper (returns result or null on any failure).
@@ -270,7 +241,7 @@ async function buildClosedPositions(
       if (!incLogs || incLogs.length === 0) return minimal;
       incLogs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
 
-      const receipt = await rpcResult(OPTIMISM_RPC, 'eth_getTransactionReceipt', [incLogs[0].transactionHash]) as
+      const receipt = await cachedReceipt('optimism', OPTIMISM_RPC, incLogs[0].transactionHash) as
         { logs?: Array<{ address: string; topics: string[] }> } | null;
       const mintLog = receipt?.logs?.find((l) =>
         l.topics?.[0]?.toLowerCase() === POOL_MINT_TOPIC &&

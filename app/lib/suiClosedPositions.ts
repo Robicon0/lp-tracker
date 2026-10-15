@@ -47,6 +47,8 @@ import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, getSuiO
 import type { ScanStatus } from './historyScan';
 import { ownershipVerdict, type OwnershipVerdict } from './positionOwnership';
 import { readOwnershipVerdicts, recordOwnershipVerdicts, type StoredVerdict } from './suiOwnershipStore';
+import { createSharedRedis } from './sharedStore';
+import { suiCoinMetadataCached } from './tokenMetaCache';
 
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
@@ -351,8 +353,8 @@ async function resolveDecimals(coinType: string): Promise<number | null> {
   const tok = lookupHardcodedToken('sui', normalizeSuiType(coinType));
   if (tok) return tok.decimals;
   try {
-    const meta = (await suiRpc('suix_getCoinMetadata', [coinType])) as { decimals?: number } | null;
-    if (meta && typeof meta.decimals === 'number') return meta.decimals;
+    const meta = await suiCoinMetadataCached(coinType);
+    if (meta) return meta.decimals;
   } catch { /* ignore */ }
   return null;
 }
@@ -913,7 +915,7 @@ const _redisUrl = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _redisToken = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_redisUrl && _redisToken) {
-  try { _redis = new Redis({ url: _redisUrl, token: _redisToken }); }
+  try { _redis = createSharedRedis('suiClosedPositions'); }
   catch (err) { console.warn('[suiClosedPositions] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 

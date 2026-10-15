@@ -59,6 +59,7 @@ import {
   defillamaRequestId,
   lookupHardcodedToken,
 } from './tokenConstants';
+import { createSharedRedis } from './sharedStore';
 
 export type { Chain } from './tokenConstants';
 
@@ -101,7 +102,7 @@ const REST_TOKEN = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let redis: Redis | null = null;
 if (REST_URL && REST_TOKEN) {
   try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+    redis = createSharedRedis('tokenResolver');
   } catch (err) {
     console.warn('[tokenResolver] Redis client construction failed; no-op stub:', err);
     redis = null;

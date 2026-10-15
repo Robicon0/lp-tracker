@@ -8,6 +8,7 @@ import { safeCalcPendingFee, calcFeeGrowthInside, emitFeeUnderflow } from '../..
 import { resolveSuiRewardTokens, buildPendingRewards } from '../../lib/suiRewardMeta';
 import { logPrice } from '../../lib/priceLogger';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
+import { suiCoinMetadataCached } from '../../lib/tokenMetaCache';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['cetus-clmm'] as const;
@@ -158,9 +159,10 @@ async function fetchCoinMetadata(coinType: string): Promise<{ symbol: string; de
     return { symbol: k.symbol, decimals: k.decimals, name: k.name };
   }
   try {
-    const result = await suiRpc('suix_getCoinMetadata', [coinType]) as
-      { decimals: number; symbol: string; name: string } | null;
-    if (result) return { decimals: result.decimals, symbol: result.symbol, name: result.name };
+    // Memory → shared store → chain (app/lib/tokenMetaCache.ts): a coin's metadata
+    // does not change, so it is read from the chain once, not on every request.
+    const m = await suiCoinMetadataCached(coinType);
+    if (m) return { decimals: m.decimals, symbol: m.symbol, name: m.name ?? '' };
   } catch { /* ignore */ }
   return null;
 }

@@ -34,6 +34,7 @@
 import { Redis } from '@upstash/redis';
 import { createHash } from 'crypto';
 import type { PositionPnLData } from './positionPnl';
+import { createSharedRedis } from './sharedStore';
 
 // ── Snapshot shape (v1) ────────────────────────────────────────────────────────
 // Mirrors EXACTLY what the analytics page renders — see analytics/page.tsx
@@ -137,7 +138,7 @@ const _redisUrl = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _redisToken = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_redisUrl && _redisToken) {
-  try { _redis = new Redis({ url: _redisUrl, token: _redisToken }); }
+  try { _redis = createSharedRedis('analyticsSnapshot'); }
   catch (err) { console.warn('[analyticsSnapshot] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 

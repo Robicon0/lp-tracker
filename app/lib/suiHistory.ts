@@ -42,6 +42,7 @@
 import { Redis } from '@upstash/redis';
 import { rpcUrlFromEnv } from './rpcEnv';
 import { runResumableScan, readStoredScan, _resetHistoryScanOverlay, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
+import { createSharedRedis } from './sharedStore';
 
 const DEFAULT_ENDPOINT = 'https://graphql.mainnet.sui.io/graphql';
 function endpoint(): string { return rpcUrlFromEnv('SUI_GRAPHQL_URL') || DEFAULT_ENDPOINT; }
@@ -197,7 +198,7 @@ const _url = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_url && _token) {
-  try { _redis = new Redis({ url: _url, token: _token }); }
+  try { _redis = createSharedRedis('suiHistory'); }
   catch (err) { console.warn('[suiHistory] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 // v2: resumable layout (a meta key plus chunk keys). v1 held one finished scan

@@ -27,6 +27,7 @@
 //   const prices = out.get(blockHex); // { price0Usd, price1Usd } | null
 
 import { logPrice } from './priceLogger';
+import { createSharedRedis } from './sharedStore';
 
 const SLOT0_SELECTOR = "0x3850c7bd"; // slot0()
 
@@ -57,8 +58,7 @@ try {
   const url = process.env.PRICE_CACHE_KV_REST_API_URL;
   const token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
   if (url && token) {
-    const { Redis } = require('@upstash/redis') as typeof import('@upstash/redis');
-    redis = new Redis({ url, token }) as unknown as typeof redis;
+    redis = createSharedRedis('v3HistoricalFeePrice') as unknown as typeof redis;
   }
 } catch {
   redis = null;

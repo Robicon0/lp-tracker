@@ -40,6 +40,7 @@
 
 import { Redis } from '@upstash/redis';
 import { logPrice } from './priceLogger';
+import { createSharedRedis } from './sharedStore';
 
 // 30 days. Historical daily prices are immutable in practice; the TTL exists
 // only so an eventual CoinGecko correction can propagate, and so the free-tier
@@ -56,7 +57,7 @@ const REST_TOKEN = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let redis: Redis | null = null;
 if (REST_URL && REST_TOKEN) {
   try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+    redis = createSharedRedis('redisPriceCache');
   } catch (err) {
     // Construction should never throw with a valid url/token, but stay defensive.
     console.warn('[redisPriceCache] Redis client construction failed; running as no-op stub:', err);

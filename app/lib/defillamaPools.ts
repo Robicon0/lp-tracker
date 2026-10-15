@@ -23,6 +23,7 @@
 
 import { Redis } from '@upstash/redis';
 import { POOL_STATS_UNAVAILABLE, POOL_STATS_LAST_KNOWN, type RouteTruncation } from './enumerationTruncation';
+import { createSharedRedis } from './sharedStore';
 
 export interface LlamaPool {
   project: string;
@@ -56,7 +57,7 @@ const _url = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_url && _token) {
-  try { _redis = new Redis({ url: _url, token: _token }); }
+  try { _redis = createSharedRedis('defillamaPools'); }
   catch (err) { console.warn('[defillamaPools] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 const readOnly = () => process.env.CLOSED_POS_CACHE_READONLY === '1';

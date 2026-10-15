@@ -35,6 +35,8 @@ import { lookupHardcodedToken, normalizeSuiType } from './tokenConstants';
 import { suiRpc } from './suiRpc';
 import { getSuiCoinMetadata } from './suiHistory';
 import { Redis } from '@upstash/redis';
+import { createSharedRedis } from './sharedStore';
+import { suiCoinMetadataCached } from './tokenMetaCache';
 
 export interface SuiPoolContext {
   coinTypeA: string;
@@ -57,7 +59,7 @@ const _redisUrl = process.env.PRICE_CACHE_KV_REST_API_URL;
 const _redisToken = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let _redis: Redis | null = null;
 if (_redisUrl && _redisToken) {
-  try { _redis = new Redis({ url: _redisUrl, token: _redisToken }); }
+  try { _redis = createSharedRedis('suiPoolContext'); }
   catch (err) { console.warn('[suiPoolContext] Redis client construction failed; no-op stub:', err); _redis = null; }
 }
 const poolCtxKey = (poolId: string) => `${POOL_CTX_CACHE_VERSION}:${poolId}`;
@@ -93,8 +95,8 @@ async function resolveDecimals(coinType: string): Promise<number | null> {
   if (_decimalsCache.has(norm)) return _decimalsCache.get(norm)!;
   let dec: number | null = null;
   try {
-    const meta = (await suiRpc('suix_getCoinMetadata', [coinType])) as { decimals?: number } | null;
-    if (meta && typeof meta.decimals === 'number') dec = meta.decimals;
+    const meta = await suiCoinMetadataCached(coinType);
+    if (meta) dec = meta.decimals;
   } catch { /* try the second source */ }
   if (dec === null) {
     const meta = await getSuiCoinMetadata(coinType);

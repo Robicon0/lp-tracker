@@ -25,6 +25,7 @@
 // (Same reasoning as DefiTuna Phase 1's "no cache bumps".)
 
 import { Redis } from '@upstash/redis';
+import { createSharedRedis } from './sharedStore';
 
 const KEY_PREFIX = 'vfat_sickles_v1:';
 const TTL_DEPLOYED_SECONDS = 30 * 24 * 60 * 60; // 30d — immutable once created
@@ -41,7 +42,7 @@ const REST_TOKEN = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let redis: Redis | null = null;
 if (REST_URL && REST_TOKEN) {
   try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+    redis = createSharedRedis('vfatSickleCache');
   } catch (err) {
     console.warn('[vfatSickleCache] Redis client construction failed; no-op stub:', err);
     redis = null;

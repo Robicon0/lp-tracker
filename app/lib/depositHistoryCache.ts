@@ -34,6 +34,7 @@
 //     fire-and-forget.
 
 import { Redis } from '@upstash/redis';
+import { createSharedRedis } from './sharedStore';
 
 // 30 days. Closed-position history is immutable in practice; the TTL only bounds
 // the free-tier keyspace and lets a (hypothetical) reorg correction propagate.
@@ -55,7 +56,7 @@ const REST_TOKEN = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 let redis: Redis | null = null;
 if (REST_URL && REST_TOKEN) {
   try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+    redis = createSharedRedis('depositHistoryCache');
   } catch (err) {
     console.warn('[depositHistoryCache] Redis client construction failed; no-op stub:', err);
     redis = null;

@@ -98,13 +98,28 @@ interface RawLog {
   logIndex: string;
 }
 
+// The reply is checked before it is read: an HTTP error, an empty body or a body
+// that is not JSON is retried twice, then answered as a JSON-RPC error envelope
+// (every caller already checks `.error`), never thrown as "Unexpected end of
+// JSON input". Throttling (429) is retried by the shared Alchemy limiter first.
 async function rpcPost(url: string, body: object): Promise<unknown> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  let why = 'no reply';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, attempt === 1 ? 300 : 900));
+    let res: Response;
+    try {
+      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    } catch (err) {
+      why = err instanceof Error && err.name === 'AlchemyThrottledError' ? 'evm-rpc-http-429' : 'evm-rpc-network-error';
+      if (why === 'evm-rpc-http-429') break;
+      continue;
+    }
+    if (!res.ok) { why = `evm-rpc-http-${res.status}`; continue; }
+    const text = await res.text();
+    if (!text.trim()) { why = 'evm-rpc-empty-reply'; continue; }
+    try { return JSON.parse(text); } catch { why = 'evm-rpc-bad-json'; continue; }
+  }
+  return { error: { code: -32000, message: why } };
 }
 
 async function fetchLogsChunked(
