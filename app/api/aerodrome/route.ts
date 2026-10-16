@@ -4,12 +4,7 @@ import { getEverOwnedTokenIds, type EverOwnedResult } from '../../lib/evmEverOwn
 import { archiveRpcUrl } from '../../lib/evmArchiveRpc';
 import { resolveToken } from '../../lib/tokenResolver';
 import { resolveHolderVerdict, amountsFromLiquidity } from '../../lib/evmGaugeStaking';
-import {
-  type RouteTruncation,
-  lookupFailureNotice,
-  excludedNotice,
-  LOOKUP_FAILED,
-} from '../../lib/enumerationTruncation';
+import { type RouteTruncation, lookupFailureNotice, excludedNotice, LOOKUP_FAILED } from '../../lib/enumerationTruncation';
 import {
   resolveSugarSpanForFactory,
   pageSugarPositions,
@@ -17,6 +12,7 @@ import {
 } from '../../lib/sugarPaging';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
 import { cachedPoolTokens, cachedReceipt } from '../../lib/evmImmutableCache';
+import { guardClosedList, type ClosedRecordLike } from '../../lib/evmClosedListGuard';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['aerodrome-slipstream', 'aerodrome-v1'] as const;
@@ -459,6 +455,23 @@ async function loadOpenPositions(account: string): Promise<OpenPositionsResult> 
       );
     }
 
+    // An empty list is only "holds nothing" when the chain says so (queue item
+    // a, 2026-10-16): Sugar returning no row for a wallet whose NFT balance is
+    // above zero is a short read, and a balance that could not be read leaves
+    // the empty unconfirmed. Either way the page says so instead of rendering
+    // the wallet as empty. (Staked positions are not in the balance; the closed
+    // half finds them through the gauge check.)
+    const segment = span.segments[0];
+    if (rawPositions.length === 0 && segment) {
+      if (segment.balanceOf == null) {
+        console.warn(`[aerodrome] ${account}: Sugar returned no position and the NFT balance could not be read`);
+        truncated.push(lookupFailureNotice('Base positions'));
+      } else if (segment.balanceOfAuthoritative && segment.balanceOf > 0) {
+        console.warn(`[aerodrome] ${account}: Sugar returned no position but the wallet holds ${segment.balanceOf} position NFTs`);
+        truncated.push(excludedNotice('Base positions', 'not-listed', segment.balanceOf, segment.balanceOf));
+      }
+    }
+
     if (rawPositions.length === 0) {
       // Still disclose: a swept-but-truncated empty is NOT the same answer as a
       // wallet that genuinely holds nothing (queue item B).
@@ -631,12 +644,31 @@ export async function GET(request: Request) {
     // because the NFT was burned on close (Aerodrome Slipstream burns on full
     // exit). Returned as Closed records so they appear in the dashboard Closed
     // tab; their fees are recovered via /api/aerodrome/activity?positionId=all.
-    // Skipped for a wallet Sugar returns nothing for (the long-standing
-    // empty-Sugar gate — unchanged here).
+    //
+    // Runs WHETHER OR NOT the wallet has an open position (queue item a,
+    // 2026-10-16). It used to be skipped when Sugar returned nothing, so a
+    // wallet that closed its last Aerodrome position lost every closed one with
+    // it — and, because the wallet-wide fee scan is asked only for wallets with
+    // an Aerodrome position on the list, all of its Aerodrome fees too
+    // (Account 1 from 2026-10-15 09:19 UTC: 14 positions, 2,533.41 of fees). No
+    // safety was lost by removing the gate: a position is emitted as Closed
+    // only on a chain verdict (its burn in the transfer index, or a reverted
+    // ownerOf / zero liquidity), never from "Sugar did not return it".
     let closedPositions: Record<string, unknown>[] = [];
-    if (enumerationPromise && open.heldIds.size > 0) {
-      const closed = await buildClosedPositions(account, open.heldIds, open.prices, enumerationPromise);
-      closedPositions = closed.positions;
+    if (enumerationPromise) {
+      // An empty sweep returns no prices; the closed records carry spot prices
+      // (the activity route's last-resort basis), so read them here.
+      const prices = Object.keys(open.prices).length > 0 ? open.prices : await fetchPrices().catch(() => ({} as Record<string, number>));
+      const closed = await buildClosedPositions(account, open.heldIds, prices, enumerationPromise);
+      // Closed lists never shrink (rule (b)): a shorter build keeps the stored
+      // positions and says so.
+      const guarded = await guardClosedList({
+        protocol: 'aerodrome', chain: 'base', wallet: account,
+        scope: 'Base closed-position recovery',
+        fresh: closed.positions.filter((p) => p.status === 'Closed') as ClosedRecordLike[],
+      });
+      closedPositions = [...guarded.positions, ...closed.positions.filter((p) => p.status !== 'Closed')];
+      if (guarded.notice) truncated.push(guarded.notice);
       // Queue item B — a failed closed-position enumeration travels on the SAME
       // channel as a bound cap, because it has the same meaning for the user:
       // this list is not necessarily everything.

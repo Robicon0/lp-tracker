@@ -17,6 +17,7 @@ import {
 } from '../../lib/enumerationTruncation';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
 import { cachedPoolTokens, cachedReceipt } from '../../lib/evmImmutableCache';
+import { guardClosedList, type ClosedRecordLike } from '../../lib/evmClosedListGuard';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['velodrome-slipstream', 'velodrome-v1'] as const;
@@ -411,9 +412,22 @@ export async function GET(request: Request) {
     if (rawPositions.length === 0) {
       // Still disclose: a swept-but-truncated empty is NOT the same answer as a
       // wallet that genuinely holds nothing (queue item B).
+      // Closed recovery runs here too (queue item a, 2026-10-16): returning
+      // before it hid every closed position of a wallet with no open one.
+      const prices = await fetchPrices().catch(() => ({} as Record<string, number>));
+      const closed = await buildClosedPositions(account, new Set(), prices);
+      const guarded = await guardClosedList({
+        protocol: 'velodrome', chain: 'optimism', wallet: account,
+        scope: 'Optimism closed-position recovery',
+        fresh: closed.positions.filter((p) => p.status === 'Closed') as ClosedRecordLike[],
+      });
+      const closedPositions = [...guarded.positions, ...closed.positions.filter((p) => p.status !== 'Closed')];
+      if (closed.notice) truncated.push(closed.notice);
+      if (closed.holderNotice) truncated.push(closed.holderNotice);
+      if (guarded.notice) truncated.push(guarded.notice);
       return NextResponse.json({
-        positions: [],
-        count: 0,
+        positions: closedPositions,
+        count: closedPositions.length,
         account,
         ...(truncated.length > 0 ? { truncated } : {}),
       });
@@ -546,9 +560,16 @@ export async function GET(request: Request) {
     // tab; their fees are recovered via /api/velodrome/activity?positionId=all.
     const heldIds = new Set(rawPositions.map((p) => p.id));
     const closed = await buildClosedPositions(account, heldIds, prices);
-    const closedPositions = closed.positions;
+    // Closed lists never shrink (rule (b)).
+    const guarded = await guardClosedList({
+      protocol: 'velodrome', chain: 'optimism', wallet: account,
+      scope: 'Optimism closed-position recovery',
+      fresh: closed.positions.filter((p) => p.status === 'Closed') as ClosedRecordLike[],
+    });
+    const closedPositions = [...guarded.positions, ...closed.positions.filter((p) => p.status !== 'Closed')];
     if (closed.notice) truncated.push(closed.notice);
     if (closed.holderNotice) truncated.push(closed.holderNotice);
+    if (guarded.notice) truncated.push(guarded.notice);
     if (positions.length > 0) truncated.push(...llamaPoolsNotices(LLAMA_PROJECTS));
 
     return NextResponse.json({

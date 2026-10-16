@@ -395,7 +395,13 @@ async function scan(chain: ArchiveChain, nftManager: string, wallet: string): Pr
   let logsByToken = group();
   const verified: Record<string, boolean> = {};
   const check = async () => {
-    await Promise.all(ids.map(async (id) => { verified[id] = receiptsComplete && await reconciles(id, logsByToken[id]); }));
+    // A BURNED position cannot gain events, so a stored event set that
+    // reconciles (all liquidity removed, at least as much collected as
+    // withdrawn) is its whole history even when this scan's own reads failed
+    // (queue item a, 2026-10-16: a throttled scan marked every closed position
+    // unverified and their fees left the totals). A live one still needs this
+    // scan's receipts to be complete.
+    await Promise.all(ids.map(async (id) => { verified[id] = (receiptsComplete || burned[id]) && await reconciles(id, logsByToken[id]); }));
   };
   await check();
   mark('verify');

@@ -126,3 +126,5 @@ async function tokenMeta() {
   console.log(failures ? `\n${failures} FAILED` : '\nall passed');
   process.exit(failures ? 1 : 0);
 })();
+
+export {};

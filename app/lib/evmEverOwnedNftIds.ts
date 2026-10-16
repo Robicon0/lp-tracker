@@ -103,16 +103,30 @@ export async function getEverOwnedTokenIds(
   chain?: ArchiveChain,
 ): Promise<EverOwnedResult> {
   if (!wallet) return COMPLETE_EMPTY;
-  const viaTransfers = async (): Promise<EverOwnedResult | null> => {
+  // The transfer-index history, read at most once per call.
+  let historyRead: WalletNftHistory | null = null;
+  const readHistory = async (): Promise<WalletNftHistory | null> => {
     if (!chain) return null;
-    const history = await getWalletNftHistory({ chain, nftManager, wallet });
-    return history.complete
+    historyRead ??= await getWalletNftHistory({ chain, nftManager, wallet });
+    return historyRead;
+  };
+  const viaTransfers = async (): Promise<EverOwnedResult | null> => {
+    const history = await readHistory();
+    return history?.complete
       ? { ids: history.ids, complete: true, reason: null, history }
       : null;
   };
   if (chain && !archiveServesWideLogs(chain)) {
     const direct = await viaTransfers();
     if (direct) return direct;
+    // The scan came back partial. What it already holds (its stored history,
+    // which only ever grows) is still the wallet's: return those ids flagged
+    // incomplete rather than falling to an archive scan this chain cannot serve
+    // and losing them (queue item a, 2026-10-16).
+    const partial = await readHistory();
+    if (partial && partial.ids.length > 0) {
+      return { ids: partial.ids, complete: false, reason: partial.reason ?? LOOKUP_FAILED, history: partial };
+    }
   }
   const archive = await scanArchive(nftManager, wallet, rpc, fromBlock);
   if (archive.complete) return archive;

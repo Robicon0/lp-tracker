@@ -549,6 +549,10 @@ async function buildBurnedPosition(
   };
 }
 
+// Thrown when the wallet holds no position NFT on a chain, so the burned-NFT
+// recovery below still runs; never a failure, never disclosed as one.
+class NothingHeld extends Error {}
+
 async function fetchPositionsForChain(
   chainKey: string,
   account: string,
@@ -567,10 +571,15 @@ async function fetchPositionsForChain(
   // recovery further down share it, so a wallet whose open-position scan is
   // expensive cannot also spend the recovery's time and blow `maxDuration`.
   const recoveryDeadline = Date.now() + ENUMERATION_BUDGET_MS;
+  let nothingHeld = false;
   
   try {
     const balance = await getBalance(chain.rpc, chain.nftManager, account);
-    if (balance === 0) return { positions, truncated };
+    // Holding no position NFT on this chain is not "no history": the burned-NFT
+    // recovery below still runs (queue item a, 2026-10-16 — it used to return
+    // here, so a wallet whose last position on a chain was burned lost its
+    // closed ones on that chain).
+    if (balance === 0) throw new NothingHeld();
 
     const deadline = recoveryDeadline;
 
@@ -729,9 +738,12 @@ async function fetchPositionsForChain(
       }
     }
   } catch (err) {
-    // A failed read is disclosed (banner + ≈), never returned as "no positions".
-    logPositionListReadFailure(`Uniswap V3 ${chain.chainName}`, account, err);
-    truncated.push(lookupFailureNotice(`${chain.chainName} positions`));
+    if (err instanceof NothingHeld) nothingHeld = true;
+    else {
+      // A failed read is disclosed (banner + ≈), never returned as "no positions".
+      logPositionListReadFailure(`Uniswap V3 ${chain.chainName}`, account, err);
+      truncated.push(lookupFailureNotice(`${chain.chainName} positions`));
+    }
   }
 
   // ── Burned-NFT recovery (defensive, additive) ────────────────────────────
@@ -783,11 +795,14 @@ async function fetchPositionsForChain(
       // trace. Disclose it on the same channel as a bound cap.
       truncated.push(lookupFailureNotice(`${chain.chainName} closed-position recovery`));
     }
-  } else if (!archiveRpc) {
+  } else if (!archiveRpc && !nothingHeld) {
     // No archive endpoint exists for this chain (BNB: Tenderly has no BSC
     // gateway). Previously "skipped gracefully" — i.e. silently, so a BNB
     // wallet's burned positions were absent with nothing said. This is the
     // UNAVAILABLE case by definition: retrying cannot help, configuration can.
+    // Said only to a wallet that holds positions on the chain, as before queue
+    // item a: telling every wallet that BNB has no history source would be a
+    // notice on every page for a gap that is known and recorded.
     truncated.push(lookupFailureNotice(
       `${chain.chainName} closed-position recovery`,
       LOOKUP_UNAVAILABLE,

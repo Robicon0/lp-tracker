@@ -100,13 +100,14 @@ export const POOL_STATS_LAST_KNOWN = 'pool-stats-last-known';
  * that depends on the scan shows `≈`.
  */
 export const LOOKUP_EXCLUDED_PREFIX = 'lookup-excluded:';
-export type ExcludedCause = 'pool-unresolved' | 'position-error' | 'time-budget' | 'no-archive' | 'holder-check';
+export type ExcludedCause = 'pool-unresolved' | 'position-error' | 'time-budget' | 'no-archive' | 'holder-check' | 'not-listed';
 const EXCLUDED_CAUSE_TEXT: Record<ExcludedCause, string> = {
   'pool-unresolved': "the position's pool could not be identified",
   'position-error': 'its history request failed',
   'time-budget': 'the scan reached its time limit first',
   'no-archive': 'no history source is configured for this chain',
   'holder-check': 'the check of who holds it now failed',
+  'not-listed': 'the wallet holds it, but the position list did not return it',
 };
 
 function excludedCauseOf(reason: string): ExcludedCause | null {
@@ -133,6 +134,17 @@ export function excludedPositionNotices(
 
 export function excludedNotice(scope: string, cause: ExcludedCause, count: number, total: number): RouteTruncation {
   return { scope, cap: 0, returned: count, knownTotal: total, reason: `${LOOKUP_EXCLUDED_PREFIX}${cause}` };
+}
+
+/**
+ * A closed-position scan came back with FEWER positions than the stored list
+ * (a closed position never reopens, so the scan was short). The stored ones are
+ * still shown; `returned` is how many came only from the store, `knownTotal`
+ * the list shown. A `lookup-` reason: the totals that depend on it show `≈`.
+ */
+export const LOOKUP_KEPT_STORED = 'lookup-kept-stored';
+export function keptStoredNotice(scope: string, kept: number, total: number): RouteTruncation {
+  return { scope, cap: 0, returned: kept, knownTotal: total, reason: LOOKUP_KEPT_STORED };
 }
 
 /**
@@ -309,6 +321,11 @@ export function describeTruncation(n: TruncationNotice): string {
     const of = n.knownTotal != null && n.knownTotal > 0 ? ` of ${n.knownTotal}` : '';
     const one = n.returned === 1;
     return `${where}: ${n.returned}${of} position${one ? '' : 's'} left out — ${one ? why : why.replace(/^its /, 'their ').replace("the position's pool", 'their pools').replace('who holds it', 'who holds them')}. ${one ? 'Its' : 'Their'} fees and Capital G/L are not in the totals`;
+  }
+
+  if (n.reason === LOOKUP_KEPT_STORED) {
+    const one = n.returned === 1;
+    return `${where}: this scan came back short — ${n.returned} closed position${one ? ' was' : 's were'} found before and ${one ? 'is' : 'are'} still shown from the last complete scan`;
   }
 
   if (n.reason === LOOKUP_UNREADABLE_TX) {
