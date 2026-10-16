@@ -268,16 +268,7 @@ as a third endpoint. Note Alchemy has no `getAssetBatch`. Report:
 
 **Queued from the Base history work (owner-listed 2026-10-08 — NOT built, each needs its own
 plan):**
-- **a. Closed Aerodrome positions for a wallet with no open Aerodrome position.** The
-  empty-Sugar gate returns before the closed half runs, so such a wallet sees no closed rows.
-  **⚠️ LIVE ON ACCOUNT 1 SINCE 2026-10-15 09:00 UTC** (the owner burned the last open Aerodrome
-  position, 76833100): production shows Closed (106) with no Aerodrome row in it (the 14 closed
-  Aerodrome positions of the morning B7, plus 76833100, are gone from Capital G/L), and Fees
-  Collected has no Aerodrome row (2,533.41 on the morning B7), with NO
-  notice and no `≈`. The fee half is a second gate: `useWalletLevelFees` asks the wallet-wide
-  Aerodrome scan only for wallets that have an Aerodrome position in the positions list
-  (`aerodromeByWallet`), so with the closed half empty the scan is never requested. A silent drop
-  under rule (i); ranks first.
+- **a. ✅ DONE `9eba766`** — an empty position list no longer hides closed history or fees (see Recent fixes).
 - **b. ✅ DONE `3a4ca79`** — DefiLlama pools list read once and shared (see Recent fixes).
 - **c. Snapshot save is intermittent.** After a fully settled load the page sometimes never
   POSTs its snapshot. Find the blocking condition (suspects: the save effect's deps do not
@@ -969,6 +960,56 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`9eba766`** (Empty-Sugar fix, queue item a, 2026-10-16, live as `dpl_AtqEkmfMQatb8FdXnGfoKGps9eBZ`)
+  — **An empty position list never hides closed history or fees.** Methodology rule (n).
+  **Cause.** `app/api/aerodrome/route.ts` (was line 637) ran the closed half only when
+  `open.heldIds.size > 0`, so a wallet whose Sugar sweep returned nothing got no closed positions;
+  and `useWalletLevelFees` asks the wallet-wide Aerodrome fee scan only for wallets with an
+  Aerodrome row on the list (`aerodromeByWallet`), so their fees went too. Nothing was overwritten
+  or expired: the EVM closed list was never stored, it was rebuilt per request from
+  `evm_wallet_hist_v1:base:{manager}:{wallet}`, which held all 14 positions (14 burns, 98 logs)
+  throughout. Account 1 burned 76833100 at 2026-10-15 09:00:27 UTC; the last sweep with its row
+  was 09:00:45 UTC, and from 09:19:39 UTC every sweep for it returned 0 rows. The Oct 15 B7 runs
+  that read Closed 115 / Deposited 27,890.81 were all before 09:00 UTC.
+  **Audit.** Same root cause, fixed here: Velodrome (`rawPositions.length === 0` returned before
+  closed recovery) and Uniswap V3 (`if (balance === 0) return` skipped a chain's burned-NFT
+  recovery; BNB, with no history source, stays quiet for a wallet holding nothing there). Not
+  affected: Cetus / Bluefin / Momentum and Orca / Raydium (closed scans and fee scans are keyed by
+  the wallet list; Sui 0x15ac shows 40 closed with nothing open, Solana 2rr3SF 217). No recovery
+  at all, a different gap: PancakeSwap and Uniswap on BNB, HyperSwap / KittenSwap / ProjectX
+  (about 4-6 h each, a history source first). DefiTuna closed positions are not built (queue).
+  **Fix.** The closed half runs whatever the open list holds (a position is Closed only on a chain
+  verdict, so the gate added no safety); an empty sweep is checked against the NFT balance
+  (`lookup-excluded:not-listed` when it is above zero, `lookup-failed` when unreadable);
+  `evmClosedListGuard.ts` keeps Aerodrome / Velodrome closed lists from shrinking
+  (`closed_pos_evm_v1`, `lookup-kept-stored` notice); `getEverOwnedTokenIds` keeps a partial
+  history's ids instead of falling to an archive scan Base cannot serve; a burned position whose
+  stored events reconcile stays verified when a scan's own reads fail.
+  **76833100 from the chain:** deposit 9,294.77 USDC (2026-09-21), fee claims 156.43 (10-06) and
+  84.11 (10-15 08:43 UTC), withdrawal 3.597350 WETH = 8,535.53 at the burn block; Capital G/L
+  −759.24. CLP export (2026-10-07, read in place): the active Base position's deposit 9,294.77; 55
+  Base claims 2,532.20 (chain 2,533.41 at the time).
+  **Why three gates could not be met (owner decided to push):** Total Deposited is open positions
+  only. The morning's 27,890.81 = Aerodrome 9,294.77 + Orca SOL / USDC 2,849.03 + Orca ZEC / USDC
+  3,478.75 + Cetus USDC / SUI 12,268.26. On Oct 15 the owner burned 76833100 and closed and
+  reopened Orca ZEC twice (Djcg… −228.85, 4cyC… −17.11, now GmhUMvy… 3,232.78) and Cetus twice
+  (0x0a9c… −1,625.34, 0xf0a1… −107.77, now 10,481.77): 2,849.03 + 3,232.78 + 10,481.77 = 16,563.58.
+  Aerodrome fees are 2,617.52 = 2,533.41 + the 84.11 claim after the morning B7. Closed is 120 =
+  115 + 76833100 + those 4. Capital G/L −12,768.74 − 759.24 − 228.85 − 17.11 − 1,625.34 − 107.77
+  = −15,507.05.
+  **Tests:** `npx tsx scripts/empty-sugar-test.ts` (15: chain-confirmed empty, Sugar empty with a
+  held NFT, unreadable balance, the never-shrink merge and guard). Forced on a local build, every
+  `alchemy_getAssetTransfers` answered 429: with the stored history, 14 closed rows and 2,617.52 of
+  fees with `lookup-failed`; with no store, 0 rows with `lookup-unavailable`; never silent. Full
+  suite green.
+  **Production B7 (2026-10-16):** Account 1 Closed (120), Deposited 16,563.58, Capital G/L
+  ≈ −15,507.06, Fees 15,158.94 (Aerodrome 2,617.52; Cetus 6,268.24, CETUS price), Net ≈ +267.47
+  ties to the cent, same three notices, first row 6.3 s (7.2 s before). Solana 2rr3SF identical;
+  Sui 0x15ac ≈ −2,136.50; 0x9d6e ≈ −4,791.44; heavy +635.75, 0x0256 −3,642.61, 0x81e1 +56.13
+  identical; 0x844e ≈ +10.79 (51 positions not priced). No non-200, 0 page errors; logs: Kamino
+  (known) and one DeFiLlama pool-list timeout on `/api/raydium` (handled). Store 3,222 → 3,246:
+  2 `closed_pos_evm_v1` (Account 1: 14), receipts, pool tokens, prices; no closed list changed.
 
 - **`f170229`** (Alchemy hardening, stage 1, 2026-10-16, live as `dpl_2pv4vmoR9npjhXT4ZyejuGaojgH1`)
   — **One limiter for every Alchemy call; PancakeSwap reply checks; immutable caches;
@@ -3709,6 +3750,16 @@ with similar position shapes. Never wallet-specific framing.
   stub in `scripts/alchemy-limiter-test.ts`. Check with `npx tsx scripts/alchemy-limiter-test.ts`
   and `npx tsx scripts/alchemy-hardening-test.ts`.
 
+- **(n) An empty or failed list read is never "owns nothing" and never skips the history or fee
+  scan.** A position route's closed-history half runs whatever its open list holds; a position is
+  Closed only on a chain verdict (a burn, a reverted `ownerOf`, zero liquidity), never because a
+  list did not return it. An empty open list is accepted as empty only when the chain confirms it
+  (the NFT balance); otherwise the route answers a notice (`lookup-excluded:not-listed`,
+  `lookup-failed`). Closed EVM lists never shrink (`app/lib/evmClosedListGuard.ts`,
+  `closed_pos_evm_v1`): a shorter build serves the stored positions with a counted
+  `lookup-kept-stored` notice. A partial history scan keeps the ids and the burned positions'
+  reconciled events it already holds. Check with `npx tsx scripts/empty-sugar-test.ts`.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
@@ -3854,8 +3905,13 @@ failed transactions in its 20. (Resolved in `75411c3`: vault-held positions, `/a
 RPC answers an empty body. (Resolved in `cd7f637`: Solana version-1 transactions, the Sui
 leading-zero address, re-valuing stored Sui records; in `3a4ca79`: the 24 MB Orca pool list.)
 
-**Open, found 2026-10-15/16 (details in the `f170229` entry):** queue item a is live on Account 1
-(Aerodrome closed rows and fees missing, no notice); contract wallet 0x844e…7c97 has 51 closed
+**Open, found 2026-10-16 (details in the `9eba766` entry):** PancakeSwap and Uniswap on BNB, and
+HyperSwap / KittenSwap / ProjectX, have no burned-position recovery at all (no history source on
+those chains is wired); while a fee source is still answering, Fees Collected can show without
+`≈` for a few seconds (Account 1: 14,990.85 for about 10 s, the Uniswap 168.09 short), now more
+visible because `/api/uniswap/v3` runs recovery on empty chains (up to 15-17 s on Account 1).
+
+**Open, found 2026-10-15/16 (details in the `f170229` entry):** contract wallet 0x844e…7c97 has 51 closed
 Aerodrome positions that can never be priced (`TOKEN0 / TOKEN1`) and the pricing retry still runs
 its 12 rounds on every page (about 700-940 requests per analytics load) before saying so; the
 `evmRpc` 12 s timeout includes the limiter's backoff, so under a sustained 429 storm a long scan
