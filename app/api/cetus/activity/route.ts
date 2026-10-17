@@ -70,7 +70,7 @@ export interface ActivityEvent {
   priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
   // A claim priced from the nearest earlier day (≤ 3 days): the page counts it
   // and marks Fees `≈` (pricing-invariants Rule 1a).
-  claimPriceBasis?: 'nearby-day';
+  claimPriceBasis?: 'nearby-day' | 'underlying-asset';
   cumulativeFeeUSD: number; // running total of fee+reward USD; 0 for non-fee events
   rewardSymbol?: string;    // set on reward_claim
   rewardCoinType?: string;  // set on reward_claim: the coin type the event names
@@ -388,7 +388,7 @@ async function GET_impl(request: Request) {
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
       let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
-      let claimPriceBasis: 'nearby-day' | undefined;
+      let claimPriceBasis: 'nearby-day' | 'underlying-asset' | undefined;
       // Sprint 1.15: which historical source priced a fee claim (for the
       // read-only [PRICE_LOG] re-derivation below). NEVER 'cg-spot' — fee claims
       // are historical-only (Rule 1a).
@@ -438,7 +438,7 @@ async function GET_impl(request: Request) {
           price1AtTime = null;
           usdAtTime = amount0 * side.price;
           __feeClaimSrc = side.src;
-          if (side.nearby) claimPriceBasis = 'nearby-day';
+          if (side.nearby) claimPriceBasis = side.underlying ? 'underlying-asset' : 'nearby-day';
         } else {
           price0AtTime = null;
           price1AtTime = null;
@@ -468,7 +468,7 @@ async function GET_impl(request: Request) {
             price1AtTime = sB.price;
             usdAtTime = amount0 * sA.price + amount1 * sB.price;
             __feeClaimSrc = [sA.src, sB.src].includes('defillama-historical') ? 'defillama-historical' : [sA.src, sB.src].includes('sui-historical') ? 'sui-historical' : 'stablecoin-fixed';
-            if (sA.nearby || sB.nearby) claimPriceBasis = 'nearby-day';
+            if (sA.nearby || sB.nearby) claimPriceBasis = (sA.underlying || sB.underlying) ? 'underlying-asset' : 'nearby-day';
           }
           // else: usdAtTime stays null → pending (Rule 1a — no spot fallback).
         } else {

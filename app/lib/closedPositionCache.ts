@@ -192,6 +192,12 @@ interface SlotState<T> {
   slot: ClosedCacheSlot;
   cached: T[] | null;
   meta: ClosedCacheMeta | null;
+  /**
+   * The stored list could not be read. Whatever is stored is unknown, so this
+   * request never writes the slot (a fresh list could be shorter than the stored
+   * one and would replace it) and reports itself incomplete.
+   */
+  readFailed?: boolean;
 }
 
 /**
@@ -213,8 +219,16 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
 
   const states: SlotState<T>[] = await Promise.all(opts.slots.map(async (slot): Promise<SlotState<T>> => {
     if (!backend) return { slot, cached: null, meta: null };
+    let raw: unknown;
     try {
-      const cached = parseList<T>(await backend.get(slot.key), opts.isValid);
+      raw = await backend.get(slot.key);
+    } catch {
+      return { slot, cached: null, meta: null, readFailed: true };
+    }
+    const cached = parseList<T>(raw, opts.isValid);
+    // A value that is there but does not parse is not "nothing stored" either.
+    if (raw != null && cached === null) return { slot, cached: null, meta: null, readFailed: true };
+    try {
       if (!cached || cached.length === 0) return { slot, cached, meta: null };
       let meta = parseMeta(await backend.get(closedMetaKey(slot.key)));
       // Rule 2 — a found position must not drop off. A list written by an older
@@ -228,7 +242,8 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
       if (ttl > 0) await write(() => backend.persist(slot.key));
       return { slot, cached, meta };
     } catch {
-      return { slot, cached: null, meta: null };
+      // The list itself was read; only the meta / TTL bookkeeping failed. Serve it.
+      return { slot, cached, meta: null };
     }
   }));
 
@@ -238,6 +253,7 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
     typeof opts.mark === 'function' ? opts.mark(list) : opts.mark;
   const markMoved = (s: SlotState<T>) =>
     opts.mark !== undefined && (s.cached?.length ?? 0) > 0 && s.meta?.mark !== markFor(s.cached ?? []);
+  const anyReadFailed = states.some((s) => s.readFailed);
   const needScan = states.some((s) => s.cached === null || isDue(s) || markMoved(s));
 
   if (!needScan) {
@@ -245,7 +261,7 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
     for (const s of states) bySlot[s.slot.name] = s.cached ?? [];
     // Stale, and the last attempt came back short: still the best list we have,
     // but say so on every load, not only on the load that ran the scan.
-    const incomplete = states.some((s) => isStale(s) && s.meta?.lastAttemptComplete === false);
+    const incomplete = anyReadFailed || states.some((s) => isStale(s) && s.meta?.lastAttemptComplete === false);
     return { bySlot, incomplete, scanned: false };
   }
 
@@ -267,6 +283,10 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
     const merged = mergeClosedPositions(cached, scan.bySlot[s.slot.name] ?? [], opts.idOf, opts.weightOf);
     bySlot[s.slot.name] = merged;
 
+    if (s.readFailed) {
+      log(`stored list ${s.slot.name} could not be read; serving the fresh list, writing nothing`);
+      continue;
+    }
     if (!scan.complete) {
       // Rule 3 — a short scan never produces a list that reads as complete.
       const settled = scan.settled !== false;
@@ -304,5 +324,5 @@ export async function loadClosedPositionsGuarded<T>(opts: GuardedLoadOptions<T>)
     await write(() => backend!.set(s.slot.key, JSON.stringify(merged)));
     await write(() => backend!.set(closedMetaKey(s.slot.key), JSON.stringify(meta)));
   }
-  return { bySlot, incomplete: !scan.complete, scanned: true };
+  return { bySlot, incomplete: !scan.complete || anyReadFailed, scanned: true };
 }

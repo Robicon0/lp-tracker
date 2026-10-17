@@ -1,5 +1,6 @@
 "use client";
 
+import { isRememberedUnpriceable, rememberUnpriceable, forgetUnpriceable } from '../lib/unpriceableMemo';
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
@@ -716,7 +717,9 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // v32 → v33 (rewards commit): every Sui fee and reward claim is valued by coin
 // type at its claim day (DeFiLlama day price, nearby-day marked); a v32 entry
 // holds reward claims valued at today's spot (CETUS, pool-side rewards).
-const CACHE_KEY_PREFIX = "lp-pnl-events-v33-";
+// v33 → v34 (Oct 18): Uniswap / PancakeSwap fee claims are valued at their claim
+// day (ITEM 0e); a v33 entry can hold a claim valued at today's spot.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v34-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
@@ -2020,6 +2023,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
         if (!mountedRef.current) return;
         inflightRef.current.delete(pos.id);
         resultsRef.current.set(pos.id, r);
+        if (r.ok && (r.data.spotFallbackEventCount ?? 0) === 0) forgetUnpriceable([pos.id]);
         setResult(agg());
       });
     }
@@ -2049,31 +2053,44 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
   //      0 → N as results arrive, which re-runs this effect and arms the timer.
   useEffect(() => {
     if (result.capitalGLPricingPending === 0) { pricingAttemptsRef.current = 0; setPricingGaveUp(false); return; }
+    // Two shapes to retry, matching the two ways Capital G/L can be not-final:
+    // an outright pricing EXCLUSION (ok:false), and a SUCCESSFUL result whose
+    // exit was valued at spot because the historical price was cold (ok:true).
+    // The second is easy to miss — it looks like a healthy result — and it was
+    // the entire remaining $738.81 spread.
+    // A position this browser already ran the whole schedule for in the last
+    // 6 hours is not retried again (app/lib/unpriceableMemo.ts): it was fetched
+    // once on this load, which is enough to see a price that has appeared since.
+    const retryableIds = () => {
+      const now = Date.now();
+      const out: string[] = [];
+      for (const [id, r] of Array.from(resultsRef.current.entries())) {
+        const pendingExclusion = !r.ok && PRICING_PENDING_REASONS.has(r.reason);
+        const pendingSpotFallback = r.ok && (r.data.spotFallbackEventCount ?? 0) > 0;
+        if ((pendingExclusion || pendingSpotFallback) && !isRememberedUnpriceable(id, now)) out.push(id);
+      }
+      return out;
+    };
+    if (retryableIds().length === 0) {
+      // Every pending position is remembered as unpriceable: say so now.
+      setPricingGaveUp(true);
+      return;
+    }
     if (pricingAttemptsRef.current >= PRICING_RETRY_MAX) {
       // The schedule has run out and positions are still not priced: stop
-      // promising an answer (the page says they could not be priced).
-      const t = setTimeout(() => setPricingGaveUp(true), pricingRetryDelay(PRICING_RETRY_MAX - 1));
+      // promising an answer (the page says they could not be priced), and
+      // remember them so the next load does not run the schedule again.
+      const t = setTimeout(() => { rememberUnpriceable(retryableIds()); setPricingGaveUp(true); }, pricingRetryDelay(PRICING_RETRY_MAX - 1));
       return () => clearTimeout(t);
     }
     const t = setTimeout(() => {
       pricingAttemptsRef.current += 1;
-      for (const [id, r] of Array.from(resultsRef.current.entries())) {
-        // Two shapes to retry, matching the two ways Capital G/L can be
-        // not-final: an outright pricing EXCLUSION (ok:false), and a SUCCESSFUL
-        // result whose exit was valued at spot because the historical price was
-        // cold (ok:true). The second is easy to miss — it looks like a healthy
-        // result — and it was the entire remaining $738.81 spread.
-        const pendingExclusion = !r.ok && PRICING_PENDING_REASONS.has(r.reason);
-        const pendingSpotFallback = r.ok && (r.data.spotFallbackEventCount ?? 0) > 0;
-        if (pendingExclusion || pendingSpotFallback) {
-          // Marked for a re-fetch, NOT removed: the result it has stays in the
-          // totals (with its `≈` and "pricing N positions…") until the new one
-          // lands. Removing it first took the position out of Capital G/L for
-          // the length of the re-fetch with no mark on the figure (measured
-          // 2026-10-13: −2,138.74 unmarked against ≈ −2,140.09).
-          repriceIdsRef.current.add(id);
-        }
-      }
+      // Marked for a re-fetch, NOT removed: the result it has stays in the
+      // totals (with its `≈` and "pricing N positions…") until the new one
+      // lands. Removing it first took the position out of Capital G/L for the
+      // length of the re-fetch with no mark on the figure (measured 2026-10-13:
+      // −2,138.74 unmarked against ≈ −2,140.09).
+      for (const id of retryableIds()) repriceIdsRef.current.add(id);
       setPricingRetry((n) => n + 1);
     }, pricingRetryDelay(pricingAttemptsRef.current));
     return () => clearTimeout(t);

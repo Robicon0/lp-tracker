@@ -18,7 +18,7 @@
 // production nothing is written (app/lib/sharedStore.ts).
 
 import { createSharedRedis } from './sharedStore';
-import { keptStoredNotice, type RouteTruncation } from './enumerationTruncation';
+import { keptStoredNotice, lookupFailureNotice, LOOKUP_FAILED, type RouteTruncation } from './enumerationTruncation';
 
 const KEY_PREFIX = 'closed_pos_evm_v1';
 const sharedRedis = createSharedRedis('evmClosedListGuard');
@@ -64,8 +64,10 @@ export async function guardClosedList<T extends ClosedRecordLike>(opts: {
   } catch (err) {
     // A failed read of the stored list leaves this request with the fresh list
     // only; it is never written over (nothing is written without a read).
+    // The fresh list may be shorter than the stored one, so it is marked: the
+    // totals show `≈` until the store answers again.
     console.warn(`[evmClosedListGuard] ${opts.protocol} ${opts.chain}: stored list could not be read (${err instanceof Error ? err.message : 'error'}); serving the fresh list`);
-    return { positions: fresh, notice: null, kept: 0 };
+    return { positions: fresh, notice: lookupFailureNotice(opts.scope, LOOKUP_FAILED), kept: 0 };
   }
   const { merged, kept } = mergeClosedLists(stored, fresh);
   if (kept.length > 0) {

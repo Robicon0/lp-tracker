@@ -1,6 +1,13 @@
 // Tests for app/lib/alchemyLimiter.ts. No network: Alchemy is a stub.
 //   npx tsx scripts/alchemy-limiter-test.ts          (unit tests + the 20-wallet simulation, about 2-3 min)
 //   QUICK=1 npx tsx scripts/alchemy-limiter-test.ts  (unit tests only)
+//   SEED=7 …       the simulation's seed (default 1); REALTIME=1 runs it on the wall clock
+//
+// The simulation runs on a VIRTUAL CLOCK with a seeded random source (Oct 18):
+// on the wall clock its 429 share moved between 4.4% and 6.6% from run to run
+// on the same code (timer drift, Math.random latency, shuffle and jitter), so
+// a fixed threshold passed or failed by luck. Virtual time makes one seed one
+// answer; several seeds give the spread.
 //
 // The simulation answers like Alchemy's account limit: a token bucket of 500 CU/s
 // over a 10-second window (5,000 CU), HTTP 429 with Retry-After: 1 above it. Four
@@ -90,42 +97,81 @@ const PROFILE: Record<string, number> = { // Account 1 dashboard load, before-bu
   suix_getCoinMetadata: 4, sui_getObject: 3, eth_getTransactionCount: 2, sui_multiGetObjects: 3,
 };
 
-function alchemyStub(limitPerSec: number, windowSec: number) {
+interface SimClock { now: () => number; sleep: (ms: number) => Promise<void>; random: () => number; timeout: (ms: number) => AbortSignal }
+
+// mulberry32: a small seeded PRNG.
+function seeded(seed: number) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+// Discrete-event clock: `sleep` registers a timer; the driver advances time to
+// the earliest timer once every pending microtask (and setImmediate) has run.
+function virtualClock(seed: number): SimClock & { drive: <T>(p: Promise<T>) => Promise<T> } {
+  let t = 1_000_000, seq = 0;
+  const timers: Array<{ at: number; seq: number; fire: () => void }> = [];
+  const add = (ms: number, fire: () => void) => { timers.push({ at: t + Math.max(0, ms), seq: seq++, fire }); };
+  const clock = {
+    now: () => t,
+    sleep: (ms: number) => new Promise<void>((r) => add(ms, r)),
+    random: seeded(seed),
+    timeout: (ms: number) => { const ac = new AbortController(); add(ms, () => ac.abort(new DOMException('timed out', 'TimeoutError'))); return ac.signal; },
+    drive: async <T,>(p: Promise<T>): Promise<T> => {
+      let done = false; let out: T; let err: unknown; let failed = false;
+      p.then((v) => { done = true; out = v; }, (e) => { done = true; failed = true; err = e; });
+      const idle = () => new Promise<void>((r) => setImmediate(r));
+      for (;;) {
+        for (let i = 0; i < 3; i++) await idle();
+        if (done) break;
+        if (timers.length === 0) throw new Error('virtual clock: nothing scheduled and not done');
+        timers.sort((a, b) => a.at - b.at || a.seq - b.seq);
+        const next = timers.shift()!;
+        t = Math.max(t, next.at);
+        next.fire();
+      }
+      if (failed) throw err;
+      return out!;
+    },
+  };
+  return clock;
+}
+const realClock = (): SimClock => ({ now: Date.now, sleep, random: Math.random, timeout: (ms) => AbortSignal.timeout(ms) });
+
+function alchemyStub(limitPerSec: number, windowSec: number, clock: SimClock) {
   // Alchemy: "a Free tier customer with a 300 CU/s limit can consume up to 3,000 CUs
   // over any 10-second period". So: accepted CU in ANY trailing window ≤ limit × window.
   const cap = limitPerSec * windowSec;
   const accepted: Array<[number, number]> = []; let n429 = 0, sends = 0, inWindow = 0, head = 0;
   const fn = (async (_input: unknown, init?: RequestInit) => {
     sends++;
-    const now = Date.now();
+    const now = clock.now();
     while (head < accepted.length && now - accepted[head][0] >= windowSec * 1000) { inWindow -= accepted[head][1]; head++; }
     const cu = alchemyCuOf(init?.body ?? null);
     if (inWindow + cu > cap) { n429++; return tooMany('1'); }
     inWindow += cu; accepted.push([now, cu]);
-    await sleep(60 + Math.random() * 90);
+    await clock.sleep(60 + clock.random() * 90);
     return ok();
   }) as typeof fetch;
   const peak = (ms: number) => { let best = 0; for (let i = 0, j = 0, sum = 0; i < accepted.length; i++) { sum += accepted[i][1]; while (accepted[i][0] - accepted[j][0] >= ms) { sum -= accepted[j][1]; j++; } best = Math.max(best, sum); } return best; };
   return { fn, stats: () => ({ sends, n429, peak1s: peak(1000), peak10s: peak(10_000), totalCu: accepted.reduce((t, [, c]) => t + c, 0) }) };
 }
 
-async function simulate(label: string, useLimiter: boolean, timeoutMs: number | null) {
-  const stub = alchemyStub(500, 10);
-  const instances = Array.from({ length: 4 }, () => useLimiter ? createAlchemyLimiter(stub.fn) : { fetch: stub.fn, stats: () => null });
+async function simulate(label: string, useLimiter: boolean, timeoutMs: number | null, seed: number) {
+  const vc = process.env.REALTIME ? null : virtualClock(seed);
+  const clock: SimClock = vc ?? realClock();
+  const stub = alchemyStub(500, 10, clock);
+  const instances = Array.from({ length: 4 }, () => useLimiter ? createAlchemyLimiter(stub.fn, { now: clock.now, sleep: clock.sleep, random: clock.random }) : { fetch: stub.fn, stats: () => null });
   const calls: string[] = []; for (const [m, n] of Object.entries(PROFILE)) for (let i = 0; i < n; i++) calls.push(m);
   const outcome = { complete: 0, thrown429: 0, aborted: 0, handed429: 0, other: 0 };
   const lat: number[] = [];
-  const t0 = Date.now();
-  await Promise.all(Array.from({ length: 20 }, async (_, w) => {
+  const t0 = clock.now();
+  const run = Promise.all(Array.from({ length: 20 }, async (_, w) => {
     const inst = instances[w % 4];
     // A page load fires its route requests at once; each route makes a few calls in a row.
-    const queue = [...calls].sort(() => Math.random() - 0.5);
+    const queue = [...calls].map((m) => [clock.random(), m] as const).sort((a, b) => a[0] - b[0]).map(([, m]) => m);
     await Promise.all(Array.from({ length: 12 }, async () => {
       while (queue.length) {
-        const m = queue.pop()!; const s = Date.now();
+        const m = queue.pop()!; const s = clock.now();
         try {
-          const res = await inst.fetch(URL_BASE, { method: 'POST', body: body(m), ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}) });
-          if (res.status === 200) { outcome.complete++; lat.push(Date.now() - s); } else if (res.status === 429) outcome.handed429++; else outcome.other++;
+          const res = await inst.fetch(URL_BASE, { method: 'POST', body: body(m), ...(timeoutMs ? { signal: clock.timeout(timeoutMs) } : {}) });
+          if (res.status === 200) { outcome.complete++; lat.push(clock.now() - s); } else if (res.status === 429) outcome.handed429++; else outcome.other++;
         } catch (e) {
           if (isAlchemyThrottledError(e)) outcome.thrown429++;
           else if (e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError')) outcome.aborted++;
@@ -134,9 +180,10 @@ async function simulate(label: string, useLimiter: boolean, timeoutMs: number | 
       }
     }));
   }));
+  await (vc ? vc.drive(run) : run);
   const st = stub.stats(); lat.sort((a, b) => a - b);
   const total = calls.length * 20;
-  console.log(`  ${label}: ${((Date.now() - t0) / 1000).toFixed(0)} s | calls ${total}: complete ${outcome.complete}, thrown (429) ${outcome.thrown429}, aborted by caller timeout ${outcome.aborted}, 429 handed to caller ${outcome.handed429} | Alchemy saw ${st.sends} sends, ${st.n429} answered 429, ${st.totalCu} CU accepted, peak ${st.peak1s} CU in 1 s, ${(st.peak10s / 10).toFixed(0)} CU/s over 10 s | latency p50 ${lat[lat.length >> 1] ?? '-'} ms p95 ${lat[Math.floor(lat.length * 0.95)] ?? '-'} ms`);
+  console.log(`  ${label}: ${((clock.now() - t0) / 1000).toFixed(0)} s${vc ? ' (virtual)' : ''} | calls ${total}: complete ${outcome.complete}, thrown (429) ${outcome.thrown429}, aborted by caller timeout ${outcome.aborted}, 429 handed to caller ${outcome.handed429} | Alchemy saw ${st.sends} sends, ${st.n429} answered 429, ${st.totalCu} CU accepted, peak ${st.peak1s} CU in 1 s, ${(st.peak10s / 10).toFixed(0)} CU/s over 10 s | latency p50 ${lat[lat.length >> 1] ?? '-'} ms p95 ${lat[Math.floor(lat.length * 0.95)] ?? '-'} ms`);
   return { outcome, st, total };
 }
 
@@ -144,15 +191,22 @@ async function simulate(label: string, useLimiter: boolean, timeoutMs: number | 
   await unit();
   if (process.env.QUICK) { console.log(failures ? `\n${failures} FAILED` : '\nall passed'); process.exit(failures ? 1 : 0); }
   console.log('\n20 wallets × one Account 1 dashboard load, 4 instances, stub limit 500 CU/s = 5,000 CU in any 10 s:');
-  const control = await simulate('no limiter (before)', false, null);
-  await sleep(11_000); // let the stub's window refill between runs (separate stubs anyway)
-  const patient = await simulate('limiter, callers wait', true, null);
-  const timed = await simulate('limiter, 12 s caller timeout (evmRpc / suiRpc)', true, 12_000);
+  const seed = Number(process.env.SEED ?? 1);
+  const control = await simulate('no limiter (before)', false, null, seed);
+  if (process.env.REALTIME) await sleep(11_000); // separate stubs anyway
+  const patient = await simulate('limiter, callers wait', true, null, seed);
+  const timed = await simulate('limiter, 12 s caller timeout (evmRpc / suiRpc)', true, 12_000, seed);
+  console.log(`  seed ${seed}: patient 429 share ${(100 * patient.st.n429 / patient.st.sends).toFixed(2)}%`);
   check('control: without the limiter the stub answers 429 to many calls', control.outcome.handed429 > control.total * 0.1, `${control.outcome.handed429} of ${control.total}`);
   check('limiter: no 429 is ever handed to a caller', patient.outcome.handed429 === 0 && timed.outcome.handed429 === 0);
   check('limiter: every call ends complete or as a thrown, visible failure', [patient, timed].every((r) => r.outcome.complete + r.outcome.thrown429 + r.outcome.aborted === r.total && r.outcome.other === 0));
   check('limiter, patient callers: all calls complete', patient.outcome.complete === patient.total, `${patient.outcome.complete} of ${patient.total}`);
-  check('limiter: Alchemy answers 429 to under 5% of sends', patient.st.n429 < patient.st.sends * 0.05, `${patient.st.n429} of ${patient.st.sends}`);
+  // Threshold (Oct 18): on the virtual clock the share is 4.84-5.20% over seeds
+  // 1-10 on the unchanged limiter (4 instances × a 5 s burst at 200 CU/s against
+  // a 500 CU/s account: the first overshoot is structural). The old 5% bound sat
+  // on that mean, set from one wall-clock run (4.4%); 6% still fails a limiter
+  // whose back-off is lost (no limiter: ~91%).
+  check('limiter: Alchemy answers 429 to under 6% of sends', patient.st.n429 < patient.st.sends * 0.06, `${patient.st.n429} of ${patient.st.sends}`);
   console.log(failures ? `\n${failures} FAILED` : '\nall passed');
   process.exit(failures ? 1 : 0);
 })();

@@ -102,6 +102,20 @@ for(const prot of ["cetus","bluefin","momentum"]){ const list=sui.filter(p=>p.pr
   const stored=JSON.parse(B.m.get(key));
   ok("partial: a short scan over a stored list never shrinks it or any record",r.incomplete&&stored.length===list.length+1&&list.every(p=>stored.some(q=>JSON.stringify(q)===JSON.stringify(p)))); }
 
+// ───────── store read FAILS (Oct 18): a complete fresh scan must never overwrite a list it could not read
+for(const fam of ["closed_pos_sui_v2:cetus:w","closed_pos_solana_v1:orca:w"]){ const B=mem(); NOW=Date.parse("2026-10-08T12:00:00Z"); const list=fam.includes("sui")?sui.filter(p=>p.protocol==="cetus"):sol; B.seed(fam,list); const before=B.m.get(fam);
+  const failing={...B,get:async(k)=>{ if(k===fam) throw new Error("store timeout"); return B.get(k);} };
+  for(const fresh of [[],short(list,1)]){ B.reset();
+    const r=await loadClosedPositionsGuarded({...common,backend:failing,slots:[{name:"a",key:fam}],emptyTtlSeconds:fam.includes("solana")?7*DAY:null,scan:async()=>({bySlot:{a:fresh},complete:true})});
+    ok(`${fam.split(":")[0]}: read FAILS + complete ${fresh.length?"shorter":"EMPTY"} scan → stored list untouched, flagged`,B.m.get(fam)===before&&B.writes().length===0&&r.incomplete===true&&r.bySlot.a.length===fresh.length,`writes=${B.writes().length}`); }
+  B.m.set(fam,"{not json"); const garbage=B.m.get(fam); B.reset();
+  const r=await loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"a",key:fam}],emptyTtlSeconds:null,scan:async()=>({bySlot:{a:[fake("Z")]},complete:true})});
+  ok(`${fam.split(":")[0]}: stored value unreadable → never overwritten, flagged`,B.m.get(fam)===garbage&&B.writes().length===0&&r.incomplete===true); }
+// ───────── every non-empty list loses its expiry on the first read, on every family
+for(const fam of ["closed_pos_sui_v2:bluefin:w","closed_pos_sui_v2:momentum:w","closed_pos_solana_v1:raydium:w"]){ const B=mem(); NOW=Date.parse("2026-10-08T12:00:00Z"); B.seed(fam,[fake("A"),fake("B")],2*DAY);
+  await loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"a",key:fam}],emptyTtlSeconds:null,scan:async()=>({bySlot:{a:[]},complete:true})});
+  ok(`${fam.split(":").slice(0,2).join(":")}: legacy TTL removed on read`,(await B.ttl(fam))===-1&&JSON.parse(B.m.get(fam)).length===2); }
+
 // ───────── read-only switch: a local run can never write to the shared store
 { process.env.CLOSED_POS_CACHE_READONLY="1"; process.env.CLOSED_POS_REFRESH_AFTER_SECONDS="0"; const B=mem(), key="closed_pos_sui_v2:cetus:w"; NOW=Date.parse("2026-10-08T12:00:00Z"); const list=sui.filter(p=>p.protocol==="cetus"); B.seed(key,list,11*DAY); B.reset();
   const r=await loadClosedPositionsGuarded({...common,backend:B,slots:[{name:"cetus",key}],emptyTtlSeconds:null,scan:async()=>({bySlot:{cetus:[fake("N")]},complete:true})});

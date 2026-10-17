@@ -85,6 +85,7 @@ async function guard() {
   const failing = { get: async () => { throw new Error('down'); }, set: async () => { writes.push('bad'); return 'OK'; } };
   g = await guardClosedList({ ...base, store: failing, fresh: [rec('1')] });
   check('an unreadable store: the fresh list is served and nothing is written', g.positions.length === 1 && !writes.includes('bad'));
+  check('an unreadable store: the (possibly shorter) list carries a lookup-failed notice', g.notice?.reason === 'lookup-failed');
 }
 
 (async () => {

@@ -3,7 +3,7 @@ import { resolveBlockTimestamps } from '../../../lib/blockTimestamps';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
-import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
+import { prewarmEvmClaimPrices, priceEvmFeeClaim, type EvmClaimSides } from '../../../lib/evmClaimPrice';
 import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
@@ -323,25 +323,6 @@ async function GET_impl(request: Request) {
 
     cleanRawEvents.sort((a, b) => a.blockNumber - b.blockNumber);
 
-    // Pre-warm CoinGecko historical daily prices for every fee_claim day, for
-    // any non-stablecoin token mapped in CG_IDS. Fee claims must be valued at
-    // the market price on the day of the claim, not the pool's internal
-    // sqrtPriceX96 ratio. Stablecoins anchor at $1 (no fetch).
-    {
-      const feeTimestamps = cleanRawEvents
-        .filter((e) => e.type === 'fee_claim' && e.timestamp > 0)
-        .map((e) => e.timestamp);
-      if (feeTimestamps.length > 0) {
-        const cg0 = !STABLECOINS.has(token0) ? CG_IDS[token0] : undefined;
-        const cg1 = !STABLECOINS.has(token1) ? CG_IDS[token1] : undefined;
-        const pairs: Array<{ coingeckoId: string; timestamps: number[] }> = [];
-        if (cg0) pairs.push({ coingeckoId: cg0, timestamps: feeTimestamps });
-        if (cg1) pairs.push({ coingeckoId: cg1, timestamps: feeTimestamps });
-        // Fire-and-forget — never block the route on CoinGecko. See the
-        // detailed rationale in app/api/aerodrome/activity/route.ts.
-        if (pairs.length > 0) void prewarmTokenPrices(pairs).catch(() => {});
-      }
-    }
 
     // Resolve the pool's historical sqrtPriceX96 at EVERY unique event
     // block (deposits + withdrawals + fee claims) so each event's USD =
@@ -385,6 +366,12 @@ async function GET_impl(request: Request) {
         } catch { /* coerced to 0 by final guard below */ }
       }
     }
+
+    // Claim-day prices for every fee claim (Rule 1): one batched DeFiLlama
+    // request per pass, stored per coin, awaited so a claim is never valued
+    // from a cold cache by luck of timing (10 s cap; a miss stays unpriced).
+    const __claimSides: EvmClaimSides = { chain: 'bnb', token0, token1, isStable0: STABLECOINS.has(token0), isStable1: STABLECOINS.has(token1) };
+    await prewarmEvmClaimPrices(__claimSides, cleanRawEvents.filter((e) => e.type === 'fee_claim').map((e) => e.timestamp));
 
     const hasTicks = tickLower != null && tickUpper != null;
     let runningFeeUSD = 0;
@@ -435,52 +422,30 @@ async function GET_impl(request: Request) {
         }
       }
 
-      // Fee claims — PRIORITY 1: pool sqrtPriceX96 at the claim block via
-      // archive resolver. Synchronously resolved, always runs first, gives
-      // accurate per-block pool-internal pricing.
-      if (ev.type === 'fee_claim' && histPrices) {
-        const hex = '0x' + ev.blockNumber.toString(16);
-        const hp = histPrices.get(hex);
-        if (hp) {
-          price0AtTime = hp.price0Usd;
-          price1AtTime = hp.price1Usd;
-          usdAtTime = amount0 * hp.price0Usd + amount1 * hp.price1Usd;
-        }
-      }
-
-      // Fee claims — PRIORITY 2: CoinGecko historical market price (cache
-      // hit only — never fetches). Refines sqrtPriceX96 with true market
-      // price when available; fire-and-forget prewarm populates the cache.
-      if (ev.type === 'fee_claim' && usdAtTime == null) {
-        const isStable0 = STABLECOINS.has(token0);
-        const isStable1 = STABLECOINS.has(token1);
-        const cg0 = !isStable0 ? CG_IDS[token0] : undefined;
-        const cg1 = !isStable1 ? CG_IDS[token1] : undefined;
-        const p0 = isStable0 ? 1 : (cg0 ? getCachedOnlyTokenPrice(cg0, ev.timestamp) : null);
-        const p1 = isStable1 ? 1 : (cg1 ? getCachedOnlyTokenPrice(cg1, ev.timestamp) : null);
-        if (p0 != null && p1 != null) {
-          price0AtTime = p0;
-          price1AtTime = p1;
-          usdAtTime = amount0 * p0 + amount1 * p1;
-        }
+      // Fee claims (pricing-invariants Rule 1, ITEM 0e): each side at its
+      // claim day by contract address — stablecoin $1, otherwise DeFiLlama's
+      // day price (an earlier day ≤ 3 back is marked). No price → unpriced and
+      // counted on the page; never the pool's price, never today's spot.
+      let claimPriceBasis: 'nearby-day' | undefined;
+      let __claimSrc = 'unknown';
+      if (ev.type === 'fee_claim') {
+        const cp = priceEvmFeeClaim(__claimSides, amount0, amount1, ev.timestamp);
+        price0AtTime = cp.price0;
+        price1AtTime = cp.price1;
+        usdAtTime = cp.usd;
+        __claimSrc = cp.src;
+        if (cp.nearby) claimPriceBasis = 'nearby-day';
       }
 
       // ITEM 0b: allowed but MARKED — never silently substituted. Same
       // ungated-fee_claim caveat as the Uniswap route (see the note there).
-      if (usdAtTime == null) {
+      if (usdAtTime == null && ev.type !== 'fee_claim') {
         price0AtTime = currentSpot0 || null;
         price1AtTime = currentSpot1 || null;
         if (currentSpot0 > 0 || currentSpot1 > 0) {
           usdAtTime = amount0 * currentSpot0 + amount1 * currentSpot1;
           priceBasis = 'current-spot-substituted';
         }
-      }
-
-      // PART 1 FINAL GUARANTEE: fee_claim usdAtTime must never be null —
-      // analytics feeIncome push() drops null events and the protocol
-      // disappears from "Fee Income By Protocol".
-      if (ev.type === 'fee_claim' && usdAtTime == null) {
-        usdAtTime = 0;
       }
 
       let cumulativeFeeUSD = 0;
@@ -492,21 +457,7 @@ async function GET_impl(request: Request) {
       // [PRICE_LOG] fee_claim resolution — read-only re-derivation of the
       // winning price source, mirrors the ladder above without altering values.
       if (ev.type === 'fee_claim') {
-        const __hex = '0x' + ev.blockNumber.toString(16);
-        let __src: string;
-        if (histPrices && histPrices.get(__hex)) {
-          __src = 'sqrtPriceX96';
-        } else {
-          const __s0 = STABLECOINS.has(token0);
-          const __s1 = STABLECOINS.has(token1);
-          const __cg0 = !__s0 ? CG_IDS[token0] : undefined;
-          const __cg1 = !__s1 ? CG_IDS[token1] : undefined;
-          const __p0 = __s0 ? 1 : (__cg0 ? getCachedOnlyTokenPrice(__cg0, ev.timestamp) : null);
-          const __p1 = __s1 ? 1 : (__cg1 ? getCachedOnlyTokenPrice(__cg1, ev.timestamp) : null);
-          if (__p0 != null && __p1 != null) __src = (__s0 && __s1) ? 'stablecoin-fixed' : 'cg-historical-cache';
-          else if (currentSpot0 > 0 || currentSpot1 > 0) __src = 'cg-spot';
-          else __src = 'unknown';
-        }
+        const __src = __claimSrc;
         __totalClaims++; __totalLookups++;
         __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
         const __ok = usdAtTime != null && usdAtTime > 0;
@@ -526,7 +477,7 @@ async function GET_impl(request: Request) {
           notes: `source=${__src}`,
         });
       }
-      return { type: ev.type, txHash: ev.txHash, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), cumulativeFeeUSD };
+      return { type: ev.type, txHash: ev.txHash, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), ...(claimPriceBasis ? { claimPriceBasis } : {}), cumulativeFeeUSD };
     });
 
     events.reverse();

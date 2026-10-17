@@ -36,7 +36,7 @@ function cacheKey(positionId: string) {
   // the event's own pool price instead of a range-boundary estimate.
   // v6 → v7 (rewards commit): reward claims valued by the event's `reward_type`
   // at the claim day (was symbol-matched to a pool side at today's spot).
-  return `bluefin-activity-v7-${positionId}`;
+  return `bluefin-activity-v8-${positionId}`; // v8 (Oct 18): bridged-coin claims priced from the underlying asset
 }
 
 function readCache(positionId: string): BluefinActivityData | null {

@@ -38,7 +38,7 @@ function cacheKey(positionId: string) {
   // missing); deposits/withdrawals valued from the event's own pool price.
   // v7 (rewards commit): reward claims valued by coin type at the claim day
   // (CETUS spot exception removed).
-  return `cetus-activity-v7-${positionId}`;
+  return `cetus-activity-v8-${positionId}`; // v8 (Oct 18): bridged-ETH claims priced from ETH (underlying-asset)
 }
 
 function readCache(positionId: string): CetusActivityData | null {

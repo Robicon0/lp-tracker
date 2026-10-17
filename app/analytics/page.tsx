@@ -827,7 +827,7 @@ export default function Analytics() {
     //     `undatedClaimCount` / `undatedUsd`. Measured 2026-10-11: this is why
     //     the panel showed Uniswap V3 at 84.73, 120.80 or not at all while
     //     lifetime Fees Collected always held its 168.09.
-    interface MergedClaim { ts: number; usd: number | null; nearby: boolean; protocol: string; chain: string; dedupeKey: string; }
+    interface MergedClaim { ts: number; usd: number | null; nearby: boolean; underlying: boolean; protocol: string; chain: string; dedupeKey: string; }
     const merged = new Map<string, MergedClaim>();
     let __dedupDropped = 0;
     const push = (
@@ -839,12 +839,14 @@ export default function Analytics() {
       const usd = e.usdAtTime != null && Number.isFinite(e.usdAtTime) && e.usdAtTime >= 0 ? e.usdAtTime : null;
       // Priced from the nearest earlier day (Rule 1a): counted, Fees `≈`.
       const nearby = usd != null && e.claimPriceBasis === "nearby-day";
+      // A bridged coin priced from the asset it redeems for: counted, Fees `≈`.
+      const underlying = usd != null && e.claimPriceBasis === "underlying-asset";
       const ts = e.timestamp > 0 ? e.timestamp * 1000 : 0;
       const dedupeKey = buildKey(protocol, e);
       const prev = merged.get(dedupeKey);
-      if (!prev) { merged.set(dedupeKey, { ts, usd, nearby, protocol, chain, dedupeKey }); return; }
+      if (!prev) { merged.set(dedupeKey, { ts, usd, nearby, underlying, protocol, chain, dedupeKey }); return; }
       if (prev.usd != null && usd != null) __dedupDropped += 1;
-      if (prev.usd == null && usd != null) { prev.usd = usd; prev.nearby = nearby; }
+      if (prev.usd == null && usd != null) { prev.usd = usd; prev.nearby = nearby; prev.underlying = underlying; }
       if (!(prev.ts > 0) && ts > 0) prev.ts = ts;
     };
 
@@ -872,9 +874,11 @@ export default function Analytics() {
     }
     let pendingClaimCount = 0;
     let nearbyDayClaimCount = 0;
+    let underlyingClaimCount = 0;
     for (const m of merged.values()) {
       if (m.usd == null) { pendingClaimCount += 1; continue; }
       if (m.nearby) nearbyDayClaimCount += 1;
+      if (m.underlying) underlyingClaimCount += 1;
       flat.push({ ts: m.ts, usd: m.usd, protocol: m.protocol, chain: m.chain, dedupeKey: m.dedupeKey });
     }
     flat.sort((a, b) => a.ts - b.ts);
@@ -932,7 +936,7 @@ export default function Analytics() {
     }
     const peakDay = Math.max(0, ...Array.from(byDay.values()));
 
-    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay, pendingClaimCount, nearbyDayClaimCount, undatedClaimCount, undatedUsd };
+    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay, pendingClaimCount, nearbyDayClaimCount, underlyingClaimCount, undatedClaimCount, undatedUsd };
   }, [eventsMap, positions, selectedChains, selectedProtocols, rangeCutoff, activeRange, walletLevelFees, activityMetaMap]);
 
   // Unfiltered lifetime claimed-fees total — reference for the filter banner.
@@ -1072,6 +1076,9 @@ export default function Analytics() {
     !isLoading && pendingSources.length === 0 && !activityLoading && !walletFeesLoading &&
     !lpPnlLive.isLoading && !lpPnlLive.suiClosedLoading && !lpPnlLive.solanaClosedLoading;
   const liveTrustworthy = pipelineSettled && lpPnlLive.errored === 0;
+  // Read by the snapshot save timer at fire time (see the save effect).
+  const liveTrustRef = useRef(liveTrustworthy);
+  useEffect(() => { liveTrustRef.current = liveTrustworthy; }, [liveTrustworthy]);
   // ITEM 0i, snapshot side. A saved snapshot is only as good as the compute that
   // wrote it, and it is rendered ABOVE a breakdown that is always live. If the
   // snapshot's LP totals are all zero while live closed rows exist, or it
@@ -1096,8 +1103,16 @@ export default function Analytics() {
   const feesUndatedClaims = feeIncome.undatedClaimCount ?? 0;
   //   nearby  — claims priced from the nearest earlier day (≤ 3 days back), in the total
   const feesNearbyDayClaims = (feeIncome as { nearbyDayClaimCount?: number }).nearbyDayClaimCount ?? 0;
-  const feesStillLoading = !useSnap && (walletFeesLoading || activityLoading);
-  const feesFailed = useSnap ? [] : feeFailedSources;
+  //   underlying — bridged-coin claims priced from the asset they redeem for, in the total
+  const feesUnderlyingClaims = (feeIncome as { underlyingClaimCount?: number }).underlyingClaimCount ?? 0;
+  // A positions source that has not answered (or failed) is a fee source too:
+  // the wallet-wide fee scans are asked per source the rows name (Uniswap fees
+  // only once /api/uniswap/v3 has listed the wallet's positions), so while one
+  // is pending nothing is in flight and the figure would otherwise look whole.
+  const feePositionsPending = !useSnap && pendingSources.length > 0;
+  const feePositionsFailed = useSnap ? [] : failedSources;
+  const feesStillLoading = !useSnap && (walletFeesLoading || activityLoading || feePositionsPending);
+  const feesFailed = useSnap ? [] : [...new Set([...feeFailedSources, ...feePositionsFailed])];
   // partial — a fee source answered, but said its history lookup failed, is
   //           unavailable or was capped (the same notice the banner shows).
   const feesPartial = useSnap ? [] : feePartialSources;
@@ -1114,7 +1129,7 @@ export default function Analytics() {
   ].filter(Boolean).join(" · ") || null;
   const closedOutOfTotals = closedNotPriced + closedToCheck;
   const closedGaps = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind !== "not-held");
-  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0 || feesNearbyDayClaims > 0;
+  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0 || feesNearbyDayClaims > 0 || feesUnderlyingClaims > 0;
   const feesNote = feesStillLoading
     ? "still loading fee history"
     : feesFailed.length > 0
@@ -1125,6 +1140,8 @@ export default function Analytics() {
         ? `incomplete — ${feesPendingClaims} claim${feesPendingClaims === 1 ? "" : "s"} not priced yet`
         : ([closedNotPricedNote, feesNearbyDayClaims > 0
             ? `${feesNearbyDayClaims} claim${feesNearbyDayClaims === 1 ? "" : "s"} priced from a nearby day`
+            : null, feesUnderlyingClaims > 0
+            ? `${feesUnderlyingClaims} bridged-coin claim${feesUnderlyingClaims === 1 ? "" : "s"} priced from the underlying asset`
             : null].filter(Boolean).join(" · ") || null);
   const feesApprox = feesIncomplete ? "≈ " : "";
   // The time-window figures also miss the undated claims.
@@ -1259,6 +1276,16 @@ export default function Analytics() {
     if (lpPnlLive.included + lpPnlLive.excluded + lpPnlLive.errored < filteredPositions.length) return;
     if (lpPnlLive.aggregateSelfContradictory) return;
     if (snapshotWrittenForRef.current === walletSetKey) return;
+    // The settle must HOLD before it is saved. When the last position source
+    // answers, the page renders once with nothing pending and the fee hooks not
+    // yet loading (their effects mark themselves loading in the same commit,
+    // after this one read its values): that render looks settled and used to be
+    // saved — measured 2026-10-18 on Account 1 with /api/uniswap/v3 slow: a
+    // snapshot without the Uniswap fees (14,989.50 against 15,162.76), then
+    // shown for 11 s with no mark. A settle that flips back on the next render
+    // cancels this timer (the deps change); one that holds 1.5 s is saved.
+    const saveTimer = setTimeout(() => {
+    if (!liveTrustRef.current || snapshotWrittenForRef.current === walletSetKey) return;
     snapshotWrittenForRef.current = walletSetKey;
     const adjustedNetPnl =
       lpPnlLive.currentValue + feeIncomeLive.totalAllTime + lpPnlLive.feesUnclaimed + lpPnlLive.capitalGL - lpPnlLive.initialValue;
@@ -1307,8 +1334,10 @@ export default function Analytics() {
     })
       .then((r) => { if (r.ok) setSnapshot(payload); }) // status line → "updated just now"
       .catch(() => { /* quiet — next visit recomputes as usual */ });
+    }, 1500);
+    return () => clearTimeout(saveTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveTrustworthy, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory, feeFailedSources.length]);
+  }, [liveTrustworthy, activityLoading, walletFeesLoading, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory, feeFailedSources.length]);
 
   // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {

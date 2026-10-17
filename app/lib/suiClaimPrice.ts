@@ -30,6 +30,18 @@ const STABLE_TYPES = new Set([
 ]);
 const STABLE_CGIDS = new Set(['usd-coin', 'tether', 'dai']);
 
+// Bridged / wrapped coins whose own DeFiLlama series has gaps, and the asset
+// they redeem 1:1 for. Used only when the bridged coin has no price for the
+// claim day (or the 3 days before): the claim is then valued at the underlying
+// asset's day price and MARKED (`underlying`), never left at spot or $0.
+// Measured 2026-10-18: Sui-bridge ETH has no DeFiLlama point 2024-12 to 2025-02.
+const WETH_ETHEREUM = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+const UNDERLYING: Record<string, { chain: 'ethereum'; coin: string }> = {
+  '0xd0e89b2af5e4910726fbcd8b8dd37bb79b29e5f83f7491bca830e94f7f226d29::eth::eth': { chain: 'ethereum', coin: WETH_ETHEREUM }, // Sui Bridge ETH
+  '0xaf8cd5edc19c4512f4259f0bee101a40d41ebed738ade5874359610ef8eeced5::coin::coin': { chain: 'ethereum', coin: WETH_ETHEREUM }, // Wormhole WETH
+};
+const underlyingOf = (ct: string) => UNDERLYING[normalizeSuiType(ct).toLowerCase()] ?? null;
+
 export function isSuiStableType(ct: string): boolean { return STABLE_TYPES.has(normalizeSuiType(ct).toLowerCase()); }
 export function isSuiCoin(ct: string): boolean { return normalizeSuiType(ct).toLowerCase() === SUI_CANONICAL; }
 
@@ -83,10 +95,23 @@ export async function prewarmSuiClaimPrices(sides: ClaimSideInput[]): Promise<vo
     suiTs.length ? prewarmSuiPricesForTimestamps(suiTs).catch(() => {}) : Promise.resolve(),
     byCoin.size ? prewarmClaimDayPrices([...byCoin].map(([coin, timestamps]) => ({ chain: 'sui' as const, coin, timestamps }))) : Promise.resolve(),
   ]);
+  // Bridged coins: the underlying asset's days, only for claims the coin's own series missed.
+  const under: Array<{ chain: 'ethereum'; coin: string; timestamps: number[] }> = [];
+  for (const [coin, ts] of byCoin) {
+    const u = underlyingOf(coin);
+    if (!u) continue;
+    const gaps = ts.filter((t) => getClaimDayPrice('sui', coin, t) == null);
+    if (gaps.length) under.push({ ...u, timestamps: gaps });
+  }
+  if (under.length) await prewarmClaimDayPrices(under);
 }
 
 export type ClaimSideSource = 'stablecoin-fixed' | 'sui-historical' | 'defillama-historical' | 'unknown';
-export interface ClaimSidePrice { price: number | null; src: ClaimSideSource; nearby: boolean }
+/**
+ * `nearby`: priced from an approximation the page marks with `≈` — an earlier
+ * day, or (`underlying`) the asset a bridged coin redeems for.
+ */
+export interface ClaimSidePrice { price: number | null; src: ClaimSideSource; nearby: boolean; underlying?: boolean }
 
 /** One side of a claim, at its claim day (after `prewarmSuiClaimPrices`). */
 export function priceSuiClaimSide(coinType: string, isStable: boolean, isSui: boolean, ts: number): ClaimSidePrice {
@@ -97,5 +122,8 @@ export function priceSuiClaimSide(coinType: string, isStable: boolean, isSui: bo
   }
   const d = coinType ? getClaimDayPrice('sui', coinType, ts) : null;
   if (d) return { price: d.price, src: 'defillama-historical', nearby: d.basis === 'nearby-day' };
+  const u = coinType ? underlyingOf(coinType) : null;
+  const ud = u ? getClaimDayPrice(u.chain, u.coin, ts) : null;
+  if (ud) return { price: ud.price, src: 'defillama-historical', nearby: true, underlying: true };
   return { price: null, src: 'unknown', nearby: false };
 }

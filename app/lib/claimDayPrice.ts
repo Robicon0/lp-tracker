@@ -29,6 +29,14 @@ import { type Chain, DEFILLAMA_CHAIN, normalizeIdentifier, defillamaRequestId } 
 import { createSharedRedis } from './sharedStore';
 
 export type ClaimDayBasis = 'claim-day' | 'nearby-day';
+/**
+ * The chains claims are priced on. BNB is not a resolver chain (`Chain`): its
+ * PancakeSwap / Uniswap claims are priced here by contract address only.
+ */
+export type ClaimChain = Chain | 'bnb';
+const LLAMA_CHAIN: Record<ClaimChain, string> = { ...DEFILLAMA_CHAIN, bnb: 'bsc' };
+const normCoin = (chain: ClaimChain, coin: string) => (chain === 'bnb' ? coin.trim().toLowerCase() : normalizeIdentifier(chain, coin));
+const requestId = (chain: ClaimChain, coin: string) => (chain === 'bnb' ? coin.trim().toLowerCase() : defillamaRequestId(chain, coin));
 export interface ClaimDayPrice { price: number; basis: ClaimDayBasis; day: string }
 
 const KEY_PREFIX = 'claim_day_px_v1';
@@ -65,7 +73,7 @@ function dayStart(day: string): number {
 }
 function shiftDay(day: string, n: number): string { return utcDay(dayStart(day) + n * DAY + 1); }
 
-const coinKey = (chain: Chain, coin: string) => `${chain}:${normalizeIdentifier(chain, coin)}`;
+const coinKey = (chain: ClaimChain, coin: string) => `${chain}:${normCoin(chain, coin)}`;
 const storeKey = (ck: string) => `${KEY_PREFIX}:${ck}`;
 
 function mapOf<V>(m: Map<string, Map<string, V>>, ck: string): Map<string, V> {
@@ -110,18 +118,18 @@ function dayState(ck: string, day: string, now: number): number | 'missing' | un
   return undefined;
 }
 
-interface Want { chain: Chain; ck: string; coin: string; day: string }
+interface Want { chain: ClaimChain; ck: string; coin: string; day: string }
 
 /** Asks DeFiLlama for every (coin, day) in `wants`; records prices and misses. */
 async function fetchDays(wants: Want[], now: number): Promise<Set<string>> {
   const newlyStored = new Set<string>(); // coinKeys that gained a finished day
   const byReq = new Map<string, { want: Want; ts: number }[]>();
   for (const w of wants) {
-    const dl = DEFILLAMA_CHAIN[w.chain];
+    const dl = LLAMA_CHAIN[w.chain];
     if (!dl) continue;
     const noon = dayStart(w.day) + DAY / 2;
     const ts = noon * 1000 <= now - 60_000 ? noon : Math.floor(now / 1000) - 60;
-    const id = `${dl}:${defillamaRequestId(w.chain, w.coin)}`;
+    const id = `${dl}:${requestId(w.chain, w.coin)}`;
     const list = byReq.get(id) ?? byReq.set(id, []).get(id)!;
     list.push({ want: w, ts });
   }
@@ -199,12 +207,12 @@ async function writeStored(ck: string): Promise<void> {
  * Never throws. Two DeFiLlama passes at most: the claim days, then up to
  * `NEARBY_DAYS` earlier days for the ones that had no price.
  */
-export async function prewarmClaimDayPrices(items: Array<{ chain: Chain; coin: string; timestamps: number[] }>): Promise<void> {
+export async function prewarmClaimDayPrices(items: Array<{ chain: ClaimChain; coin: string; timestamps: number[] }>): Promise<void> {
   try {
     const now = Date.now();
     const days = new Map<string, Want>();
     for (const { chain, coin, timestamps } of items) {
-      if (!coin || !DEFILLAMA_CHAIN[chain]) continue;
+      if (!coin || !LLAMA_CHAIN[chain]) continue;
       const ck = coinKey(chain, coin);
       for (const ts of timestamps) {
         if (!Number.isFinite(ts) || ts <= 0) continue;
@@ -242,8 +250,8 @@ export async function prewarmClaimDayPrices(items: Array<{ chain: Chain; coin: s
  * back, `basis: 'nearby-day'`), or null. Synchronous: call after
  * `prewarmClaimDayPrices`.
  */
-export function getClaimDayPrice(chain: Chain, coin: string, ts: number): ClaimDayPrice | null {
-  if (!coin || !Number.isFinite(ts) || ts <= 0 || !DEFILLAMA_CHAIN[chain]) return null;
+export function getClaimDayPrice(chain: ClaimChain, coin: string, ts: number): ClaimDayPrice | null {
+  if (!coin || !Number.isFinite(ts) || ts <= 0 || !LLAMA_CHAIN[chain]) return null;
   const ck = coinKey(chain, coin);
   const now = Date.now();
   const day = utcDay(ts);

@@ -74,6 +74,18 @@ remains on any chain** (the CETUS reward spot + LKG exception below is retired).
   orders of magnitude.
 - Deposits and withdrawals are unchanged (Rule 2; Sui: the pool price in the
   event). Capital G/L does not depend on claim prices.
+- **Uniswap V3 (every chain) and PancakeSwap (BNB) fee claims (Oct 18, ITEM 0e)**
+  use the same day map by contract address (`app/lib/evmClaimPrice.ts`; BNB is
+  DeFiLlama chain `bsc`): stablecoin $1, otherwise the claim day, nearby day
+  marked, else unpriced. The pool's price at the claim block, the CoinGecko
+  cache step and the current-spot fallback (which an unpriced claim used to reach)
+  are gone from both routes; an unpriced claim is `null`, never $0.
+- **A bridged coin with no price for the day** (Sui Bridge ETH, Wormhole WETH;
+  the table in `app/lib/suiClaimPrice.ts`) is valued at the day price of the
+  asset it redeems 1:1 for (WETH on Ethereum), only when its own series has no
+  point within 3 days. Such a claim carries `claimPriceBasis: 'underlying-asset'`
+  and Fees shows `≈` with "N bridged-coin claims priced from the underlying asset".
+  Wrapped and bridged stablecoins are $1 (the stablecoin list).
 
 ### Rule 1a: Unresolved fee claims are marked, never spot-valued
 

@@ -25,7 +25,7 @@ export interface ActivityEvent {
   logIndex?: number;
   // A claim priced from the nearest earlier day (Sui claim routes): counted on
   // the page, Fees `≈` (pricing-invariants Rule 1a).
-  claimPriceBasis?: 'nearby-day';
+  claimPriceBasis?: 'nearby-day' | 'underlying-asset';
 }
 
 interface ActivityResponse {
@@ -145,7 +145,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // the event's own time instead of a range estimate.
 // v24 → v25 (rewards commit): lockstep with lp-pnl-events-v33 — Sui reward claims
 // valued at their claim day, never spot; `claimPriceBasis` marks a nearby day.
-function cacheKey(id: string) { return `analytics-activity-v25-${id}`; }
+// v25 → v26 (Oct 18): lockstep with lp-pnl-events-v34 — Uniswap / PancakeSwap fee
+// claims are valued at their claim day (a v25 entry can hold a spot-valued claim).
+function cacheKey(id: string) { return `analytics-activity-v26-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {
