@@ -36,7 +36,9 @@ function cacheKey(positionId: string) {
   // parsed — pre-V2 deposits/withdrawals enter the event stream; flush v4.
   // v6 (Sprint 1b): history from GraphQL (a deposit older than a week was
   // missing); deposits/withdrawals valued from the event's own pool price.
-  return `cetus-activity-v6-${positionId}`;
+  // v7 (rewards commit): reward claims valued by coin type at the claim day
+  // (CETUS spot exception removed).
+  return `cetus-activity-v7-${positionId}`;
 }
 
 function readCache(positionId: string): CetusActivityData | null {

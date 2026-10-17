@@ -4,8 +4,7 @@ import { getSuiActivityBlocks } from '../../../lib/suiHistory';
 import { scanStatusNotice, type RouteTruncation } from '../../../lib/enumerationTruncation';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
-import { prewarmSuiPricesForTimestamps, getHistoricalOnlySuiPrice } from '../../../lib/suiPriceHistory';
-import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
+import { prewarmSuiClaimPrices, priceSuiClaimSide, type ClaimSideInput } from '../../../lib/suiClaimPrice';
 import { resolveToken } from '../../../lib/tokenResolver';
 import { resolveSuiPoolContexts, type SuiPoolContext } from '../../../lib/suiPoolContext';
 import { logPrice } from '../../../lib/priceLogger';
@@ -69,6 +68,9 @@ export interface ActivityEvent {
   // tick-boundary estimate, or current spot) rather than its own historical
   // price. Consumers treat it as not-yet-final.
   priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
+  // A claim priced from the nearest earlier day (≤ 3 days): the page counts it
+  // and marks Fees `≈` (pricing-invariants Rule 1a).
+  claimPriceBasis?: 'nearby-day';
   cumulativeFeeUSD: number; // running total of fee+reward USD; 0 for non-fee events
   rewardSymbol?: string;    // set for reward_claim events
 }
@@ -332,54 +334,23 @@ async function GET_impl(request: Request) {
       }
     }
 
-    // Historical pricing prewarm. Detect which pool side is SUI (canonical short
-    // form, case-insensitive). Prewarm the per-date CoinGecko-SUI cache for every
-    // fee-claim date, every SUI-side reward date — then the synchronous cascade
-    // below reads it via getHistoricalOnlySuiPrice. Rule 1a: claim-date only.
+    // Claim pricing (pricing-invariants Rule 1 / 1a): every fee and reward
+    // claim side is valued by COIN TYPE at its claim day, never spot
+    // (`suiClaimPrice.ts`, shared with Cetus and Bluefin).
     {
-      const suiTs: number[] = [];
-      for (const e of rawEvents) {
-        if (e.type === 'fee_claim') {
-          const c = feeCtxFor(e);
-          if (c && (c.coinTypeA.toLowerCase() === SUI_CANONICAL || c.coinTypeB.toLowerCase() === SUI_CANONICAL)) {
-            suiTs.push(e.timestamp);
-          }
-        } else if (e.type === 'reward_claim' && e.rewardCoinType) {
-          const m = rewardMeta.get(e.rewardCoinType);
-          if (m?.isSui) suiTs.push(e.timestamp);
-        }
-      }
-      if (suiTs.length > 0) await prewarmSuiPricesForTimestamps(suiTs);
-    }
-
-    // Prewarm DeFiLlama claim-date historical-by-coin-type for every non-stable
-    // pool side (fee claims, incl. the SUI side so a cold/missed CoinGecko-SUI
-    // lookup falls to DeFiLlama instead of spot) and every non-stable reward
-    // coin type. Stablecoins anchor at $1 (no fetch). Mirrors Bluefin/Cetus.
-    {
-      const dlByCoin = new Map<string, Set<number>>();
-      const addDl = (contract: string, ts: number) => {
-        if (!contract) return;
-        const set = dlByCoin.get(contract) ?? dlByCoin.set(contract, new Set()).get(contract)!;
-        set.add(ts);
-      };
-      const feeEligible = (ct: string) => !!ct && !STABLECOINS.has(ct.toLowerCase());
+      const sides: ClaimSideInput[] = [];
       for (const e of rawEvents) {
         if (e.type === 'fee_claim') {
           const c = feeCtxFor(e);
           if (!c) continue;
-          if (feeEligible(c.coinTypeA)) addDl(c.coinTypeA, e.timestamp);
-          if (feeEligible(c.coinTypeB)) addDl(c.coinTypeB, e.timestamp);
-        } else if (e.type === 'reward_claim' && e.rewardCoinType) {
+          sides.push({ coinType: c.coinTypeA, isStable: STABLECOINS.has(c.coinTypeA.toLowerCase()), isSui: c.coinTypeA.toLowerCase() === SUI_CANONICAL, ts: e.timestamp });
+          sides.push({ coinType: c.coinTypeB, isStable: STABLECOINS.has(c.coinTypeB.toLowerCase()), isSui: c.coinTypeB.toLowerCase() === SUI_CANONICAL, ts: e.timestamp });
+        } else if (e.type === 'reward_claim' && e.rewardCoinType && e.amount0Raw > 0n) {
           const m = rewardMeta.get(e.rewardCoinType);
-          if (m && !m.isStable) addDl(e.rewardCoinType, e.timestamp); // SUI fallback + non-SUI primary
+          if (m?.decimalsKnown) sides.push({ coinType: e.rewardCoinType, isStable: m.isStable, isSui: m.isSui, ts: e.timestamp });
         }
       }
-      if (dlByCoin.size > 0) {
-        await prewarmDefillamaPrices(
-          [...dlByCoin].map(([contract, ts]) => ({ chain: 'sui' as const, contract, timestamps: [...ts] })),
-        );
-      }
+      await prewarmSuiClaimPrices(sides);
     }
 
     const hasTicks = tickLower != null && tickUpper != null;
@@ -419,6 +390,7 @@ async function GET_impl(request: Request) {
       let price1AtTime: number | null = null;
       let usdAtTime: number | null = null;
       let priceBasis: 'current-spot-substituted' | 'tick-derived-estimate' | undefined;
+      let claimPriceBasis: 'nearby-day' | undefined;
       // Which historical source priced this claim (for the [PRICE_LOG] block).
       // NEVER 'cg-spot' for fee OR reward claims — Momentum claims are
       // historical-only from day one (Rule 1a).
@@ -452,17 +424,10 @@ async function GET_impl(request: Request) {
         const m = ct ? rewardMeta.get(ct) : undefined;
         let px: number | null = null;
         if (!m?.decimalsKnown) { /* amount cannot be scaled → pending */ }
-        else if (m?.isStable) { px = 1; __claimSrc = 'stablecoin-fixed'; }
-        else if (m?.isSui) {
-          const hist = getHistoricalOnlySuiPrice(ev.timestamp);
-          if (hist != null) { px = hist; __claimSrc = 'sui-historical'; }
-          else if (ct) {
-            const dl = getCachedOnlyDefillamaPrice('sui', ct, ev.timestamp);
-            if (dl != null) { px = dl; __claimSrc = 'defillama-historical'; }
-          }
-        } else if (ct) {
-          const dl = getCachedOnlyDefillamaPrice('sui', ct, ev.timestamp);
-          if (dl != null) { px = dl; __claimSrc = 'defillama-historical'; }
+        else if (ev.amount0Raw === 0n) { usdAtTime = 0; __claimSrc = 'zero_amount'; }
+        else if (ct) {
+          const side = priceSuiClaimSide(ct, m.isStable, m.isSui, ev.timestamp);
+          if (side.price != null) { px = side.price; __claimSrc = side.src; if (side.nearby) claimPriceBasis = 'nearby-day'; }
         }
         if (px != null) {
           price0AtTime = px;
@@ -485,28 +450,14 @@ async function GET_impl(request: Request) {
           const __sB = STABLECOINS.has(__cB.toLowerCase());
           const __suiA = __cA.toLowerCase() === SUI_CANONICAL;
           const __suiB = __cB.toLowerCase() === SUI_CANONICAL;
-          const __histSui = getHistoricalOnlySuiPrice(ev.timestamp);
-          let __usedDl = false;
-          let __usedSuiHist = false;
-          const priceSide = (coinType: string, isStable: boolean, isSui: boolean): number | null => {
-            if (isStable) return 1;
-            if (isSui) {
-              if (__histSui != null) { __usedSuiHist = true; return __histSui; }
-              const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
-              if (dl != null) __usedDl = true;
-              return dl;
-            }
-            const dl = getCachedOnlyDefillamaPrice('sui', coinType, ev.timestamp);
-            if (dl != null) __usedDl = true;
-            return dl;
-          };
-          const pxA = priceSide(__cA, __sA, __suiA);
-          const pxB = priceSide(__cB, __sB, __suiB);
-          if (pxA != null && pxB != null) {
-            price0AtTime = pxA;
-            price1AtTime = pxB;
-            usdAtTime = amount0 * pxA + amount1 * pxB;
-            __claimSrc = __usedDl ? 'defillama-historical' : __usedSuiHist ? 'sui-historical' : 'stablecoin-fixed';
+          const sA = priceSuiClaimSide(__cA, __sA, __suiA, ev.timestamp);
+          const sB = priceSuiClaimSide(__cB, __sB, __suiB, ev.timestamp);
+          if (sA.price != null && sB.price != null) {
+            price0AtTime = sA.price;
+            price1AtTime = sB.price;
+            usdAtTime = amount0 * sA.price + amount1 * sB.price;
+            __claimSrc = [sA.src, sB.src].includes('defillama-historical') ? 'defillama-historical' : [sA.src, sB.src].includes('sui-historical') ? 'sui-historical' : 'stablecoin-fixed';
+            if (sA.nearby || sB.nearby) claimPriceBasis = 'nearby-day';
           }
           // else: usdAtTime stays null → pending (Rule 1a — no spot fallback).
         } else {
@@ -538,7 +489,7 @@ async function GET_impl(request: Request) {
         const __src = __claimSrc;
         __totalClaims++; __totalLookups++;
         __srcBreakdown[__src] = (__srcBreakdown[__src] ?? 0) + 1;
-        const __ok = usdAtTime != null && usdAtTime > 0;
+        const __ok = usdAtTime != null && (usdAtTime > 0 || __src === 'zero_amount');
         const __tokLabel = ev.type === 'reward_claim' ? (ev.rewardSymbol ?? 'REWARD') : `${coinTypeA}/${coinTypeB}`;
         if (__ok) __resolvedClaims++;
         else { __failedClaims++; __failures.push({ token: __tokLabel, blockTimestamp: ev.timestamp, reason: __src === 'unknown' ? 'no_price_any_source' : 'zero_usd' }); }
@@ -567,6 +518,8 @@ async function GET_impl(request: Request) {
         price0AtTime,
         price1AtTime,
         ...(priceBasis ? { priceBasis } : {}),
+        // A zero-amount claim is $0 whatever the day: it is never marked nearby-day.
+        ...(claimPriceBasis && (usdAtTime ?? 0) > 0 ? { claimPriceBasis } : {}),
         cumulativeFeeUSD,
         ...(ev.rewardSymbol ? { rewardSymbol: ev.rewardSymbol } : {}),
       };

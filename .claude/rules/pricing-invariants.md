@@ -47,6 +47,34 @@ For all fee claims on all protocols on all chains:
 - **Never** add hardcoded fallback prices to `/api/prices`. This broke all
   position values to $0.00 in a prior incident.
 
+### Rule 1 (rewards commit, 2026-10-17): one price per coin per claim day, no spot exceptions
+
+Every fee AND reward claim is valued by COIN TYPE (the token the event names:
+Cetus `rewarder_type`, Bluefin `reward_type`, Momentum `reward_coin_type`, a
+pool's resolved side for a fee), at the claim's own UTC day. **No spot exception
+remains on any chain** (the CETUS reward spot + LKG exception below is retired).
+
+- **The day's price** (`app/lib/claimDayPrice.ts`) is DeFiLlama's point nearest
+  12:00 UTC of that day (it must fall inside the same UTC day), requested with
+  the coin's FULL address and batched across coins (`/batchHistorical`). It is
+  stored permanently, one key per coin holding a day → price map
+  (`claim_day_px_v1:{chain}:{coin}`). A day whose noon has not passed is
+  answered from the latest point, kept 10 minutes in the instance, never stored.
+- **SUI** keeps CoinGecko's historical day price first, then the DeFiLlama day.
+  Stablecoins are $1. The Sui routes share one implementation
+  (`app/lib/suiClaimPrice.ts`).
+- **Nearby day (`≈`).** When the claim day has no price, or its request failed,
+  the nearest EARLIER day with a price, at most 3 days back, is used. Such a
+  claim carries `claimPriceBasis: 'nearby-day'`, and Fees Collected / Net P&L
+  show `≈` with "N claims priced from a nearby day". Beyond 3 days the claim
+  stays unpriced and is counted in "N claims not priced yet" (Rule 1a). Never
+  spot, never $0 (a zero-amount claim is $0 because its amount is zero).
+- A reward whose decimals cannot be read (resolver, or the event's own
+  `reward_decimals`) stays unpriced: scaling by a guessed exponent is wrong by
+  orders of magnitude.
+- Deposits and withdrawals are unchanged (Rule 2; Sui: the pool price in the
+  event). Capital G/L does not depend on claim prices.
+
 ### Rule 1a: Unresolved fee claims are marked, never spot-valued
 
 If a fee claim's designated historical price is unavailable (cache miss,
@@ -122,15 +150,15 @@ exists yet — it is an unsupported protocol in the P&L pipeline); the same
 historical-only cascade will be built into its activity route when that route is
 created (sprint queue). With Bluefin fixed, **no protocol on any chain values a fee
 claim at spot** — Rule 1a is fully enforced platform-wide. Reward claims on every
-Sui route are NOT routed through DeFiLlama: the CETUS reward token's spot+LKG path
-(below) is a separate, designated exception and is preserved; Bluefin reward events
-carry no coin type and keep their separate symbol-matched path (untouched this
-sprint — empirical historical migration deferred, same caution as the CETUS
-exception).
+Sui route were NOT routed through DeFiLlama at the time; SUPERSEDED 2026-10-17 by Rule 1
+(rewards commit): Cetus, Bluefin and Momentum rewards are all valued by the event's coin
+type at the claim day, and the CETUS spot + LKG exception is retired.
 
 ### Exceptions to Rule 1
 
-**CETUS reward token (Sui)**
+**CETUS reward token (Sui) — RETIRED 2026-10-17 (rewards commit).** CETUS
+rewards are now valued like every other claim (DeFiLlama day price by coin
+type, Rule 1 above). The text below is kept as history only.
 - Use CoinGecko **spot** price + sticky process-wide last-known-good (LKG) cache.
 - Reason: paced-historical path saturates CoinGecko's shared per-IP budget
   (16+ retry calls), starves SUI/CETUS spot fallbacks, drops resolution to

@@ -713,7 +713,10 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // v31 → v32 (Sprint 2b): Orca deposits and withdrawals are valued at the market
 // price at the event's own time; a v31 entry holds the range-estimate value and
 // its "estimate" mark.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v32-";
+// v32 → v33 (rewards commit): every Sui fee and reward claim is valued by coin
+// type at its claim day (DeFiLlama day price, nearby-day marked); a v32 entry
+// holds reward claims valued at today's spot (CETUS, pool-side rewards).
+const CACHE_KEY_PREFIX = "lp-pnl-events-v33-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 

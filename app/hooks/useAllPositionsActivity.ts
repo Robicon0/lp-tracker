@@ -23,6 +23,9 @@ export interface ActivityEvent {
   // dedup can collapse the per-position and wallet-scope views of the SAME
   // claim even when their decimal-scaled amounts differ (Sprint 2.1b).
   logIndex?: number;
+  // A claim priced from the nearest earlier day (Sui claim routes): counted on
+  // the page, Fees `≈` (pricing-invariants Rule 1a).
+  claimPriceBasis?: 'nearby-day';
 }
 
 interface ActivityResponse {
@@ -140,7 +143,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // the full history and Cetus/Bluefin deposits are valued from the event's pool price.
 // v23 → v24 (Sprint 2b): lockstep with lp-pnl-events-v32 — Orca legs priced at
 // the event's own time instead of a range estimate.
-function cacheKey(id: string) { return `analytics-activity-v24-${id}`; }
+// v24 → v25 (rewards commit): lockstep with lp-pnl-events-v33 — Sui reward claims
+// valued at their claim day, never spot; `claimPriceBasis` marks a nearby day.
+function cacheKey(id: string) { return `analytics-activity-v25-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

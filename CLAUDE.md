@@ -961,6 +961,16 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(rewards commit, 2026-10-17)** — **Every Sui fee and reward claim is valued by coin type at
+  its claim day from DeFiLlama; the CETUS spot exception is gone.** NEW `app/lib/claimDayPrice.ts`
+  (one price per coin per UTC day: DeFiLlama's point nearest noon UTC, batched, stored forever as one
+  day map per coin `claim_day_px_v1:{chain}:{coin}`; nearest earlier day ≤ 3 back marked
+  `claimPriceBasis: 'nearby-day'`, else unpriced) and `app/lib/suiClaimPrice.ts` (the one Sui claim
+  valuation, used by Cetus, Bluefin, Momentum). Rewards are identified by the coin type the event
+  names; decimals from the resolver or the event. Analytics counts nearby-day claims (`≈`). Cache
+  bumps: lp-pnl-events v33, analytics-activity v25, cetus-activity v7, bluefin-activity v7. Pricing
+  Rule 1 rewritten (pricing-invariants.md). Results: see the docs commit that follows.
+
 - **`9eba766`** (Empty-Sugar fix, queue item a, 2026-10-16, live as `dpl_AtqEkmfMQatb8FdXnGfoKGps9eBZ`)
   — **An empty position list never hides closed history or fees.** Methodology rule (n).
   **Cause.** `app/api/aerodrome/route.ts` (was line 637) ran the closed half only when

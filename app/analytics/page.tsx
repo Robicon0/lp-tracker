@@ -827,22 +827,24 @@ export default function Analytics() {
     //     `undatedClaimCount` / `undatedUsd`. Measured 2026-10-11: this is why
     //     the panel showed Uniswap V3 at 84.73, 120.80 or not at all while
     //     lifetime Fees Collected always held its 168.09.
-    interface MergedClaim { ts: number; usd: number | null; protocol: string; chain: string; dedupeKey: string; }
+    interface MergedClaim { ts: number; usd: number | null; nearby: boolean; protocol: string; chain: string; dedupeKey: string; }
     const merged = new Map<string, MergedClaim>();
     let __dedupDropped = 0;
     const push = (
       protocol: string,
       chain: string,
-      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string; logIndex?: number },
+      e: { type: string; timestamp: number; amount0: number; amount1: number; usdAtTime: number | null; txHash?: string; logIndex?: number; claimPriceBasis?: string },
     ) => {
       if (e.type !== "fee_claim" && e.type !== "reward_claim") return;
       const usd = e.usdAtTime != null && Number.isFinite(e.usdAtTime) && e.usdAtTime >= 0 ? e.usdAtTime : null;
+      // Priced from the nearest earlier day (Rule 1a): counted, Fees `≈`.
+      const nearby = usd != null && e.claimPriceBasis === "nearby-day";
       const ts = e.timestamp > 0 ? e.timestamp * 1000 : 0;
       const dedupeKey = buildKey(protocol, e);
       const prev = merged.get(dedupeKey);
-      if (!prev) { merged.set(dedupeKey, { ts, usd, protocol, chain, dedupeKey }); return; }
+      if (!prev) { merged.set(dedupeKey, { ts, usd, nearby, protocol, chain, dedupeKey }); return; }
       if (prev.usd != null && usd != null) __dedupDropped += 1;
-      if (prev.usd == null && usd != null) prev.usd = usd;
+      if (prev.usd == null && usd != null) { prev.usd = usd; prev.nearby = nearby; }
       if (!(prev.ts > 0) && ts > 0) prev.ts = ts;
     };
 
@@ -869,8 +871,10 @@ export default function Analytics() {
       console.debug(`[feeIncome] dedup dropped ${__dedupDropped} duplicate claim(s) (per-position value wins over wallet-scope)`);
     }
     let pendingClaimCount = 0;
+    let nearbyDayClaimCount = 0;
     for (const m of merged.values()) {
       if (m.usd == null) { pendingClaimCount += 1; continue; }
+      if (m.nearby) nearbyDayClaimCount += 1;
       flat.push({ ts: m.ts, usd: m.usd, protocol: m.protocol, chain: m.chain, dedupeKey: m.dedupeKey });
     }
     flat.sort((a, b) => a.ts - b.ts);
@@ -928,7 +932,7 @@ export default function Analytics() {
     }
     const peakDay = Math.max(0, ...Array.from(byDay.values()));
 
-    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay, pendingClaimCount, undatedClaimCount, undatedUsd };
+    return { totalAllTime, totalWindow, series, protocols, recent, hourlyRate, dailyAvg, annualizedAtRate, peakDay, pendingClaimCount, nearbyDayClaimCount, undatedClaimCount, undatedUsd };
   }, [eventsMap, positions, selectedChains, selectedProtocols, rangeCutoff, activeRange, walletLevelFees, activityMetaMap]);
 
   // Unfiltered lifetime claimed-fees total — reference for the filter banner.
@@ -1090,6 +1094,8 @@ export default function Analytics() {
   // A saved snapshot is a settled compute, so only its own counts apply to it.
   const feesPendingClaims = feeIncome.pendingClaimCount ?? 0;
   const feesUndatedClaims = feeIncome.undatedClaimCount ?? 0;
+  //   nearby  — claims priced from the nearest earlier day (≤ 3 days back), in the total
+  const feesNearbyDayClaims = (feeIncome as { nearbyDayClaimCount?: number }).nearbyDayClaimCount ?? 0;
   const feesStillLoading = !useSnap && (walletFeesLoading || activityLoading);
   const feesFailed = useSnap ? [] : feeFailedSources;
   // partial — a fee source answered, but said its history lookup failed, is
@@ -1108,7 +1114,7 @@ export default function Analytics() {
   ].filter(Boolean).join(" · ") || null;
   const closedOutOfTotals = closedNotPriced + closedToCheck;
   const closedGaps = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind !== "not-held");
-  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0;
+  const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0 || feesNearbyDayClaims > 0;
   const feesNote = feesStillLoading
     ? "still loading fee history"
     : feesFailed.length > 0
@@ -1117,7 +1123,9 @@ export default function Analytics() {
         ? `incomplete — ${feesPartial.join(" · ")} not fully read`
       : feesPendingClaims > 0
         ? `incomplete — ${feesPendingClaims} claim${feesPendingClaims === 1 ? "" : "s"} not priced yet`
-        : closedNotPricedNote;
+        : ([closedNotPricedNote, feesNearbyDayClaims > 0
+            ? `${feesNearbyDayClaims} claim${feesNearbyDayClaims === 1 ? "" : "s"} priced from a nearby day`
+            : null].filter(Boolean).join(" · ") || null);
   const feesApprox = feesIncomplete ? "≈ " : "";
   // The time-window figures also miss the undated claims.
   const feeWindowIncomplete = feesIncomplete || feesUndatedClaims > 0;

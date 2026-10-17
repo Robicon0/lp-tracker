@@ -34,7 +34,9 @@ function cacheKey(positionId: string) {
   // so any spot-contaminated cached fee value re-resolves via DeFiLlama / pending.
   // v5 → v6 (Sprint 1b): history from GraphQL; deposits/withdrawals valued from
   // the event's own pool price instead of a range-boundary estimate.
-  return `bluefin-activity-v6-${positionId}`;
+  // v6 → v7 (rewards commit): reward claims valued by the event's `reward_type`
+  // at the claim day (was symbol-matched to a pool side at today's spot).
+  return `bluefin-activity-v7-${positionId}`;
 }
 
 function readCache(positionId: string): BluefinActivityData | null {
