@@ -961,6 +961,50 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`9aac567`** (Reliability batch, 2026-10-18, live as `dpl_FtU13bpdTP8pMMHQkZpcmk6X68Mc`) — **Closed
+  lists never overwritten after a failed read; Uniswap / PancakeSwap claims at claim-day prices;
+  Fees marked while a positions source is pending; unpriceable positions remembered; limiter test
+  deterministic.** Methodology rule (o) added (B7 hygiene).
+  **(1) Closed lists.** TTL audit of all 3,303 keys (19:16 UTC): every non-empty closed list has no
+  expiry except `closed_pos_solana_v1:orca:H8r6UKSRPz6bVA2NqPj6s7raMgLfBPFQsnSs4xhqf595` (84 positions,
+  12.4 d left; the original-case address recovered from a stored transaction); one production load
+  removed its TTL (value byte-identical, 129,120 bytes). Empty Raydium lists keep their 7-day TTL by
+  design. `closed_pos_sui_v2:cetus:0x925c…3b51` rebuilt by a production load: 14 positions, all closed
+  2026-09-14 → 09-18; the lost list (9, Oct 12 snapshot, TTL ran out about 10-16 21:00 UTC) was
+  written about 09-16 20:30 UTC and exactly 9 of the 14 had closed by then. No key was hand-edited.
+  Guard fix (`closedPositionCache.ts`): a list whose read failed or does not parse is never written
+  by that request (before: a complete but shorter scan replaced it; the new tests fail 6 of 6 on the
+  old code); EVM guard: an unreadable store adds `lookup-failed`.
+  **(2) Pricing.** Uniswap V3 (all chains) and PancakeSwap (BNB = DeFiLlama `bsc`) fee claims use the
+  claim-day map (`app/lib/evmClaimPrice.ts`); pool-price, CoinGecko-cache, spot and forced-$0 steps
+  removed. Account 1, 3 claims (Arbitrum WETH): 47.28 → 48.20 (01-20), 37.45 → 37.43 (01-27),
+  83.36 → 87.63 (01-31, old value used the pool price at the claim block, ETH 2,375 that evening;
+  day price 2,636), +5.17; every price equals DeFiLlama's noon point. Sui-bridge ETH with no own price
+  is valued at the WETH day price, marked `underlying-asset` ("N bridged-coin claims priced from the
+  underlying asset"): 0x9d6e's 10 USDC / ETH claims null → 270.02 (implied ETH equal to DeFiLlama).
+  **(3)** Fees Collected shows `≈` while a positions source is pending or failed, and the analytics
+  snapshot is saved only once the settle holds 1.5 s: a one-render settle (positions answered, fee
+  hooks not yet loading) saved a snapshot without the Uniswap fees (14,989.50 vs 15,162.76) and showed
+  it unmarked for 11 s. Forced `/api/uniswap/v3` slow 60 s / 503: new 24 / 72 samples marked, 0
+  unmarked; old 62 of 68 unmarked.
+  **(4)** `app/lib/unpriceableMemo.ts`: a position still unpriced after the retry schedule is not
+  retried for 6 h in that browser. 0x844e: load 1 743 activity requests, notice at 401 s; load 2 82,
+  notice at 5 s.
+  **(5) Limiter test.** The limiter is unchanged since `f170229`. On a seeded virtual clock the
+  429 share is 4.84-5.20% over seeds 1-10 (repeatable per seed); wall clock (old test) 5.2-5.7%. The
+  5% bound sat on the mean; now 6%.
+  **B7 (rule (o) times, UTC).** Production baseline on `b62ac22` p0 19:39-20:20 and p1 21:50-22:29;
+  local old/new 20:22-21:05; production new 22:40-23:20. Solana 2rr3SF identical (217, ≈ −359.87,
+  ≈ 275.98). Account 1 Closed 120, Deposited 16,563.58, Capital G/L ≈ −15,507.06, Fees 15,157.59 →
+  15,162.76 (Uniswap only), 387/387 equal on loads 39 min apart and on production, same notices,
+  first row 1.6 s. 0x15ac ≈ −2,135.91, Fees 1,396.44. 0x9d6e ≈ −4,687.46 (production old build read
+  ≈ −4,686.43 an hour earlier), Fees ≈ 5,106.73 → 5,376.75, 0 unpriced. 0x0256 −3,642.61 / 2,328.55;
+  heavy +635.75; 0x81e1 +56.13; 0x844e ≈ +9.74 (51 not priced). No non-200, 0 page errors, logs only
+  Kamino 404. Store commands per fresh-instance load (local, old → new): Account 1 578 → 574,
+  0x9d6e 510 → 473. Store 3,343 → 3,345 (2 `claim_day_px_v1`). Cache bumps: lp-pnl-events v34,
+  analytics-activity v26, cetus-activity v8, bluefin-activity v8. Tests: `claim-day-evm-test` (19),
+  closed-cache-guard 49, empty-sugar, full suite green.
+
 - **`b62ac22`** (Rewards commit, 2026-10-17, live as `dpl_G75xmXhTLB6zLatMZ4bPDwaJjS2r`) — **Every
   Sui fee and reward claim is valued by coin type at its claim day from DeFiLlama; no spot exception
   remains.** NEW `app/lib/claimDayPrice.ts`: one price per (coin, UTC day), DeFiLlama's point nearest
@@ -3803,6 +3847,15 @@ with similar position shapes. Never wallet-specific framing.
   `lookup-kept-stored` notice. A partial history scan keeps the ids and the burned positions'
   reconciled events it already holds. Check with `npx tsx scripts/empty-sugar-test.ts`.
 
+- **(o) Every B7 figure carries the UTC time it was measured and where; bands are re-measured
+  on production within 2 hours before a push.** Each figure in a B7 table or report names its
+  source (local old build, local new build, production) and its UTC time (`ab.cjs` / `feerun.cjs`
+  print `measured <ISO>`). The gate baselines are re-measured on the CURRENTLY deployed production
+  within 2 hours before the push; a band older than that, or taken before a known on-chain event on
+  the wallet (an open, a close, a claim), is stale and is re-measured, never argued from. Example
+  (2026-10-18): 0x9d6e's band −4,784.07 from 10-16 read ≈ −4,686 to −4,691 on production's own
+  unchanged build that evening.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
@@ -3963,9 +4016,14 @@ its 12 rounds on every page (about 700-940 requests per analytics load) before s
 SUI through the spot fallback) and third-token Cetus/Bluefin rewards never priced. Every Sui claim
 is valued by coin type at its claim day.
 
-**Open, found 2026-10-17 (details in the `b62ac22` entry):** stored closed lists the guard never
-read still carry their old 30-day TTL (one Sui list already expired; one Solana list of 84 positions
-expires about 2026-10-30); Fees Collected is unmarked while a positions source is still pending.
+**Resolved 2026-10-18 (`9aac567`):** the expired 0x925c Sui list (rebuilt: 14 positions), the
+84-position Solana list's expiry (removed by a production load), Fees Collected unmarked while a
+positions source is pending, Uniswap / PancakeSwap fee claims at spot (ITEM 0e), the 10 Sui-bridge
+ETH fee claims on 0x9d6e (priced from ETH, marked).
+
+**Open, found 2026-10-18 (details in the `9aac567` entry):** 0x9d6e reads "pricing 9 positions"
+on every build (was 2 estimate-priced positions on 10-16), Capital G/L ≈ −4,686 against −4,784 on
+10-16, cause not traced; empty Raydium lists keep a 7-day TTL by design (a rescan, never a shrink).
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
 see the silent-drop entry):** Aerodrome history answers 500 for
