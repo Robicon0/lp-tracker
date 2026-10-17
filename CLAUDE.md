@@ -961,15 +961,48 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(rewards commit, 2026-10-17)** — **Every Sui fee and reward claim is valued by coin type at
-  its claim day from DeFiLlama; the CETUS spot exception is gone.** NEW `app/lib/claimDayPrice.ts`
-  (one price per coin per UTC day: DeFiLlama's point nearest noon UTC, batched, stored forever as one
-  day map per coin `claim_day_px_v1:{chain}:{coin}`; nearest earlier day ≤ 3 back marked
-  `claimPriceBasis: 'nearby-day'`, else unpriced) and `app/lib/suiClaimPrice.ts` (the one Sui claim
-  valuation, used by Cetus, Bluefin, Momentum). Rewards are identified by the coin type the event
-  names; decimals from the resolver or the event. Analytics counts nearby-day claims (`≈`). Cache
-  bumps: lp-pnl-events v33, analytics-activity v25, cetus-activity v7, bluefin-activity v7. Pricing
-  Rule 1 rewritten (pricing-invariants.md). Results: see the docs commit that follows.
+- **`b62ac22`** (Rewards commit, 2026-10-17, live as `dpl_G75xmXhTLB6zLatMZ4bPDwaJjS2r`) — **Every
+  Sui fee and reward claim is valued by coin type at its claim day from DeFiLlama; no spot exception
+  remains.** NEW `app/lib/claimDayPrice.ts`: one price per (coin, UTC day), DeFiLlama's point nearest
+  noon UTC (same UTC day), batched (`/batchHistorical`), stored forever as one day map per coin
+  (`claim_day_px_v1:{chain}:{coin}`); no price or a failed request → nearest earlier day ≤ 3 back,
+  marked `claimPriceBasis: 'nearby-day'` (Fees `≈` + "N claims priced from a nearby day"; a $0
+  zero-amount claim is never marked); else unpriced and counted. NEW `app/lib/suiClaimPrice.ts`: the
+  one Sui claim valuation (stable $1; SUI CoinGecko day then DeFiLlama day; other DeFiLlama day), used
+  by Cetus, Bluefin, Momentum. Rewards identified by the event's coin type (`rewarder_type`,
+  `reward_type`, `reward_coin_type`); decimals from the resolver or the event (NS is 6, the old symbol
+  map read it as 9). Pricing Rule 1 rewritten. Cache bumps: lp-pnl-events v33, analytics-activity v25,
+  cetus-activity v7, bluefin-activity v7.
+  **What was wrong before:** Cetus/Bluefin rewards were priced by symbol: a stablecoin symbol $1, SUI
+  through a helper that falls back to SUI spot (331 of 399 SUI rewards on 0x9d6e read $1.006), a pool
+  side at today's pool price (the 13 DEEP claims at 0.0240734), CETUS at CoinGecko spot; anything else
+  unpriced (DEEP/NS/HAEDAL/BLUE/stSUI).
+  **Checks:** 15 claims (DEEP, NS, CETUS, BLUE, stSUI × 3 days) equal DeFiLlama's own per-day answer
+  to the last digit. Forced: DeFiLlama 502 → non-zero CETUS rewards and WBTC fee claims unpriced and
+  counted, SUI rewards keep the CoinGecko day; page test with one claim marked nearby / one unpriced /
+  source failed → `≈` + the right note each time, 0 page errors. Account 1 fees identical claim by
+  claim (387/387) on two loads 38 min apart and on production. `npx tsx scripts/claim-day-price-test.ts`
+  (18). Suite green except `alchemy-limiter-test` "429 to under 5% of sends" (6.0-6.6%), which fails
+  identically on the previous code on this machine today (wall-clock stub).
+  **Production B7 (2026-10-17):** Solana 2rr3SF identical. Account 1 Closed (120), Deposited
+  16,563.58, Capital G/L ≈ −15,507.06, Fees 15,157.59 (was 15,158.94 yesterday; old build today
+  15,156.98: Momentum X_SUI +0.74, CETUS −0.13), no new notice. 0x15ac ≈ −2,136.35, Fees 1,396.44 with
+  no mark (was ≈ 1,321.87, 38 unpriced → 0: stSUI +61.53, DEEP +11.37, SUI +3.42, CETUS +1.78, BLUE
+  +0.26). 0x9d6e ≈ −4,784.07 (band −4,791.44: 7.37 off, but the old build read −4,784.95 two hours
+  earlier; 2 estimate-priced positions move with live prices), Fees ≈ 5,106.73 (was ≈ 4,594.78, 183 →
+  10 unpriced, the Sui-bridge ETH fee claims: DEEP +225.36, SUI +193.13, CETUS +80.94, NS +15.64,
+  HAEDAL +2.34, fee sides −5.46). 0x0256 −3,642.61, Fees ≈ 2,328.55 (was 2,383.53: CETUS rewards
+  384.11 → 331.86, spot 0.02343 against claim days 0.0178-0.0285). Heavy +635.75, 0x81e1 +56.13,
+  0x844e ≈ +10.52 (51 not priced) identical. No non-200, 0 page errors, first row 5.4-8.1 s. Logs: Kamino
+  404 (known) and the pool-list timeout (see Known limitations). Store commands per fresh-instance
+  load: Account 1 625 → 551, 0x9d6e 766 → 404 (the claim-day key costs 6 / 28 reads; per-(coin, day)
+  DeFiLlama reads −81 / −432). Store 3,239 → 3,273 keys: 23 `claim_day_px_v1`, the rest prices.
+  **Found, not fixed:** (1) the stored closed list `closed_pos_sui_v2:cetus:0x925c…3b51` (9 positions,
+  present 2026-10-16) is gone with no meta key: a list the guard never read keeps its pre-Sprint-1a
+  30-day TTL and expires. `closed_pos_solana_v1:orca:h8r6uk…` (84 positions, no meta) expires in about
+  12.7 days. (2) Fees Collected has no `≈` while a positions source is pending (`feesStillLoading`
+  ignores `pendingSources`). (3) The `[defillamaPools]` timeout line is logged under whichever request
+  the instance is serving (/api/raydium, /api/vfat/sickles, /api/lending/dolomite), not by them.
 
 - **`9eba766`** (Empty-Sugar fix, queue item a, 2026-10-16, live as `dpl_AtqEkmfMQatb8FdXnGfoKGps9eBZ`)
   — **An empty position list never hides closed history or fees.** Methodology rule (n).
@@ -3907,9 +3940,8 @@ way to verify this path is a forced cold scan — delete the wallet's
 
 **Raydium route out of memory — RESOLVED `cd45675` (2026-10-12).** See Recent fixes.
 
-**Open, found 2026-10-14/15 (details in the `cd7f637` and `75411c3` entries):** Cetus and Bluefin
-reward claims in a third token are never priced (sized, not built); the Orca pool look-back counts
-failed transactions in its 20. (Resolved in `75411c3`: vault-held positions, `/api/prices` 429.)
+**Open, found 2026-10-14/15 (details in the `cd7f637` and `75411c3` entries):** the Orca pool
+look-back counts failed transactions in its 20. (Third-token rewards: resolved in `b62ac22`.) (Resolved in `75411c3`: vault-held positions, `/api/prices` 429.)
 
 **Open, found 2026-10-13 (details in the `8421493` entry):** `/api/pancakeswap` 500s when the BNB
 RPC answers an empty body. (Resolved in `cd7f637`: Solana version-1 transactions, the Sui
@@ -3927,10 +3959,13 @@ its 12 rounds on every page (about 700-940 requests per analytics load) before s
 `evmRpc` 12 s timeout includes the limiter's backoff, so under a sustained 429 storm a long scan
 (Base history) fails as a visible notice rather than finishing.
 
-**Open, found 2026-10-15 (details in the `3a4ca79` entry):** an OPEN Cetus position's own scan
-values DEEP reward claims at today's DEEP price (0.0240734 applied to claims from 2025-05 to
-2026-10), which the analytics merge then uses for the same claim the wallet-wide scan leaves
-unpriced. A reward valued at spot outside the designated CETUS exception (pricing Rule 1a).
+**Resolved 2026-10-17 (`b62ac22`):** reward claims at spot (DEEP on open Cetus positions, CETUS,
+SUI through the spot fallback) and third-token Cetus/Bluefin rewards never priced. Every Sui claim
+is valued by coin type at its claim day.
+
+**Open, found 2026-10-17 (details in the `b62ac22` entry):** stored closed lists the guard never
+read still carry their old 30-day TTL (one Sui list already expired; one Solana list of 84 positions
+expires about 2026-10-30); Fees Collected is unmarked while a positions source is still pending.
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
 see the silent-drop entry):** Aerodrome history answers 500 for
