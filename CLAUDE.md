@@ -991,7 +991,7 @@ shorthand.
   retried for 6 h in that browser. 0x844e: load 1 743 activity requests, notice at 401 s; load 2 82,
   notice at 5 s.
   **(5) Limiter test.** The limiter is unchanged since `f170229`. On a seeded virtual clock the
-  429 share is 4.84-5.20% over seeds 1-10 (repeatable per seed); wall clock (old test) 5.2-5.7%. The
+  429 share is 4.84-5.20% over seeds 1-10 (repeatable per seed); wall clock (old test, 10 runs) 5.20-7.19%. The
   5% bound sat on the mean; now 6%.
   **B7 (rule (o) times, UTC).** Production baseline on `b62ac22` p0 19:39-20:20 and p1 21:50-22:29;
   local old/new 20:22-21:05; production new 22:40-23:20. Solana 2rr3SF identical (217, ≈ −359.87,
