@@ -961,6 +961,47 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`5026c79`** (Batch A, 2026-10-19, live as `dpl_2HDJ9xy6HEcbULsGxAfAVxdQwk2u`; the first build failed on
+  a Google Fonts download in Vercel's build and was redeployed unchanged) — **A reconstructed closed
+  position that was never withdrawn is "check history", never a full loss.**
+  **0x9d6e trace (the −4,784.07 → ≈ −4,687 move).** Not a code change. USDC / USDSUI `0x29af7d0e40`
+  was opened by the wallet straight into a vault (creation tx also emits a `DepositEvent` of package
+  `0x11ea791d…f526`; never address-owned), so the Sui engine ("opened − owned = closed") stored it as
+  CLOSED on 09-26 with only its deposit: Capital G/L −91.39 while it was still open (Oct 14 route dump).
+  The wallet really closed it on 2026-10-17 16:16 UTC (withdrawal 91.36), the record was rebuilt, G/L
+  −0.03: +91.36; the rest (≈ +1.8) is live prices on the 5 spot-valued owned positions. "Pricing 9
+  positions" is NOT new (already 9 on 10-16, before `b62ac22`): the per-position Cetus route anchors an
+  event's pool price only when one side is a stablecoin, so X / SUI pools (and USDSUI, not in its stable
+  list) fall to current spot (`current-spot-substituted`): 4 open (USDSUI / SUI, ETH / SUI, CETUS / SUI,
+  DEEP / SUI) and 5 owned zero-liquidity (HIPPO, BUCK, CETUS, NS, DEEP / SUI); 2 more are tick
+  estimates (V1 events with no sqrt price). Fix not built: anchor on the SUI day price as the closed
+  engine does, about 3-4 h with B7. Classifier change (`closedPositionClassify.ts`): deposits and no
+  withdrawal → `check-history` (out of totals, counted, `≈`); no stored Sui or Solana record matches
+  today, so no figure moved. Test `vault-held-test` 23.
+  **Store capacity (read-only, 2026-10-18 19:29 UTC):** the Upstash database is **64 MB, `noeviction`,
+  45.5 MB used (71%)**; writes fail when full. Wallet histories and closed lists: 42 MB for 19 wallets
+  (median 0.24 MB, mean 2.2 MB; the two heavy Sui wallets 36 MB). 500 pasted wallets ≈ 120 MB at the
+  median: over capacity, so step 2 (immutable keys without expiry) was NOT built; those families total
+  under 0.25 MB today.
+  **Snapshot audit:** the fee-less snapshot (10-17) could only live in Upstash
+  `analytics_snapshot_v2:{hash}` (24 h TTL); none exist; read only by the analytics page while live
+  data settles. Neon `portfolio_snapshots` holds values, no fees, and no page reads it.
+  **SUI claim source flip:** a SUI claim's price comes from CoinGecko (not stored) when it answers, else
+  the DeFiLlama day map: 0x15ac's 2025-10-19 Bluefin claim read 8.16 (DeFiLlama 2.6158) on one build and
+  7.97 (CoinGecko 2.5016) on the other at the same time.
+  **B7 (UTC):** local old / new 19:38-20:23 identical except that flip; production baseline 20:26-21:05,
+  production new 21:10-21:46 identical to it. Account 1 changed only through the owner's own
+  transactions on 10-18 (chain-checked, sender = Account 1): Cetus USDC / SUI `0x9125…` closed 19:30
+  (−305.06, fee 102.62, rewards SUI 12.04 + CETUS 0.24), Orca SOL / USDC `2Lz5…` closed 19:36 (−297.73,
+  fee 11.61), Orca ZEC / USDC `GmhU…` closed 19:39 (−146.67, fee 73.75), Cetus USDC / SUI `0x6adae6…`
+  opened 19:34 closed 20:05 (−59.53); new opens Orca `9uKk…`, `Aepz…`, Cetus `0xbf4e…`. Account 1 now:
+  Closed (124), Deposited 15,709.28, Capital G/L ≈ −16,316.05 (= −15,507.06 − 808.99), Fees 15,363.02.
+  0x15ac ≈ −2,136.57 / 1,396.44; 0x9d6e ≈ −4,683.68 / ≈ 5,376.75; 0x0256 −3,642.61 / 2,328.55; heavy
+  +635.75; 0x81e1 +56.13; Solana identical; 0x844e ≈ +9.02 (51 not priced). No non-200, 0 page errors,
+  logs Kamino and the pool-list timeout only. Store commands, Account 1 fresh instance: old 534 / 547,
+  new 537 / 554; an A/A run of the OLD build on both ports read 551 / 566, so the difference is noise
+  (the change has no I/O).
+
 - **`9aac567`** (Reliability batch, 2026-10-18, live as `dpl_FtU13bpdTP8pMMHQkZpcmk6X68Mc`) — **Closed
   lists never overwritten after a failed read; Uniswap / PancakeSwap claims at claim-day prices;
   Fees marked while a positions source is pending; unpriceable positions remembered; limiter test
@@ -4021,9 +4062,10 @@ is valued by coin type at its claim day.
 positions source is pending, Uniswap / PancakeSwap fee claims at spot (ITEM 0e), the 10 Sui-bridge
 ETH fee claims on 0x9d6e (priced from ETH, marked).
 
-**Open, found 2026-10-18 (details in the `9aac567` entry):** 0x9d6e reads "pricing 9 positions"
-on every build (was 2 estimate-priced positions on 10-16), Capital G/L ≈ −4,686 against −4,784 on
-10-16, cause not traced; empty Raydium lists keep a 7-day TTL by design (a rescan, never a shrink).
+**Open, found 2026-10-19 (details in the `5026c79` entry):** the shared store is 64 MB with
+`noeviction` and 71% full; the per-position Cetus route values X / SUI deposits and withdrawals at
+current spot (9 positions on 0x9d6e); a SUI claim flips between CoinGecko and DeFiLlama day prices;
+HyperEVM fee claims depend on a 30-day CoinGecko copy with no fallback past 365 days.
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
 see the silent-drop entry):** Aerodrome history answers 500 for
