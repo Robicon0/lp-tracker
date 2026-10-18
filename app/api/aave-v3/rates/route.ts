@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { alchemyKey } from '../../../lib/alchemyKey';
 
 // Live AAVE V3 rates endpoint.
 // Query:  GET /api/aave-v3/rates?chain=Arbitrum&tokens=0xaToken1,0xdebt1,...
@@ -12,27 +13,27 @@ import { NextResponse } from "next/server";
 
 const AAVE_V3_CHAINS: Record<string, { rpc: string; poolAddressesProvider: string; cgPlatform: string }> = {
   Ethereum: {
-    rpc: `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
+    rpc: `https://eth-mainnet.g.alchemy.com/v2/${alchemyKey() ?? ""}`,
     poolAddressesProvider: "0x2f39d218133AFaB8F2B819B1066c7E434Ad94E9e",
     cgPlatform: "ethereum",
   },
   Arbitrum: {
-    rpc: `https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
+    rpc: `https://arb-mainnet.g.alchemy.com/v2/${alchemyKey() ?? ""}`,
     poolAddressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
     cgPlatform: "arbitrum-one",
   },
   Optimism: {
-    rpc: `https://opt-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
+    rpc: `https://opt-mainnet.g.alchemy.com/v2/${alchemyKey() ?? ""}`,
     poolAddressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
     cgPlatform: "optimistic-ethereum",
   },
   Polygon: {
-    rpc: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
+    rpc: `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey() ?? ""}`,
     poolAddressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
     cgPlatform: "polygon-pos",
   },
   Base: {
-    rpc: `https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? ""}`,
+    rpc: `https://base-mainnet.g.alchemy.com/v2/${alchemyKey() ?? ""}`,
     poolAddressesProvider: "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",
     cgPlatform: "base",
   },

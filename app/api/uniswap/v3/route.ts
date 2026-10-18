@@ -12,11 +12,12 @@ import {
 } from '../../../lib/enumerationTruncation';
 import { ethCallMany } from '../../../lib/evmBatchCall';
 import { getLlamaPools, llamaPoolsNotices } from '../../../lib/defillamaPools';
+import { alchemyKey } from '../../../lib/alchemyKey';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['uniswap-v3'] as const;
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 
 // Archive RPCs for full-range Transfer-log enumeration (Alchemy free tier caps
 // eth_getLogs at 10 blocks). Tenderly has no BSC gateway, so BNB has no entry

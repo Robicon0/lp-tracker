@@ -3,13 +3,22 @@ import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import { getTokenLogo } from "../lib/tokenLogos";
 
-const CHAINS: Array<{ name: string; url: string; nativeSymbol: string; nativeName: string }> = [
-  { name: "Ethereum", url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
-  { name: "Base",     url: `https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
-  { name: "Arbitrum", url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
-  { name: "Optimism", url: `https://opt-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "ETH",   nativeName: "Ethereum" },
-  { name: "Polygon",  url: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`, nativeSymbol: "MATIC", nativeName: "Polygon"  },
+// EVM balances come from our own route (/api/evm/token-balances), which calls
+// Alchemy server-side through the limiter: the browser makes no Alchemy call and
+// the key is not in the bundle (batch C 2a).
+const CHAINS: Array<{ name: string; param: string; nativeSymbol: string; nativeName: string }> = [
+  { name: "Ethereum", param: "ethereum", nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Base",     param: "base",     nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Arbitrum", param: "arbitrum", nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Optimism", param: "optimism", nativeSymbol: "ETH",   nativeName: "Ethereum" },
+  { name: "Polygon",  param: "polygon",  nativeSymbol: "MATIC", nativeName: "Polygon"  },
 ];
+
+interface TokenBalancesRoute {
+  nativeHex: string;
+  tokens: Array<{ contractAddress: string; tokenBalance: string; meta: { symbol: string | null; decimals: number | null; name: string | null; logo: string | null } | null }>;
+  metaFailed: number;
+}
 
 // HyperEVM has no Alchemy support, so we cannot use alchemy_getTokenBalances.
 // Instead we batch-call balanceOf() against a curated list of common HyperEVM
@@ -176,6 +185,10 @@ export interface WalletTokensData {
   priceUnavailableCount: number;
   /** Tokens valued at a last known price because the live read failed. */
   lastKnownPriceCount: number;
+  /** EVM chains whose balances could not be read: their tokens are missing, not zero. */
+  failedSources?: string[];
+  /** Tokens held whose metadata could not be read (not shown, not in a total). */
+  unreadTokenCount?: number;
 }
 
 export function useWalletTokens(): WalletTokensData {
@@ -304,120 +317,91 @@ export function useWalletTokens(): WalletTokensData {
         }
 
         const tokens: TokenItem[] = [];
+        // EVM chains whose balance read failed, and tokens whose metadata could not be read.
+        const failedEvm = new Set<string>();
+        let metaFailedCount = 0;
 
         // Build parallel scan tasks for each connected wallet
         const scanTasks: Promise<void>[] = [];
 
         // ── EVM chains via Alchemy ────────────────────────────────────────────
-        if (evmAddresses.length > 0 && process.env.NEXT_PUBLIC_ALCHEMY_KEY) {
+        if (evmAddresses.length > 0) {
           for (const evmAddr of evmAddresses) {
           scanTasks.push(
             ...CHAINS.map(async (chain) => {
-              const post = (body: object) =>
-                fetch(chain.url, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(body),
-                }).then((r) => r.json());
-
               try {
                 console.log(`[useWalletTokens] Scanning ${chain.name} for ${evmAddr}...`);
+                const res = await fetch(`/api/evm/token-balances?address=${encodeURIComponent(evmAddr)}&chain=${chain.param}&limit=50`);
+                // A failed read is a failed source, named on the page (rule (e)) — never "holds nothing".
+                if (!res.ok) { failedEvm.add(chain.name); return; }
+                const j = (await res.json()) as TokenBalancesRoute;
+                metaFailedCount += j.metaFailed ?? 0;
 
                 // Native chain coin (ETH on Eth/Base/Arb/Op, MATIC on Polygon).
-                // alchemy_getTokenBalances ONLY returns ERC-20s — native
-                // balance has to be fetched separately or it never appears.
-                try {
-                  const natRes = await post({
-                    jsonrpc: "2.0", id: 0,
-                    method: "eth_getBalance",
-                    params: [evmAddr, "latest"],
-                  });
-                  if (natRes?.result) {
-                    const natBal = Number(BigInt(natRes.result)) / 1e18;
-                    if (natBal > 0 && !cancelled) {
-                      const price = priceOf(chain.nativeSymbol);
-                      tokens.push({
-                        symbol: chain.nativeSymbol,
-                        name: chain.nativeName,
-                        balance: natBal,
-                        usdValue: natBal * price,
-                        price,
-                        change24h: changeOf(chain.nativeSymbol),
-                        chain: chain.name,
-                        logo: getTokenLogo(chain.nativeSymbol) || "",
-                        isLending: false,
-                        isDebt: false,
-                        contractAddress: "native",
-                      });
-                    }
+                if (j.nativeHex) {
+                  const natBal = Number(BigInt(j.nativeHex)) / 1e18;
+                  if (natBal > 0 && !cancelled) {
+                    const price = priceOf(chain.nativeSymbol);
+                    tokens.push({
+                      symbol: chain.nativeSymbol,
+                      name: chain.nativeName,
+                      balance: natBal,
+                      usdValue: natBal * price,
+                      price,
+                      change24h: changeOf(chain.nativeSymbol),
+                      chain: chain.name,
+                      logo: getTokenLogo(chain.nativeSymbol) || "",
+                      isLending: false,
+                      isDebt: false,
+                      contractAddress: "native",
+                    });
                   }
-                } catch (err) { console.error(`[useWalletTokens] ${chain.name} native balance failed:`, err); }
+                }
 
-                const balRes = await post({
-                  jsonrpc: "2.0", id: 1,
-                  method: "alchemy_getTokenBalances",
-                  params: [evmAddr, "erc20"],
-                });
-                const nonZero = (balRes.result?.tokenBalances ?? []).filter(
-                  (t: { tokenBalance: string }) => t.tokenBalance && t.tokenBalance !== ZERO_HEX,
-                );
-                const top = nonZero.slice(0, 50);
-
-                await Promise.allSettled(
-                  top.map(async (token: { contractAddress: string; tokenBalance: string }) => {
-                    try {
-                      const meta = await post({
-                        jsonrpc: "2.0", id: 2,
-                        method: "alchemy_getTokenMetadata",
-                        params: [token.contractAddress],
-                      });
-                      const m = meta.result;
-                      if (!m?.symbol || m.symbol.length >= 20) return;
-                      // Detect lending/debt against the RAW on-chain symbol —
-                      // the detection keys on the AAVE wrapper prefix which the
-                      // strip step removes.
-                      const lending = isLendingToken(m.symbol);
-                      const debt = isDebtToken(m.symbol);
-                      // Display symbol: for AAVE aTokens / debtTokens, use the
-                      // stripped underlying (USDC, USDT, DAI, WETH, …). For
-                      // everything else the on-chain symbol passes through
-                      // unchanged.
-                      const displaySymbol = stripAavePrefix(m.symbol);
-                      const decimals = m.decimals || 18;
-                      const rawBal = BigInt(token.tokenBalance);
-                      const balance = Number(rawBal) / Math.pow(10, decimals);
-                      // Filter only true-zero balances at scan time. The page-
-                      // level "Hide dust < $0.01" toggle handles USD-value
-                      // filtering — keeping the scan permissive ensures every
-                      // real holding reaches the page even before pricing.
-                      if (balance <= 0) return;
-                      const price = priceOf(displaySymbol);
-                      const usdValue = balance * price;
-                      if (!cancelled) {
-                        tokens.push({
-                          symbol: displaySymbol,
-                          name: displaySymbol,
-                          balance,
-                          usdValue,
-                          price,
-                          change24h: changeOf(displaySymbol),
-                          chain: chain.name,
-                          logo: m.logo || getTokenLogo(displaySymbol) || "",
-                          isLending: lending,
-                          isDebt: debt,
-                          contractAddress: token.contractAddress,
-                        });
-                      }
-                    } catch (err) { console.error(`[useWalletTokens] ${chain.name} token metadata failed for ${token.contractAddress}:`, err); }
-                  }),
-                );
+                for (const token of j.tokens) {
+                  const m = token.meta;
+                  if (!m?.symbol || m.symbol.length >= 20) continue;
+                  // Detect lending/debt against the RAW on-chain symbol —
+                  // the detection keys on the AAVE wrapper prefix which the
+                  // strip step removes.
+                  const lending = isLendingToken(m.symbol);
+                  const debt = isDebtToken(m.symbol);
+                  // Display symbol: for AAVE aTokens / debtTokens, use the
+                  // stripped underlying (USDC, USDT, DAI, WETH, …). For
+                  // everything else the on-chain symbol passes through
+                  // unchanged.
+                  const displaySymbol = stripAavePrefix(m.symbol);
+                  const decimals = m.decimals || 18;
+                  const rawBal = BigInt(token.tokenBalance);
+                  const balance = Number(rawBal) / Math.pow(10, decimals);
+                  // Filter only true-zero balances at scan time. The page-
+                  // level "Hide dust < $0.01" toggle handles USD-value
+                  // filtering — keeping the scan permissive ensures every
+                  // real holding reaches the page even before pricing.
+                  if (balance <= 0) continue;
+                  const price = priceOf(displaySymbol);
+                  const usdValue = balance * price;
+                  if (!cancelled) {
+                    tokens.push({
+                      symbol: displaySymbol,
+                      name: displaySymbol,
+                      balance,
+                      usdValue,
+                      price,
+                      change24h: changeOf(displaySymbol),
+                      chain: chain.name,
+                      logo: m.logo || getTokenLogo(displaySymbol) || "",
+                      isLending: lending,
+                      isDebt: debt,
+                      contractAddress: token.contractAddress,
+                    });
+                  }
+                }
                 console.log(`[useWalletTokens] ${chain.name} done for ${evmAddr}`);
-              } catch (err) { console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
+              } catch (err) { failedEvm.add(chain.name); console.error(`[useWalletTokens] ${chain.name} chain scan failed:`, err); }
             }),
           );
           }
-        } else if (evmAddresses.length > 0) {
-          console.warn("[useWalletTokens] NEXT_PUBLIC_ALCHEMY_KEY missing — skipping EVM token scan");
         }
 
         // ── HyperEVM via public RPC (no Alchemy) ──────────────────────────────
@@ -634,6 +618,8 @@ export function useWalletTokens(): WalletTokensData {
         fetchCompleted = true;
         clearTimeout(timeoutId);
         setData({
+          failedSources: [...failedEvm].sort(),
+          unreadTokenCount: metaFailedCount,
           priceUnavailableCount: tokens.filter((t) => t.priceState === "unavailable" && t.balance > 0).length,
           lastKnownPriceCount: tokens.filter((t) => t.priceState === "last-known" && t.balance > 0).length,
           tokens,

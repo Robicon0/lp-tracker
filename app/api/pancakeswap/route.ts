@@ -3,11 +3,12 @@ import { PositionListReadError, logPositionListReadFailure } from '../../lib/pos
 import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
 import { getCachedTokenMeta, setCachedTokenMeta } from '../../lib/tokenMetaCache';
+import { alchemyKey } from '../../lib/alchemyKey';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['pancakeswap-v3'] as const;
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 const RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 const POSITION_MANAGER = '0x46A15B0b27311cedF172AB29E4f4766fbE7F4364';

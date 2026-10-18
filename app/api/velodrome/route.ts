@@ -18,11 +18,12 @@ import {
 import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
 import { cachedPoolTokens, cachedReceipt } from '../../lib/evmImmutableCache';
 import { guardClosedList, type ClosedRecordLike } from '../../lib/evmClosedListGuard';
+import { alchemyKey } from '../../lib/alchemyKey';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['velodrome-slipstream', 'velodrome-v1'] as const;
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 const OPTIMISM_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 const SUGAR_ADDRESS = '0xb8a82f0334e43c2eb0ab5d799036965f7bf07ba8';

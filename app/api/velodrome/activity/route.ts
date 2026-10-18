@@ -18,8 +18,9 @@ import {
   LOOKUP_FAILED,
 } from '../../../lib/enumerationTruncation';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
+import { alchemyKey } from '../../../lib/alchemyKey';
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 // Alchemy Optimism — used only for eth_getBlockByNumber / eth_blockNumber (timestamp lookups)
 const ALCHEMY_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit

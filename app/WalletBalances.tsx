@@ -10,8 +10,8 @@ interface TokenBalance {
   logo: string;
 }
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
-const ALCHEMY_URL = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
+// Balances come from our own route (/api/evm/token-balances): no Alchemy call
+// and no key in the browser (batch C 2a). (Not mounted by any page today.)
 
 export default function WalletBalances() {
   const { evmAddress: address } = useWalletAuth();
@@ -33,80 +33,31 @@ export default function WalletBalances() {
       setError("");
 
       try {
-        // Fetch ETH balance
-        const ethRes = await fetch(ALCHEMY_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "eth_getBalance",
-            params: [address, "latest"],
-          }),
-        });
-        const ethData = await ethRes.json();
-        const ethWei = BigInt(ethData.result);
+        const res = await fetch(`/api/evm/token-balances?address=${encodeURIComponent(address)}&chain=ethereum&limit=10`);
+        if (!res.ok) throw new Error(`token-balances ${res.status}`);
+        const j = (await res.json()) as { nativeHex: string; tokens: Array<{ tokenBalance: string; meta: { symbol: string | null; decimals: number | null; name: string | null; logo: string | null } | null }> };
+        const ethWei = BigInt(j.nativeHex);
         const ethValue = Number(ethWei) / 1e18;
         setEthBalance(ethValue.toFixed(4));
 
-        // Fetch token balances using Alchemy's getTokenBalances
-        const tokenRes = await fetch(ALCHEMY_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 2,
-            method: "alchemy_getTokenBalances",
-            params: [address, "erc20"],
-          }),
-        });
-        const tokenData = await tokenRes.json();
-
-        if (tokenData.result && tokenData.result.tokenBalances) {
-          const nonZero = tokenData.result.tokenBalances.filter(
-            (t: { tokenBalance: string }) =>
-              t.tokenBalance && t.tokenBalance !== "0x0000000000000000000000000000000000000000000000000000000000000000"
-          );
-
-          const top = nonZero.slice(0, 10);
-          const tokenDetails: TokenBalance[] = [];
-
-          for (const token of top) {
-            try {
-              const metaRes = await fetch(ALCHEMY_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: 3,
-                  method: "alchemy_getTokenMetadata",
-                  params: [token.contractAddress],
-                }),
+        const tokenDetails: TokenBalance[] = [];
+        for (const token of j.tokens) {
+          const meta = token.meta;
+          if (meta && meta.symbol) {
+            const rawBalance = BigInt(token.tokenBalance);
+            const decimals = meta.decimals || 18;
+            const balance = Number(rawBalance) / Math.pow(10, decimals);
+            if (balance > 0.0001) {
+              tokenDetails.push({
+                name: meta.name || "Unknown",
+                symbol: meta.symbol || "???",
+                balance: balance < 1 ? balance.toFixed(6) : balance.toFixed(2),
+                logo: meta.logo || "",
               });
-              const metaData = await metaRes.json();
-              const meta = metaData.result;
-
-              if (meta && meta.symbol) {
-                const rawBalance = BigInt(token.tokenBalance);
-                const decimals = meta.decimals || 18;
-                const balance = Number(rawBalance) / Math.pow(10, decimals);
-
-                if (balance > 0.0001) {
-                  tokenDetails.push({
-                    name: meta.name || "Unknown",
-                    symbol: meta.symbol || "???",
-                    balance: balance < 1 ? balance.toFixed(6) : balance.toFixed(2),
-                    logo: meta.logo || "",
-                  });
-                }
-              }
-            } catch {
-              // Skip tokens that fail metadata fetch
             }
           }
-
-          setTokens(tokenDetails);
         }
+        setTokens(tokenDetails);
       } catch (err) {
         setError("Failed to fetch balances. Please try again.");
       } finally {

@@ -19,8 +19,9 @@ import { evmRpcPost, isEvmRpcThrottle } from '../../../lib/evmRpc';
 import { archiveRpcUrl, archiveServesWideLogs } from '../../../lib/evmArchiveRpc';
 import { getWalletNftHistory } from '../../../lib/evmAssetTransferHistory';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
+import { alchemyKey } from '../../../lib/alchemyKey';
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 // Alchemy used only for eth_getBlockByNumber / eth_blockNumber — free tier supports this
 const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit, fast.

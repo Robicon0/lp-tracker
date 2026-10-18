@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
+import { alchemyKey } from '../../../lib/alchemyKey';
 
 // DolomiteMargin on Arbitrum — verified on Arbiscan
 const DOLOMITE_MARGIN = '0x6Bd780E7fDf01D77e4d475c821f1e7AE05409072';
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 const ARB_RPC = `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 // ABI selectors (keccak256 computed with viem)

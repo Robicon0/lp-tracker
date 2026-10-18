@@ -373,10 +373,12 @@ export default function Dashboard() {
     tokenCount, lendingCount,
     isLoading: walletTokensLoading,
     tokens: walletTokenItems,
+    failedSources: walletTokenFailed = [],
   } = useWalletTokens();
   // A lending token whose price could not be read is not in the lending total;
   // one at its last known price is in it, marked.
-  const lendingPriceGap = walletTokenItems.some((t) => t.isLending && t.balance > 0 && (t.priceState === "unavailable" || t.priceState === "last-known"));
+  // An EVM chain whose balances could not be read may hold lending tokens too.
+  const lendingPriceGap = walletTokenFailed.length > 0 || walletTokenItems.some((t) => t.isLending && t.balance > 0 && (t.priceState === "unavailable" || t.priceState === "last-known"));
 
   const { positions: externalLendingPositions } = useLendingPositions();
   const externalLendingValue = externalLendingPositions.reduce((s, p) => s + p.totalSupplied, 0);

@@ -38,6 +38,7 @@ import { evmRpcPost } from './evmRpc';
 import { LOOKUP_FAILED, LOOKUP_UNAVAILABLE } from './enumerationTruncation';
 import type { ArchiveChain } from './evmArchiveRpc';
 import { createSharedRedis } from './sharedStore';
+import { alchemyKey } from './alchemyKey';
 
 // Uniswap-V3-style NonfungiblePositionManager events (identical topic hashes on
 // Aerodrome / Velodrome Slipstream and Uniswap V3).
@@ -129,7 +130,7 @@ try {
 }
 
 function alchemyUrl(chain: ArchiveChain): string {
-  const key = (process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? '').trim();
+  const key = (alchemyKey() ?? '').trim();
   return key ? `https://${ALCHEMY_NETWORK[chain]}.g.alchemy.com/v2/${key}` : '';
 }
 

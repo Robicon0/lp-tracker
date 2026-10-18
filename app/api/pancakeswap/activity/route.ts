@@ -7,11 +7,12 @@ import { prewarmEvmClaimPrices, priceEvmFeeClaim, type EvmClaimSides } from '../
 import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
+import { alchemyKey } from '../../../lib/alchemyKey';
 
 // PancakeSwap V3 is a Uniswap V3 fork on BNB Chain. Same event topic0 hashes,
 // same ABI layout. Only the NFT manager address and the chain RPCs differ.
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 // Alchemy used only for eth_getBlockByNumber (timestamp lookups)
 const ALCHEMY_RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // publicnode — works reliably for BSC eth_getLogs (Tenderly has no public BSC gateway

@@ -16,61 +16,48 @@ interface ChainBalances {
   nativeSymbol: string;
   nativeBalance: string | null;
   tokens: TokenBalance[];
+  /** The balance read failed: shown as failed, never as an empty wallet. */
+  failed?: boolean;
 }
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
-
+// Balances come from our own route (/api/evm/token-balances): the browser makes
+// no Alchemy call and the key is not in the bundle (batch C 2a).
 const CHAINS = [
-  { name: "Ethereum", nativeSymbol: "ETH", url: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` },
-  { name: "Base", nativeSymbol: "ETH", url: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` },
-  { name: "Arbitrum", nativeSymbol: "ETH", url: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` },
-  { name: "Optimism", nativeSymbol: "ETH", url: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` },
-  { name: "Polygon", nativeSymbol: "POL", url: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` },
+  { name: "Ethereum", nativeSymbol: "ETH", param: "ethereum" },
+  { name: "Base", nativeSymbol: "ETH", param: "base" },
+  { name: "Arbitrum", nativeSymbol: "ETH", param: "arbitrum" },
+  { name: "Optimism", nativeSymbol: "ETH", param: "optimism" },
+  { name: "Polygon", nativeSymbol: "POL", param: "polygon" },
 ];
 
 async function fetchChainBalances(address: string, chain: typeof CHAINS[0]): Promise<ChainBalances> {
-  const post = (body: object) =>
-    fetch(chain.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json());
+  const res = await fetch(`/api/evm/token-balances?address=${encodeURIComponent(address)}&chain=${chain.param}&limit=20`);
+  // A failed read is shown as failed (rule (e)), never as an empty wallet.
+  if (!res.ok) return { chain: chain.name, nativeSymbol: chain.nativeSymbol, nativeBalance: null, tokens: [], failed: true };
+  const j = (await res.json()) as { nativeHex: string; tokens: Array<{ tokenBalance: string; meta: { symbol: string | null; decimals: number | null; name: string | null; logo: string | null } | null }> };
 
   // Native balance
-  const ethData = await post({ jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [address, "latest"] });
-  const ethWei = BigInt(ethData.result ?? "0x0");
+  const ethWei = BigInt(j.nativeHex ?? "0x0");
   const nativeBalance = (Number(ethWei) / 1e18).toFixed(4);
 
-  // ERC-20 balances
-  let tokens: TokenBalance[] = [];
-  try {
-    const tokenData = await post({ jsonrpc: "2.0", id: 2, method: "alchemy_getTokenBalances", params: [address, "erc20"] });
-    const nonZero = (tokenData.result?.tokenBalances ?? []).filter(
-      (t: { tokenBalance: string }) =>
-        t.tokenBalance && t.tokenBalance !== "0x0000000000000000000000000000000000000000000000000000000000000000"
-    );
-
-    const top = nonZero.slice(0, 20);
-    for (const token of top) {
-      try {
-        const metaData = await post({ jsonrpc: "2.0", id: 3, method: "alchemy_getTokenMetadata", params: [(token as { contractAddress: string }).contractAddress] });
-        const meta = metaData.result;
-        if (meta?.symbol && meta.symbol.length < 20) {
-          const rawBalance = BigInt((token as { tokenBalance: string }).tokenBalance);
-          const decimals = meta.decimals || 18;
-          const balance = Number(rawBalance) / Math.pow(10, decimals);
-          if (balance > 0.0001) {
-            tokens.push({
-              name: meta.name && meta.name.length < 30 ? meta.name : "Unknown",
-              symbol: meta.symbol,
-              balance: balance < 1 ? balance.toFixed(6) : balance.toFixed(2),
-              logo: meta.logo || "",
-            });
-          }
-        }
-      } catch { /* skip bad token */ }
+  // ERC-20 balances (first 20 non-zero, in Alchemy's order, as before)
+  const tokens: TokenBalance[] = [];
+  for (const token of j.tokens) {
+    const meta = token.meta;
+    if (meta?.symbol && meta.symbol.length < 20) {
+      const rawBalance = BigInt(token.tokenBalance);
+      const decimals = meta.decimals || 18;
+      const balance = Number(rawBalance) / Math.pow(10, decimals);
+      if (balance > 0.0001) {
+        tokens.push({
+          name: meta.name && meta.name.length < 30 ? meta.name : "Unknown",
+          symbol: meta.symbol,
+          balance: balance < 1 ? balance.toFixed(6) : balance.toFixed(2),
+          logo: meta.logo || "",
+        });
+      }
     }
-  } catch { /* skip if chain doesn't support */ }
+  }
 
   return { chain: chain.name, nativeSymbol: chain.nativeSymbol, nativeBalance, tokens };
 }
@@ -219,6 +206,11 @@ export default function WalletPage() {
                             <td className="px-4 py-3 text-right text-white text-base">{token.balance}</td>
                           </tr>
                         ))}
+                        {cb.failed && (
+                          <tr>
+                            <td colSpan={2} className="px-4 py-4 text-center text-amber-300/80 text-base">Couldn&apos;t load {cb.chain} balances — try again shortly</td>
+                          </tr>
+                        )}
                         {cb.nativeBalance === "0.0000" && cb.tokens.length === 0 && (
                           <tr>
                             <td colSpan={2} className="px-4 py-4 text-center text-emerald-400/40 text-base">No tokens found on {cb.chain}</td>

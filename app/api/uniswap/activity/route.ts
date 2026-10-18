@@ -18,8 +18,9 @@ import {
   LOOKUP_FAILED,
   LOOKUP_UNAVAILABLE,
 } from '../../../lib/enumerationTruncation';
+import { alchemyKey } from '../../../lib/alchemyKey';
 
-const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const ALCHEMY_KEY = alchemyKey();
 
 // Tenderly public gateways — primary for eth_getLogs: full-history, no block-range limit, fast.
 // NOTE: no BNB Chain entry — Tenderly has no public BSC gateway. BNB skips

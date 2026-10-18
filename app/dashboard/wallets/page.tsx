@@ -319,7 +319,7 @@ export default function TokensPage() {
     scanAddress !== null ||
     !!(address || solanaAddress || suiAddress) ||
     watchedWallets.length > 0;
-  const { tokens, totalTokenValue, tokenCount, isLoading, priceUnavailableCount, lastKnownPriceCount } = useWalletTokens();
+  const { tokens, totalTokenValue, tokenCount, isLoading, priceUnavailableCount, lastKnownPriceCount, failedSources = [], unreadTokenCount = 0 } = useWalletTokens();
 
   const [search, setSearch] = useState("");
   const [hideDust, setHideDust] = useState(true);
@@ -511,7 +511,7 @@ export default function TokensPage() {
                         textShadow: "0 0 22px color-mix(in srgb, var(--accent) 22%, transparent)",
                       }}
                     >
-                      {(priceUnavailableCount > 0 || lastKnownPriceCount > 0) && "≈ "}
+                      {(priceUnavailableCount > 0 || lastKnownPriceCount > 0 || failedSources.length > 0 || unreadTokenCount > 0) && "≈ "}
                       <AnimatedCount target={totalTokenValue} prefix="$" decimals={2} />
                     </div>
                   )}
@@ -531,6 +531,8 @@ export default function TokensPage() {
                         `${tokenCount} token${tokenCount === 1 ? "" : "s"} across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}`,
                         priceUnavailableCount > 0 ? `${priceUnavailableCount} price${priceUnavailableCount === 1 ? "" : "s"} unavailable — not in this total` : null,
                         lastKnownPriceCount > 0 ? `${lastKnownPriceCount} at last known price` : null,
+                        failedSources.length > 0 ? `incomplete — couldn't load ${failedSources.join(" · ")} balances` : null,
+                        unreadTokenCount > 0 ? `${unreadTokenCount} token${unreadTokenCount === 1 ? "" : "s"} could not be read — not shown` : null,
                       ].filter(Boolean).join(" · ")}
                 </div>
               </div>

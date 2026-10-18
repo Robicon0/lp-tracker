@@ -22,6 +22,8 @@
 // RPC for and already decodes the underlying AMMs on. Adding a chain here is a
 // one-line change and needs no other code.
 
+import { alchemyKey } from './alchemyKey';
+
 export interface VfatChainConfig {
   /** DefiDesh's internal chain label. */
   chain: string;
@@ -56,7 +58,7 @@ export const SICKLES_SELECTOR = '0x967e4da8';
 
 /** Build the RPC URL for a configured chain. Returns null when no key is set. */
 export function vfatRpcUrl(cfg: VfatChainConfig): string | null {
-  const key = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+  const key = alchemyKey();
   if (!key) return null;
   return `https://${cfg.alchemyHost}.g.alchemy.com/v2/${key}`;
 }

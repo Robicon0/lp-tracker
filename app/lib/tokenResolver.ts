@@ -60,6 +60,7 @@ import {
   lookupHardcodedToken,
 } from './tokenConstants';
 import { createSharedRedis } from './sharedStore';
+import { alchemyKey } from './alchemyKey';
 
 export type { Chain } from './tokenConstants';
 
@@ -151,7 +152,7 @@ const inFlight = new Map<string, Promise<ResolvedToken>>();
 
 // ── Per-chain RPC endpoints (per-chain PARAMETERS, allowed by
 // architecture-principles Rule 2 — no per-chain LOGIC branches). ──────────────
-const ALCHEMY = process.env.NEXT_PUBLIC_ALCHEMY_KEY ?? '';
+const ALCHEMY = alchemyKey() ?? '';
 const EVM_RPC: Partial<Record<Chain, string>> = {
   ethereum: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY}`,
   arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY}`,
