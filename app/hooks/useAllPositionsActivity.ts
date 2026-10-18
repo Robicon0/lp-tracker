@@ -147,7 +147,8 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // valued at their claim day, never spot; `claimPriceBasis` marks a nearby day.
 // v25 → v26 (Oct 18): lockstep with lp-pnl-events-v34 — Uniswap / PancakeSwap fee
 // claims are valued at their claim day (a v25 entry can hold a spot-valued claim).
-function cacheKey(id: string) { return `analytics-activity-v26-${id}`; }
+// v26 → v27 (Oct 19): lockstep with lp-pnl-events-v35 (SUI claims from the day map only).
+function cacheKey(id: string) { return `analytics-activity-v27-${id}`; }
 
 function readCache(id: string): ActivityResponse | null {
   try {

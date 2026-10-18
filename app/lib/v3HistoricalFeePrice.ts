@@ -48,12 +48,11 @@ const SLOT0_SELECTOR = "0x3850c7bd"; // slot0()
 //   • own client, PRICE_CACHE_KV_*, no-op stub when unset, never throws
 //   • fire-and-forget writes
 //   • POSITIVE RESULTS ONLY. A null may be a transient archive failure, and
-//     persisting it would pin the position to the substitute basis for 90 days
+//     persisting it would pin the position to the substitute basis for good
 //     — permanently freezing in the exact bug this is meant to remove.
 const REDIS_KEY_PREFIX = 'evm_hist_price_v1:';
-const REDIS_TTL_SECONDS = 90 * 24 * 60 * 60;
 
-let redis: { get: (k: string) => Promise<unknown>; set: (k: string, v: unknown, o: { ex: number }) => Promise<unknown> } | null = null;
+let redis: { get: (k: string) => Promise<unknown>; set: (k: string, v: unknown, o?: { ex: number }) => Promise<unknown> } | null = null;
 try {
   const url = process.env.PRICE_CACHE_KV_REST_API_URL;
   const token = process.env.PRICE_CACHE_KV_REST_API_TOKEN;
@@ -219,11 +218,13 @@ export function createHistoricalFeePriceResolver(ctx: HistPriceContext) {
     const prices = applyStableAnchor(human, ctx.token0, ctx.token1, ctx.stablecoins);
     cache.set(blockHex, prices);
     // POSITIVE ONLY — see the contract note at the top of this file. A null here
-    // can be a transient archive failure; persisting it for 90 days would pin
+    // can be a transient archive failure; persisting it (no expiry) would pin
     // the position to a substitute basis forever.
     if (prices && redis && ctx.chain) {
       writes += 1;
-      redis.set(redisKey(blockHex), prices, { ex: REDIS_TTL_SECONDS }).catch(() => {});
+      // A pool's price at a past block never changes: stored with no expiry
+      // (batch C 1a; the read path already treats it as immutable).
+      redis.set(redisKey(blockHex), prices).catch(() => {});
     }
     logPrice({
       event: 'price_lookup',

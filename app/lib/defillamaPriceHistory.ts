@@ -35,6 +35,7 @@
 // through a polite per-process rate gate (<=5 concurrent, >=200ms between
 // dispatches) — DeFiLlama's limits are generous, but we stay courteous.
 
+import { priceCopyOpts } from './finishedDay';
 import { Redis } from '@upstash/redis';
 import { logPrice } from './priceLogger';
 import { type Chain, DEFILLAMA_CHAIN, normalizeIdentifier, defillamaRequestId } from './tokenConstants';
@@ -134,10 +135,11 @@ async function redisGet(key: string): Promise<number | null> {
     return null; // miss on error
   }
 }
-function redisSet(key: string, priceUsd: number): void {
+function redisSet(key: string, priceUsd: number, timestampSec: number): void {
   if (!redis) return;
-  void redis
-    .set(key, priceUsd, { ex: TTL_SECONDS })
+  // A finished day's price is permanent (finishedDay.ts); today's keeps the TTL.
+  const opts = priceCopyOpts(timestampSec, TTL_SECONDS);
+  void (opts ? redis.set(key, priceUsd, opts) : redis.set(key, priceUsd))
     .catch((err) => console.warn('[defillamaPriceHistory] Redis write failed (ignored):', err));
 }
 
@@ -257,7 +259,7 @@ export async function fetchDefillamaPriceAtDate(
       const outcome = await fetchOnce(chain, contract, unixTimestamp);
       if (outcome.kind === 'price' && typeof outcome.price === 'number') {
         cache.set(k, outcome.price);
-        redisSet(rk, outcome.price); // fire-and-forget cross-instance write-back
+        redisSet(rk, outcome.price, unixTimestamp); // fire-and-forget cross-instance write-back
         logPrice({
           event: 'defillama_historical_used',
           chain,
@@ -392,7 +394,7 @@ export async function fetchDefillamaPriceAtTime(chain: Chain, contract: string, 
     const stored = await redisGet(rk);
     if (stored != null) { exactCache.set(k, stored); exactStats.hit += 1; return stored; }
     const outcome = await fetchExactOnce(chain, contract, ts);
-    if (outcome.kind === 'price' && typeof outcome.price === 'number') { const px: number = outcome.price; exactCache.set(k, px); redisSet(rk, px); exactStats.hit += 1; return px; }
+    if (outcome.kind === 'price' && typeof outcome.price === 'number') { const px: number = outcome.price; exactCache.set(k, px); redisSet(rk, px, ts); exactStats.hit += 1; return px; }
     if (outcome.kind === 'missing') { exactMissing.add(k); exactStats.missing += 1; } else exactStats.error += 1;
     return null;
   })();

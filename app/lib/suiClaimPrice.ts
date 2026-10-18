@@ -17,7 +17,6 @@
 
 import { normalizeSuiType } from './tokenConstants';
 import { resolveToken } from './tokenResolver';
-import { prewarmSuiPricesForTimestamps, getHistoricalOnlySuiPrice } from './suiPriceHistory';
 import { prewarmClaimDayPrices, getClaimDayPrice } from './claimDayPrice';
 
 export const SUI_CANONICAL = '0x2::sui::sui';
@@ -84,17 +83,15 @@ export interface ClaimSideInput { coinType: string; isStable: boolean; isSui: bo
 
 /** Fetches every price the claims below need (awaited; never throws). */
 export async function prewarmSuiClaimPrices(sides: ClaimSideInput[]): Promise<void> {
-  const suiTs: number[] = [];
   const byCoin = new Map<string, number[]>();
   for (const s of sides) {
     if (!s.coinType || s.isStable || !(s.ts > 0)) continue;
-    if (s.isSui) suiTs.push(s.ts);
     (byCoin.get(s.coinType) ?? byCoin.set(s.coinType, []).get(s.coinType)!).push(s.ts);
   }
-  await Promise.all([
-    suiTs.length ? prewarmSuiPricesForTimestamps(suiTs).catch(() => {}) : Promise.resolve(),
-    byCoin.size ? prewarmClaimDayPrices([...byCoin].map(([coin, timestamps]) => ({ chain: 'sui' as const, coin, timestamps }))) : Promise.resolve(),
-  ]);
+  // SUI is priced from the stored day map like every other coin (batch C 1b):
+  // CoinGecko first made the same claim read differently depending on whether
+  // CoinGecko answered on that load (0x15ac 2025-10-19: 8.16 vs 7.97).
+  if (byCoin.size) await prewarmClaimDayPrices([...byCoin].map(([coin, timestamps]) => ({ chain: 'sui' as const, coin, timestamps })));
   // Bridged coins: the underlying asset's days, only for claims the coin's own series missed.
   const under: Array<{ chain: 'ethereum'; coin: string; timestamps: number[] }> = [];
   for (const [coin, ts] of byCoin) {
@@ -116,10 +113,6 @@ export interface ClaimSidePrice { price: number | null; src: ClaimSideSource; ne
 /** One side of a claim, at its claim day (after `prewarmSuiClaimPrices`). */
 export function priceSuiClaimSide(coinType: string, isStable: boolean, isSui: boolean, ts: number): ClaimSidePrice {
   if (isStable) return { price: 1, src: 'stablecoin-fixed', nearby: false };
-  if (isSui) {
-    const h = getHistoricalOnlySuiPrice(ts);
-    if (h != null && h > 0) return { price: h, src: 'sui-historical', nearby: false };
-  }
   const d = coinType ? getClaimDayPrice('sui', coinType, ts) : null;
   if (d) return { price: d.price, src: 'defillama-historical', nearby: d.basis === 'nearby-day' };
   const u = coinType ? underlyingOf(coinType) : null;

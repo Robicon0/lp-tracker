@@ -15,6 +15,7 @@ process.env.VERCEL_ENV = 'production';
 const series = new Map<string, Map<string, number>>(); // llama id → day → price
 const asked: string[] = [];
 const storeData = new Map<string, unknown>();
+let cgUp = false; let cgAsked = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
@@ -39,7 +40,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     return new Response(JSON.stringify({ coins: out }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
-  if (url.includes('coingecko')) return new Response('{}', { status: 429 });
+  if (url.includes('coingecko')) {
+    cgAsked += 1;
+    if (!cgUp) return new Response('{}', { status: 429 });
+    // CoinGecko answering with a DIFFERENT price than DeFiLlama (2.5016 vs 2.6158, measured 10-18)
+    return new Response(JSON.stringify({ market_data: { current_price: { usd: 2.5016 } }, prices: [[Date.now(), 2.5016]] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
   return realFetch(input, init);
 }) as typeof fetch;
 
@@ -94,6 +100,17 @@ function check(name: string, ok: boolean, detail = '') { if (ok) pass++; else fa
   await prewarmSuiClaimPrices([{ coinType: DEEP, isStable: false, isSui: false, ts: tGap }]);
   sp = priceSuiClaimSide(DEEP, false, false, tGap);
   check('a coin with no underlying stays unpriced', sp.price === null);
+
+  // ── (1b) SUI claims: the stored day map only — CoinGecko up or down gives the same figure
+  const SUI = '0x2::sui::SUI';
+  series.set('sui:0x0000000000000000000000000000000000000000000000000000000000000002::sui::sui', new Map([['20251019', 2.6157498500736023]]));
+  series.set('sui:0x2::sui::sui', new Map([['20251019', 2.6157498500736023]]));
+  const tClaim = T('2025-10-19T23:57:31Z');
+  const readSui = async (up: boolean) => { cgUp = up; await prewarmSuiClaimPrices([{ coinType: SUI, isStable: false, isSui: true, ts: tClaim }]); return priceSuiClaimSide(SUI, false, true, tClaim); };
+  const down = await readSui(false), up = await readSui(true);
+  check('SUI claim: CoinGecko down and CoinGecko up give the identical price (day map)', down.price != null && down.price === up.price && Math.abs((down.price as number) - 2.6157498500736023) < 1e-12, `down ${down.price} up ${up.price}`);
+  check('SUI claim: 0x15ac 2025-10-19 Bluefin claim = 1.590032743 × 2.6158 + 3.99701 = 8.16', Math.abs(1.590032743 * (up.price as number) + 3.99701 - 8.156) < 0.01);
+  check('SUI claim: CoinGecko is never asked for a claim price', cgAsked === 0, `asked ${cgAsked}`);
 
   // ── (4) unpriceable memo
   const { isRememberedUnpriceable, rememberUnpriceable, forgetUnpriceable, UNPRICEABLE_MEMO_MS } = await import('../app/lib/unpriceableMemo');

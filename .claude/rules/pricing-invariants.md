@@ -60,9 +60,14 @@ remains on any chain** (the CETUS reward spot + LKG exception below is retired).
   stored permanently, one key per coin holding a day → price map
   (`claim_day_px_v1:{chain}:{coin}`). A day whose noon has not passed is
   answered from the latest point, kept 10 minutes in the instance, never stored.
-- **SUI** keeps CoinGecko's historical day price first, then the DeFiLlama day.
-  Stablecoins are $1. The Sui routes share one implementation
-  (`app/lib/suiClaimPrice.ts`).
+- **SUI** is priced from the same stored day map (DeFiLlama), never CoinGecko
+  (batch C 1b, 2026-10-19: CoinGecko-first made one claim read 8.16 or 7.97
+  depending on whether CoinGecko answered on that load). Stablecoins are $1.
+  The Sui routes share one implementation (`app/lib/suiClaimPrice.ts`).
+- **Stored historical price copies of a finished UTC day never expire**
+  (`app/lib/finishedDay.ts`: CoinGecko day prices, DeFiLlama day and exact-time
+  prices; pool prices at a past block likewise). CoinGecko's free plan cannot
+  re-fetch a date older than 365 days, so an expired copy was a price lost.
 - **Nearby day (`≈`).** When the claim day has no price, or its request failed,
   the nearest EARLIER day with a price, at most 3 days back, is used. Such a
   claim carries `claimPriceBasis: 'nearby-day'`, and Fees Collected / Net P&L

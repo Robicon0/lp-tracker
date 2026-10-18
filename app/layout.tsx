@@ -1,5 +1,5 @@
 import Providers from "./providers";
-import { Geist, Geist_Mono, JetBrains_Mono, Space_Grotesk, Inter } from "next/font/google";
+import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/react";
 import FloatingFeedback from "./components/FloatingFeedback";
 import FeedbackTab from "./components/FeedbackTab";
@@ -7,38 +7,44 @@ import WalletRestoreEffect from "./components/WalletRestoreEffect";
 import ThemeScript from "./components/theme/ThemeScript";
 import "./globals.css";
 
-const geistSans = Geist({
+// Fonts are SELF-HOSTED (app/fonts, latin variable woff2 from Fontsource,
+// SIL OFL 1.1). With next/font/google every build downloaded them from Google,
+// and a failed download failed the whole build (the first build of 5026c79 on
+// 2026-10-18). Same families, same CSS variables; the variable files cover
+// every weight the old setup asked for.
+const geistSans = localFont({
+  src: "./fonts/geist-latin-wght-normal.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  weight: "100 900",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin-wght-normal.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
+  display: "swap",
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const jetbrainsMono = localFont({
+  src: "./fonts/jetbrains-mono-latin-wght-normal.woff2",
   variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: "100 800",
+  display: "swap",
 });
 
-// Display + body faces for the redesigned home page. The ui-ux-pro-max design
-// system recommends the Space Grotesk / Inter / JetBrains Mono triad for DeFi
-// and fintech surfaces: Space Grotesk carries display headlines, Inter carries
-// prose, JetBrains Mono stays reserved for data, labels, and terminal chrome.
-// Declaring them here is additive — nothing renders differently until a
-// component opts in via var(--font-space-grotesk) / var(--font-inter).
-const spaceGrotesk = Space_Grotesk({
+const spaceGrotesk = localFont({
+  src: "./fonts/space-grotesk-latin-wght-normal.woff2",
   variable: "--font-space-grotesk",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: "300 700",
+  display: "swap",
 });
 
-const inter = Inter({
+const inter = localFont({
+  src: "./fonts/inter-latin-wght-normal.woff2",
   variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: "100 900",
+  display: "swap",
 });
 
 export const metadata = {

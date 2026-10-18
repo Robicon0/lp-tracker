@@ -111,6 +111,58 @@ export function overlayStore<T extends object>(real: T, label = 'store'): T {
   }) as T;
 }
 
+/**
+ * Test switch (batch C 1d): `SHARED_STORE_FAIL_WRITES=oom` makes every write to
+ * the store fail the way a full Upstash database does under `noeviction`
+ * ("OOM command not allowed when used memory > 'maxmemory'"); reads still work.
+ * Never honoured in production.
+ */
+export function failingWritesStore<T extends object>(real: T, label = 'store'): T {
+  const isRead = (p: string) => READ_COMMANDS.has(p);
+  return new Proxy(real, {
+    get(target, prop, receiver) {
+      const orig = Reflect.get(target, prop, receiver);
+      if (typeof prop !== 'string' || typeof orig !== 'function' || isRead(prop)) return typeof orig === 'function' ? orig.bind(target) : orig;
+      return async () => {
+        recordStoreWriteFailure(label, prop);
+        throw new Error("OOM command not allowed when used memory > 'maxmemory'.");
+      };
+    },
+  }) as T;
+}
+
+// Write failures seen by this instance (any reason: a full store, a timeout).
+// Routes read it to add a "could not be saved" information notice; figures are
+// unaffected (they are computed from what this request read or fetched).
+let _writeFailures = 0;
+let _lastWriteFailureAt = 0;
+export function recordStoreWriteFailure(label: string, command: string, err?: unknown): void {
+  _writeFailures += 1;
+  _lastWriteFailureAt = Date.now();
+  if (_writeFailures === 1 || _writeFailures % 50 === 0) {
+    console.warn(`[sharedStore] ${label}: write "${command}" failed (${_writeFailures} so far): ${err instanceof Error ? err.message : String(err ?? 'store write refused')}`.slice(0, 220));
+  }
+}
+/** Number of store writes that failed in this instance since `sinceMs`-ish (0 = ever). */
+export function storeWriteFailuresSince(sinceMs: number): number {
+  return _lastWriteFailureAt >= sinceMs ? _writeFailures : 0;
+}
+
+/** Production: writes pass through unchanged; a rejected write is counted, then re-thrown. */
+function countWriteFailures<T extends object>(real: T, label: string): T {
+  return new Proxy(real, {
+    get(target, prop, receiver) {
+      const orig = Reflect.get(target, prop, receiver);
+      if (typeof orig !== 'function') return orig;
+      if (typeof prop !== 'string' || READ_COMMANDS.has(prop) || !['set', 'mset', 'del', 'persist', 'expire', 'incr', 'incrby', 'hset', 'sadd', 'lpush', 'rpush'].includes(prop)) return orig.bind(target);
+      return async (...a: unknown[]) => {
+        try { return await (orig as (...x: unknown[]) => Promise<unknown>).apply(target, a); }
+        catch (err) { recordStoreWriteFailure(label, prop, err); throw err; }
+      };
+    },
+  }) as T;
+}
+
 let announced = false;
 
 /**
@@ -129,7 +181,8 @@ export function createSharedRedis(label: string): Redis | null {
     console.warn(`[${label}] Redis client construction failed; no-op stub:`, err);
     return null;
   }
-  if (sharedStoreMode() === 'write') return client;
+  if (sharedStoreMode() === 'write') return countWriteFailures(client, label);
+  if (process.env.SHARED_STORE_FAIL_WRITES === 'oom') return failingWritesStore(client, label);
   if (!announced) {
     announced = true;
     console.warn(`[sharedStore] VERCEL_ENV=${process.env.VERCEL_ENV ?? 'unset'}: writes to the shared store stay in this process`);

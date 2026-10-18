@@ -8,6 +8,7 @@ import { prewarmSuiClaimPrices, priceSuiClaimSide, type ClaimSideInput } from '.
 import { resolveToken } from '../../../lib/tokenResolver';
 import { resolveSuiPoolContexts, type SuiPoolContext } from '../../../lib/suiPoolContext';
 import { logPrice } from '../../../lib/priceLogger';
+import { withStoreWriteNotice } from '../../../lib/storeWriteNotice';
 
 // Sprint MOMENTUM — Momentum (Sui CLMM) activity route, modeled on the Bluefin
 // route (app/api/bluefin/activity/route.ts, 17c5101). Built historical-only from
@@ -138,6 +139,7 @@ interface SuiTxBlock {
 export const GET = withActivityRouteCache(GET_impl);
 
 async function GET_impl(request: Request) {
+  const __storeT0 = Date.now(); // batch C 1d: store writes that fail during this request
   const { searchParams } = new URL(request.url);
   const positionId = searchParams.get('positionId'); // raw Sui object ID
   const account = searchParams.get('account') ?? '';
@@ -173,7 +175,7 @@ async function GET_impl(request: Request) {
     if (history.blocks.length === 0) {
       return NextResponse.json({
         events: [], netInvested0: 0, netInvested1: 0, totalFees0: 0, totalFees1: 0,
-        ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
+        ...(withStoreWriteNotice(historyNotices, __storeT0, 'Momentum history').length > 0 ? { truncated: withStoreWriteNotice(historyNotices, __storeT0, 'Momentum history') } : {}),
       } as ActivityResponse);
     }
 
@@ -546,7 +548,7 @@ async function GET_impl(request: Request) {
       netInvested1: Number(deposited1 - withdrawn1) / Number(scaleB),
       totalFees0: Number(fees0) / Number(scaleA),
       totalFees1: Number(fees1) / Number(scaleB),
-      ...(historyNotices.length > 0 ? { truncated: historyNotices } : {}),
+      ...(withStoreWriteNotice(historyNotices, __storeT0, 'Momentum history').length > 0 ? { truncated: withStoreWriteNotice(historyNotices, __storeT0, 'Momentum history') } : {}),
     } as ActivityResponse);
   } catch (err) {
     console.error('[momentum/activity] Unexpected error:', err);

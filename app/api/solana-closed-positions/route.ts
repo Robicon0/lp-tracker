@@ -3,6 +3,7 @@ import { getClosedPositionsWithinBudget, type SolanaClosedPosition } from '../..
 import { scanStatusNotice, unreadableTxNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { capClosedPositions } from '../../lib/closedPositionResponse';
 import { withActivityRouteCache } from '../../lib/activityRouteCache';
+import { withStoreWriteNotice } from '../../lib/storeWriteNotice';
 
 // Sprint LPPNL-PERF (Part B1): the wallet tx-history scan is unbounded (scales
 // with tx count). Without maxDuration the route dies at Vercel's low default →
@@ -38,6 +39,7 @@ export const maxDuration = 300;
 // dominant win), plus a short TTL result mirror. The authoritative durable cache
 // remains Redis `closed_pos_solana_v1:*` inside getCachedClosedPositionsGuarded.
 async function GET_impl(request: Request) {
+  const __storeT0 = Date.now(); // batch C 1d: store writes that fail during this request
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
   if (!account) {
@@ -61,7 +63,7 @@ async function GET_impl(request: Request) {
     const notice = unread && status === 'failed' ? null : scanStatusNotice('closed-position history', status);
     const { positions, notice: capNotice }: { positions: SolanaClosedPosition[]; notice: RouteTruncation | null } =
       capClosedPositions(all, (p) => p.closedTs);
-    const truncated: RouteTruncation[] = [...(unread ? [unread] : []), ...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])];
+    const truncated: RouteTruncation[] = withStoreWriteNotice([...(unread ? [unread] : []), ...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])], __storeT0, 'closed-position history');
     return NextResponse.json({
       positions, count: positions.length, account,
       ...(truncated.length > 0 ? { truncated } : {}),

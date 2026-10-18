@@ -87,6 +87,11 @@ export interface ScanResult<T> {
   kept: number;
   /** Changes whenever the kept set or its completeness changes. */
   mark: string;
+  /**
+   * Items this run kept but could not save (the store refused a write, e.g. full
+   * under `noeviction`). They are in `items()`; the next run reads them again.
+   */
+  unsaved?: number;
   /** Everything kept so far, oldest first, de-duplicated by id. */
   items(): Promise<T[]>;
 }
@@ -248,8 +253,20 @@ async function runScan<T, C>(opts: ScanOptions<T, C>): Promise<ScanResult<T>> {
   let pagesSinceFlush = 0;
   const knownIds = new Set<string>();
 
+  // Set when the store refuses a write: the rest of this run is kept in memory
+  // (returned with the result) instead of stopping the scan. A full store must
+  // cost a re-read next time, never a "history couldn't be loaded".
+  let storeWriteFailed = false;
   const flush = async (): Promise<void> => {
-    if (!store) { unsaved.push(...pending); pending = []; pagesSinceFlush = 0; return; }
+    if (!store || storeWriteFailed) { unsaved.push(...pending); pending = []; pagesSinceFlush = 0; return; }
+    try { await flushToStore(); } catch (err) {
+      storeWriteFailed = true;
+      log(`store write failed, keeping this run in memory: ${String(err instanceof Error ? err.message : err).slice(0, 120)}`);
+      unsaved.push(...pending); pending = []; pagesSinceFlush = 0;
+    }
+  };
+  const flushToStore = async (): Promise<void> => {
+    if (!store) return;
     if (pending.length > 0) {
       let index = meta.chunks.length;
       if (tail === null) {
@@ -339,7 +356,8 @@ async function runScan<T, C>(opts: ScanOptions<T, C>): Promise<ScanResult<T>> {
   } finally {
     if (store) { try { await store.del(lockKey); } catch { /* expires on its own */ } }
   }
-  return result(meta, failed, reason, unsaved);
+  const out = result(meta, failed, reason, unsaved);
+  return storeWriteFailed ? { ...out, unsaved: unsaved.length } : out;
 }
 
 /**

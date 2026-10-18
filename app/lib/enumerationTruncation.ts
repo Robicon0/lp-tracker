@@ -91,6 +91,15 @@ export const LOOKUP_CAPPED = 'lookup-capped';
 export const POOL_STATS_UNAVAILABLE = 'pool-stats-unavailable';
 /** Pool statistics served from the last known copy (the source could not be read). Information only. */
 export const POOL_STATS_LAST_KNOWN = 'pool-stats-last-known';
+/**
+ * The shared store refused a write (full under `noeviction`, or failing): what
+ * this request read or fetched is shown and every figure is correct, but it
+ * could not be saved, so the next load does the work again. Information only.
+ */
+export const STORE_WRITE_FAILED = 'store-write-failed';
+export function storeWriteFailedNotice(scope: string): RouteTruncation {
+  return { scope, cap: 0, returned: 0, knownTotal: null, reason: STORE_WRITE_FAILED };
+}
 
 /**
  * Positions a scan KNEW about and left out (standing rule (i): no position and
@@ -171,7 +180,7 @@ export function notHeldOpenNotice(scope: string, count: number): RouteTruncation
 
 /** True for a notice that reports missing decoration, not missing positions or money. */
 export function isInfoReason(reason: unknown): boolean {
-  return reason === POOL_STATS_UNAVAILABLE || reason === POOL_STATS_LAST_KNOWN || reason === NOT_HELD_OPEN;
+  return reason === POOL_STATS_UNAVAILABLE || reason === POOL_STATS_LAST_KNOWN || reason === NOT_HELD_OPEN || reason === STORE_WRITE_FAILED;
 }
 
 export type LookupReason =
@@ -347,6 +356,8 @@ export function describeTruncation(n: TruncationNotice): string {
       return `${where}: this wallet's history is too long to read in full — only its most recent activity is included`;
     case POOL_STATS_UNAVAILABLE:
       return `${where}: fee APR and pool TVL couldn't be loaded right now — positions, values and fees are not affected`;
+    case STORE_WRITE_FAILED:
+      return `${where}: results could not be saved (the data store is full or failing) — figures are complete, but this wallet's history is read again on the next load`;
     case POOL_STATS_LAST_KNOWN:
       return `${where}: fee APR and pool TVL are the last known figures (the source couldn't be read right now) — positions, values and fees are not affected`;
     case NOT_HELD_OPEN:

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCachedClosedPositionsGuarded, type SuiClosedPosition } from '../../lib/suiClosedPositions';
 import { scanStatusNotice, notHeldOpenNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { capClosedPositions } from '../../lib/closedPositionResponse';
+import { withStoreWriteNotice } from '../../lib/storeWriteNotice';
 
 // Sprint LPPNL-PERF (Part B1): pin to the Vercel Pro ceiling so the tx-history
 // scan (public-Sui-RPC queryTransactionBlocks + multiGet, ~18–50 s cold) never
@@ -24,6 +25,7 @@ export const maxDuration = 300;
 // positions' Capital G/L + fees into the same totals as EVM closed positions.
 
 export async function GET(request: Request) {
+  const __storeT0 = Date.now(); // batch C 1d: store writes that fail during this request
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
   if (!account) {
@@ -54,6 +56,7 @@ export async function GET(request: Request) {
     const truncated: RouteTruncation[] = [
       ...(notice ? [notice] : []), ...(capNotice ? [capNotice] : []),
       ...(notHeldOpen > 0 ? [notHeldOpenNotice('closed-position history', notHeldOpen)] : []),
+      ...withStoreWriteNotice([], __storeT0, 'closed-position history'),
     ];
     return NextResponse.json({
       positions, count: positions.length, account,

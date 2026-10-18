@@ -38,6 +38,7 @@
 // fire-and-forget. If the env vars are missing the module degrades to a no-op
 // stub so local dev still works.
 
+import { priceCopyOpts } from './finishedDay';
 import { Redis } from '@upstash/redis';
 import { logPrice } from './priceLogger';
 import { createSharedRedis } from './sharedStore';
@@ -185,7 +186,9 @@ export async function setCachedHistoricalPrice(
   if (!Number.isFinite(priceUsd) || priceUsd <= 0) return;
   const key = buildCacheKey(coingeckoId, timestampSec);
   try {
-    await redis.set(key, priceUsd, { ex: TTL_SECONDS });
+    // A finished day's price is permanent (finishedDay.ts); today's keeps the TTL.
+    const opts = priceCopyOpts(timestampSec, TTL_SECONDS);
+    await (opts ? redis.set(key, priceUsd, opts) : redis.set(key, priceUsd));
   } catch (err) {
     console.warn('[redisPriceCache] Redis write failed (ignored):', err);
   }

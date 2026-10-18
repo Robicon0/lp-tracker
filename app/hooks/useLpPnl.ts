@@ -719,7 +719,8 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // holds reward claims valued at today's spot (CETUS, pool-side rewards).
 // v33 → v34 (Oct 18): Uniswap / PancakeSwap fee claims are valued at their claim
 // day (ITEM 0e); a v33 entry can hold a claim valued at today's spot.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v34-";
+// v34 → v35 (Oct 19, batch C): SUI claims priced from the stored day map only.
+const CACHE_KEY_PREFIX = "lp-pnl-events-v35-";
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
