@@ -18,7 +18,9 @@
 //                        It is not missing data, so it does not mark totals `≈`.
 //   check-history      — standing rule (k), the backstop: the numbers look
 //                        impossible (withdrawn more than 3x deposited and over
-//                        $1,000, or withdrawals against deposits worth nothing).
+//                        $1,000, or withdrawals against deposits worth nothing),
+//                        or the position was never withdrawn at all (it may
+//                        still be open, held by a vault or wrapper).
 //                        A row marked "check history", in no total, until checked.
 //
 // The test is on the LEGS, not on computePositionPnL's verdict, because that
@@ -109,6 +111,16 @@ export function classifyReconstructedClosed(sp: {
   if (sp.notHeldNote) return { kind: 'not-held', detail: detail('not-held', sp.notHeldNote) };
   if (deposits.length === 0) {
     return { kind: 'history-incomplete', detail: detail('history-incomplete', 'no deposit was found in its history') };
+  }
+  // A position is only closed after its liquidity came out: no withdrawal at all
+  // means the engine inferred "closed" from absence (not in the wallet's owned
+  // objects), which is what a position held by a vault or wrapper looks like
+  // while it is still OPEN. Valued as closed it is a loss the size of its
+  // deposit. Measured 2026-10-19: 0x9d6e…b1f9's USDC / USDSUI 0x29af7d0e40
+  // (created inside a vault deposit, package 0x11ea791d…f526) sat in Capital G/L
+  // at −91.39 from 09-26 until the wallet really closed it on 10-17 (−0.03).
+  if (!legs.some((e) => e.type === 'withdrawal')) {
+    return { kind: 'check-history', detail: detail('check-history', 'never withdrawn — it may still be open, held by a vault or wrapper') };
   }
   if (unpricedLegs.length > 0) {
     const d = unpricedLegs.filter((e) => e.type === 'deposit').length;

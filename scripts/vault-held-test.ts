@@ -79,6 +79,11 @@ console.log('4. sanity guard (backstop)');
   check('classifier: a 187x position is a check-history row', big.kind === 'check-history' && big.detail.why === 'withdrawn 187.0x what was deposited', JSON.stringify(big).slice(0, 120));
   const ok = classifyReconstructedClosed({ events: [ev('deposit', 478_896.44), ev('withdrawal', 525_105.02)] });
   check('classifier: a 1.10x position stays priced (why ownership is the real test)', ok.kind === 'priced');
+  // 0x9d6e's USDC / USDSUI 0x29af7d0e40 on 10-14: opened into a vault, still open, stored as closed.
+  const open = classifyReconstructedClosed({ events: [ev('deposit', 91.39), ev('fee_claim', 0.01)] });
+  check('classifier: deposited but never withdrawn is check-history (never a loss of the whole deposit)', open.kind === 'check-history' && /never withdrawn/.test(open.detail.why), JSON.stringify(open).slice(0, 120));
+  const closed = classifyReconstructedClosed({ events: [ev('deposit', 91.39), ev('withdrawal', 91.36)] });
+  check('classifier: the same position once really closed is priced', closed.kind === 'priced' && Math.abs(closed.data.closingValue - closed.data.initialValue + 0.03) < 1e-9);
 }
 
 async function live() {
