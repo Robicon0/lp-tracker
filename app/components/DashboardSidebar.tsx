@@ -101,7 +101,6 @@ export default function DashboardSidebar({
     textTransform: "uppercase",
     color: C.text,
     padding: "0 18px 10px",
-    opacity: 0.5,
   };
 
   const itemBase: CSSProperties = {
@@ -232,7 +231,7 @@ export default function DashboardSidebar({
                 ...itemBase,
                 cursor: "default",
                 color: live ? C.textMid : C.text,
-                opacity: live ? 1 : 0.6,
+                opacity: 1,
               }}
             >
               <span
@@ -301,16 +300,13 @@ export default function DashboardSidebar({
           onClick={onAddWallet}
           style={{
             ...itemBase,
-            opacity: 0.6,
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.color = C.green;
-            e.currentTarget.style.opacity = "1";
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.color = C.text;
-            e.currentTarget.style.opacity = "0.6";
           }}
         >
           <span style={iconStyle}>+</span>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTruncationNotices } from "../hooks/useTruncationNotices";
+import { isInfoReason } from "../lib/enumerationTruncation";
 import { unpricedShortLabel } from "../lib/closedPositionClassify";
 import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSProperties } from "react";
 import { TruncationBanner } from "../components/TruncationBanner";
@@ -263,7 +265,11 @@ export default function Dashboard() {
   // Open-position sources still outstanding (the closed-history halves do not
   // feed the headline value, so they are not named here).
   const pendingOpenSources = pendingSources.filter((s) => !/history$/i.test(s));
-  const headlinePartial = !isLoading && (failedSources.length > 0 || pendingOpenSources.length > 0);
+  // A scan that was truncated or failed (the notice above the positions) also
+  // leaves the total incomplete: ≈, never a clean figure (batch D 1b).
+  const truncationNotices = useTruncationNotices().filter((n) => !isInfoReason(n.reason));
+  const headlineTruncated = truncationNotices.length > 0;
+  const headlinePartial = (!isLoading && (failedSources.length > 0 || pendingOpenSources.length > 0)) || headlineTruncated;
   // Per-position activity events — used for proper P&L calculation per row.
   // Per-row P&L on the positions table comes from the SAME on-chain pipeline
   // that feeds the analytics LP P&L totals — no parallel calculation, no
@@ -299,6 +305,9 @@ export default function Dashboard() {
   // on screen (see useWalletDisconnect).
   const { disconnectEvm, disconnectSolana, disconnectSui } = useWalletDisconnect();
   const [mounted, setMounted] = useState(false);
+  // Nothing has answered yet (the first seconds after a paste or a load):
+  // never a clean $0.00 — the headline says it is loading (batch D 1e).
+  const headlineFirstLoad = mounted && isLoading && allPositions.length === 0;
   useEffect(() => setMounted(true), []);
 
   const { wallets: solanaWallets } = useWallet();
@@ -363,7 +372,13 @@ export default function Dashboard() {
   }
   function handleAddScanToWatched() {
     if (!scanAddress) return;
-    addWallet(scanAddress.address, scanAddress.chain);
+    const a = scanAddress.address;
+    const r = addWallet(a, scanAddress.chain);
+    // Say what happened (batch D 1e).
+    setAddWalletDone(r.ok
+      ? { label: `${a.slice(0, 6)}…${a.slice(-4)}`, chain: scanAddress.chain === "evm" ? "EVM" : scanAddress.chain === "sui" ? "Sui" : "Solana" }
+      : null);
+    if (!r.ok) setAddWalletError(r.message);
     setScanAddress(null);
     router.replace(pathname ?? "/dashboard");
   }
@@ -406,6 +421,13 @@ export default function Dashboard() {
   const [addWalletAddress, setAddWalletAddress] = useState("");
   const [addWalletLabel, setAddWalletLabel] = useState("");
   const [addWalletError, setAddWalletError] = useState("");
+  const [addWalletDone, setAddWalletDone] = useState<{ label: string; chain: string } | null>(null);
+  // The confirmation stays two minutes, then goes.
+  useEffect(() => {
+    if (!addWalletDone) return;
+    const t = setTimeout(() => setAddWalletDone(null), 120_000);
+    return () => clearTimeout(t);
+  }, [addWalletDone]);
   const [editingWallet, setEditingWallet] = useState<string | null>(null);
   const [editLabelValue, setEditLabelValue] = useState("");
 
@@ -540,6 +562,9 @@ export default function Dashboard() {
     isScanMode ? 0 : totalValue,
     isScanMode ? 0 : allPositions.length,
     isScanMode ? 0 : dataUpdatedAt,
+    // Saved only when the total is whole (batch D 1c): nothing pending or
+    // failed, and no truncated or failed scan.
+    !isLoading && pendingSources.length === 0 && failedSources.length === 0 && !headlineTruncated,
   );
   const activeRange    = TIME_RANGES.find((r) => r.key === chartTab) ?? TIME_RANGES[2];
   const rangeCutoff    = Date.now() - activeRange.ms;
@@ -599,6 +624,8 @@ export default function Dashboard() {
     setAddWalletAddress("");
     setAddWalletLabel("");
     setAddWalletError("");
+    // Say so (batch D 1e): the input used to clear with nothing else on screen.
+    setAddWalletDone({ label: `${addr.slice(0, 6)}…${addr.slice(-4)}`, chain: chain === "evm" ? "EVM" : chain === "sui" ? "Sui" : "Solana" });
   }
 
   function handleSolanaConnectFromModal(walletName: string) {
@@ -716,6 +743,12 @@ export default function Dashboard() {
           All dashboard data below is for the scanned address; user's own
           connected wallets are temporarily ignored. Click [X] to dismiss
           and return to the user's own wallet view. */}
+      {!isScanMode && addWalletDone && (
+        <div role="status" data-wallet-added-top style={{ margin: "12px 16px 0", padding: "8px 14px", border: `1px solid ${C.green}`, background: C.greenFaint, color: C.green, fontSize: 13, fontFamily: FONT, letterSpacing: "0.04em" }}>
+          ✓ Added {addWalletDone.label} ({addWalletDone.chain}) to watched wallets
+          <span style={{ color: C.text }}>{(isLoading || isFetching || pendingSources.length > 0) ? " — loading its positions…" : " — positions loaded"}</span>
+        </div>
+      )}
       {isScanMode && scanAddress && (
         <div
           className="dashboard-scan-banner"
@@ -872,7 +905,6 @@ export default function Dashboard() {
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
                 marginBottom: 10,
-                opacity: 0.6,
               }}
             >
               <span style={{ color: C.green, opacity: 1 }}>// </span>
@@ -906,15 +938,24 @@ export default function Dashboard() {
                       lower total (measured 2026-10-11 with the Cetus pool read
                       failing: $15,269.89 shown unmarked for a $26.8k wallet, the
                       only notice below the fold). */}
+                  {headlineFirstLoad ? "—" : (<>
                   {mounted && headlinePartial && <span style={{ fontSize: 32, color: C.amber, fontWeight: 500, marginRight: 8 }}>≈</span>}
                   ${splitTotal.whole}
                   <span style={{ fontSize: 32, color: C.textMid, fontWeight: 500 }}>.{splitTotal.cents}</span>
+                  </>)}
                 </div>
-                {mounted && headlinePartial && (
+                {headlineFirstLoad && (
+                  <div data-headline-loading="1" role="status" style={{ marginTop: 8, fontSize: 12, color: C.text, letterSpacing: "0.04em" }}>
+                    loading positions{isScanMode && scanAddress ? ` for ${scanAddress.address.slice(0, 6)}…${scanAddress.address.slice(-4)}` : ""}…
+                  </div>
+                )}
+                {mounted && !headlineFirstLoad && headlinePartial && (
                   <div data-headline-partial="1" style={{ marginTop: 8, fontSize: 12, color: C.amber, letterSpacing: "0.04em" }}>
                     {failedSources.length > 0
                       ? `incomplete — couldn't load ${failedSources.join(" · ")}`
-                      : `still loading ${pendingOpenSources.join(" · ")}`}
+                      : pendingOpenSources.length > 0 && !isLoading
+                        ? `still loading ${pendingOpenSources.join(" · ")}`
+                        : "may be incomplete — see the notice above the positions"}
                   </div>
                 )}
                 {chartPnlAvailable && (
@@ -931,7 +972,7 @@ export default function Dashboard() {
                   >
                     <span style={{ fontSize: 17 }}>{chartPnlDollar >= 0 ? "↑" : "↓"}</span>
                     <span>{chartPnlDollar >= 0 ? "+" : "-"}{fmt$(Math.abs(chartPnlDollar))}</span>
-                    <span style={{ color: C.text, fontSize: 12, marginLeft: 4, opacity: 0.6 }}>
+                    <span style={{ color: C.text, fontSize: 12, marginLeft: 4 }}>
                       {chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(1)}% ({activeRange.label.replace("in last ", "")})
                     </span>
                   </div>
@@ -1051,7 +1092,7 @@ export default function Dashboard() {
                     gap: 5,
                   }}
                 >
-                  <div style={{ fontSize: 13, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6 }}>
+                  <div style={{ fontSize: 13, color: C.text, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                     {s.label}
                   </div>
                   <div
@@ -1068,7 +1109,7 @@ export default function Dashboard() {
                   >
                     {s.val}
                   </div>
-                  <div style={{ fontSize: 12, color: C.text, opacity: 0.5 }}>{s.sub}</div>
+                  <div style={{ fontSize: 12, color: C.text }}>{s.sub}</div>
                 </div>
               ))}
             </div>
@@ -1088,7 +1129,7 @@ export default function Dashboard() {
               <PaneHead title="wallets" linkLabel="+ Add wallet" onLinkClick={() => setShowManageWallets(true)} />
 
               {!hasWallet && mounted && (
-                <div style={{ fontSize: 14, color: C.text, opacity: 0.5, padding: "12px 0" }}>
+                <div style={{ fontSize: 14, color: C.text, padding: "12px 0" }}>
                   No wallet connected — use ▸ Wallets above.
                 </div>
               )}
@@ -1112,15 +1153,15 @@ export default function Dashboard() {
                     <div style={{ fontSize: 15, fontWeight: 600, color: C.textBright, letterSpacing: "0.02em" }}>
                       {w.name}
                     </div>
-                    <div style={{ fontSize: 12, color: C.text, marginTop: 2, fontStyle: "italic", opacity: 0.6 }}>
+                    <div style={{ fontSize: 12, color: C.text, marginTop: 2, fontStyle: "italic" }}>
                       {w.addr.slice(0, 6)}…{w.addr.slice(-4)}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontSize: 15, color: C.textMid, opacity: 0.7 }}>
+                    <div style={{ fontSize: 15, color: C.textMid }}>
                       {w.type === "browser" ? "● Connected" : "Watched"}
                     </div>
-                    <div style={{ fontSize: 12, color: C.text, marginTop: 2, opacity: 0.5 }}>
+                    <div style={{ fontSize: 12, color: C.text, marginTop: 2 }}>
                       {w.sub}
                     </div>
                   </div>
@@ -1197,7 +1238,6 @@ export default function Dashboard() {
                   marginBottom: 6,
                   fontSize: 11,
                   color: C.text,
-                  opacity: 0.4,
                   letterSpacing: "0.1em",
                   textTransform: "uppercase",
                 }}
@@ -1235,7 +1275,7 @@ export default function Dashboard() {
                       fontSize: 12,
                     }}
                   >
-                    <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11, opacity: 0.6 }}>
+                    <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11 }}>
                       {r.label}
                     </span>
                     <span style={{ fontWeight: 600, color: r.c, fontVariantNumeric: "tabular-nums" }}>
@@ -1265,7 +1305,6 @@ export default function Dashboard() {
                     marginBottom: 6,
                     fontSize: 11,
                     color: C.text,
-                    opacity: 0.4,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
                   }}
@@ -1288,7 +1327,7 @@ export default function Dashboard() {
                 </div>
                 <div style={{ marginTop: 20 }}>
                   {topLending.length === 0 ? (
-                    <div style={{ fontSize: 14, color: C.text, opacity: 0.5, padding: "8px 0" }}>
+                    <div style={{ fontSize: 14, color: C.text, padding: "8px 0" }}>
                       {hasWallet ? "No lending positions" : "Connect a wallet to see lending"}
                     </div>
                   ) : (
@@ -1304,9 +1343,9 @@ export default function Dashboard() {
                           fontSize: 12,
                         }}
                       >
-                        <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11, opacity: 0.6 }}>
+                        <span style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11 }}>
                           {p.protocol}{" "}
-                          <span style={{ opacity: 0.4 }}>({p.chain})</span>
+                          <span style={{ color: C.text }}>({p.chain})</span>
                         </span>
                         <span style={{ fontWeight: 600, color: C.cyan, fontVariantNumeric: "tabular-nums" }}>
                           {fmt$(p.totalSupplied)}
@@ -1377,7 +1416,7 @@ export default function Dashboard() {
                       <div style={{ fontSize: 16, fontWeight: 700, color: C.textBright }}>
                         {protocolBreakdown.length}
                       </div>
-                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.2em", opacity: 0.5 }}>
+                      <div style={{ fontSize: 10, color: C.text, letterSpacing: "0.2em" }}>
                         POOLS
                       </div>
                     </div>
@@ -1411,7 +1450,7 @@ export default function Dashboard() {
                           >
                             {pct.toFixed(0)}%
                           </div>
-                          <div style={{ color: C.text, fontSize: 11, minWidth: 56, textAlign: "right", opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>
+                          <div style={{ color: C.text, fontSize: 11, minWidth: 56, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                             {fmt$(entry.value, 0)}
                           </div>
                         </div>
@@ -1425,7 +1464,7 @@ export default function Dashboard() {
                 <PaneHead title="chain_distribution" />
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {chainGrouped.length === 0 ? (
-                    <div style={{ color: C.text, fontSize: 14, opacity: 0.5 }}>No chain data yet.</div>
+                    <div style={{ color: C.text, fontSize: 14 }}>No chain data yet.</div>
                   ) : chainGrouped.map((c) => {
                     const colour = CHAIN_DISPLAY[c.name].color;
                     return (
@@ -1434,7 +1473,7 @@ export default function Dashboard() {
                           <div style={{ color: C.textMid, display: "flex", alignItems: "center", gap: 6 }}>
                             <div style={{ width: 6, height: 6, background: colour, flexShrink: 0, boxShadow: `0 0 5px ${colour}88` }} />
                             <span>{c.name}</span>
-                            <span style={{ fontSize: 11, opacity: 0.4, marginLeft: 4 }}>{c.chains}</span>
+                            <span style={{ fontSize: 11, marginLeft: 4 }}>{c.chains}</span>
                           </div>
                           <div style={{ color: C.textBright, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
                             {c.pct.toFixed(0)}%
@@ -1449,8 +1488,8 @@ export default function Dashboard() {
                           />
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
-                          <span style={{ color: C.text, opacity: 0.5 }}>VALUE</span>
-                          <span style={{ color: C.text, opacity: 0.7 }}>{fmt$(c.value, 0)}</span>
+                          <span style={{ color: C.text }}>VALUE</span>
+                          <span style={{ color: C.text }}>{fmt$(c.value, 0)}</span>
                         </div>
                       </div>
                     );
@@ -1474,7 +1513,6 @@ export default function Dashboard() {
                     letterSpacing: "0.22em",
                     textTransform: "uppercase",
                     color: C.text,
-                    opacity: 0.55,
                     marginRight: 20,
                   }}
                 >
@@ -1531,10 +1569,10 @@ export default function Dashboard() {
 
               {portfolioHistory.length < 2 ? (
                 <div style={{ textAlign: "center", padding: "32px 0" }}>
-                  <div style={{ fontSize: 15, color: C.text, opacity: 0.5 }}>
+                  <div style={{ fontSize: 15, color: C.text }}>
                     Tracking started — chart appears after the next refresh.
                   </div>
-                  <div style={{ fontSize: 12, color: C.text, marginTop: 4, letterSpacing: "0.06em", opacity: 0.4 }}>
+                  <div style={{ fontSize: 12, color: C.text, marginTop: 4, letterSpacing: "0.06em" }}>
                     A data point is saved on every 60-second refresh.
                   </div>
                 </div>
@@ -1549,9 +1587,9 @@ export default function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="4 6" stroke="var(--surface-hover)" />
-                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.2)", fontSize: 11, fontFamily: FONT }}
+                    <XAxis dataKey="label" tick={{ fill: "var(--fg-muted)", fontSize: 11, fontFamily: FONT }}
                       axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: "rgba(255,255,255,0.18)", fontSize: 11, fontFamily: FONT }}
+                    <YAxis tick={{ fill: "var(--fg-muted)", fontSize: 11, fontFamily: FONT }}
                       axisLine={false} tickLine={false} width={64}
                       tickFormatter={(v) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
                     <Tooltip
@@ -1644,7 +1682,6 @@ export default function Dashboard() {
                     letterSpacing: "0.18em",
                     textTransform: "uppercase",
                     marginBottom: 10,
-                    opacity: 0.5,
                   }}
                 >
                   {m.label}
@@ -1667,7 +1704,7 @@ export default function Dashboard() {
                 >
                   {m.val}
                 </div>
-                <div style={{ fontSize: 12, color: C.text, opacity: 0.45 }}>{m.sub}</div>
+                <div style={{ fontSize: 12, color: C.text }}>{m.sub}</div>
               </div>
             ))}
           </div>
@@ -1786,7 +1823,7 @@ export default function Dashboard() {
             {mounted && <TruncationBanner style={{ marginBottom: 12 }} />}
 
             {mounted && !isLoading && pendingSources.length > 0 && (
-              <div style={{ fontSize: 11, color: C.text, opacity: 0.55, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
+              <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
                 <span className="spin-icon" style={{ display: "inline-block", marginRight: 6 }}>↻</span>
                 still scanning: {pendingSources.join(" · ")}
               </div>
@@ -1828,7 +1865,7 @@ export default function Dashboard() {
                     <div style={{ fontSize: 16, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
                       NO_WALLET_CONNECTED
                     </div>
-                    <div style={{ color: C.text, fontSize: 14, opacity: 0.6 }}>
+                    <div style={{ color: C.text, fontSize: 14 }}>
                       Connect a wallet to track LP positions across EVM, Solana, and Sui.
                     </div>
                   </>
@@ -1837,12 +1874,12 @@ export default function Dashboard() {
                     <div style={{ fontSize: 16, fontWeight: 700, color: C.textBright, marginBottom: 8, letterSpacing: "0.06em" }}>
                       NO_POSITIONS_FOUND
                     </div>
-                    <div style={{ color: C.text, fontSize: 14, opacity: 0.6 }}>
+                    <div style={{ color: C.text, fontSize: 14 }}>
                       No LP positions were found for your connected wallet(s).
                     </div>
                   </>
                 ) : (
-                  <div style={{ fontSize: 14, opacity: 0.5 }}>No positions match this filter.</div>
+                  <div style={{ fontSize: 14 }}>No positions match this filter.</div>
                 )}
               </div>
             ) : (
@@ -1862,7 +1899,6 @@ export default function Dashboard() {
                             letterSpacing: "0.16em",
                             textTransform: "uppercase",
                             borderBottom: `1px solid ${C.border}`,
-                            opacity: 0.55,
                           }}
                         >
                           {h}
@@ -1954,11 +1990,11 @@ export default function Dashboard() {
                                   {pos.pair}
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-                                  <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.6 }}>
+                                  <span style={{ fontSize: 11, color: C.text, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                                     {pos.protocol}
                                   </span>
                                   {closedDate && (
-                                    <span style={{ fontSize: 10, color: C.text, opacity: 0.45 }}>
+                                    <span style={{ fontSize: 10, color: C.text }}>
                                       closed {closedDate}
                                     </span>
                                   )}
@@ -1994,7 +2030,7 @@ export default function Dashboard() {
                               {fmt$(pos.value)}
                             </div>
                             {dailyEarnings !== null && (
-                              <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                              <div style={{ fontSize: 11, color: C.text, marginTop: 3 }}>
                                 ${dailyEarnings.toFixed(2)}/day
                               </div>
                             )}
@@ -2007,7 +2043,7 @@ export default function Dashboard() {
                                 <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px color-mix(in srgb, var(--accent) 25%, transparent)", fontVariantNumeric: "tabular-nums" }}>
                                   {pos.apy.toFixed(1)}%
                                 </div>
-                                <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                                <div style={{ fontSize: 11, color: C.text, marginTop: 3 }}>
                                   base
                                 </div>
                               </>
@@ -2016,12 +2052,12 @@ export default function Dashboard() {
                                 <div style={{ fontSize: 16, fontWeight: 700, color: C.green, textShadow: "0 0 10px color-mix(in srgb, var(--accent) 25%, transparent)", fontVariantNumeric: "tabular-nums" }}>
                                   ~{derivedApr.toFixed(1)}%
                                 </div>
-                                <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.5 }}>
+                                <div style={{ fontSize: 11, color: C.text, marginTop: 3 }}>
                                   est.
                                 </div>
                               </>
                             ) : (
-                              <div style={{ fontSize: 14, color: C.text, opacity: 0.5 }}>N/A</div>
+                              <div style={{ fontSize: 14, color: C.text }}>N/A</div>
                             )}
                           </td>
 
@@ -2041,7 +2077,7 @@ export default function Dashboard() {
                                   {pnlUsd >= 0 ? "+" : "-"}{fmt$(Math.abs(pnlUsd))}
                                 </div>
                                 {pnlPct !== null && Number.isFinite(pnlPct) && (
-                                  <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.55, fontVariantNumeric: "tabular-nums" }}>
+                                  <div style={{ fontSize: 11, color: C.text, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
                                     {pnlUsd >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%
                                   </div>
                                 )}
@@ -2051,7 +2087,7 @@ export default function Dashboard() {
                                 <div style={{ fontSize: 15.5, fontWeight: 700, color: C.green, fontVariantNumeric: "tabular-nums" }}>
                                   +{fmt$(pos.fees)}
                                 </div>
-                                <div style={{ fontSize: 11, color: C.text, marginTop: 3, opacity: 0.45 }}>
+                                <div style={{ fontSize: 11, color: C.text, marginTop: 3 }}>
                                   fees only
                                 </div>
                               </>
@@ -2150,14 +2186,13 @@ export default function Dashboard() {
                     color: C.text,
                     letterSpacing: "0.1em",
                     background: "transparent",
-                    opacity: 0.7,
                   }}
                   title="Position data via Zerion. Full deep analytics available for supported protocols."
                 >
                   via zerion
                 </span>
                 <span style={{ flex: 1 }} />
-                <span style={{ fontSize: 11, color: C.text, opacity: 0.5, textTransform: "none", letterSpacing: 0 }}>
+                <span style={{ fontSize: 11, color: C.text, textTransform: "none", letterSpacing: 0 }}>
                   {zerionPositions.length} {zerionPositions.length === 1 ? "position" : "positions"}
                 </span>
               </div>
@@ -2229,7 +2264,7 @@ export default function Dashboard() {
                         <div style={{ fontSize: 11, color: C.text, marginTop: 2, letterSpacing: "0.06em", textTransform: "uppercase" }}>
                           {z.protocol}
                           {z.positionType && z.positionType !== "unknown" && (
-                            <span style={{ marginLeft: 6, opacity: 0.5 }}>· {z.positionType}</span>
+                            <span style={{ marginLeft: 6 }}>· {z.positionType}</span>
                           )}
                         </div>
                       </div>
@@ -2322,7 +2357,7 @@ export default function Dashboard() {
             <div style={{ fontSize: 14, color: C.text, padding: "8px 0", letterSpacing: "0.04em" }}>
               ◇ No active alerts.
             </div>
-            <div style={{ fontSize: 12, color: C.text, opacity: 0.5, marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: C.text, marginTop: 4 }}>
               Coming soon — out-of-range warnings, IL thresholds, and price-drop notifications.
             </div>
           </div>
@@ -2439,7 +2474,7 @@ export default function Dashboard() {
                   <input
                     type="text"
                     value={addWalletAddress}
-                    onChange={(e) => { setAddWalletAddress(e.target.value); setAddWalletError(""); }}
+                    onChange={(e) => { setAddWalletAddress(e.target.value); setAddWalletError(""); setAddWalletDone(null); }}
                     onKeyDown={(e) => e.key === "Enter" && handleAddWatchedWallet()}
                     placeholder="0x… / sol… / 0x(sui)…"
                     style={{
@@ -2474,6 +2509,14 @@ export default function Dashboard() {
                   />
                   {addWalletError && (
                     <div style={{ color: C.red, fontSize: 14 }}>{addWalletError}</div>
+                  )}
+                  {addWalletDone && (
+                    <div role="status" data-wallet-added style={{ color: C.green, fontSize: 14, lineHeight: 1.5 }}>
+                      ✓ Added {addWalletDone.label} ({addWalletDone.chain}) to watched wallets
+                      {(isLoading || isFetching || pendingSources.length > 0)
+                        ? <span style={{ color: C.text }}> — loading its positions…</span>
+                        : <span style={{ color: C.text }}> — positions loaded</span>}
+                    </div>
                   )}
                   <button
                     onClick={handleAddWatchedWallet}
@@ -2837,7 +2880,6 @@ function PaneHead({
           letterSpacing: "0.22em",
           textTransform: "uppercase",
           color: C.text,
-          opacity: 0.55,
           display: "flex",
           alignItems: "center",
           gap: 8,
@@ -2872,7 +2914,7 @@ function PaneHead({
 function ChartMeta({ label, value, colour }: { label: string; value: string; colour: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-      <div style={{ color: C.text, opacity: 0.5, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11 }}>
+      <div style={{ color: C.text, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: 11 }}>
         {label}
       </div>
       <div style={{ fontWeight: 700, color: colour, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>

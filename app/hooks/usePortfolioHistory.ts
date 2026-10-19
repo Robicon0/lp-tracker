@@ -16,6 +16,12 @@ export function usePortfolioHistory(
   totalValue: number,
   positionCount: number,
   dataUpdatedAt: number,
+  /**
+   * The total is whole: every positions source answered and no scan was
+   * truncated or failed (batch D 1c). A partial total is never saved — it was
+   * what put the dips in the chart (points with 1-3 positions among 18-21).
+   */
+  complete = true,
 ): PortfolioSnapshot[] {
   const [history, setHistory] = useState<PortfolioSnapshot[]>([]);
 
@@ -35,7 +41,7 @@ export function usePortfolioHistory(
 
   // Save a snapshot whenever a new fetch completes (dataUpdatedAt changes)
   useEffect(() => {
-    if (dataUpdatedAt === 0 || totalValue === 0) return;
+    if (dataUpdatedAt === 0 || totalValue === 0 || !complete) return;
 
     setHistory((prev) => {
       const cutoff = Date.now() - MAX_AGE_MS;
@@ -57,7 +63,7 @@ export function usePortfolioHistory(
 
       return recent;
     });
-  }, [dataUpdatedAt, totalValue, positionCount]);
+  }, [dataUpdatedAt, totalValue, positionCount, complete]);
 
   return history;
 }

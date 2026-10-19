@@ -57,34 +57,46 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
     0,
   );
 
+  // One compact line in plain words (batch D 1a); the full technical text is
+  // one click away, never removed. "Aerodrome (Base) positions may be incomplete".
+  const what = (n: { source: string; scope?: string }) => (n.scope ? `${n.source} (${n.scope})` : n.source);
+  const capSources = [...new Set(notices.filter((n) => !isLookupFailureReason(n.reason)).map(what))];
+  const lookupSources = [...new Set(notices.filter((n) => isLookupFailureReason(n.reason)).map((n) => n.source))];
+  const summary = [
+    capSources.length ? `${capSources.join(", ")} positions may be incomplete` : null,
+    lookupSources.length ? `${lookupSources.join(", ")} history may be incomplete` : null,
+  ].filter(Boolean).join(" · ");
+
   return (
     <>
-    <div
+    <details
       role="status"
+      data-truncation-banner
       style={{
         border: "1px solid var(--warn)",
         background: "color-mix(in srgb, var(--warn) 10%, transparent)",
         color: "var(--foreground)",
-        padding: "10px 14px",
+        padding: "6px 12px",
         fontSize: 12,
         lineHeight: 1.6,
         letterSpacing: "0.03em",
         ...style,
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>
-        ⚠ {heading}
-        {anyKnown && missing > 0 ? ` — ${missing} not shown` : ""}
+      <summary style={{ cursor: "pointer", listStyle: "none", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700 }}>⚠ {summary}{anyKnown && missing > 0 ? ` — ${missing} not shown` : ""}</span>
+        <span style={{ color: "var(--fg-muted)", textDecoration: "underline" }}>details</span>
+      </summary>
+      <div style={{ marginTop: 6 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>{heading}</div>
+        <div>{lead}</div>
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          {notices.map((n) => (
+            <li key={`${n.source}|${n.scope}|${n.address}`}>{describeTruncation(n)}</li>
+          ))}
+        </ul>
       </div>
-      <div style={{ opacity: 0.85 }}>
-        {lead}
-      </div>
-      <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-        {notices.map((n) => (
-          <li key={`${n.source}|${n.scope}|${n.address}`}>{describeTruncation(n)}</li>
-        ))}
-      </ul>
-    </div>
+    </details>
     {infoBlock}
     </>
   );

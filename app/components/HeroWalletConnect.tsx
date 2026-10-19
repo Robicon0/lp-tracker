@@ -115,6 +115,8 @@ export default function HeroWalletConnect() {
 
   const [addrInput, setAddrInput] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
+  // Visible while the dashboard opens for a pasted address (batch D 1e).
+  const [scanning, setScanning] = useState<string | null>(null);
   function handleScan(e: React.FormEvent) {
     e.preventDefault();
     const v = addrInput.trim();
@@ -128,6 +130,7 @@ export default function HeroWalletConnect() {
       return;
     }
     setScanError(null);
+    setScanning(`${v.slice(0, 6)}…${v.slice(-4)} (${chain === "evm" ? "EVM" : chain === "sui" ? "Sui" : "Solana"})`);
     router.push(`/dashboard?address=${encodeURIComponent(v)}&chain=${chain}`);
   }
 
@@ -209,11 +212,18 @@ export default function HeroWalletConnect() {
           />
           <button
             type="submit"
+            disabled={!!scanning}
+            aria-busy={!!scanning}
             className="bg-[var(--surface)] text-[var(--fg-subtle)] hover:text-[var(--accent)] hover:bg-[color-mix(in srgb, var(--accent) 6%, transparent)] border-l border-[var(--line-strong)] px-4 py-2.5 text-[14px] tracking-[0.08em] uppercase transition-colors whitespace-nowrap"
           >
-            SCAN
+            {scanning ? "LOADING…" : "SCAN"}
           </button>
         </form>
+        {scanning && (
+          <div role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--accent)", letterSpacing: "0.04em" }}>
+            ✓ Wallet {scanning} found — opening its dashboard…
+          </div>
+        )}
         {scanError && (
           <div
             style={{
