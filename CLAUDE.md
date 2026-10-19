@@ -961,6 +961,36 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`67af8e5` + `44d8a07`** (Batch C, 2026-10-19, live as `dpl_7xVRz9a75ktQ19sKHCHhjJxmQcYE`) — **Part 1:
+  permanent price copies, SUI claims from the day map, self-hosted fonts, full-store behaviour. Part 2:
+  the browser makes no Alchemy calls.**
+  **1a.** A finished UTC day's price copy has no expiry (`app/lib/finishedDay.ts`; CoinGecko day,
+  DeFiLlama day and exact-time, pool price at a past block); today's keeps its TTL. 2,311 existing keys
+  had their expiry removed after the deploy (118,421 bytes; values untouched); audit before/after: every
+  finished-day price key has no expiry.
+  **1b.** SUI claims priced from the stored DeFiLlama day map only. 312 claims moved, each SUI side now
+  equal to the stored day price: Account 1 Fees 15,363.02 → 15,379.67 (137 claims), 0x15ac 1,396.44 →
+  1,395.72 (41), 0x9d6e 5,376.75 → 5,383.97 (134), 0x0256 +0.45, 0x81e1 +0.07. CoinGecko up or down now
+  gives identical figures. Bumps: lp-pnl-events v35, analytics-activity v27, cetus / bluefin-activity v9.
+  **1c.** Fonts self-hosted (`app/fonts`, Fontsource variable woff2, OFL 1.1). With all outbound HTTPS
+  blocked the old code's build fails on fonts.googleapis.com (as Vercel's did on 10-18, and once more on
+  this machine on 10-19); the new build passes.
+  **1d.** Full store (`SHARED_STORE_FAIL_WRITES=oom`, every write refused): before, no 500 and correct
+  totals, but every Sui / Solana wallet read "≈ … history couldn't be loaded" because the resumable scan
+  stopped on its first failed progress write. Now the scan keeps the rest of its run in memory and the
+  routes add an information notice ("results could not be saved … figures are complete"); figures equal
+  the normal build to the cent; closed lists served, never dropped. Test `store-full-test` 16.
+  **Part 2.** `/api/evm/token-balances` (limiter, metadata in `token_meta_v1`; a failed chain is a 503
+  and "couldn't load {chain} balances" with `≈`); `useWalletTokens`, the wallet page and `WalletBalances`
+  call it. `app/lib/alchemyKey.ts`: `ALCHEMY_KEY` first, `NEXT_PUBLIC_ALCHEMY_KEY` fallback (13 server
+  files). Public bundle: key in 5 static files before, 0 after (local and production). Per wallets view
+  (Account 1): browser 89 calls / 990 CU → 0; server 990 CU on a cold metadata cache, 200 CU after.
+  Wallet views for Account 1, Account 2 and 0x844e identical line by line on all five chains.
+  **B7 (UTC):** local old / new 22:51-23:27 identical except 1b; production old 23:46-00:17; production
+  new 00:28-01:00 equal to local new (Account 1 394 / 394 claims). Account 1 Closed (124), Deposited
+  15,709.28, Capital G/L ≈ −16,316.05, Fees 15,379.67. No non-200, logs Kamino only. Store commands per
+  fresh Account 1 load old 576 / new 574. First row equal (5.8 s / 5.8 s fresh).
+
 - **`5026c79`** (Batch A, 2026-10-19, live as `dpl_2HDJ9xy6HEcbULsGxAfAVxdQwk2u`; the first build failed on
   a Google Fonts download in Vercel's build and was redeployed unchanged) — **A reconstructed closed
   position that was never withdrawn is "check history", never a full loss.**
