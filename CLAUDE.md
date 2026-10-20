@@ -826,6 +826,10 @@ which the routes already do). Complexity MEDIUM.
 **Acceptance:** a wallet whose only position is staked in a pool at index >= 2000 renders it;
 the `pool-scan-ceiling` notice then stops firing for ordinary Base wallets, which is the
 point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
+**Batch E (`837c593`, 2026-10-20): the notice no longer fires for every Base wallet.** It now
+clears per wallet when the history pass proves coverage by NFT ownership (see Recent fixes); a
+wallet with a position staked past index 2,000 now shows it OPEN from the history pass. C2 (gauge
+enumeration) is still the way to find such a position for a wallet whose history cannot be read.
 **Re-run the census before building** — `allPoolsLength` grows (3,487 at first measurement,
 3,498 a few days later), so the 17/180 figures are a snapshot, not a constant.
 
@@ -960,6 +964,53 @@ point — it currently fires for EVERY Base wallet because 3,498 > 2,000.
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`837c593`** (Batch E, 2026-10-20, live as `dpl_8SuneFkhfHNJz4dQHuXLSpPGSH1x`) — **The Aerodrome
+  2,000-pool notice clears by NFT ownership; Kamino Altcoins market fixed; label contrast; an analytics
+  update loop fixed.** NEW `app/lib/aerodromeCeilingCheck.ts` (`checkPoolCeilingCoverage`), run by the
+  `scope=closed` half when the open half raised `pool-scan-ceiling` and the history has no notice of its
+  own: every NFT the wallet ever held must be burned (history or a reverted `ownerOf`), held by the
+  wallet, staked in a gauge the Voter confirms, or someone else's; `balanceOf(wallet)` on the position
+  manager must equal the wallet-held count; each gauge's `stakedValues(wallet)` (0x4b937763) must equal
+  the history's staked set there; every held or staked NFT must be on the shown list. Any read failure
+  or mismatch keeps the notice (fails closed, with the reason in the log line `[aerodrome] pool-ceiling
+  check`). The response carries `ceilingCheck.covered`; `app/lib/aerodrome.ts` drops the open half's
+  `pool-scan-ceiling` for that wallet only then, and restores it if a later history pass fails or is
+  not covered. Per-NFT reads run 4 at a time.
+  **Measured (local, read-only store, UTC 2026-10-20):** 0xd99a 14 burned, 1 call, 0.5 s; 0xEf93 11
+  burned, 1 call; 0x844e 65 burned + 1 staked, 9 calls, 3.0 s, its staked position open; public staker
+  0x8259…b04c 111 NFTs (103 burned, 8 staked in 6 gauges), 63 calls, 39 s, its 3 positions staked in
+  pools past index 2,000 (pool idx 2066) now shown In Range. About 26 CU per call; the time is behind the
+  open rows (closed half only). Production log: 0x844e 2.0 s cold then 0.17-0.26 s, 0xd99a 33-302 ms.
+  Account 1 watched set, local new vs old same minute: notice gone at +10 s, total $16,421.68 without
+  `≈`, Yield History saving (0 → 24 points in 150 s; old build 0 points, `≈`).
+  **Kamino:** the Altcoins address (`ByYiZxp8QrdENEask…`) was not a Kamino market (404 on every call);
+  now `ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5` from `/v2/kamino-market`. Production: all three
+  markets 200; no wallet in the standard set holds a Kamino obligation.
+  **Contrast (canvas-resolved, dark / light):** VIEW badge 2.64 → 11.31 / 1.86 → 5.69; Solana chain
+  label 4.33 → 5.94 / 4.52 → 6.52.
+  **`useWalletLevelFees` loop:** with nothing to scan the effect set a fresh `[]` each run; on analytics
+  for a wallet with no fee sources (Account 2 EVM) that looped into React error #185 and the page showed
+  no figures (old build 1 of 3 loads, new 2 of 3, dev server every load). It keeps the same empty array
+  now; 0 errors on 5 loads.
+  **Production B7 (baselines on `f027ab9` 00:35-01:15 UTC, new build 02:08-02:57 UTC):** Account 1
+  set Deposited 15,709.28, Fees 15,379.67, Capital G/L ≈ −16,316.05 identical, dashboard notice gone,
+  $16,382.00 plain. Account 2 EVM Fees 3,675.89, ≈ −1,445.78 identical, notice gone; Account 2 Sui
+  12,649.67 / −12,681.91 identical; 2rr3SF identical; 0x15ac ≈ −2,138.44 → −2,138.37; 0x9d6e ≈ −4,690.53
+  → −4,690.37; 0x0256 −3,642.61; heavy +635.75; 0x81e1 +56.13; 0x925c +8.17; 0x844e ≈ +9.42 → +9.82,
+  notice gone. No non-200, 0 page errors, no 5xx or out-of-memory in the logs. The heavy wallet showed
+  one open Cetus WAL/SUI row on two loads ($6,685.61, then $3,105.54) and none at 03:32 UTC: the chain
+  agrees each time (a bot opening and closing positions). Test: `npx tsx scripts/ceiling-check-test.ts`
+  (12), full suite green.
+  **Found, not fixed:** the public staker shows "couldn't load: PancakeSwap" and a Uniswap V3 history
+  notice; no wallet in the standard set has an open in-range EVM position (demo shortlist).
+
+- **`f027ab9`** (Batch D, 2026-10-19, live as `dpl_AHiVm2M2G3FrcLxSxNQ2wwAQ9kiv`) — compact
+  incomplete-scan banner (one `<details>` line per source, off the lending page); dashboard total
+  `≈` while any non-info notice stands and `—` + "loading positions…" before the first answer; Yield
+  History saves only a whole total (`usePortfolioHistory` `complete`); no opacity dimming on text
+  (all ≥ 4.5:1 except the two Solana labels and VIEW, fixed in batch E); confirmation on add-wallet
+  and a scanning state on paste.
 
 - **`67af8e5` + `44d8a07`** (Batch C, 2026-10-19, live as `dpl_7xVRz9a75ktQ19sKHCHhjJxmQcYE`) — **Part 1:
   permanent price copies, SUI claims from the day map, self-hosted fonts, full-store behaviour. Part 2:
