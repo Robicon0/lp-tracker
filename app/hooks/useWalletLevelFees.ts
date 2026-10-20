@@ -440,7 +440,10 @@ export function useWalletLevelFees(
     const allWalletKeys = [...new Set([...bluefinByWallet.keys(), ...suiWallets.keys()])].sort();
     if (allWalletKeys.length === 0 && aerodromeByWallet.size === 0 && velodromeByWallet.size === 0 && uniV3ByWalletChain.size === 0 && solanaWallets.size === 0) {
       runIdRef.current += 1; // nothing to scan: drop any in-flight run's result
-      setEvents([]);
+      // Keep the same empty array: a fresh [] on every run re-renders the page, the
+      // caller's arrays are rebuilt, this effect runs again — React error #185
+      // (maximum update depth) on analytics for a wallet with nothing to scan here.
+      setEvents((prev) => (prev.length === 0 ? prev : []));
       setIsLoading(false);
       return;
     }

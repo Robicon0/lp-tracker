@@ -82,6 +82,8 @@ interface AerodromeResponse {
   account: string;
   // Queue item C Phase 1 — present only when an enumeration cap bound.
   truncated?: RouteTruncation[];
+  /** Batch E: the history pass's verdict on the 2,000-pool notice (scope=closed). */
+  ceilingCheck?: { covered: boolean; reason?: string };
   error?: string;
 }
 
@@ -96,6 +98,19 @@ interface AerodromeResponse {
 // `pendingSources` while it loads and the totals stay marked until it lands.
 // The notices are keyed per half: a clean answer from one must not clear a
 // notice the other raised.
+// Batch E (Option B): the history pass (scope=closed) may report that it
+// accounted for every NFT the wallet ever held and that the chain cross-checks
+// agree (`ceilingCheck.covered`). Only then is the open sweep's 2,000-pool
+// notice dropped for that wallet. The last open notices are kept so the notice
+// comes straight back if a later history pass is not covered.
+const lastOpenNotices = new Map<string, RouteTruncation[] | undefined>();
+const ceilingCovered = new Map<string, boolean>();
+function applyOpenNotices(account: string): void {
+  const k = account.toLowerCase();
+  const list = lastOpenNotices.get(k);
+  applyTruncationNotices('Aerodrome', account, ceilingCovered.get(k) ? (list ?? []).filter((t) => t.reason !== 'pool-scan-ceiling') : list);
+}
+
 async function fetchAerodromeScope(
   account: string,
   scope: 'open' | 'closed',
@@ -107,11 +122,20 @@ async function fetchAerodromeScope(
     // Record (or clear) the truncation notice for this source+wallet. Only
     // reached on a SUCCESSFUL response — a failed fetch must never be read as
     // evidence that the enumeration was complete.
-    applyTruncationNotices(noticeSource, account, data.truncated);
+    if (scope === 'open') {
+      lastOpenNotices.set(account.toLowerCase(), data.truncated);
+      applyOpenNotices(account);
+    } else {
+      applyTruncationNotices(noticeSource, account, data.truncated);
+      ceilingCovered.set(account.toLowerCase(), data.ceilingCheck?.covered === true);
+      applyOpenNotices(account);
+    }
 
     return (data.positions || []).map((p: AerodromePosition) => ({ ...p }));
   } catch (error) {
     console.error('Failed to fetch Aerodrome positions:', error);
+    // A failed history pass proves nothing: the 2,000-pool notice comes back.
+    if (scope === 'closed' && ceilingCovered.get(account.toLowerCase())) { ceilingCovered.set(account.toLowerCase(), false); applyOpenNotices(account); }
     // A failed request is not "no positions" (positionsFetch.ts): the page keeps the last good rows.
     throw error;
   }

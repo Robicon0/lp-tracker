@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 // Kamino Finance — three lending markets on Solana, queried per wallet:
 //   Main     7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF
 //   JLP      DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek
-//   Altcoins ByYiZxp8QrdENEaskMe388D4kFqFSFJ8ZKMjKcFnf4o5
+//   Altcoins ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5
 //
 // Public REST API at https://api.kamino.finance/. We fan out one
 // `reserves/metrics` + one `users/{wallet}/obligations` call per market in
@@ -31,7 +31,10 @@ const KAMINO_API = 'https://api.kamino.finance';
 const MARKETS: Array<{ key: string; pubkey: string }> = [
   { key: 'Main',     pubkey: '7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF' },
   { key: 'JLP',      pubkey: 'DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek' },
-  { key: 'Altcoins', pubkey: 'ByYiZxp8QrdENEaskMe388D4kFqFSFJ8ZKMjKcFnf4o5' },
+  // Batch E: the address that was here (ByYiZxp8QrdENEask…) is not a Kamino
+  // market — every Altcoins request answered 404. This is the one Kamino lists
+  // (api.kamino.finance/v2/kamino-market, "Altcoins Market").
+  { key: 'Altcoins', pubkey: 'ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5' },
 ];
 
 const TWO_60 = 2n ** 60n;

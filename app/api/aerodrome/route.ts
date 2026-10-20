@@ -14,6 +14,7 @@ import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
 import { cachedPoolTokens, cachedReceipt } from '../../lib/evmImmutableCache';
 import { guardClosedList, type ClosedRecordLike } from '../../lib/evmClosedListGuard';
 import { alchemyKey } from '../../lib/alchemyKey';
+import { checkPoolCeilingCoverage, type CeilingCheck } from '../../lib/aerodromeCeilingCheck';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['aerodrome-slipstream', 'aerodrome-v1'] as const;
@@ -656,6 +657,7 @@ export async function GET(request: Request) {
     // only on a chain verdict (its burn in the transfer index, or a reverted
     // ownerOf / zero liquidity), never from "Sugar did not return it".
     let closedPositions: Record<string, unknown>[] = [];
+    let ceilingCheck: CeilingCheck | null = null;
     if (enumerationPromise) {
       // An empty sweep returns no prices; the closed records carry spot prices
       // (the activity route's last-resort basis), so read them here.
@@ -675,6 +677,25 @@ export async function GET(request: Request) {
       // this list is not necessarily everything.
       if (closed.notice) truncated.push(closed.notice);
       if (closed.holderNotice) truncated.push(closed.holderNotice);
+
+      // Batch E (Option B): the open sweep's 2,000-pool notice can be cleared
+      // only by this history pass, and only when it accounts for every NFT the
+      // wallet ever held and both chain cross-checks agree (aerodromeCeilingCheck.ts).
+      // Not attempted when this pass is itself short: then the notice stays.
+      if (open.truncated.some((t) => t.reason === 'pool-scan-ceiling')
+        && !closed.notice && !closed.holderNotice && !guarded.notice) {
+        const enumeration = await enumerationPromise;
+        if (enumeration) {
+          const t0 = Date.now();
+          const shownOpenIds = new Set<string>([...open.heldIds, ...closed.positions.filter((p) => p.status !== 'Closed').map((p) => String(p.depositId))]);
+          ceilingCheck = await checkPoolCeilingCoverage({
+            rpc: TENDERLY_RPC, nftManager: NFT_MANAGER, voter: AERODROME_VOTER, account,
+            history: { ids: enumeration.ids, complete: enumeration.complete, burned: enumeration.history?.burned },
+            shownOpenIds,
+          }).catch((err): CeilingCheck => ({ covered: false, reason: `check failed: ${String(err).slice(0, 80)}`, everHeld: enumeration.ids.length, burned: 0, walletHeld: 0, staked: 0, otherOwner: 0, gaugesChecked: 0, rpcCalls: 0 }));
+          console.log(`[aerodrome] pool-ceiling check ${account}: ${ceilingCheck.covered ? 'COVERED' : 'kept'} ${ceilingCheck.reason ?? ''} | ever ${ceilingCheck.everHeld}, burned ${ceilingCheck.burned}, held ${ceilingCheck.walletHeld}, staked ${ceilingCheck.staked}, other ${ceilingCheck.otherOwner}, balanceOf ${ceilingCheck.balanceOf ?? '-'}, gauges ${ceilingCheck.gaugesChecked}, calls ${ceilingCheck.rpcCalls}, ${Date.now() - t0} ms`);
+        }
+      }
     }
 
     // The closed half is built from what the sweep returned. When the sweep
@@ -693,6 +714,8 @@ export async function GET(request: Request) {
       // Additive (queue item C Phase 1) — present ONLY when a cap bound or a
       // lookup failed (queue item B).
       ...(truncated.length > 0 ? { truncated } : {}),
+      // Batch E: present on the closed scope when the 2,000-pool check ran.
+      ...(ceilingCheck ? { ceilingCheck } : {}),
     });
   } catch (error) {
     console.error('[aerodrome] positions route failed:', error);

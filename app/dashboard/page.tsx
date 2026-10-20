@@ -1208,7 +1208,7 @@ export default function Dashboard() {
                     <span
                       style={{
                         fontSize: 9,
-                        color: "color-mix(in srgb, var(--pos) 40%, transparent)",
+                        color: "var(--pos)",
                         background: "color-mix(in srgb, var(--pos) 6.7%, transparent)",
                         padding: "2px 6px",
                         borderRadius: 2,
@@ -2012,7 +2012,10 @@ export default function Dashboard() {
                                         textTransform: "uppercase",
                                         border: `1px solid ${chainTok.border}`,
                                         background: chainTok.faint,
-                                        color: chainTok.color,
+                                        // Text mixed toward the foreground so it reads at ≥ 4.5:1
+                                        // in both themes (Solana's #9945ff alone is 4.33:1 on dark);
+                                        // the border and fill keep the chain colour.
+                                        color: `color-mix(in srgb, ${chainTok.color} 75%, var(--fg))`,
                                         fontWeight: 600,
                                       }}
                                     >
