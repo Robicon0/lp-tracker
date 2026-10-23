@@ -43,6 +43,7 @@ import { Redis } from '@upstash/redis';
 import { rpcUrlFromEnv } from './rpcEnv';
 import { runResumableScan, readStoredScan, _resetHistoryScanOverlay, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
 import { createSharedRedis } from './sharedStore';
+import { withSuiGqlSlot } from './suiGraphql';
 
 const DEFAULT_ENDPOINT = 'https://graphql.mainnet.sui.io/graphql';
 function endpoint(): string { return rpcUrlFromEnv('SUI_GRAPHQL_URL') || DEFAULT_ENDPOINT; }
@@ -51,7 +52,6 @@ function endpoint(): string { return rpcUrlFromEnv('SUI_GRAPHQL_URL') || DEFAULT
 // 40 s timeout. Queries here are a few hundred bytes and a dozen nodes.
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_ATTEMPTS = 4;
-const MAX_CONCURRENT = 4;
 const TX_PAGE = 50;
 const EVENT_PAGE = 50;
 const MAX_TX_PAGES = 200; // object history only: 10,000 transactions; hitting it throws
@@ -65,13 +65,9 @@ export class SuiHistoryUnavailableError extends Error {
 }
 
 // ── Paced transport ──────────────────────────────────────────────────────────
-let active = 0;
-const waiters: Array<() => void> = [];
-async function acquire<T>(fn: () => Promise<T>): Promise<T> {
-  if (active >= MAX_CONCURRENT) await new Promise<void>((r) => waiters.push(r));
-  active += 1;
-  try { return await fn(); } finally { active -= 1; waiters.shift()?.(); }
-}
+// One limiter per instance for ALL Sui GraphQL traffic (history and live state),
+// owned by suiGraphql.ts.
+const acquire = withSuiGqlSlot;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One GraphQL call. Retries throttling, 5xx, timeouts and data-less errors; throws when it cannot answer. */

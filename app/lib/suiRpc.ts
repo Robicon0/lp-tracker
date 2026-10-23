@@ -1,5 +1,6 @@
 import { rpcUrlFromEnv } from './rpcEnv';
 import { isAlchemyThrottledError } from './alchemyLimiter';
+import { SUI_GQL_METHODS, suiGqlAsRpc } from './suiGraphql';
 
 // Sprint SUI-RPC-RELIABILITY — shared Sui JSON-RPC client with automatic
 // endpoint failover, per-call timeout, and a global concurrency semaphore.
@@ -119,6 +120,19 @@ export interface SuiRpcOptions { timeoutMs?: number }
  * (same shape the old bare helper produced on a bad response).
  */
 export async function suiRpc(method: string, params: unknown[], opts: SuiRpcOptions = {}): Promise<unknown> {
+  // 2026-10-23: Sui switched JSON-RPC off (Alchemy and the public fullnodes).
+  // The six live-state methods are answered from Sui GraphQL in the same shapes
+  // (app/lib/suiGraphql.ts, its own limiter, timeouts and backoff). A read that
+  // cannot be answered is `undefined`, as before.
+  if (SUI_GQL_METHODS.has(method)) {
+    try {
+      return await suiGqlAsRpc(method, params);
+    } catch (err) {
+      exhausted += 1;
+      console.error(`[suiRpc] ${method} failed over GraphQL:`, err instanceof Error ? err.message : err);
+      return undefined;
+    }
+  }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return acquire(async () => {
     // Sprint 2b — retry with backoff. Before this, ONE throttled or timed-out
