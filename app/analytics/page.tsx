@@ -3,7 +3,7 @@
 import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } from "react";
 import { TruncationBanner } from "../components/TruncationBanner";
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
-import { isUnsupportedReason, UNSUPPORTED_UNCHECKED } from "../lib/enumerationTruncation";
+import { isSuiUnavailableReason, isUnsupportedReason, UNSUPPORTED_UNCHECKED } from "../lib/enumerationTruncation";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TerminalNavbar from "../components/TerminalNavbar";
@@ -1133,12 +1133,21 @@ export default function Analytics() {
   // Positions DefiDesh cannot read yet (Uniswap V4, chains not scanned) are in
   // no total. The open-position sums and Net P&L carry the mark while the
   // wallet holds any, or while the count could not be read (rule (e)).
-  const unsupportedNotices = useTruncationNotices().filter((n) => isUnsupportedReason(n.reason));
+  const allTruncationNotices = useTruncationNotices();
+  const unsupportedNotices = allTruncationNotices.filter((n) => isUnsupportedReason(n.reason));
   const unsupportedCount = unsupportedNotices.reduce((s, n) => s + (n.reason === UNSUPPORTED_UNCHECKED ? 0 : n.returned), 0);
   const unsupportedNote = unsupportedNotices.length === 0 ? null
     : unsupportedCount > 0
       ? `${unsupportedCount} position${unsupportedCount === 1 ? "" : "s"} we can't read yet — not in this total`
       : "couldn't check for positions we can't read yet";
+  // Sui could not be read: open Sui positions (and lending, balances) are in no
+  // total, so the open sums and Net P&L carry the mark and the snapshot waits.
+  const suiUnavailable = allTruncationNotices.some((n) => isSuiUnavailableReason(n.reason));
+  const suiUnavailableNote = suiUnavailable ? "Sui data temporarily unavailable — open Sui positions not in this total" : null;
+  // Header cards (portfolio, daily income, unclaimed fees) read open positions
+  // and lending: a failed source or unreadable Sui leaves them unknown, never 0.
+  const headerPartial = suiUnavailable || failedSources.length > 0;
+  const headerPartialNote = suiUnavailable ? "incomplete — Sui data temporarily unavailable" : `incomplete — couldn't load ${failedSources.join(" · ")}`;
   const closedGaps = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind !== "not-held");
   const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0 || feesNearbyDayClaims > 0 || feesUnderlyingClaims > 0;
   const feesNote = feesStillLoading
@@ -1240,6 +1249,7 @@ export default function Analytics() {
     }
     if (c.pendingClosed) add(closedNotPricedNote);
     if (c.unsupported) add(unsupportedNote);
+    if (c.unsupported) add(suiUnavailableNote);
     if (c.feesPending && feesIncomplete && feesNote && feesNote !== closedNotPricedNote) {
       add(c.pendingClosed ? `fees ${feesNote}` : feesNote);
     } else if (c.feesPending && feesIncomplete && !c.pendingClosed) add(feesNote);
@@ -1285,6 +1295,7 @@ export default function Analytics() {
     //   • every LP total is zero while closed rows exist (ITEM 0i).
     if (failedSources.length > 0) return;
     if (feeFailedSources.length > 0) return; // a fee source failed: its fees are missing, not zero
+    if (suiUnavailable) return; // Sui could not be read: its positions are missing, not zero
     if (lpPnlLive.included + lpPnlLive.excluded + lpPnlLive.errored < filteredPositions.length) return;
     if (lpPnlLive.aggregateSelfContradictory) return;
     if (snapshotWrittenForRef.current === walletSetKey) return;
@@ -1349,7 +1360,7 @@ export default function Analytics() {
     }, 1500);
     return () => clearTimeout(saveTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveTrustworthy, activityLoading, walletFeesLoading, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory, feeFailedSources.length]);
+  }, [liveTrustworthy, activityLoading, walletFeesLoading, hasWallet, walletSetKey, snapshotChecked, positions.length, lendingPositions.length, failedSources.length, filteredPositions.length, lpPnlLive.included, lpPnlLive.excluded, lpPnlLive.aggregateSelfContradictory, feeFailedSources.length, suiUnavailable]);
 
   // ── Chain / protocol breakdowns ────────────────────────────────────────────
   const chainExposure = useMemo(() => {
@@ -1734,11 +1745,11 @@ export default function Analytics() {
                 </div>
                 {headerSkel ? <Skel w={120} h={28} /> : (
                   <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
-                    {fmtCompact(totalPortfolioValue)}
+                    {headerPartial ? (totalPortfolioValue === 0 ? "—" : `≈ ${fmtCompact(totalPortfolioValue)}`) : fmtCompact(totalPortfolioValue)}
                   </div>
                 )}
-                <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {headerSkel ? <Skel w={140} h={11} /> : <>LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}</>}
+                <div style={{ fontSize: 11, marginTop: 6, color: headerPartial ? C.amber : C.text, letterSpacing: "0.06em" }}>
+                  {headerSkel ? <Skel w={140} h={11} /> : headerPartial ? headerPartialNote : <>LP {fmtCompact(totalLpValue)}{totalLendingValue > 0 ? ` · Lending ${fmtCompact(totalLendingValue)}` : ""}</>}
                 </div>
               </div>
 
@@ -1756,11 +1767,11 @@ export default function Analytics() {
                       textShadow: totalDailyIncome > 0 ? "0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
                     }}
                   >
-                    {totalDailyIncome > 0 ? `+${fmt$(totalDailyIncome)}` : "$0.00"}
+                    {totalDailyIncome > 0 ? `${headerPartial ? "≈ " : ""}+${fmt$(totalDailyIncome)}` : headerPartial ? "—" : "$0.00"}
                   </div>
                 )}
-                <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {headerSkel ? <Skel w={120} h={11} /> : (totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions")}
+                <div style={{ fontSize: 11, marginTop: 6, color: headerPartial ? C.amber : C.text, letterSpacing: "0.06em" }}>
+                  {headerSkel ? <Skel w={120} h={11} /> : headerPartial ? headerPartialNote : (totalDailyIncome > 0 ? `${fmt$(totalDailyIncome * 30)}/mo` : "No active positions")}
                 </div>
               </div>
 
@@ -1771,11 +1782,11 @@ export default function Analytics() {
                 </div>
                 {headerSkel ? <Skel w={100} h={28} /> : (
                   <div style={{ fontSize: 28, fontWeight: 700, color: C.textBright, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
-                    {fmt$(totalLpFees)}
+                    {headerPartial ? (totalLpFees === 0 ? "—" : `≈ ${fmt$(totalLpFees)}`) : fmt$(totalLpFees)}
                   </div>
                 )}
-                <div style={{ fontSize: 11, marginTop: 6, color: C.text, letterSpacing: "0.06em" }}>
-                  {headerSkel ? <Skel w={140} h={11} /> : `${positionsWithFeesView} positions with fees`}
+                <div style={{ fontSize: 11, marginTop: 6, color: headerPartial ? C.amber : C.text, letterSpacing: "0.06em" }}>
+                  {headerSkel ? <Skel w={140} h={11} /> : headerPartial ? headerPartialNote : `${positionsWithFeesView} positions with fees`}
                 </div>
               </div>
 
@@ -2277,7 +2288,7 @@ export default function Analytics() {
                           // Fee totals follow the same rule: a fee source that is
                           // still loading, failed, or holds unpriced claims makes
                           // Fees Collected and Net P&L a partial sum, shown as one.
-                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.feesPending && feesIncomplete) || (c.unsupported && unsupportedNote) ? `≈ ${c.val}` : c.val}
+                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.feesPending && feesIncomplete) || (c.unsupported && (unsupportedNote || suiUnavailableNote)) ? `≈ ${c.val}` : c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>

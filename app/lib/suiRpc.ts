@@ -195,3 +195,22 @@ export async function suiRpcIndexed(method: string, params: unknown[], opts: Sui
 
 // Exposed for diagnostics / tests (never a per-token branch).
 export function _suiEndpointCount(): number { return SUI_ENDPOINTS.length; }
+
+/**
+ * A Sui read that did not answer (every endpoint, every round). Callers that
+ * must not turn a failed read into "owns nothing" (Methodology rule (e)) throw
+ * this and let it reach the route, which answers 503 `sui-unavailable`.
+ * Per-item catch blocks rethrow it instead of skipping the item.
+ */
+export class SuiReadError extends Error {
+  constructor(method: string) { super(`Sui RPC failed (all endpoints) for ${method}`); this.name = 'SuiReadError'; }
+}
+export function isSuiReadError(err: unknown): err is SuiReadError {
+  return err instanceof SuiReadError || (err instanceof Error && err.name === 'SuiReadError');
+}
+/** `suiRpc` that throws `SuiReadError` instead of answering `undefined`. */
+export async function suiRpcOrThrow(method: string, params: unknown[], opts: SuiRpcOptions = {}): Promise<unknown> {
+  const result = await suiRpc(method, params, opts);
+  if (result === undefined) throw new SuiReadError(method);
+  return result;
+}

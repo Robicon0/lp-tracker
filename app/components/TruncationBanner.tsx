@@ -1,7 +1,7 @@
 "use client";
 
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
-import { describeTruncation, isInfoReason, isLookupFailureReason, isUnsupportedReason, unsupportedSummary } from "../lib/enumerationTruncation";
+import { describeTruncation, isInfoReason, isLookupFailureReason, isSuiUnavailableReason, isUnsupportedReason, SUI_UNAVAILABLE_TEXT, unsupportedSummary } from "../lib/enumerationTruncation";
 
 /**
  * Renders the enumeration-truncation notice (queue item C, Phase 1).
@@ -40,18 +40,23 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
   // is false when the lookup simply did not answer.
   const failures = notices.filter((n) => isLookupFailureReason(n.reason)).length;
   const unsupported = notices.filter((n) => isUnsupportedReason(n.reason));
-  const caps = notices.length - failures - unsupported.length;
+  const sui = notices.filter((n) => isSuiUnavailableReason(n.reason));
+  const caps = notices.length - failures - unsupported.length - sui.length;
   const kind =
-    caps === 0 && failures === 0 ? "unsupported"
+    caps === 0 && failures === 0 && unsupported.length === 0 ? "sui"
+    : caps === 0 && failures === 0 ? "unsupported"
     : failures === 0 ? "cap"
     : failures === notices.length - unsupported.length ? "lookup" : "mixed";
   const heading =
-    kind === "unsupported" ? "Some positions can't be read yet"
+    kind === "sui" ? "Sui data temporarily unavailable"
+    : kind === "unsupported" ? "Some positions can't be read yet"
     : kind === "cap" ? "Some positions could not be listed"
     : kind === "lookup" ? "Some history could not be loaded"
     : "Some positions or history could not be loaded";
   const lead =
-    kind === "unsupported"
+    kind === "sui"
+      ? "Sui could not be read, so open Sui positions, Sui balances and Sui lending are missing from every total:"
+      : kind === "unsupported"
       ? "This wallet holds positions DefiDesh does not read yet, so they are not in any total:"
       : kind === "cap"
       ? "A scan limit was reached, so the positions below and every total computed from them are incomplete:"
@@ -68,9 +73,10 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
   // One compact line in plain words (batch D 1a); the full technical text is
   // one click away, never removed. "Aerodrome (Base) positions may be incomplete".
   const what = (n: { source: string; scope?: string }) => (n.scope ? `${n.source} (${n.scope})` : n.source);
-  const capSources = [...new Set(notices.filter((n) => !isLookupFailureReason(n.reason) && !isUnsupportedReason(n.reason)).map(what))];
+  const capSources = [...new Set(notices.filter((n) => !isLookupFailureReason(n.reason) && !isUnsupportedReason(n.reason) && !isSuiUnavailableReason(n.reason)).map(what))];
   const lookupSources = [...new Set(notices.filter((n) => isLookupFailureReason(n.reason)).map((n) => n.source))];
   const summary = [
+    sui.length ? SUI_UNAVAILABLE_TEXT : null,
     ...unsupported.map(unsupportedSummary),
     capSources.length ? `${capSources.join(", ")} positions may be incomplete` : null,
     lookupSources.length ? `${lookupSources.join(", ")} history may be incomplete` : null,

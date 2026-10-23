@@ -12,11 +12,14 @@ import { fetchRaydiumPositions } from "../lib/raydium";
 import { fetchOrcaPositions } from "../lib/orca";
 import { fetchDefiTunaPositions } from "../lib/defituna";
 import { fetchCetusPositions } from "../lib/cetus";
+import { reportSuiRead } from "../lib/enumerationTruncation";
 import { fetchBluefinPositions } from "../lib/bluefin";
 import { fetchMomentumPositions } from "../lib/momentum";
 import { fetchHyperSwapPositions } from "../lib/hyperswap";
 import { fetchPancakeSwapPositions } from "../lib/pancakeswap";
 import { fetchVfatSickles } from "../lib/vfatSickle";
+
+const SUI_SOURCES = new Set(["Cetus", "Bluefin", "Momentum"]);
 
 interface PositionsContextValue {
   positions: AerodromePosition[];
@@ -287,6 +290,16 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
     return [...labels];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, queries.filter((q) => q.isError).length]);
+
+  // A Sui position source that failed shows the ONE Sui-unavailable notice
+  // (≈ on totals, no history snapshot); an answer clears it for that source.
+  const suiStates = queries.map((q, i) => (SUI_SOURCES.has(sources[i].label) ? `${sources[i].label}|${sources[i].address}|${q.isError ? 'e' : q.isSuccess ? 'ok' : ''}` : '')).filter(Boolean).join(',');
+  useEffect(() => {
+    for (const st of suiStates.split(',')) {
+      const [label, address, state] = st.split('|');
+      if (label && state) reportSuiRead(label, address, state === 'ok');
+    }
+  }, [suiStates]);
 
   // Fee and history scans wait for this (firstRowsGate.ts): open rows first.
   const anyPending = queries.some((q) => q.isPending);

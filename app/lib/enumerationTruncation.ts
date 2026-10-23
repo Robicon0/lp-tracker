@@ -203,6 +203,27 @@ export function unsupportedSummary(n: { source: string; scope: string; returned:
     : `${n.source} ${n.scope}: ${n.returned} position${n.returned === 1 ? '' : 's'} we can't read yet`;
 }
 
+/**
+ * A Sui read did not answer (every endpoint failed; since 2026-10-22 Alchemy and
+ * the public fullnode no longer serve Sui JSON-RPC). One notice per feeder
+ * (positions per protocol, balances, each lending protocol) and wallet, all
+ * rendered as ONE plain line. Not info (totals get ≈) and not a `lookup-`
+ * reason (no history failed: closed lists and fees come from stored history).
+ */
+export const SUI_UNAVAILABLE = 'sui-unavailable';
+export const SUI_UNAVAILABLE_TEXT = "Sui data temporarily unavailable: open Sui positions and balances can't be read right now";
+export function isSuiUnavailableReason(reason: unknown): boolean {
+  return reason === SUI_UNAVAILABLE;
+}
+/** Record (ok=false) or clear (ok=true) the Sui-unavailable notice for one feeder and wallet. */
+export function reportSuiRead(feeder: string, address: string, ok: boolean): void {
+  applyTruncationNotices(
+    `Sui (${feeder})`,
+    address,
+    ok ? null : [{ scope: '', cap: 0, returned: 0, knownTotal: null, reason: SUI_UNAVAILABLE }],
+  );
+}
+
 export function isInfoReason(reason: unknown): boolean {
   return reason === POOL_STATS_UNAVAILABLE || reason === POOL_STATS_LAST_KNOWN || reason === NOT_HELD_OPEN || reason === STORE_WRITE_FAILED;
 }
@@ -367,6 +388,10 @@ export function describeTruncation(n: TruncationNotice): string {
   }
   if (n.reason === UNSUPPORTED_UNCHECKED) {
     return `${n.source} ${n.scope}: couldn't check this wallet for positions we can't read yet — some may be missing from the totals`;
+  }
+
+  if (n.reason === SUI_UNAVAILABLE) {
+    return `${n.source}: data temporarily unavailable — open Sui positions and balances can't be read right now and are not in the totals`;
   }
 
   if (n.reason === LOOKUP_UNREADABLE_TX) {

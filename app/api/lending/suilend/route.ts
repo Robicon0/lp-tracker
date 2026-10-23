@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { suiRpc } from '../../../lib/suiRpc';
+import { suiRpcOrThrow, isSuiReadError } from '../../../lib/suiRpc';
 import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 // Suilend on Sui — raw Sui RPC (no SDK)
@@ -22,11 +22,9 @@ const LENDING_MARKET  = '0x84030d26d85eaa7035084a057f2f11f701b7e2e4eda87551becbc
 
 // Sprint SUI-RPC-RELIABILITY: routed through the shared paced+failover Sui client.
 // Preserves the throw-on-failure contract (all endpoints exhausted → undefined → throw).
-async function suiPost(method: string, params: unknown[]): Promise<unknown> {
-  const result = await suiRpc(method, params);
-  if (result === undefined) throw new Error(`Sui RPC failed (all endpoints) for ${method}`);
-  return result;
-}
+// A failed read throws SuiReadError, which every per-item catch rethrows: the
+// route answers 503 rather than leaving the obligation out (rule (e)).
+const suiPost = suiRpcOrThrow;
 
 // Extract symbol from Sui TypeName struct or plain string
 function symbolFromTypeName(coinType: unknown): string {
@@ -302,6 +300,7 @@ export async function GET(request: Request) {
             console.log(`[suilend/route] Deposit: ${symbol} amount=${underlying.toFixed(4)} usd=$${usdValue.toFixed(2)} apy=${apy?.toFixed(4) ?? 'null'}%`);
             supplies.push({ symbol, amount: underlying, usdValue, apy });
           } catch (err) {
+            if (isSuiReadError(err)) throw err;
             console.error('[suilend/route] Deposit parse error:', err);
           }
         }
@@ -334,10 +333,12 @@ export async function GET(request: Request) {
             console.log(`[suilend/route] Borrow: ${symbol} amount=${amount.toFixed(4)} usd=$${usdValue.toFixed(2)}`);
             borrows.push({ symbol, amount, usdValue, apy: 0 });
           } catch (err) {
+            if (isSuiReadError(err)) throw err;
             console.error('[suilend/route] Borrow parse error:', err);
           }
         }
       } catch (err) {
+        if (isSuiReadError(err)) throw err;
         console.error('[suilend/route] Obligation processing error:', err);
       }
     }
@@ -349,6 +350,10 @@ export async function GET(request: Request) {
     });
   } catch (err) {
     console.error('[suilend/route] Unexpected error:', err);
-    return NextResponse.json({ supplies: [], borrows: [], error: String(err) });
+    // Never an empty 200: the wallet's obligations are unknown, not absent.
+    return NextResponse.json(
+      { error: isSuiReadError(err) ? 'sui-unavailable' : 'suilend-read-failed', details: String(err) },
+      { status: 503 },
+    );
   }
 }

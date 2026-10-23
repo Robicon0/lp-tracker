@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
-import { applyTruncationNotices, type RouteTruncation } from "../lib/enumerationTruncation";
+import { applyTruncationNotices, reportSuiRead, type RouteTruncation } from "../lib/enumerationTruncation";
 
 // AlphaFi/AlphaLend (Sui) — implemented via raw Sui RPC in /api/lending/alphafi/route.ts
 // Uses suix_getOwnedObjects to find PositionCap objects, then reads position details.
@@ -153,7 +153,16 @@ export function useLendingPositions(): UseLendingPositionsData {
               addrs.map((a) => `${a.slice(0, 6)}…${a.slice(-4)}`),
             );
             const results = await Promise.allSettled(
-              addrs.map((a) => fetch(`${endpoint}?account=${a}`).then((r) => r.json())),
+              addrs.map(async (a) => {
+                const r = await fetch(`${endpoint}?account=${a}`).catch((err) => {
+                  if (chain === "Sui") reportSuiRead(protocol, a, false);
+                  throw err;
+                });
+                // A Sui lending read that failed is never "no position" (rule (e)).
+                if (chain === "Sui") reportSuiRead(protocol, a, r.ok);
+                if (!r.ok) throw new Error(`${protocol} answered ${r.status}`);
+                return r.json();
+              }),
             );
             if (cancelled) return null;
             const supplies: ExternalLendingAsset[] = [];

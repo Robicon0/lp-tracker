@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { suiRpc } from '../../../lib/suiRpc';
+import { suiRpcOrThrow, isSuiReadError } from '../../../lib/suiRpc';
 import type { RouteTruncation } from '../../../lib/enumerationTruncation';
 
 // AlphaFi / AlphaLend on Sui — raw Sui RPC
@@ -40,11 +40,9 @@ const MARKETS_TABLE   = '0x2326d387ba8bb7d24aa4cfa31f9a1e58bf9234b097574afb06c5d
 type AssetEntry = { symbol: string; amount: number; usdValue: number; apy: number | null };
 
 // Sprint SUI-RPC-RELIABILITY: routed through the shared paced+failover Sui client.
-async function suiPost(method: string, params: unknown[]): Promise<unknown> {
-  const result = await suiRpc(method, params);
-  if (result === undefined) throw new Error(`Sui RPC failed (all endpoints) for ${method}`);
-  return result;
-}
+// A failed read throws SuiReadError; every per-item catch rethrows it, so the
+// route answers 503 instead of leaving a position out (rule (e)).
+const suiPost = suiRpcOrThrow;
 
 // Queue item C Phase 1 — the 5-page bound below caps enumeration at 250 objects.
 // It is far above any realistic lending wallet, but a bound that can bind and
@@ -173,6 +171,7 @@ async function getMarketData(marketId: string): Promise<{ symbol: string; decima
     _marketCache[marketId] = data;
     return data;
   } catch (err) {
+    if (isSuiReadError(err)) throw err;
     console.error(`[alphafi/route] Market ${marketId} fetch failed:`, err);
     return null;
   }
@@ -216,6 +215,7 @@ export async function GET(request: Request) {
   // Request-scoped (queue item C Phase 1).
   const truncationNotices: RouteTruncation[] = [];
 
+  try {
   // ── AlphaLend positions ─────────────────────────────────────────────────────
   await (async () => {
     const [capsOld, capsNew] = await Promise.all([
@@ -281,6 +281,7 @@ export async function GET(request: Request) {
               supplies.push({ symbol: market.symbol, amount: underlyingHuman, usdValue, apy });
             }
           } catch (err) {
+            if (isSuiReadError(err)) throw err;
             console.error('[alphafi/route] Collateral entry error:', err);
           }
         }
@@ -302,9 +303,10 @@ export async function GET(request: Request) {
             const price    = await getPriceUsd(symbol);
             console.log(`[alphafi/route] Borrow: ${symbol} amount=${amount} usd=${(amount*price).toFixed(2)}`);
             borrows.push({ symbol, amount, usdValue: amount * price, apy: 0 });
-          } catch (err) { console.error('[alphafi/route] Loan error:', err); }
+          } catch (err) { if (isSuiReadError(err)) throw err; console.error('[alphafi/route] Loan error:', err); }
         }
       } catch (err) {
+        if (isSuiReadError(err)) throw err;
         console.error('[alphafi/route] PositionCap processing error:', err);
       }
     }
@@ -347,9 +349,18 @@ export async function GET(request: Request) {
         } else {
           console.log(`[alphafi/route] Vault ${symbol}: cannot compute USD. tvl=${tvlRaw} supply=${totalSupply}`);
         }
-      } catch (err) { console.error('[alphafi/route] Receipt error:', err); }
+      } catch (err) { if (isSuiReadError(err)) throw err; console.error('[alphafi/route] Receipt error:', err); }
     }
   })();
+
+  } catch (err) {
+    // Never an empty 200: the wallet's AlphaFi positions are unknown, not absent.
+    console.error('[alphafi/route] read failed:', err);
+    return NextResponse.json(
+      { error: isSuiReadError(err) ? 'sui-unavailable' : 'alphafi-read-failed', details: String(err) },
+      { status: 503 },
+    );
+  }
 
   console.log(`[alphafi/route] Final: ${supplies.length} supplies, ${borrows.length} borrows`);
   return NextResponse.json({

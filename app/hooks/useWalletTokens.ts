@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 import { getTokenLogo } from "../lib/tokenLogos";
+import { reportSuiRead } from "../lib/enumerationTruncation";
 
 // EVM balances come from our own route (/api/evm/token-balances), which calls
 // Alchemy server-side through the limiter: the browser makes no Alchemy call and
@@ -552,8 +553,14 @@ export function useWalletTokens(): WalletTokensData {
           scanTasks.push((async () => {
             try {
               console.log(`[useWalletTokens] Scanning Sui for ${suiAddr}...`);
-              const res = await fetch(`/api/sui/balances?account=${suiAddr}`).then((r) => r.json());
+              const r = await fetch(`/api/sui/balances?account=${suiAddr}`);
               if (cancelled) return;
+              // A failed read is never an empty balance (rule (e)): the chain is
+              // named as failed (≈ on totals) and the Sui notice shows.
+              if (!r.ok) { failedEvm.add("Sui"); reportSuiRead("balances", suiAddr, false); return; }
+              const res = await r.json();
+              if (cancelled) return;
+              reportSuiRead("balances", suiAddr, true);
 
               // Native SUI
               const suiBal = parseFloat(res.suiBalance ?? "0");
@@ -594,7 +601,7 @@ export function useWalletTokens(): WalletTokensData {
                 });
               }
               console.log("[useWalletTokens] Sui done");
-            } catch (err) { console.error("[useWalletTokens] Sui scan failed:", err); }
+            } catch (err) { failedEvm.add("Sui"); reportSuiRead("balances", suiAddr, false); console.error("[useWalletTokens] Sui scan failed:", err); }
           })());
         }
 

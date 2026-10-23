@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import Navbar from "../Navbar";
+import { reportSuiRead, SUI_UNAVAILABLE_TEXT } from "../lib/enumerationTruncation";
 
 interface TokenBalance {
   name: string;
@@ -82,6 +83,7 @@ export default function WalletPage() {
   const [loading, setLoading] = useState(false);
   const [solanaLoading, setSolanaLoading] = useState(false);
   const [suiLoading, setSuiLoading] = useState(false);
+  const [suiFailed, setSuiFailed] = useState(false);
 
   useEffect(() => {
     if (!isConnected || !address) {
@@ -124,10 +126,12 @@ export default function WalletPage() {
       return;
     }
     setSuiLoading(true);
+    setSuiFailed(false);
     fetch(`/api/sui/balances?account=${suiAddress}`)
-      .then((r) => r.json())
-      .then((data) => setSuiBalances(data.error ? null : data))
-      .catch(() => setSuiBalances(null))
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`sui balances ${r.status}`))))
+      .then((data) => { setSuiBalances(data); setSuiFailed(false); reportSuiRead("balances", suiAddress, true); })
+      // A failed read is never an empty balance (rule (e)).
+      .catch(() => { setSuiBalances(null); setSuiFailed(true); reportSuiRead("balances", suiAddress, false); })
       .finally(() => setSuiLoading(false));
   }, [suiAddress]);
 
@@ -356,6 +360,10 @@ export default function WalletPage() {
                         )}
                       </tbody>
                     </table>
+                  </div>
+                ) : suiFailed ? (
+                  <div role="status" className="border border-amber-400/40 rounded-xl p-4 text-amber-200 text-sm">
+                    ⚠ {SUI_UNAVAILABLE_TEXT}
                   </div>
                 ) : null}
               </div>

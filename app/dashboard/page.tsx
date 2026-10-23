@@ -1,7 +1,7 @@
 "use client";
 
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
-import { isInfoReason } from "../lib/enumerationTruncation";
+import { isInfoReason, isSuiUnavailableReason, SUI_UNAVAILABLE_TEXT } from "../lib/enumerationTruncation";
 import { unpricedShortLabel } from "../lib/closedPositionClassify";
 import { useState, useMemo, useEffect, useRef, useCallback, Suspense, type CSSProperties } from "react";
 import { TruncationBanner } from "../components/TruncationBanner";
@@ -270,6 +270,9 @@ export default function Dashboard() {
   const truncationNotices = useTruncationNotices().filter((n) => !isInfoReason(n.reason));
   const headlineTruncated = truncationNotices.length > 0;
   const headlinePartial = (!isLoading && (failedSources.length > 0 || pendingOpenSources.length > 0)) || headlineTruncated;
+  // Sui could not be read (positions, balances or lending): its figures are
+  // unknown, never zero — a total that would read $0 shows "—" instead.
+  const suiUnavailable = truncationNotices.some((n) => isSuiUnavailableReason(n.reason));
   // Per-position activity events — used for proper P&L calculation per row.
   // Per-row P&L on the positions table comes from the SAME on-chain pipeline
   // that feeds the analytics LP P&L totals — no parallel calculation, no
@@ -938,7 +941,7 @@ export default function Dashboard() {
                       lower total (measured 2026-10-11 with the Cetus pool read
                       failing: $15,269.89 shown unmarked for a $26.8k wallet, the
                       only notice below the fold). */}
-                  {headlineFirstLoad ? "—" : (<>
+                  {headlineFirstLoad || (headlinePartial && totalValue === 0) ? "—" : (<>
                   {mounted && headlinePartial && <span style={{ fontSize: 32, color: C.amber, fontWeight: 500, marginRight: 8 }}>≈</span>}
                   ${splitTotal.whole}
                   <span style={{ fontSize: 32, color: C.textMid, fontWeight: 500 }}>.{splitTotal.cents}</span>
@@ -951,7 +954,9 @@ export default function Dashboard() {
                 )}
                 {mounted && !headlineFirstLoad && headlinePartial && (
                   <div data-headline-partial="1" style={{ marginTop: 8, fontSize: 12, color: C.amber, letterSpacing: "0.04em" }}>
-                    {failedSources.length > 0
+                    {suiUnavailable
+                      ? `incomplete — Sui data temporarily unavailable${failedSources.filter((f) => !["Cetus", "Bluefin", "Momentum"].includes(f)).length ? ` · couldn't load ${failedSources.filter((f) => !["Cetus", "Bluefin", "Momentum"].includes(f)).join(" · ")}` : ""}`
+                      : failedSources.length > 0
                       ? `incomplete — couldn't load ${failedSources.join(" · ")}`
                       : pendingOpenSources.length > 0 && !isLoading
                         ? `still loading ${pendingOpenSources.join(" · ")}`
@@ -1058,7 +1063,7 @@ export default function Dashboard() {
               {[
                 {
                   label: "Positions",
-                  val:   String(allPositions.length),
+                  val:   allPositions.length === 0 && (suiUnavailable || failedSources.length > 0) ? "—" : String(allPositions.length),
                   cls:   "white" as const,
                   sub:   uniqueChains > 0 ? `across ${uniqueChains} chain${uniqueChains === 1 ? "" : "s"}` : "—",
                 },
@@ -1323,12 +1328,12 @@ export default function Dashboard() {
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {walletTokensLoading ? "—" : `${lendingPriceGap ? "≈ " : ""}${fmt$(combinedLendingValue)}`}
+                  {walletTokensLoading || (suiUnavailable && combinedLendingValue === 0) ? "—" : `${lendingPriceGap || suiUnavailable ? "≈ " : ""}${fmt$(combinedLendingValue)}`}
                 </div>
                 <div style={{ marginTop: 20 }}>
                   {topLending.length === 0 ? (
                     <div style={{ fontSize: 14, color: C.text, padding: "8px 0" }}>
-                      {hasWallet ? "No lending positions" : "Connect a wallet to see lending"}
+                      {suiUnavailable ? "Sui lending couldn't be read right now" : hasWallet ? "No lending positions" : "Connect a wallet to see lending"}
                     </div>
                   ) : (
                     topLending.map((p, i) => (
@@ -1867,6 +1872,15 @@ export default function Dashboard() {
                     </div>
                     <div style={{ color: C.text, fontSize: 14 }}>
                       Connect a wallet to track LP positions across EVM, Solana, and Sui.
+                    </div>
+                  </>
+                ) : allPositions.length === 0 && (suiUnavailable || failedSources.length > 0) ? (
+                  <>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: C.amber, marginBottom: 8, letterSpacing: "0.06em" }}>
+                      POSITIONS_UNAVAILABLE
+                    </div>
+                    <div style={{ color: C.text, fontSize: 14 }}>
+                      {suiUnavailable ? SUI_UNAVAILABLE_TEXT : `Couldn't load ${failedSources.join(" · ")} — positions there are unknown, not absent.`}
                     </div>
                   </>
                 ) : allPositions.length === 0 ? (

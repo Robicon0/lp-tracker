@@ -30,7 +30,12 @@ export async function GET(request: Request) {
       lockedBalance: Record<string, string>;
     }> | null;
 
-    if (!balances) return NextResponse.json({ suiBalance: '0.0000', tokens: [] });
+    // A read that did not answer is never "holds nothing" (rule (e)): the page
+    // shows the Sui-unavailable notice instead of an empty balance.
+    if (!Array.isArray(balances)) {
+      console.error(`[sui/balances] balance read failed for ${account}`);
+      return NextResponse.json({ error: 'sui-unavailable' }, { status: 503 });
+    }
 
     const suiEntry = balances.find((b) => b.coinType === '0x2::sui::SUI');
     const suiBalance = suiEntry
