@@ -235,6 +235,17 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
+**🔴🔴 SUI OUTAGE (found 2026-10-22 22:46 UTC, NOT fixed): every Sui position route fails on
+production.** Alchemy Sui answers "suix_getOwnedObjects is not supported. JSON-RPC has been removed on
+Sui as of Sui v1.82. Please migrate to gRPC."; the public fullnode is deprecated too. `/api/cetus`,
+`/api/bluefin`, `/api/momentum` answer 503 `position-list-read-failed` (shown as "couldn't load");
+AlphaFi and Suilend lending fail; `/api/sui/balances` answers 200 with an EMPTY list (a silent "owns
+nothing", rule (e) violation). Closed lists and fee scans still answer from stored history (GraphQL).
+No such failure in the logs before 2026-10-22. Fix shape: move the 6 JSON-RPC methods used through
+`app/lib/suiRpc.ts` (getOwnedObjects, multiGetObjects, getDynamicFieldObject, getCoinMetadata,
+getAllBalances, getObject; 15 files) to Sui GraphQL, which `suiHistory.ts` already uses; the nested
+Move field shapes differ. Ranks above everything below.
+
 **🔴 RECONCILIATION PLAN (owner-approved 2026-10-08; step 1a shipped, the rest NOT started —
 each needs its own go-ahead). Ranks above everything below.**
 
@@ -964,6 +975,51 @@ enumeration) is still the way to find such a position for a wallet whose history
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`b52baed`** (Uniswap Base + "can't read yet" notice, 2026-10-23, live as `dpl_Fijeqdq6x1XgPEu6XHepHZhzoVwM`)
+  — **Uniswap V3 on Base; a notice for Uniswap positions DefiDesh cannot read.**
+  **Base.** Added to `/api/uniswap/v3` and `/api/uniswap/activity` (NPM `0x03a520b3…34f1`, factory
+  `0x33128a8f…FDfD`, deploy block 1,371,680). History through the transfer index
+  (`getVerifiedPositionLogs`), as Aerodrome on Base; an unverified position answers 503
+  `history-unverified`. Open positions on EVERY Uniswap chain are now valued at the pool's `slot0`
+  price (was a range-midpoint estimate) with pending fees (`calcFeeGrowthInsideX128` /
+  `safeCalcPendingFeeX128` in `clmmFeeMath.ts`, u256, underflow-guarded); a failed pool read adds
+  `lookupFailureNotice('<Chain> pool price')`. No cache bump: Base events are new keys, open values
+  are not in a versioned cache.
+  **Chain checks.** Account 1: 6298519 In Range, 3.053172 WETH + 1,204.876875 USDC ($8,478.39,
+  22:34 UTC); a `decreaseLiquidity` simulation returns 3.053171666 / 1,204.876847; `collect`
+  simulation $64.02 vs route 63.94. 6281713 Closed (owned, liquidity 0): liquidity in
+  2,628,590,579,583,027 = liquidity out; deposit $8,527.72 (ETH 2,370.56; DeFiLlama 2,371.87),
+  withdrawal $8,410.92 (2,338.09; 2,337.18), Capital G/L −116.80, fee 0.008744 WETH + 21.193316 USDC
+  = $42.30 at the claim-day price. Account 2: 6298517 open (3.300731 WETH + 1,265.286037 USDC, equal
+  to the simulation), 6281718 closed (one-sided 3.834587 WETH in and out, raw logs checked: −124.50,
+  fee 45.09).
+  **Notice.** NEW `/api/uniswap/unsupported`: one `balanceOf` per manager (V4 PositionManager on 10
+  chains, V3 on 6 unscanned chains; 7 on Alchemy ≈ 182 CU), 5-min memo of complete answers only. A
+  count above zero → `unsupported-positions` ("Uniswap V4 / Base: 1 position we can't read yet"); a
+  failed read → `unsupported-unchecked`, never a clean zero. Dashboard total `≈` (any non-info
+  notice); analytics Deposited / Current Value / Net P&L `≈` + "N positions we can't read yet — not
+  in this total". Banner heading "Some positions can't be read yet". Test wallet
+  `0x5cfb90cc…6614` (one V4 NFT on Base) shows it on production.
+  **B7.** Local old/new 22:39–23:25 UTC (10-22): only Uniswap figures moved. Production baselines
+  00:36–01:14 UTC, production new 01:24–02:02 UTC (10-23): Solana 2rr3SF identical; Account 1 set
+  Closed 124 → 125, Deposited ≈ 5,644.83 → ≈ 13,971.01 (+8,326.18), Fees 15,379.67 → 15,421.97
+  (+42.30, Uniswap 173.26 → 215.56), Capital G/L ≈ −16,316.05 → ≈ −16,432.85 (−116.80);
+  Account 2 EVM Closed 15 → 16, Deposited 0 → 8,964.74, Fees 3,675.89 → 3,720.98, Capital G/L
+  ≈ −1,445.78 → ≈ −1,570.28; Sui 0x15ac ≈ −2,112.70, 0x9d6e ≈ −2,437.18, 0x0256 −3,642.61, heavy
+  +635.75, 0x81e1 +56.13 identical (closed lists only, see the Sui outage); 0x844e ≈ +9.67 → ≈ +9.73
+  (estimates). Non-200 set identical before and after; no error on any Uniswap route; no
+  out-of-memory.
+  **CU (local, server Alchemy calls, EVM-only page, 10-22 23:28–23:42 UTC, old → new):** Account 1
+  first load 3,618 → 5,378 (134 → 194 calls; +38 Base `eth_call`, +3 transfer-index, the count),
+  second 3,066 → 4,042; Account 2 first 4,914 → 5,708. `/api/uniswap/v3` first call 18.9 → 26.2 s on
+  Account 1 (Base history behind it); first dashboard row unchanged (it does not wait for Uniswap).
+  **Demo shortlist (production, 02:03 UTC, 0xd99a pasted):** first In Range row desktop 4.3 s, iPad
+  8.1 s, iPhone 14 3.5 s, iPhone SE 3.9 s; $8,497-8,502, In Range (1), Closed (19); no overflow, 0
+  page errors. Screenshots: `~/Documents/defidesh-reports/work-2026-10-23/demo/`.
+  Test: `npx tsx scripts/uniswap-base-unsupported-test.ts` (17).
+  **Found, not fixed:** PancakeSwap answers 503 for `0x5cfb90cc…` ("execution reverted" on the BNB
+  read, production too); dashboard reads "1 positions claiming".
 
 - **`837c593`** (Batch E, 2026-10-20, live as `dpl_8SuneFkhfHNJz4dQHuXLSpPGSH1x`) — **The Aerodrome
   2,000-pool notice clears by NFT ownership; Kamino Altcoins market fixed; label contrast; an analytics
