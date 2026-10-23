@@ -8,7 +8,7 @@ import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
 import { logPrice } from '../../../lib/priceLogger';
 import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
-import { archiveRpcUrl, type ArchiveChain } from '../../../lib/evmArchiveRpc';
+import { archiveRpcUrl, archiveServesWideLogs, type ArchiveChain } from '../../../lib/evmArchiveRpc';
 import { getVerifiedPositionLogs } from '../../../lib/evmAssetTransferHistory';
 import { resolveEvmPositionContexts } from '../../../lib/evmPoolContext';
 import {
@@ -25,7 +25,7 @@ const ALCHEMY_KEY = alchemyKey();
 // Tenderly public gateways — primary for eth_getLogs: full-history, no block-range limit, fast.
 // NOTE: no BNB Chain entry — Tenderly has no public BSC gateway. BNB skips
 // straight to publicnode chunked via ROLLING_SCAN_DEPTH below.
-const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism'];
+const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism', 'base'];
 const TENDERLY_RPCS: Record<string, string> = Object.fromEntries(ARCHIVE_CHAINS.map((c) => [c, archiveRpcUrl(c)]));
 
 // LlamaRPC public RPCs — secondary: now enforces 30k block range limit (code -32012)
@@ -34,6 +34,7 @@ const BLAST_RPCS: Record<string, string> = {
   arbitrum: 'https://arb1.llamarpc.com',
   polygon:  'https://polygon.llamarpc.com',
   optimism: 'https://op.llamarpc.com',
+  base:     'https://base.llamarpc.com',
   bnb:      'https://binance.llamarpc.com',
 };
 
@@ -43,6 +44,7 @@ const PUBLIC_NODE_RPCS: Record<string, string> = {
   arbitrum: 'https://arbitrum-one-rpc.publicnode.com',
   polygon:  'https://polygon-bor-rpc.publicnode.com',
   optimism: 'https://optimism-rpc.publicnode.com',
+  base:     'https://base-rpc.publicnode.com',
   bnb:      'https://bsc-rpc.publicnode.com',
 };
 
@@ -52,6 +54,7 @@ const ALCHEMY_RPCS: Record<string, string> = {
   arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
   polygon:  `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
   optimism: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+  base:     `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
   bnb:      `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
 };
 
@@ -64,6 +67,7 @@ const NFT_MANAGERS: Record<string, string> = {
   arbitrum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   polygon:  '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   optimism: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  base:     '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
   bnb:      '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
 };
 
@@ -73,6 +77,7 @@ const DEPLOY_BLOCKS: Record<string, number> = {
   arbitrum:    165_216,  // Uniswap V3 on Arbitrum launch
   polygon:  22_761_331,  // Uniswap V3 on Polygon launch
   optimism:   3_000_000, // Uniswap V3 on Optimism launch
+  base:       1_371_680, // Uniswap V3 on Base launch
   bnb:      26_324_000,  // Uniswap V3 on BNB Chain launch (March 2023, ~block 26.3M)
 };
 
@@ -127,6 +132,11 @@ const STABLECOINS_BY_CHAIN: Record<string, Set<string>> = {
     '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58', // USDT
     '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1', // DAI
   ]),
+  base: new Set([
+    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // USDC
+    '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca', // USDbC
+    '0x50c5725949a6f0c72e6c4a641f24049a917db0cb', // DAI
+  ]),
   bnb: new Set([
     '0x55d398326f99059ff775485246999027b3197955', // USDT (18 decimals on BSC)
     '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', // USDC (18 decimals on BSC)
@@ -163,6 +173,9 @@ const CG_IDS_BY_CHAIN: Record<string, Record<string, string>> = {
     '0x4200000000000000000000000000000000000006': 'ethereum',       // WETH
     '0x4200000000000000000000000000000000000042': 'optimism',       // OP
     '0x68f180fcce6836688e9084f035309e29bf0a2095': 'wrapped-bitcoin', // WBTC
+  },
+  base: {
+    '0x4200000000000000000000000000000000000006': 'ethereum',       // WETH
   },
   bnb: {
     '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': 'binancecoin',    // WBNB
@@ -262,6 +275,12 @@ async function fetchLogsChunked(
   return allLogs;
 }
 
+// The position's history could not be read and checked against the chain.
+// Answered as 503 `history-unverified`; the page shows "history couldn't be loaded".
+class HistoryUnverifiedError extends Error {
+  constructor() { super('history-unverified'); this.name = 'HistoryUnverifiedError'; }
+}
+
 async function fetchLogs(
   chain: string,
   blastRpc: string,
@@ -300,6 +319,20 @@ async function fetchLogs(
       console.warn(`[uniswap/activity] ${chain} rolling-window scan failed — returning empty:`, String(err));
       return [];
     }
+  }
+
+  // A chain whose archive endpoint cannot serve wide-range logs (Base) reads
+  // the position's events from the holder's transfer-index history, only when
+  // they reconcile with the chain. Every fallback below asks for wide-range
+  // logs, so a position that does not reconcile answers 503
+  // `history-unverified` at once (same as Aerodrome), never an empty history.
+  const indexChain = ARCHIVE_CHAINS.find((c) => c === chain);
+  if (indexChain && !archiveServesWideLogs(indexChain)) {
+    const viaTransfers = owner
+      ? await getVerifiedPositionLogs({ chain: indexChain, nftManager, tokenId: BigInt(tokenIdHex).toString(), owner })
+      : null;
+    if (viaTransfers) return viaTransfers;
+    throw new HistoryUnverifiedError();
   }
 
   const logsParams = {
@@ -903,6 +936,10 @@ async function GET_impl(request: Request) {
       totalFees1:   Number(fees1) / Number(scale1),
     } satisfies ActivityResponse);
   } catch (err) {
+    if (err instanceof HistoryUnverifiedError) {
+      console.warn(`[uniswap/activity] ${chain} tokenId=${tokenId}: history could not be verified (transfer index), answering 503`);
+      return NextResponse.json({ error: 'history-unverified' }, { status: 503 });
+    }
     console.error('[uniswap/activity] Unexpected error:', err);
     return NextResponse.json({ error: 'Failed to fetch activity', details: String(err) }, { status: 500 });
   }

@@ -13,6 +13,8 @@ import {
 import { ethCallMany } from '../../../lib/evmBatchCall';
 import { getLlamaPools, llamaPoolsNotices } from '../../../lib/defillamaPools';
 import { alchemyKey } from '../../../lib/alchemyKey';
+import { calcFeeGrowthInsideX128, safeCalcPendingFeeX128, emitFeeUnderflow } from '../../../lib/clmmFeeMath';
+import { amountsFromLiquidity } from '../../../lib/evmGaugeStaking';
 
 // DeFiLlama projects this route reads fee APR from.
 const LLAMA_PROJECTS = ['uniswap-v3'] as const;
@@ -22,14 +24,17 @@ const ALCHEMY_KEY = alchemyKey();
 // Archive RPCs for full-range Transfer-log enumeration (Alchemy free tier caps
 // eth_getLogs at 10 blocks). Tenderly has no BSC gateway, so BNB has no entry
 // and burned-NFT recovery is gracefully skipped there. Mirrors the activity
-// route's TENDERLY_RPCS / DEPLOY_BLOCKS.
-const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism'];
+// route's TENDERLY_RPCS / DEPLOY_BLOCKS. Base's gateway cannot serve wide logs
+// (archiveServesWideLogs('base') is false), so getEverOwnedTokenIds reads Base
+// from the transfer index (evmAssetTransferHistory.ts), as Aerodrome does.
+const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism', 'base'];
 const TENDERLY_RPCS: Record<string, string> = Object.fromEntries(ARCHIVE_CHAINS.map((c) => [c, archiveRpcUrl(c)]));
 const DEPLOY_BLOCKS: Record<string, number> = {
   ethereum: 12_369_140,
   arbitrum:    165_216,
   polygon:  22_761_331,
   optimism:   3_000_000,
+  base:       1_371_680,
   bnb:      26_324_000,
 };
 
@@ -74,6 +79,14 @@ const CHAINS: Record<string, {
     defillamaChain: 'Optimism',
     nftManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     factory:    '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+  },
+  base: {
+    rpc: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+    chainName: 'Base',
+    defillamaChain: 'Base',
+    // Base has its own Uniswap V3 addresses (@uniswap/sdk-core CHAIN_TO_ADDRESSES_MAP).
+    nftManager: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+    factory:    '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
   },
   bnb: {
     rpc: 'https://bsc-dataseed.binance.org/',
@@ -123,6 +136,11 @@ const KNOWN_TOKENS: Record<string, Record<string, { symbol: string; decimals: nu
     '0x68f180fcce6836688e9084f035309e29bf0a2095': { symbol: 'WBTC', decimals: 8, coingeckoId: 'bitcoin' },
     '0x4200000000000000000000000000000000000042': { symbol: 'OP', decimals: 18, coingeckoId: 'optimism' },
   },
+  base: {
+    // The two high-stakes identities only; the rest resolves on chain (Rule 9).
+    '0x4200000000000000000000000000000000000006': { symbol: 'WETH', decimals: 18, coingeckoId: 'ethereum' },
+    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6, coingeckoId: 'usd-coin' },
+  },
   bnb: {
     // NOTE: USDT and USDC on BSC use 18 decimals (NOT 6 like on Ethereum / L2s).
     '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': { symbol: 'WBNB', decimals: 18, coingeckoId: 'wbnb' },
@@ -171,6 +189,10 @@ const SELECTORS = {
   symbol: '0x95d89b41',
   decimals: '0x313ce567',
   getPool: '0x1698ee82',        // getPool(address,address,uint24) on the V3 factory
+  slot0: '0x3850c7bd',
+  feeGrowthGlobal0: '0xf3058399', // feeGrowthGlobal0X128()
+  feeGrowthGlobal1: '0x46141319', // feeGrowthGlobal1X128()
+  ticks: '0xf30dba93',            // ticks(int24)
 };
 
 // ── ITEM 0g (G1): resolve each position's POOL ────────────────────────────
@@ -256,6 +278,8 @@ interface PositionData {
   tickLower: number;
   tickUpper: number;
   liquidity: bigint;
+  feeGrowthInside0LastX128: bigint;
+  feeGrowthInside1LastX128: bigint;
   tokensOwed0: bigint;
   tokensOwed1: bigint;
 }
@@ -324,8 +348,10 @@ function decodePositionData(result: string | null): PositionData | null {
   const liquidity = BigInt('0x' + readWord(7));
   const tokensOwed0 = BigInt('0x' + readWord(10));
   const tokensOwed1 = BigInt('0x' + readWord(11));
+  const feeGrowthInside0LastX128 = BigInt('0x' + readWord(8));
+  const feeGrowthInside1LastX128 = BigInt('0x' + readWord(9));
   
-  return { token0, token1, fee, tickLower, tickUpper, liquidity, tokensOwed0, tokensOwed1 };
+  return { token0, token1, fee, tickLower, tickUpper, liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128, tokensOwed0, tokensOwed1 };
 }
 
 // Fetch token symbol and decimals from chain if not in known list
@@ -439,6 +465,74 @@ async function prewarmPoolAddresses(
     const addr = '0x' + result.slice(-40);
     poolAddressCache[key] = addr !== '0x0000000000000000000000000000000000000000' ? addr : null;
   });
+}
+
+// ── Live pool state for OPEN positions ────────────────────────────────────
+// An open position's value and its uncollected fees depend on the pool's
+// CURRENT price and fee growth, so they are read from the pool: slot0 and the
+// two fee-growth globals once per pool, the two boundary ticks once per
+// position, all in one batched pass. A position whose reads fail keeps the
+// range estimate below and the chain is reported (≈), never a silent figure.
+interface LiveState { sqrtPriceX96: bigint; tick: number; pending0: bigint; pending1: bigint }
+
+function padInt24(tick: number): string {
+  return (tick < 0 ? (1n << 256n) + BigInt(tick) : BigInt(tick)).toString(16).padStart(64, '0');
+}
+
+async function readLiveStates(
+  chainKey: string,
+  rpc: string,
+  factory: string,
+  open: Array<[string, PositionData]>,
+  deadline: number,
+): Promise<{ states: Map<string, LiveState>; failed: number }> {
+  const states = new Map<string, LiveState>();
+  if (open.length === 0) return { states, failed: 0 };
+  const poolOf = (p: PositionData) => poolAddressCache[`${factory}-${p.token0}-${p.token1}-${p.fee}`.toLowerCase()] ?? null;
+  const pools = [...new Set(open.map(([, p]) => poolOf(p)).filter((a): a is string => !!a))];
+  const poolCalls = pools.flatMap((pool) => [
+    { to: pool, data: SELECTORS.slot0 },
+    { to: pool, data: SELECTORS.feeGrowthGlobal0 },
+    { to: pool, data: SELECTORS.feeGrowthGlobal1 },
+  ]);
+  const tickCalls = open.flatMap(([, p]) => {
+    const pool = poolOf(p) ?? factory; // no pool → the call fails and the position is reported
+    return [
+      { to: pool, data: SELECTORS.ticks + padInt24(p.tickLower) },
+      { to: pool, data: SELECTORS.ticks + padInt24(p.tickUpper) },
+    ];
+  });
+  const res = await ethCallMany(rpc, [...poolCalls, ...tickCalls], { deadline });
+  const poolState = new Map<string, { sqrtPriceX96: bigint; tick: number; fg0: bigint; fg1: bigint }>();
+  pools.forEach((pool, i) => {
+    const s0 = res[i * 3], g0 = res[i * 3 + 1], g1 = res[i * 3 + 2];
+    if (!s0 || s0.length < 130 || !g0 || g0 === '0x' || !g1 || g1 === '0x') return;
+    const hex = s0.slice(2);
+    const t = parseInt(hex.slice(122, 128), 16);
+    poolState.set(pool, {
+      sqrtPriceX96: BigInt('0x' + hex.slice(0, 64)),
+      tick: t >= 0x800000 ? t - 0x1000000 : t,
+      fg0: BigInt(g0),
+      fg1: BigInt(g1),
+    });
+  });
+  let failed = 0;
+  open.forEach(([id, p], i) => {
+    const pool = poolOf(p);
+    const ps = pool ? poolState.get(pool) : undefined;
+    const lo = res[poolCalls.length + i * 2], up = res[poolCalls.length + i * 2 + 1];
+    // ticks() returns 8 words; feeGrowthOutside0/1X128 are words 2 and 3.
+    if (!ps || !lo || lo.length < 258 || !up || up.length < 258) { failed += 1; return; }
+    const word = (h: string, k: number) => BigInt('0x' + h.slice(2 + k * 64, 2 + (k + 1) * 64));
+    const in0 = calcFeeGrowthInsideX128(p.tickLower, p.tickUpper, ps.tick, ps.fg0, word(lo, 2), word(up, 2));
+    const in1 = calcFeeGrowthInsideX128(p.tickLower, p.tickUpper, ps.tick, ps.fg1, word(lo, 3), word(up, 3));
+    const r0 = safeCalcPendingFeeX128(p.liquidity, in0, p.feeGrowthInside0LastX128);
+    const r1 = safeCalcPendingFeeX128(p.liquidity, in1, p.feeGrowthInside1LastX128);
+    emitFeeUnderflow(r0, { protocol: 'uniswap-v3', chain: chainKey, positionId: id, pair: `${p.token0}/${p.token1}`, side: 'token0' });
+    emitFeeUnderflow(r1, { protocol: 'uniswap-v3', chain: chainKey, positionId: id, pair: `${p.token0}/${p.token1}`, side: 'token1' });
+    states.set(id, { sqrtPriceX96: ps.sqrtPriceX96, tick: ps.tick, pending0: r0.fee, pending1: r1.fee });
+  });
+  return { states, failed };
 }
 
 // Calculate token amounts from liquidity and tick range
@@ -652,6 +746,14 @@ async function fetchPositionsForChain(
     // the same module cache resolvePoolAddress reads (ITEM 0g / G1).
     await prewarmPoolAddresses(chain.rpc, chain.factory, [...posById.values()]);
 
+    // Current price and uncollected fees for the OPEN positions.
+    const openPositions = [...posById.entries()].filter(([, p]) => p.liquidity > 0n);
+    const live = await readLiveStates(chainKey, chain.rpc, chain.factory, openPositions, deadline);
+    if (live.failed > 0) {
+      truncated.push(lookupFailureNotice(`${chain.chainName} pool price`));
+      console.warn(`[uniswap] ${chain.chainName}: pool state unreadable for ${live.failed} open position(s); range estimate kept and reported`);
+    }
+
     // Fetch position data for each token
     for (const tokenId of tokenIds) {
       try {
@@ -670,10 +772,12 @@ async function fetchPositionsForChain(
           t1Info = { ...fetchedTokenInfo[pos.token1], coingeckoId: '' };
         }
         
-        // Calculate amounts
-        const { amount0, amount1 } = estimateAmounts(
-          pos.liquidity, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals
-        );
+        // Amounts at the pool's current price; the range estimate only when
+        // that read failed (reported above).
+        const state = live.states.get(tokenId.toString());
+        const { amount0, amount1 } = state
+          ? amountsFromLiquidity(pos.liquidity, pos.tickLower, pos.tickUpper, state.sqrtPriceX96, t0Info.decimals, t1Info.decimals)
+          : estimateAmounts(pos.liquidity, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals);
         
         // Get prices
         const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
@@ -681,9 +785,9 @@ async function fetchPositionsForChain(
         
         const value = (amount0 * price0) + (amount1 * price1);
         
-        // Calculate fees value
-        const fees0 = Number(pos.tokensOwed0) / (10 ** t0Info.decimals);
-        const fees1 = Number(pos.tokensOwed1) / (10 ** t1Info.decimals);
+        // Uncollected fees: owed (settled) plus pending since the last checkpoint.
+        const fees0 = Number(pos.tokensOwed0 + (state?.pending0 ?? 0n)) / (10 ** t0Info.decimals);
+        const fees1 = Number(pos.tokensOwed1 + (state?.pending1 ?? 0n)) / (10 ** t1Info.decimals);
         const feesUsd = (fees0 * price0) + (fees1 * price1);
         
         // ITEM 0g (G1) — the position's own pool, for the activity route's
@@ -702,7 +806,10 @@ async function fetchPositionsForChain(
         // current and future protocol integrations on any chain.
         const hasToken0 = amount0 > 0.0001;
         const hasToken1 = amount1 > 0.0001;
-        const status = pos.liquidity === 0n ? 'Closed' : (hasToken0 && hasToken1) ? 'In Range' : 'Out of Range';
+        const inRange = state
+          ? state.tick >= pos.tickLower && state.tick < pos.tickUpper
+          : hasToken0 && hasToken1;
+        const status = pos.liquidity === 0n ? 'Closed' : inRange ? 'In Range' : 'Out of Range';
         
         positions.push({
           id: `uni3-${chainKey}-${tokenId.toString()}`,

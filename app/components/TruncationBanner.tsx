@@ -1,7 +1,7 @@
 "use client";
 
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
-import { describeTruncation, isInfoReason, isLookupFailureReason } from "../lib/enumerationTruncation";
+import { describeTruncation, isInfoReason, isLookupFailureReason, isUnsupportedReason, unsupportedSummary } from "../lib/enumerationTruncation";
 
 /**
  * Renders the enumeration-truncation notice (queue item C, Phase 1).
@@ -39,13 +39,21 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
   // the heading must not describe one as the other: "a scan limit was reached"
   // is false when the lookup simply did not answer.
   const failures = notices.filter((n) => isLookupFailureReason(n.reason)).length;
-  const kind = failures === 0 ? "cap" : failures === notices.length ? "lookup" : "mixed";
+  const unsupported = notices.filter((n) => isUnsupportedReason(n.reason));
+  const caps = notices.length - failures - unsupported.length;
+  const kind =
+    caps === 0 && failures === 0 ? "unsupported"
+    : failures === 0 ? "cap"
+    : failures === notices.length - unsupported.length ? "lookup" : "mixed";
   const heading =
-    kind === "cap" ? "Some positions could not be listed"
+    kind === "unsupported" ? "Some positions can't be read yet"
+    : kind === "cap" ? "Some positions could not be listed"
     : kind === "lookup" ? "Some history could not be loaded"
     : "Some positions or history could not be loaded";
   const lead =
-    kind === "cap"
+    kind === "unsupported"
+      ? "This wallet holds positions DefiDesh does not read yet, so they are not in any total:"
+      : kind === "cap"
       ? "A scan limit was reached, so the positions below and every total computed from them are incomplete:"
       : kind === "lookup"
         ? "A lookup did not complete, so closed positions, fees and every total computed from them may be incomplete:"
@@ -60,9 +68,10 @@ export function TruncationBanner({ style }: { style?: React.CSSProperties }) {
   // One compact line in plain words (batch D 1a); the full technical text is
   // one click away, never removed. "Aerodrome (Base) positions may be incomplete".
   const what = (n: { source: string; scope?: string }) => (n.scope ? `${n.source} (${n.scope})` : n.source);
-  const capSources = [...new Set(notices.filter((n) => !isLookupFailureReason(n.reason)).map(what))];
+  const capSources = [...new Set(notices.filter((n) => !isLookupFailureReason(n.reason) && !isUnsupportedReason(n.reason)).map(what))];
   const lookupSources = [...new Set(notices.filter((n) => isLookupFailureReason(n.reason)).map((n) => n.source))];
   const summary = [
+    ...unsupported.map(unsupportedSummary),
     capSources.length ? `${capSources.join(", ")} positions may be incomplete` : null,
     lookupSources.length ? `${lookupSources.join(", ")} history may be incomplete` : null,
   ].filter(Boolean).join(" · ");

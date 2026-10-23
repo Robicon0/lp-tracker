@@ -179,6 +179,30 @@ export function notHeldOpenNotice(scope: string, count: number): RouteTruncation
 }
 
 /** True for a notice that reports missing decoration, not missing positions or money. */
+/**
+ * Uniswap positions DefiDesh cannot read yet (V4, or a chain it does not scan):
+ * `returned` is how many position NFTs the wallet holds there. Not an info line
+ * (the total cannot include them, so it shows ≈) and not a `lookup-` reason (no
+ * history failed). `unsupported-unchecked`: that count itself did not answer.
+ */
+export const UNSUPPORTED_POSITIONS = 'unsupported-positions';
+export const UNSUPPORTED_UNCHECKED = 'unsupported-unchecked';
+export function unsupportedPositionsNotice(scope: string, count: number): RouteTruncation {
+  return { scope, cap: 0, returned: count, knownTotal: null, reason: UNSUPPORTED_POSITIONS };
+}
+export function unsupportedUncheckedNotice(scope: string): RouteTruncation {
+  return { scope, cap: 0, returned: 0, knownTotal: null, reason: UNSUPPORTED_UNCHECKED };
+}
+export function isUnsupportedReason(reason: unknown): boolean {
+  return reason === UNSUPPORTED_POSITIONS || reason === UNSUPPORTED_UNCHECKED;
+}
+/** Short line for the banner summary: "Uniswap V4 / Base: 2 positions we can't read yet". */
+export function unsupportedSummary(n: { source: string; scope: string; returned: number; reason: string }): string {
+  return n.reason === UNSUPPORTED_UNCHECKED
+    ? `${n.source} ${n.scope}: couldn't check for positions`
+    : `${n.source} ${n.scope}: ${n.returned} position${n.returned === 1 ? '' : 's'} we can't read yet`;
+}
+
 export function isInfoReason(reason: unknown): boolean {
   return reason === POOL_STATS_UNAVAILABLE || reason === POOL_STATS_LAST_KNOWN || reason === NOT_HELD_OPEN || reason === STORE_WRITE_FAILED;
 }
@@ -335,6 +359,14 @@ export function describeTruncation(n: TruncationNotice): string {
   if (n.reason === LOOKUP_KEPT_STORED) {
     const one = n.returned === 1;
     return `${where}: this scan came back short — ${n.returned} closed position${one ? ' was' : 's were'} found before and ${one ? 'is' : 'are'} still shown from the last complete scan`;
+  }
+
+  if (n.reason === UNSUPPORTED_POSITIONS) {
+    const one = n.returned === 1;
+    return `${n.source} ${n.scope}: ${n.returned} position${one ? '' : 's'} we can't read yet — not in the totals`;
+  }
+  if (n.reason === UNSUPPORTED_UNCHECKED) {
+    return `${n.source} ${n.scope}: couldn't check this wallet for positions we can't read yet — some may be missing from the totals`;
   }
 
   if (n.reason === LOOKUP_UNREADABLE_TX) {

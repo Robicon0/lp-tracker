@@ -101,3 +101,41 @@ export function emitFeeUnderflow(result: PendingFeeResult, ctx: UnderflowLogCont
     status: 'guarded_to_zero',
   });
 }
+
+// ── EVM Uniswap-V3 variant (uint256 fee growth, Q128) ─────────────────────
+// EVM V3 pools store fee growth as uint256 in Q128.128, not u128 Q64.64 like the
+// Solana / Sui CLMMs above. Same formulas, wider word, different shift. Shared
+// here so no EVM route carries its own inline copy (architecture Rule 8).
+export const U256_MASK = (1n << 256n) - 1n;
+const U256_HIGH_BIT = 1n << 255n;
+
+/** Fee growth inside a range for a uint256 (EVM Uniswap V3) pool. */
+export function calcFeeGrowthInsideX128(
+  tickLower: number,
+  tickUpper: number,
+  tickCurrent: number,
+  feeGrowthGlobal: bigint,
+  feeGrowthOutsideLower: bigint,
+  feeGrowthOutsideUpper: bigint,
+): bigint {
+  const below = tickCurrent >= tickLower
+    ? feeGrowthOutsideLower
+    : (feeGrowthGlobal - feeGrowthOutsideLower) & U256_MASK;
+  const above = tickCurrent < tickUpper
+    ? feeGrowthOutsideUpper
+    : (feeGrowthGlobal - feeGrowthOutsideUpper) & U256_MASK;
+  return (feeGrowthGlobal - below - above) & U256_MASK;
+}
+
+/** Pending fee for ONE side of an EVM V3 position, with the same underflow guard (high bit of uint256). */
+export function safeCalcPendingFeeX128(
+  liquidity: bigint,
+  feeGrowthInside: bigint,
+  checkpoint: bigint,
+): PendingFeeResult {
+  const wrappedDelta = (feeGrowthInside - checkpoint) & U256_MASK;
+  if (wrappedDelta >= U256_HIGH_BIT) {
+    return { fee: 0n, guarded: true, wrappedDelta };
+  }
+  return { fee: (liquidity * wrappedDelta) >> 128n, guarded: false, wrappedDelta };
+}

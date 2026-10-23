@@ -2,6 +2,8 @@
 
 import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } from "react";
 import { TruncationBanner } from "../components/TruncationBanner";
+import { useTruncationNotices } from "../hooks/useTruncationNotices";
+import { isUnsupportedReason, UNSUPPORTED_UNCHECKED } from "../lib/enumerationTruncation";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TerminalNavbar from "../components/TerminalNavbar";
@@ -1128,6 +1130,15 @@ export default function Analytics() {
     closedToCheck > 0 ? `${closedToCheck} closed position${closedToCheck === 1 ? "" : "s"} to check — not in this total` : null,
   ].filter(Boolean).join(" · ") || null;
   const closedOutOfTotals = closedNotPriced + closedToCheck;
+  // Positions DefiDesh cannot read yet (Uniswap V4, chains not scanned) are in
+  // no total. The open-position sums and Net P&L carry the mark while the
+  // wallet holds any, or while the count could not be read (rule (e)).
+  const unsupportedNotices = useTruncationNotices().filter((n) => isUnsupportedReason(n.reason));
+  const unsupportedCount = unsupportedNotices.reduce((s, n) => s + (n.reason === UNSUPPORTED_UNCHECKED ? 0 : n.returned), 0);
+  const unsupportedNote = unsupportedNotices.length === 0 ? null
+    : unsupportedCount > 0
+      ? `${unsupportedCount} position${unsupportedCount === 1 ? "" : "s"} we can't read yet — not in this total`
+      : "couldn't check for positions we can't read yet";
   const closedGaps = lpPnlLive.unpricedClosed.filter((u) => u.detail.kind !== "not-held");
   const feesIncomplete = feesStillLoading || feesFailed.length > 0 || feesPartial.length > 0 || feesPendingClaims > 0 || closedOutOfTotals > 0 || feesNearbyDayClaims > 0 || feesUnderlyingClaims > 0;
   const feesNote = feesStillLoading
@@ -1213,7 +1224,7 @@ export default function Analytics() {
   // The sub-note of one headline cell: EVERY reason that applies, in order, so
   // no reason hides another (a failed history lookup used to take the cell and
   // hide "N closed positions not priced"). Empty when the figure is settled.
-  const cellNotes = (c: { pendingOpen?: boolean; pendingClosed?: boolean; feesPending?: boolean }): string[] => {
+  const cellNotes = (c: { pendingOpen?: boolean; pendingClosed?: boolean; feesPending?: boolean; unsupported?: boolean }): string[] => {
     const notes: string[] = [];
     const add = (n: string | null | undefined) => { if (n && !notes.includes(n)) notes.push(n); };
     if ((c.pendingOpen || c.pendingClosed) && loadingMore) add(loadingNote);
@@ -1228,6 +1239,7 @@ export default function Analytics() {
       add(lpPnl.pricingRetriesExhausted ? `incomplete — ${n} position${s} could not be priced` : `incomplete — pricing ${n} position${s}…`);
     }
     if (c.pendingClosed) add(closedNotPricedNote);
+    if (c.unsupported) add(unsupportedNote);
     if (c.feesPending && feesIncomplete && feesNote && feesNote !== closedNotPricedNote) {
       add(c.pendingClosed ? `fees ${feesNote}` : feesNote);
     } else if (c.feesPending && feesIncomplete && !c.pendingClosed) add(feesNote);
@@ -2154,8 +2166,9 @@ export default function Analytics() {
                       ? `${lpPnl.estimatedPositionCount} position${lpPnl.estimatedPositionCount === 1 ? "" : "s"} using estimated deposit value — Deposit price unavailable, using current value as estimate.`
                       : undefined,
                     pendingOpen: true,
+                    unsupported: true,
                   },
-                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market", pendingOpen: true },
+                  { label: "Current Value",   val: fmt$(lpPnl.currentValue),   color: C.textBright, sub: "open positions, mark-to-market", pendingOpen: true, unsupported: true },
                   {
                     label: "Fees Collected",
                     val: `+${fmt$(lifetimeFeesCollected)}`,
@@ -2186,9 +2199,10 @@ export default function Analytics() {
                     color: adjustedNetPnl >= 0 ? C.cyan : C.red,
                     sub: `${adjustedNetPnlPct >= 0 ? "+" : ""}${adjustedNetPnlPct.toFixed(2)}%`,
                     pendingClosed: true,
+                    unsupported: true,
                     feesPending: true,
                   },
-                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; pendingOpen?: boolean; expandable?: boolean; feesPending?: boolean }>);
+                ] as Array<{ label: string; val: string; color: string; sub: string; tooltip?: string; pendingClosed?: boolean; pendingOpen?: boolean; expandable?: boolean; feesPending?: boolean; unsupported?: boolean }>);
                 })().map((c, i, arr) => (
                   <div
                     key={c.label}
@@ -2263,7 +2277,7 @@ export default function Analytics() {
                           // Fee totals follow the same rule: a fee source that is
                           // still loading, failed, or holds unpriced claims makes
                           // Fees Collected and Net P&L a partial sum, shown as one.
-                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.feesPending && feesIncomplete) ? `≈ ${c.val}` : c.val}
+                          : (c.pendingClosed && !lpPnl.capitalGLComplete) || ((c.pendingOpen || c.pendingClosed) && loadingMore) || (c.feesPending && feesIncomplete) || (c.unsupported && unsupportedNote) ? `≈ ${c.val}` : c.val}
                       </div>
                     )}
                     <div style={{ fontSize: 11, marginTop: 5, color: C.text, letterSpacing: "0.04em" }}>

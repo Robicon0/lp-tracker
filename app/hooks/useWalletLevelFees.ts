@@ -160,7 +160,7 @@ const VELODROME_FALLBACK = {
 // per-position ones in the analytics fee breakdown.
 interface UniV3Context {
   account: string;
-  chain: string;        // ethereum | arbitrum | polygon | optimism | bnb
+  chain: string;        // ethereum | arbitrum | polygon | optimism | base | bnb
   token0: string;
   token1: string;
   decimals0: number;
@@ -173,6 +173,7 @@ const UNI_CHAIN_DISPLAY: Record<string, string> = {
   arbitrum: "Arbitrum",
   polygon: "Polygon",
   optimism: "Optimism",
+  base: "Base",
   bnb: "BNB Chain",
 };
 
