@@ -235,16 +235,9 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
-**🔴🔴 SUI OUTAGE (found 2026-10-22 22:46 UTC, NOT fixed): every Sui position route fails on
-production.** Alchemy Sui answers "suix_getOwnedObjects is not supported. JSON-RPC has been removed on
-Sui as of Sui v1.82. Please migrate to gRPC."; the public fullnode is deprecated too. `/api/cetus`,
-`/api/bluefin`, `/api/momentum` answer 503 `position-list-read-failed` (shown as "couldn't load");
-AlphaFi and Suilend lending fail; `/api/sui/balances` answers 200 with an EMPTY list (a silent "owns
-nothing", rule (e) violation). Closed lists and fee scans still answer from stored history (GraphQL).
-No such failure in the logs before 2026-10-22. Fix shape: move the 6 JSON-RPC methods used through
-`app/lib/suiRpc.ts` (getOwnedObjects, multiGetObjects, getDynamicFieldObject, getCoinMetadata,
-getAllBalances, getObject; 15 files) to Sui GraphQL, which `suiHistory.ts` already uses; the nested
-Move field shapes differ. Ranks above everything below.
+**✅ SUI OUTAGE (2026-10-22 22:46 UTC) — FIXED `e83c682` (notice) + `90cd0b5` (GraphQL), see Recent fixes.**
+The only Sui JSON-RPC user left is the browser wallet client (`app/providers.tsx:22`, dapp-kit,
+wallet connection only, no figure depends on it).
 
 **🔴 RECONCILIATION PLAN (owner-approved 2026-10-08; step 1a shipped, the rest NOT started —
 each needs its own go-ahead). Ranks above everything below.**
@@ -975,6 +968,43 @@ enumeration) is still the way to find such a position for a wallet whose history
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`e83c682` + `90cd0b5`** (Sui outage, 2026-10-23, `90cd0b5` live as `dpl_G5tBkh9DXhypiVKD4r6yURH6pvci`)
+  — **Sui JSON-RPC was removed upstream (Alchemy and the public fullnode, Sui v1.82); live Sui
+  state is now read over Sui GraphQL.**
+  **Step 1 (`e83c682`):** any failed Sui read raises ONE notice "Sui data temporarily unavailable:
+  open Sui positions and balances can't be read right now" (`SUI_UNAVAILABLE`, `reportSuiRead` in
+  `enumerationTruncation.ts`); totals `≈` or `—`, never a clean $0; no snapshot while it stands.
+  `/api/sui/balances`, Suilend and AlphaFi answer 503 `sui-unavailable` (balances used to answer an
+  empty 200). `suiRpcOrThrow` / `SuiReadError` in `suiRpc.ts`. Test `sui-unavailable-test`.
+  **Step 2 (`90cd0b5`):** NEW `app/lib/suiGraphql.ts` answers the six methods (getOwnedObjects,
+  multiGetObjects, getObject, getDynamicFieldObject, getAllBalances, getCoinMetadata) in the
+  JSON-RPC result shape, rebuilt from each type's `layout` (struct → {type, fields}, UID → {id},
+  vector<u8> base64 → numbers, Option → value / null, one-field structs that GraphQL flattens
+  unwrapped, type strings with leading zeros stripped); dynamic-field names sent as BCS (u64, ID /
+  address, I32). `suiRpc` sends those methods there; a failure is still `undefined` /
+  `SuiReadError`, never "owns nothing"; a balances page cap throws. GraphQL over gRPC: plain
+  HTTPS + JSON from a function, already used by `suiHistory`, and the layout reproduces the
+  JSON-RPC rendering so no route parser changed. Limiter per instance (8 in flight, 25/s, shared
+  with `suiHistory`), 15 s timeout, 4 attempts with backoff + `Retry-After`, a validation error
+  not retried. Dynamic-field reads batched 10 per query, type layouts fetched once per instance
+  (in-flight shared): a cold Cetus call for 0x9d6e 96 → 13 requests. Coin metadata stays in
+  `token_meta_v1`. Endpoint override `SUI_GRAPHQL_URL`. Test `sui-graphql-test` (35).
+  **Chain check (09:18 UTC, raw GraphQL state, recomputed outside the route):** 0xdce8 `0xbf4e8524`
+  USDC / SUI, 0x0256 `0x0441ed51` USDC / WBTC, 0x9d6e `0xa71267fb` USDC / SUI: amounts within
+  0.0001% of the route. Third-party Bluefin `0x90d9c4…` and Momentum `0x262190…` read with fees
+  and rewards (I32 dynamic-field path).
+  **Production B7 (10:34–11:37 UTC) against Oct 20 (before the outage):** 0xdce8 1 in range
+  $10,505.55 (10,555.74, SUI price), fees 8,597.33 identical, Capital G/L −8,750.55; 0x9d6e 13 in
+  range ≈ $12,644.53 (12,723.01), Fees ≈ 5,381.99, Capital G/L ≈ −4,689.99; 0x0256 $26,642.04
+  (26,678.95), Fees ≈ 2,329.00, Capital G/L −3,642.61; heavy 0x9dae 1 open $7,702.05 (bot),
+  +635.75; 0x15ac ≈ −2,138.77, Fees 1,395.72; 0x81e1 +56.13. Account 1 Deposited 24,035.46 =
+  15,709.28 + Uniswap Base 8,326.18; Fees 15,421.97, Capital G/L ≈ −16,432.85 identical to
+  before. Account 2, Solana 2rr3SF identical. First row 5.4–9.1 s on every wallet (Sui 6.1–6.5 s).
+  0 page errors; fee sources non-200 none. Logs: no Sui error, no out-of-memory; only the known
+  PancakeSwap 503 for 0x5cfb and one aave-v3 CoinGecko 400.
+  **Store commands per fresh-instance load (local):** Account 1 588 (about 574 before), 0x9d6e
+  164; GraphQL requests 64 / 326.
 
 - **`b52baed`** (Uniswap Base + "can't read yet" notice, 2026-10-23, live as `dpl_Fijeqdq6x1XgPEu6XHepHZhzoVwM`)
   — **Uniswap V3 on Base; a notice for Uniswap positions DefiDesh cannot read.**
