@@ -1,5 +1,6 @@
 "use client";
 
+import { parseScanParams } from "../lib/scanParams";
 import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } from "react";
 import { TruncationBanner } from "../components/TruncationBanner";
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
@@ -21,7 +22,7 @@ import { useAaveV3Rates } from "../hooks/useAaveV3Rates";
 import type { AnalyticsSnapshot } from "../lib/analyticsSnapshot";
 import { useWalletAuth } from "../contexts/WalletAuthContext";
 import { unpricedRowText, unpricedShortLabel } from "../lib/closedPositionClassify";
-import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
+import { useWatchedWallets } from "../contexts/WatchedWalletsContext";
 
 // ── Scan-mode listener (same pattern as the dashboard's) ─────────────────────
 // Applies /analytics?address=&chain= to scanAddress so a hard refresh or a
@@ -38,9 +39,8 @@ function AnalyticsScanModeListener() {
     const sig = `${addr}|${chainParam}`;
     if (lastSigRef.current === sig) return;
     lastSigRef.current = sig;
-    if (addr && chainParam && (chainParam === "evm" || chainParam === "solana" || chainParam === "sui")) {
-      setScanAddress({ address: addr, chain: chainParam as WatchedWalletChain });
-    }
+    const parsed = parseScanParams(addr, chainParam);
+    if (parsed.kind === "ok") setScanAddress({ address: parsed.address, chain: parsed.chain });
     // NOTE: unlike the dashboard, ABSENT params do NOT clear an active
     // scanAddress here — plain in-app navigation to /analytics (no params)
     // must keep the scan the user started on the dashboard.

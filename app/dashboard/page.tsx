@@ -1,5 +1,6 @@
 "use client";
 
+import { parseScanParams } from "../lib/scanParams";
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
 import { isInfoReason, isSuiUnavailableReason, SUI_UNAVAILABLE_TEXT } from "../lib/enumerationTruncation";
 import { unpricedShortLabel } from "../lib/closedPositionClassify";
@@ -234,7 +235,7 @@ function chainInfoFromConnected(addr: string | null | undefined, kind: "EVM" | "
 // just runs the effect). The Dashboard renders this inside <Suspense> right
 // below TerminalNavbar; the rest of the dashboard reads scanAddress from
 // WatchedWalletsContext without needing its own Suspense wrapper.
-function ScanModeListener() {
+function ScanModeListener({ onLinkError }: { onLinkError: (message: string | null) => void }) {
   const searchParams = useSearchParams();
   const { setScanAddress } = useWatchedWallets();
   const lastSigRef = useRef<string | null>(null);
@@ -244,16 +245,17 @@ function ScanModeListener() {
     const sig = `${addr}|${chainParam}`;
     if (lastSigRef.current === sig) return;
     lastSigRef.current = sig;
-    if (
-      addr &&
-      chainParam &&
-      (chainParam === "evm" || chainParam === "solana" || chainParam === "sui")
-    ) {
-      setScanAddress({ address: addr, chain: chainParam as WatchedWalletChain });
+    // A link the page cannot use is said so on screen; it used to fall back to
+    // the visitor's own wallets and read a clean $0.00 (2026-10-25).
+    const parsed = parseScanParams(addr, chainParam);
+    if (parsed.kind === "ok") {
+      setScanAddress({ address: parsed.address, chain: parsed.chain });
+      onLinkError(null);
     } else {
       setScanAddress(null);
+      onLinkError(parsed.kind === "invalid" ? parsed.message : null);
     }
-  }, [searchParams, setScanAddress]);
+  }, [searchParams, setScanAddress, onLinkError]);
   return null;
 }
 
@@ -309,6 +311,14 @@ export default function Dashboard() {
   // Nothing has answered yet (the first seconds after a paste or a load):
   // never a clean $0.00 — the headline says it is loading (batch D 1e).
   const headlineFirstLoad = mounted && isLoading && allPositions.length === 0;
+  // A pasted-wallet link the page could not use, or no wallet at all: the
+  // headline is "—" with the reason, never a clean $0.00 (2026-10-25).
+  const [scanLinkError, setScanLinkError] = useState<string | null>(null);
+  const noWallet = mounted && walletKey === "";
+  // Wallet lists restore in effects; the "no wallet" note waits a moment so a
+  // returning visitor never sees it flash.
+  const [walletsSettled, setWalletsSettled] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setWalletsSettled(true), 1500); return () => clearTimeout(t); }, []);
   useEffect(() => setMounted(true), []);
 
   const { wallets: solanaWallets } = useWallet();
@@ -754,13 +764,18 @@ export default function Dashboard() {
       {/* URL → scanAddress sync. Isolated in a tiny child wrapped in Suspense
           because useSearchParams() requires a Suspense boundary in Next.js 16. */}
       <Suspense fallback={null}>
-        <ScanModeListener />
+        <ScanModeListener onLinkError={setScanLinkError} />
       </Suspense>
 
       {/* SCAN MODE banner — shown when /dashboard?address=&chain= is set.
           All dashboard data below is for the scanned address; user's own
           connected wallets are temporarily ignored. Click [X] to dismiss
           and return to the user's own wallet view. */}
+      {!isScanMode && scanLinkError && (
+        <div role="alert" data-scan-link-error style={{ margin: "12px 16px 0", padding: "8px 14px", border: `1px solid ${C.amber}`, color: C.amber, fontSize: 13, fontFamily: FONT, letterSpacing: "0.04em" }}>
+          Link not understood: {scanLinkError} Nothing is shown for it{walletKey ? "; below are your own wallets" : ""}.
+        </div>
+      )}
       {!isScanMode && addWalletDone && (
         <div role="status" data-wallet-added-top style={{ margin: "12px 16px 0", padding: "8px 14px", border: `1px solid ${C.green}`, background: C.greenFaint, color: C.green, fontSize: 13, fontFamily: FONT, letterSpacing: "0.04em" }}>
           ✓ Added {addWalletDone.label} ({addWalletDone.chain}) to watched wallets
@@ -956,7 +971,7 @@ export default function Dashboard() {
                       lower total (measured 2026-10-11 with the Cetus pool read
                       failing: $15,269.89 shown unmarked for a $26.8k wallet, the
                       only notice below the fold). */}
-                  {headlineFirstLoad || (headlinePartial && totalValue === 0) ? "—" : (<>
+                  {headlineFirstLoad || noWallet || (headlinePartial && totalValue === 0) ? "—" : (<>
                   {mounted && headlinePartial && <span style={{ fontSize: 32, color: C.amber, fontWeight: 500, marginRight: 8 }}>≈</span>}
                   ${splitTotal.whole}
                   <span style={{ fontSize: 32, color: C.textMid, fontWeight: 500 }}>.{splitTotal.cents}</span>
@@ -967,7 +982,12 @@ export default function Dashboard() {
                     loading positions{isScanMode && scanAddress ? ` for ${scanAddress.address.slice(0, 6)}…${scanAddress.address.slice(-4)}` : ""}…
                   </div>
                 )}
-                {mounted && !headlineFirstLoad && headlinePartial && (
+                {noWallet && (walletsSettled || scanLinkError) && (
+                  <div data-headline-nowallet="1" role="status" style={{ marginTop: 8, fontSize: 12, color: scanLinkError ? C.amber : C.text, letterSpacing: "0.04em" }}>
+                    {scanLinkError ? "nothing shown — the link's address isn't usable (see the notice above)" : "no wallet added — paste an address or add a wallet"}
+                  </div>
+                )}
+                {mounted && !headlineFirstLoad && !noWallet && headlinePartial && (
                   <div data-headline-partial="1" style={{ marginTop: 8, fontSize: 12, color: C.amber, letterSpacing: "0.04em" }}>
                     {suiUnavailable
                       ? `incomplete — Sui data temporarily unavailable${failedSources.filter((f) => !["Cetus", "Bluefin", "Momentum"].includes(f)).length ? ` · couldn't load ${failedSources.filter((f) => !["Cetus", "Bluefin", "Momentum"].includes(f)).join(" · ")}` : ""}`
@@ -1092,7 +1112,7 @@ export default function Dashboard() {
                   label: "Uncollected Fees",
                   val:   totalFees > 0 ? fmt$(totalFees) : "—",
                   cls:   totalFees > 0 ? "green" as const : "white" as const,
-                  sub:   `${allPositions.filter((p) => p.fees > 0).length} positions claiming`,
+                  sub:   (() => { const n = allPositions.filter((p) => p.fees > 0).length; return `${n} ${n === 1 ? "position" : "positions"} with fees`; })(),
                 },
                 {
                   label: "Daily Yield",
@@ -1676,7 +1696,7 @@ export default function Dashboard() {
                 label: "Total Uncollected",
                 val:   totalFees > 0 ? `+${fmt$(totalFees)}` : "—",
                 cls:   "white" as const,
-                sub:   `${allPositions.filter((p) => p.fees > 0).length} positions`,
+                sub:   (() => { const n = allPositions.filter((p) => p.fees > 0).length; return `${n} ${n === 1 ? "position" : "positions"}`; })(),
               },
             ].map((m, i, arr) => (
               <div

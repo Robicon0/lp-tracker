@@ -113,13 +113,16 @@ export default function HeroWalletConnect() {
     disconnectSui();
   };
 
-  const [addrInput, setAddrInput] = useState("");
+  // Uncontrolled on purpose (2026-10-25): an address typed or pasted before the
+  // page's scripts attach was wiped by hydration and Enter did nothing. The DOM
+  // keeps the text, and the form's plain GET to /dashboard works with no script.
+  const addrRef = useRef<HTMLInputElement>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   // Visible while the dashboard opens for a pasted address (batch D 1e).
   const [scanning, setScanning] = useState<string | null>(null);
   function handleScan(e: React.FormEvent) {
     e.preventDefault();
-    const v = addrInput.trim();
+    const v = (addrRef.current?.value ?? "").trim();
     if (!v) return;
     // Detect EVM (0x + 40 hex), Sui (0x + 64 hex), or Solana (base58 32-44).
     // Unknown formats show an inline error and don't navigate — the dashboard
@@ -191,6 +194,8 @@ export default function HeroWalletConnect() {
           {"// or paste any address"}
         </div>
         <form
+          action="/dashboard"
+          method="get"
           onSubmit={handleScan}
           className="flex border border-[var(--line-strong)] max-w-[480px] focus-within:border-[var(--accent)]/60 transition-colors"
         >
@@ -202,8 +207,8 @@ export default function HeroWalletConnect() {
           </span>
           <input
             type="text"
-            value={addrInput}
-            onChange={(e) => setAddrInput(e.target.value)}
+            ref={addrRef}
+            name="address"
             spellCheck={false}
             autoComplete="off"
             placeholder="0x... or sol1... or 0x(sui)..."

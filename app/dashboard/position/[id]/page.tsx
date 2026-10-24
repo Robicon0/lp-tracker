@@ -1,11 +1,12 @@
 "use client";
 
+import { parseScanParams } from "../../../lib/scanParams";
 import { useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect, useMemo, useRef, Suspense, type CSSProperties } from "react";
 import Link from "next/link";
 import TerminalNavbar from "../../../components/TerminalNavbar";
 import { usePositions } from "../../../contexts/PositionsContext";
-import { useWatchedWallets, type WatchedWalletChain } from "../../../contexts/WatchedWalletsContext";
+import { useWatchedWallets } from "../../../contexts/WatchedWalletsContext";
 import type { AerodromePosition } from "../../../lib/aerodrome";
 import { getTokenLogo, TOKEN_COLORS } from "../../../lib/tokenLogos";
 import {
@@ -48,9 +49,8 @@ function PositionScanModeListener() {
     const sig = `${addr}|${chainParam}`;
     if (lastSigRef.current === sig) return;
     lastSigRef.current = sig;
-    if (addr && chainParam && (chainParam === "evm" || chainParam === "solana" || chainParam === "sui")) {
-      setScanAddress({ address: addr, chain: chainParam as WatchedWalletChain });
-    }
+    const parsed = parseScanParams(addr, chainParam);
+    if (parsed.kind === "ok") setScanAddress({ address: parsed.address, chain: parsed.chain });
   }, [searchParams, setScanAddress]);
   return null;
 }
