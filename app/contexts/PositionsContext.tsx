@@ -43,6 +43,12 @@ interface PositionsContextValue {
    * fails; nothing protected the case where the whole source never answered.
    */
   failedSources: string[];
+  /**
+   * The wallet set these positions belong to (sorted, chain-prefixed addresses).
+   * Portfolio-history snapshots carry it, so a headline never compares totals of
+   * two different wallet sets (2026-10-25).
+   */
+  walletKey: string;
 }
 
 const PositionsContext = createContext<PositionsContextValue>({
@@ -54,6 +60,7 @@ const PositionsContext = createContext<PositionsContextValue>({
   refetch: () => {},
   pendingSources: [],
   failedSources: [],
+  walletKey: "",
 });
 
 // One entry per (protocol source, wallet address) — each becomes its own React
@@ -134,6 +141,12 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
         [suiAddress, ...watchedWallets.filter((w) => w.chain === "sui").map((w) => w.address.toLowerCase())]
           .filter((a): a is string => !!a),
       ));
+
+  const walletKey = [
+    ...evmAddresses.map((a) => `evm:${a}`),
+    ...solanaAddresses.map((a) => `solana:${a}`),
+    ...suiAddresses.map((a) => `sui:${a}`),
+  ].sort().join(",");
 
   // ── vfat / Sickle sub-account resolution ────────────────────────────────
   // vfat holds a user's LP position NFTs in a "Sickle" — a per-user contract
@@ -310,7 +323,7 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
   const refetch = () => { void queryClient.invalidateQueries({ queryKey: ["positions"] }); };
 
   return (
-    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch, pendingSources, failedSources }}>
+    <PositionsContext.Provider value={{ positions, isLoading, isFetching, isUsingDemoData: false, dataUpdatedAt, refetch, pendingSources, failedSources, walletKey }}>
       {children}
     </PositionsContext.Provider>
   );

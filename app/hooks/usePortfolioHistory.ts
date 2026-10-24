@@ -6,6 +6,14 @@ export interface PortfolioSnapshot {
   timestamp: number;  // ms since epoch
   totalValue: number;
   positionCount: number;
+  /**
+   * Saved under the whole-total rule (2026-10-25 onward). Points without it were
+   * saved before that rule and may hold a partial total; they stay stored and
+   * charted, but no headline figure is computed from them.
+   */
+  trusted?: true;
+  /** The wallet set the total belongs to (PositionsContext `walletKey`). */
+  walletKey?: string;
 }
 
 const STORAGE_KEY = "lp-portfolio-history";
@@ -22,6 +30,7 @@ export function usePortfolioHistory(
    * what put the dips in the chart (points with 1-3 positions among 18-21).
    */
   complete = true,
+  walletKey = "",
 ): PortfolioSnapshot[] {
   const [history, setHistory] = useState<PortfolioSnapshot[]>([]);
 
@@ -41,7 +50,7 @@ export function usePortfolioHistory(
 
   // Save a snapshot whenever a new fetch completes (dataUpdatedAt changes)
   useEffect(() => {
-    if (dataUpdatedAt === 0 || totalValue === 0 || !complete) return;
+    if (dataUpdatedAt === 0 || totalValue === 0 || !complete || !walletKey) return;
 
     setHistory((prev) => {
       const cutoff = Date.now() - MAX_AGE_MS;
@@ -50,7 +59,7 @@ export function usePortfolioHistory(
       // Skip if this exact timestamp was already saved
       if (recent.length > 0 && recent[recent.length - 1].timestamp === dataUpdatedAt) return prev;
 
-      recent = [...recent, { timestamp: dataUpdatedAt, totalValue, positionCount }];
+      recent = [...recent, { timestamp: dataUpdatedAt, totalValue, positionCount, trusted: true, ...(walletKey ? { walletKey } : {}) }];
 
       // Trim to MAX_POINTS, keeping newest
       if (recent.length > MAX_POINTS) recent = recent.slice(recent.length - MAX_POINTS);
@@ -63,7 +72,7 @@ export function usePortfolioHistory(
 
       return recent;
     });
-  }, [dataUpdatedAt, totalValue, positionCount, complete]);
+  }, [dataUpdatedAt, totalValue, positionCount, complete, walletKey]);
 
   return history;
 }

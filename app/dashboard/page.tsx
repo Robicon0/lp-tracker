@@ -22,6 +22,8 @@ import { sameWalletAddress } from "../contexts/WatchedWalletsContext";
 import { useSolanaConnect } from "../hooks/useSolanaConnect";
 import { useWatchedWallets, type WatchedWalletChain } from "../contexts/WatchedWalletsContext";
 import { usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import { effectiveStatus, protocolAllocation, hiddenByTab } from "../lib/dashboardRows";
+import { computeHeadline } from "../lib/portfolioHeadline";
 import { useLpPnl } from "../hooks/useLpPnl";
 import { useZerionPositions } from "../hooks/useZerionPositions";
 import type { AerodromePosition } from "../lib/aerodrome";
@@ -177,10 +179,6 @@ function getProtocolColor(protocol: string): string {
   return "var(--chain-solana)";
 }
 
-function effectiveStatus(p: { value: number; fees: number; status: string }): "In Range" | "Out of Range" | "Closed" {
-  if (p.value === 0 && p.fees === 0) return "Closed";
-  return p.status as "In Range" | "Out of Range";
-}
 
 function getTickPriceUSD(tick: number, pos: AerodromePosition): number | null {
   const d0 = pos.token0Decimals ?? 18;
@@ -261,7 +259,7 @@ function ScanModeListener() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch, pendingSources, failedSources } = usePositions();
+  const { positions: allPositions, isLoading, isFetching, dataUpdatedAt, refetch, pendingSources, failedSources, walletKey } = usePositions();
   // Open-position sources still outstanding (the closed-history halves do not
   // feed the headline value, so they are not named here).
   const pendingOpenSources = pendingSources.filter((s) => !/history$/i.test(s));
@@ -526,13 +524,15 @@ export default function Dashboard() {
     return sum / active.length;
   }, [allPositions]);
 
-  const protocolBreakdown = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const p of allPositions) {
-      if (p.value > 0) m[p.protocol] = (m[p.protocol] ?? 0) + p.value;
-    }
-    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [allPositions]);
+  const protocolBreakdown = useMemo(() => protocolAllocation(allPositions), [allPositions]);
+  // Counted positions the open status tab is not showing (the totals include them).
+  const hiddenRows = useMemo(
+    () => hiddenByTab(
+      chainFilter === "All" ? allPositions : allPositions.filter((p) => chainCategory(p.chain) === chainFilter),
+      statusFilter,
+    ),
+    [allPositions, statusFilter, chainFilter],
+  );
 
   // Group chains into EVM / Solana / Sui buckets for the chain distribution row
   const chainGrouped = useMemo(() => {
@@ -568,6 +568,7 @@ export default function Dashboard() {
     // Saved only when the total is whole (batch D 1c): nothing pending or
     // failed, and no truncated or failed scan.
     !isLoading && pendingSources.length === 0 && failedSources.length === 0 && !headlineTruncated,
+    isScanMode ? "" : walletKey,
   );
   const activeRange    = TIME_RANGES.find((r) => r.key === chartTab) ?? TIME_RANGES[2];
   const rangeCutoff    = Date.now() - activeRange.ms;
@@ -578,13 +579,27 @@ export default function Dashboard() {
     value: s.totalValue,
   }));
 
-  const chartBaseline = effectiveHistory.length >= 2 ? effectiveHistory[0].totalValue : 0;
-  const chartPnlAvailable = effectiveHistory.length >= 2 && chartBaseline > 0;
-  const chartPnlDollar = chartPnlAvailable ? totalValue - chartBaseline : 0;
-  const chartPnlPct    = chartPnlAvailable ? (chartPnlDollar / chartBaseline) * 100 : 0;
-  const peakValue = effectiveHistory.length > 0
-    ? Math.max(...effectiveHistory.map((s) => s.totalValue))
-    : totalValue;
+  // Headline change and Peak Value: only snapshots saved under the whole-total
+  // rule for this same wallet set, and only while the live total is whole.
+  // Older points stay stored and charted (2026-10-25).
+  const headline = computeHeadline(portfolioHistory, {
+    walletKey: isScanMode ? "" : walletKey,
+    rangeMs: activeRange.ms,
+    now: dataUpdatedAt, // time of the live total; 0 (nothing loaded) gives no headline
+    liveTotal: totalValue,
+    liveWhole: !isLoading && !headlinePartial,
+  });
+  const chartPnlAvailable = headline.pnlDollar !== null;
+  const chartPnlDollar = headline.pnlDollar ?? 0;
+  const chartPnlPct    = headline.pnlPct ?? 0;
+  const peakValue = headline.peak;
+  const sinceLabel = headline.sinceTs
+    ? new Date(headline.sinceTs).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : "";
+  const pnlWindowLabel = headline.coversRange ? activeRange.label.replace("in last ", "") : `since ${sinceLabel}`;
+  const pnlWindowTitle = headline.coversRange
+    ? undefined
+    : "Change since the first complete load of this wallet set in this browser";
 
   const fmt$ = (n: number, dec = 2) =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
@@ -978,7 +993,7 @@ export default function Dashboard() {
                     <span style={{ fontSize: 17 }}>{chartPnlDollar >= 0 ? "↑" : "↓"}</span>
                     <span>{chartPnlDollar >= 0 ? "+" : "-"}{fmt$(Math.abs(chartPnlDollar))}</span>
                     <span style={{ color: C.text, fontSize: 12, marginLeft: 4 }}>
-                      {chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(1)}% ({activeRange.label.replace("in last ", "")})
+                      <span title={pnlWindowTitle}>{chartPnlDollar >= 0 ? "+" : ""}{chartPnlPct.toFixed(1)}% ({pnlWindowLabel})</span>
                     </span>
                   </div>
                 )}
@@ -1565,9 +1580,9 @@ export default function Dashboard() {
                   }}
                 >
                   {chartPnlAvailable && (
-                    <ChartMeta label="Window P&L" value={`${chartPnlDollar >= 0 ? "+" : "-"}${fmt$(Math.abs(chartPnlDollar), 0)}`} colour={chartPnlDollar >= 0 ? C.green : C.red} />
+                    <ChartMeta label={headline.coversRange ? "Window P&L" : `P&L since ${sinceLabel}`} value={`${chartPnlDollar >= 0 ? "+" : "-"}${fmt$(Math.abs(chartPnlDollar), 0)}`} colour={chartPnlDollar >= 0 ? C.green : C.red} />
                   )}
-                  <ChartMeta label="Peak Value" value={fmt$(peakValue, 0)} colour={C.textBright} />
+                  <ChartMeta label="Peak Value" value={peakValue > 0 ? fmt$(peakValue, 0) : "—"} colour={C.textBright} />
                   <ChartMeta label="Avg APY" value={avgApr !== null ? `${avgApr.toFixed(1)}%` : "—"} colour={C.textBright} />
                 </div>
               </div>
@@ -2166,6 +2181,23 @@ export default function Dashboard() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {hiddenRows.length > 0 && (
+              <div
+                data-testid="hidden-by-tab"
+                style={{ padding: "12px 28px", borderTop: `1px solid ${C.border}`, fontSize: 13, color: C.text, display: "flex", flexWrap: "wrap", gap: "6px 14px" }}
+              >
+                <span>Also in the totals, not shown in this tab:</span>
+                {hiddenRows.map((h) => (
+                  <button
+                    key={h.tab}
+                    onClick={() => setStatusFilter(h.tab)}
+                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: C.textBright, textDecoration: "underline", fontFamily: FONT, fontSize: 13 }}
+                  >
+                    {h.count} {h.tab.toLowerCase()} {h.count === 1 ? "position" : "positions"} ({fmt$(h.value)})
+                  </button>
+                ))}
               </div>
             )}
           </div>
