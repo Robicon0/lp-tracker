@@ -969,6 +969,44 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`0dc84c4`** (Dashboard tabs + Yield History headline, 2026-10-24, live as `dpl_BhxzEcgc1eRQAvBJgHyyKCayHrv5`)
+  — **The list names counted positions the open tab hides; the Yield History headline uses only
+  trusted snapshots.** Report (20:52 UTC): total $24,314.58 with Cetus 41% / Uniswap V3 34% /
+  Orca 25%, but only the two Orca rows listed. **Not a data, filter or render-cap bug:** the list
+  opens on In Range, and both missing positions were Out of Range on chain at 21:01 UTC (Uniswap
+  Base 6298519: tick −198,740 below [−198,720, −197,400), 3.562302 WETH + 0 USDC; Cetus 0xdce8:
+  tick 69,744 above [67,680, 69,660), 0 USDC + 10,665.42 SUI). Out of Range (2) held both; the
+  All tab's open rows summed to the total to the cent (21:02 UTC, $24,296.44). Same with all three
+  connected, after 60 s and after a hard refresh; pasted alone each wallet shows its own figures
+  (EVM $8,320.65 Uniswap 100%, 21:22 UTC). A hard refresh's first seconds show `≈ … still loading
+  Uniswap V3` (batch D works).
+  **Fix:** `app/lib/dashboardRows.ts` holds the tab logic (`effectiveStatus`, `protocolAllocation`,
+  `hiddenByTab`); a line under the table reads "Also in the totals, not shown in this tab: 2 out
+  of range positions ($18,224.61)" (click switches tab; follows the chain filter); an unknown
+  status string lands in Out of Range, never in no tab. Guard `npx tsx
+  scripts/dashboard-rows-test.ts` (2,760 checks: every counted position in exactly one tab, tabs
+  together = Protocol Allocation, shown + hidden = allocation per tab).
+  **Yield History:** snapshots now carry `trusted: true` and `walletKey` (new PositionsContext
+  field: sorted chain-prefixed addresses) and are saved only with a wallet key (never in scan
+  mode). `app/lib/portfolioHeadline.ts`: the change and Peak Value use only trusted points of the
+  same wallet set inside the range, only while the live total is whole; the label reads "(30
+  days)" when the first such point is at the range start, else "(since Oct 23)" / "P&L since Oct
+  23" with a tooltip "Change since the first complete load of this wallet set in this browser"; a
+  baseline younger than 1% of the range shows nothing; Peak shows "—" when unknown. Points saved
+  before this (no flag, including whole saves since batch D) stay stored and charted but feed no
+  headline, so existing browsers show no change figure until a trusted point is old enough. Nothing
+  deleted. Test `npx tsx scripts/portfolio-headline-test.ts` (10). Local check with an old 18,796
+  dip seeded: no headline; with a trusted 2-day-old point: "+$205.68 +0.9% (since Oct 23)".
+  **B7 (reduced, UTC 2026-10-24):** local new build vs production old 21:23–21:35, identical: A1
+  set Closed (125), Deposited 24,035.46, Capital G/L ≈ −16,432.85, Fees 15,421.97, total $24,177.51;
+  Solana 2rr3SF Closed 217, ≈ −359.87, ≈ 275.98; Account 2 ≈ −1,570.28, 3,720.98; Sui 0xdce8
+  −8,750.55, 8,597.33. No non-200, 0 page errors. Production new (`0dc84c4`) 21:49–22:00: the same figures, no non-200,
+  0 page errors, hint live ("2 out of range positions ($18,224.61)").
+  **Ops (2026-10-24):** `NEXT_PUBLIC_ALCHEMY_KEY` was removed from Vercel at about 20:45 UTC
+  (redeploy `dpl_G8ckYLgLufjbacyEm4TieS41YEYR`); **`ALCHEMY_KEY` is now the only Alchemy key**
+  (`app/lib/alchemyKey.ts` still falls back to the public name if set). The local `.env.local`
+  files still hold the old key until the owner updates them by hand.
+
 - **`e83c682` + `90cd0b5`** (Sui outage, 2026-10-23, `90cd0b5` live as `dpl_G5tBkh9DXhypiVKD4r6yURH6pvci`)
   — **Sui JSON-RPC was removed upstream (Alchemy and the public fullnode, Sui v1.82); live Sui
   state is now read over Sui GraphQL.**
