@@ -248,7 +248,7 @@ regression; rule (p) for every B7.
 - **Order now:** (1) production check + alert ✅ (see Recent fixes); (2) PancakeSwap BNB "can't
   read yet" notice ✅ `6c4b72b` (the rebuild stays on the post-event list; do not swap the selector alone);
   (3) the four failing test files ✅ `d01db7f`; (4) Sui X / SUI and USDSUI pairs at deposit-day / claim-day
-  prices, USDSUI a stablecoin (8 h stop-loss).
+  prices, USDSUI a stablecoin ✅ `e3b8c8c`.
 
 **✅ SUI OUTAGE (2026-10-22 22:46 UTC) — FIXED `e83c682` (notice) + `90cd0b5` (GraphQL), see Recent fixes.**
 The only Sui JSON-RPC user left is the browser wallet client (`app/providers.tsx:22`, dapp-kit,
@@ -983,6 +983,32 @@ enumeration) is still the way to find such a position for a wallet whose history
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`e3b8c8c`** (Sui day prices, 2026-10-25, live 11:42:55 UTC as `dpl_9ze48vqhg9kz9V9MSCgyNzz64YzT`)
+  — **Sui deposits and withdrawals in pools with no stablecoin side are valued at day prices; USDSUI
+  is a stablecoin.** The Cetus / Bluefin / Momentum activity routes anchored an event's pool price only
+  on a stablecoin side, so X / SUI legs (and Cetus V1 / Momentum events with no sqrt price) fell to
+  current spot or a tick estimate. Now `sidePricesFromDayPrices` (`suiEventPrice.ts`): each side at its
+  DeFiLlama day price (the stored claim day map, exact day only; a nearby or underlying-asset day is
+  rejected), a missing side derived from the other through the event's pool price; estimate and spot
+  stay the marked last resorts. USDSUI (`0x44f8…::usdsui::USDSUI`) added to the Sui stablecoin list
+  (routes, `suiClaimPrice`, the closed engine). Bumps: lp-pnl-events v36, analytics-activity v28,
+  cetus / bluefin-activity v10; `closed_pos_sui` not bumped.
+  **Why figures moved (SUI about $4.5 at the deposits, about $0.7 today):** 0x9d6e Capital G/L
+  ≈ −4,674.80 → ≈ −6,183.58 (−1,508.78; the `≈` now only for the closed USDC / ETH not priced). Owned
+  zero-liquidity positions, dep / wd before → after: HIPPO / SUI 246.95 / 116.19 → 1,469.66 / 752.09
+  (−586.81), DEEP / SUI 276.36 / 248.38 → 1,763.61 / 1,109.42 (−626.21), NS / SUI −100.95, CETUS / SUI
+  −70.53, BUCK / SUI +2.38; tick-estimate V1 legs USDC / ETH −46.57, USDC / SUI −80.03. Open deposits
+  (Deposited 12,913.56 → 12,567.04): CETUS / SUI 355.03 → 282.89, ETH / SUI 662.25 → 507.24, DEEP / SUI
+  1,338.99 → 1,073.34, USDSUI / SUI 2,200.63 → 2,346.25 (USDSUI now $1). All 11 substitute legs now
+  exact. 0x15ac ≈ −2,137.56 → −2,295.25, `≈` gone (DEEP / SUI 52.14 / 27.28 → 224.45 / 41.91).
+  **0xdce8 (−9,106.81) and 0x0256 (≈ −3,642.61) unchanged:** USDC / SUI and USDC / WBTC already
+  anchored on their USDC side.
+  **B7 (sequential, UTC):** local old 10:29–10:47, local new 11:01–11:19, production old 11:21–11:41,
+  production new 11:53–12:11. Production new = local new to the cent; Account 1 (Closed 129, Deposited
+  23,681.63, ≈ −16,789.11, Fees 15,671.09), Account 2 Sui −12,681.91, Solana 2rr3SF ≈ −359.87 identical
+  throughout. 0x9d6e analytics settles in 8.7 s (165 s before: no pricing retries). No non-200, 0 page
+  errors. Tests: claim-day-price 18, vault-held 23.
 
 - **`6c4b72b` + `d01db7f`** (PancakeSwap notice + test fix, 2026-10-25, `6c4b72b` live 10:29:55 UTC)
   — **PancakeSwap on BNB says "can't read yet" instead of failing; four store tests pass under the
@@ -4379,8 +4405,8 @@ positions source is pending, Uniswap / PancakeSwap fee claims at spot (ITEM 0e),
 ETH fee claims on 0x9d6e (priced from ETH, marked).
 
 **Open, found 2026-10-19 (details in the `5026c79` entry):** the shared store is 64 MB with
-`noeviction` and 71% full; the per-position Cetus route values X / SUI deposits and withdrawals at
-current spot (9 positions on 0x9d6e); a SUI claim flips between CoinGecko and DeFiLlama day prices;
+`noeviction` and 71% full (corrected in the `e4735b9` entry); ~~the per-position Cetus route values
+X / SUI deposits and withdrawals at current spot~~ (resolved `e3b8c8c`); a SUI claim flips between CoinGecko and DeFiLlama day prices;
 HyperEVM fee claims depend on a 30-day CoinGecko copy with no fallback past 365 days.
 
 **Open, found 2026-10-12 (details in the `cd45675` entry; the hidden closed position is fixed,
