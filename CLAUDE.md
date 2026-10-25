@@ -246,8 +246,8 @@ regression; rule (p) for every B7.
 - **Nov 20 freeze:** the Alchemy plan decision (Free vs Pay As You Go, $0.525 per 1M CU, 10,000
   CU/s) is made then, from the console's monthly CU.
 - **Order now:** (1) production check + alert ✅ (see Recent fixes); (2) PancakeSwap BNB "can't
-  read yet" notice (the rebuild stays on the post-event list; do not swap the selector alone);
-  (3) the four failing test files; (4) Sui X / SUI and USDSUI pairs at deposit-day / claim-day
+  read yet" notice ✅ `6c4b72b` (the rebuild stays on the post-event list; do not swap the selector alone);
+  (3) the four failing test files ✅ `d01db7f`; (4) Sui X / SUI and USDSUI pairs at deposit-day / claim-day
   prices, USDSUI a stablecoin (8 h stop-loss).
 
 **✅ SUI OUTAGE (2026-10-22 22:46 UTC) — FIXED `e83c682` (notice) + `90cd0b5` (GraphQL), see Recent fixes.**
@@ -984,7 +984,27 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(this commit)** (Production check, 2026-10-25) — **Production is checked every 30 minutes and
+- **`6c4b72b` + `d01db7f`** (PancakeSwap notice + test fix, 2026-10-25, `6c4b72b` live 10:29:55 UTC)
+  — **PancakeSwap on BNB says "can't read yet" instead of failing; four store tests pass under the
+  local read-only switch.** `/api/pancakeswap` now only counts the wallet's position NFTs
+  (`balanceOf` on `0x46A15B0b…4364`) and answers `unsupported-positions` ("PancakeSwap V3 / BNB: N
+  positions we can't read yet"; totals `≈`), never a position figure; a failed count is still 503
+  `position-list-read-failed`; no NFT → a plain empty list. The decode path (broken selector
+  `0x99fd0e82`) is removed; the Uniswap-style rebuild stays on the post-event list.
+  0x5cfb: 503 "couldn't load PancakeSwap" → 200 + "26 positions we can't read yet".
+  **Tests:** history-scan, sui-history, store-full and sui-revalue fake an in-memory store but ran
+  with `CLOSED_POS_CACHE_READONLY=1` (set for every local run), so their store took no writes. Each
+  now clears the switch for its own process. With the switch set, before → after: 9/20 → 20/20,
+  5/8 → 8/8, 15/16 → 16/16, 34/35 → 35/35; whole suite green (closed-cache-guard 49/49).
+  **B7 (rule (o)/(p), sequential):** local new 10:01–10:14, production old 10:15–10:28, production
+  new 10:47–11:00 UTC. Identical: Account 1 Closed 129, Deposited 23,681.63, Capital G/L
+  ≈ −16,789.11, Fees 15,671.09 (15,671.08 on the last run); Solana 2rr3SF 217 / ≈ −359.87 /
+  ≈ 275.98; Account 2 16 / 3,720.98 / ≈ −1,570.28; Sui 0xdce8 63 / 8,846.45 (.44) / −9,106.81. The
+  one-cent Fees moves are claims made today (priced from today's latest point); Account 1 and
+  0xdce8 moved from the 10-25 00:xx figures (Closed 126 → 129, 60 → 63) through the owner's own
+  transactions. No non-200, 0 page errors.
+
+- **`d77b66e`** (Production check, 2026-10-25) — **Production is checked every 30 minutes and
   an issue alerts the owner.** `scripts/prod-check.mjs` + `.github/workflows/prod-check.yml`
   (GitHub Actions, free for this public repo; no new account, no secret). 17 read-only GETs, one
   after another, at :07 and :37 UTC: the home, dashboard and analytics pages, `/api/prices`, and
@@ -1080,9 +1100,10 @@ shorthand.
   wallet:** its `positions(uint256)` call uses selector `0x99fd0e82`, which reverts; the right one is
   `0x99fbab88`. Swapping only the selector returns 20 of 0x5cfb's 26 NFTs valued at $6.8e24
   (range-midpoint estimate, unknown tokens), so it was NOT shipped; needs the Uniswap-style rebuild
-  (slot0, pending fees, resolver pricing, plausibility guard), 4–6 h. The 503 it answers today is honest.
+  (slot0, pending fees, resolver pricing, plausibility guard), 4–6 h. _(Now a "can't read yet"
+  notice, `6c4b72b`; the rebuild stays on the post-event list.)_
   **Pre-existing test failures (identical on `48cdb3b`):** history-scan 11, sui-history 3, store-full 1,
-  sui-revalue 1.
+  sui-revalue 1. _(Fixed `d01db7f`: the read-only switch.)_
 
 - **`e83c682` + `90cd0b5`** (Sui outage, 2026-10-23, `90cd0b5` live as `dpl_G5tBkh9DXhypiVKD4r6yURH6pvci`)
   — **Sui JSON-RPC was removed upstream (Alchemy and the public fullnode, Sui v1.82); live Sui
