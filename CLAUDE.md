@@ -1007,6 +1007,43 @@ shorthand.
   (`app/lib/alchemyKey.ts` still falls back to the public name if set). The local `.env.local`
   files still hold the old key until the owner updates them by hand.
 
+- **`e4735b9`** (Demo safety, 2026-10-25, live as `dpl_BJgkSY2D93SkEk8HyeNDQSixYVHp`) — **A pasted
+  link that cannot be read says so; the home paste box works before hydration.**
+  **Paste-alone zeros, cause:** the scripted runs passed `?address=undefined&chain=evm 0x…` (zsh does
+  not split an unquoted variable, same class as rule (l)); the dashboard accepted it, fired no request
+  and showed a clean $0.00. Also a clean $0.00 for an EVM address on `chain=sui`. Direct loads of a
+  correct URL were always right. NEW `app/lib/scanParams.ts` (`parseScanParams`) validates
+  `?address=&chain=` for dashboard, analytics and position detail: no chain → auto-detect; wrong chain,
+  malformed or missing address → `role=alert` "Link not understood: …" and the headline "—"; no wallet
+  at all → "no wallet added" (after 1.5 s, so a returning visitor never sees it flash). Test
+  `scripts/scan-params-test.ts` (16).
+  **Paste box:** the controlled input was wiped by hydration and Enter before hydration did nothing
+  (reproduced on emulated iPhone 14 / iPad). Now uncontrolled + `<form action="/dashboard" method="get">`
+  fallback: pre-hydration paste on production reaches the dashboard URL in 615 ms.
+  **Wording:** "N positions claiming" → "N position(s) with fees".
+  **Production (00:22–00:35 UTC):** EVM 0xd99a, Solana GndR, Sui 0xdce8 pasted alone, cold and warm,
+  desktop / iPhone 14 / iPad: "— still loading …" then $8,384–8,387 (Out of Range 1, Closed 19),
+  $5,977–5,981 (In Range 2, Closed 47), $10,001–10,002 (In Range 1, Closed 60), 0 page errors; quick
+  switch sui→evm→sol→evm lands on EVM only; 6 bad links each show the notice + "—"; paste box 3 of 3
+  on both devices. B7: local new 23:34–23:46 = production old 23:46–23:58 = production new 00:09–00:21
+  to the cent (Account 1 Closed 126, Deposited 23,888.10, Fees 15,667.13, Capital G/L ≈ −16,580.17;
+  Solana 2rr3SF 217 / ≈ −359.87 / ≈ 275.98; Account 2 16 / 3,720.98 / ≈ −1,570.28; Sui 0xdce8 60 /
+  8,842.49 / −8,897.87). Account 1 and 0xdce8 moved from the 10-24 figures (Closed +1, Fees +245.16,
+  Capital G/L −147.32) through the owner's own Sui transactions 2026-10-24 22:37–22:43 UTC.
+  **Health findings recorded with it:** (1) the store is NOT "64 MB, 71% full": the engine changed
+  (INFO now Redis 8.4 / maxmemory 3 GB, used_memory meaningless); MEMORY USAGE sum 46.98 MB over 5,032
+  keys (2026-10-24 22:49 UTC) against the plan's 250 MB data limit; largest families
+  `sui_wallet_hist_v2` 27.90 MB, `closed_pos_sui_v2` 7.86, `sui_wallet_hist_v1` 3.11 (orphaned, no
+  longer read; delete only with the owner's approval). (2) `SHARED_STORE_FAIL_WRITES` cannot act in
+  production: `sharedStore` returns the write path before reading it when `VERCEL_ENV=production`, and
+  no `SHARED_STORE*` variable exists in Vercel. (3) **PancakeSwap has never read a position for any
+  wallet:** its `positions(uint256)` call uses selector `0x99fd0e82`, which reverts; the right one is
+  `0x99fbab88`. Swapping only the selector returns 20 of 0x5cfb's 26 NFTs valued at $6.8e24
+  (range-midpoint estimate, unknown tokens), so it was NOT shipped; needs the Uniswap-style rebuild
+  (slot0, pending fees, resolver pricing, plausibility guard), 4–6 h. The 503 it answers today is honest.
+  **Pre-existing test failures (identical on `48cdb3b`):** history-scan 11, sui-history 3, store-full 1,
+  sui-revalue 1.
+
 - **`e83c682` + `90cd0b5`** (Sui outage, 2026-10-23, `90cd0b5` live as `dpl_G5tBkh9DXhypiVKD4r6yURH6pvci`)
   — **Sui JSON-RPC was removed upstream (Alchemy and the public fullnode, Sui v1.82); live Sui
   state is now read over Sui GraphQL.**
