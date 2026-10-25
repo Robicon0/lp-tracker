@@ -4139,6 +4139,19 @@ with similar position shapes. Never wallet-specific framing.
   (2026-10-18): 0x9d6e's band −4,784.07 from 10-16 read ≈ −4,686 to −4,691 on production's own
   unchanged build that evening.
 
+- **(p) Local and production B7 run one after the other, never side by side, and never two local
+  servers at once, unless every local server is capped well below 100 CU/s
+  (`ALCHEMY_INSTANCE_CU_PER_SEC=50`).** Alchemy's 500 CU/s limit is per ACCOUNT, measured over a
+  rolling 10 s window: the local key (`.env.local`, app "Johnny's First App") and production
+  ("Defidesh-prod") share it. Each process has its own 200 CU/s limiter plus a 5 s burst (1,000
+  CU), so two processes can reach about 600 CU/s over 10 s and three can hold 600 CU/s steadily.
+  Why (2026-10-25): the console showed a 7-day peak of 532.7 / 500 CU/s and a "throughput exceeded"
+  banner. Production logged no Alchemy 429 in those 7 days, and in that window every
+  side-by-side run used two local servers, or local plus production: 10-18 19:38-20:33 and
+  22:51-23:42, 10-19 22:14-22:19, 10-20 00:32-01:12 (local old + local new + production), 10-22
+  22:39-23:38, and 10-24 21:23-21:35 (local + production). One B7 order: local old, then local
+  new, then production, each started after the previous one ends.
+
 **Position routes return open positions first.** A scan that needs a wallet's whole history
 (closed / staked recovery) is a separate `scope` and a separate client source, loading behind
 the open rows with the totals marked until it lands — see `/api/aerodrome` `scope=open|closed`.
