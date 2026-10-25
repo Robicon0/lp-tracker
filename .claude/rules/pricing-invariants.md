@@ -252,6 +252,12 @@ calculations on **EVM chains**:
 **HyperEVM**: sqrtPriceX96 resolver cannot run (no archival eth_call).
 Fall back to CoinGecko historical awaited for closed positions.
 
+**Sui open positions (2026-10-25)**: a deposit or withdrawal in a pool with no stablecoin
+side (X / SUI, X / Y), or with no sqrt price on the event, is valued at each side's day price
+(the DeFiLlama day map claims use, exact day only); a side with no day price is derived from
+the other through the event's pool price (`sidePricesFromDayPrices` in `suiEventPrice.ts`).
+Only when neither works does the leg fall to the marked tick estimate, then marked spot.
+
 **Sui and Solana**: position objects are destroyed on close. Historical
 P&L for closed positions requires event-log reconstruction.
 - **Sui Cetus + Bluefin — IMPLEMENTED (Sprint 2.2b, `bb7fc0d`).**
@@ -300,6 +306,8 @@ deposit/withdrawal valuation, IL calculations, capital G/L.
 
 Tokens currently treated as stablecoins:
 - USDC, USDT, DAI, USDC.e, USDbC, USDe, USD0, USDS, FRAX, LUSD, GUSD, PYUSD
+- USDSUI on Sui (`0x44f8…::usdsui::USDSUI`, added 2026-10-25 at the owner's request;
+  DeFiLlama 0.995–1.003 since May 2026)
 
 Do not add a non-stablecoin to this list without explicit user approval.
 

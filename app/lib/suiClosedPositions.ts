@@ -49,6 +49,7 @@ import { ownershipVerdict, type OwnershipVerdict } from './positionOwnership';
 import { readOwnershipVerdicts, recordOwnershipVerdicts, type StoredVerdict } from './suiOwnershipStore';
 import { createSharedRedis } from './sharedStore';
 import { suiCoinMetadataCached } from './tokenMetaCache';
+import { isSuiStableType } from './suiClaimPrice';
 
 const SUI_CANONICAL = '0x2::sui::sui';
 // Stablecoin cgIds → $1 anchor (pricing-invariants Rule 3, via Sprint 1.10 constants).
@@ -377,7 +378,7 @@ async function resolvePoolContext(poolId: string) {
 
 function isStable(coinType: string): boolean {
   const tok = lookupHardcodedToken('sui', normalizeSuiType(coinType));
-  return !!tok && STABLE_CGIDS.has(tok.cgId);
+  return (!!tok && STABLE_CGIDS.has(tok.cgId)) || isSuiStableType(coinType); // + USDSUI (2026-10-25)
 }
 
 // B3 — Retrieve the object IDs of every CLOSED position of `protocol` for a

@@ -26,6 +26,8 @@ const STABLE_TYPES = new Set([
   '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::usdc',
   '0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::coin', // USDT
   '0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::coin', // wUSDC
+  // USDSUI (6 decimals): DeFiLlama 0.995-1.003 May-Oct 2026. Owner-approved stablecoin, 2026-10-25.
+  '0x44f838219cf67b058f3b37907b655f226153c18e33dfcd0da559a844fea9b1c1::usdsui::usdsui',
 ]);
 const STABLE_CGIDS = new Set(['usd-coin', 'tether', 'dai']);
 

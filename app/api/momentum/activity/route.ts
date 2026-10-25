@@ -4,6 +4,7 @@ import { getSuiActivityBlocks } from '../../../lib/suiHistory';
 import { scanStatusNotice, type RouteTruncation } from '../../../lib/enumerationTruncation';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
+import { sidePricesFromDayPrices, dayLegSides } from '../../../lib/suiEventPrice';
 import { prewarmSuiClaimPrices, priceSuiClaimSide, type ClaimSideInput } from '../../../lib/suiClaimPrice';
 import { resolveToken } from '../../../lib/tokenResolver';
 import { resolveSuiPoolContexts, type SuiPoolContext } from '../../../lib/suiPoolContext';
@@ -46,6 +47,7 @@ const STABLECOINS = new Set([
   '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::usdc',
   '0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::coin', // USDT
   '0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::coin', // wUSDC
+  '0x44f838219cf67b058f3b37907b655f226153c18e33dfcd0da559a844fea9b1c1::usdsui::usdsui', // USDSUI (owner-approved stablecoin, 2026-10-25)
 ]);
 
 // Stablecoin CoinGecko ids — reward-token $1 anchor (reward valuation resolves
@@ -352,6 +354,7 @@ async function GET_impl(request: Request) {
           if (m?.decimalsKnown) sides.push({ coinType: e.rewardCoinType, isStable: m.isStable, isSui: m.isSui, ts: e.timestamp });
         }
       }
+      for (const s of dayLegSides(coinTypeA, coinTypeB, rawEvents)) sides.push(s);
       await prewarmSuiClaimPrices(sides);
     }
 
@@ -398,7 +401,22 @@ async function GET_impl(request: Request) {
       // historical-only from day one (Rule 1a).
       let __claimSrc = 'unknown';
 
-      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && hasTicks) {
+      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && usdAtTime == null) {
+        // No stablecoin anchor (X / SUI, X / Y, or no sqrt price): each side at
+        // its own day price, a missing side through the event's pool price.
+        // Same basis as the closed engine; exact day only, so no marker.
+        const dp = sidePricesFromDayPrices({
+          coinTypeA, coinTypeB, decimalsA, decimalsB, amountA: amount0, amountB: amount1,
+          sqrtPriceX64: undefined, ts: ev.timestamp,
+        });
+        if (dp) {
+          price0AtTime = dp.price0;
+          price1AtTime = dp.price1;
+          usdAtTime = amount0 * (dp.price0 ?? 0) + amount1 * (dp.price1 ?? 0);
+        }
+      }
+
+      if ((ev.type === 'deposit' || ev.type === 'withdrawal') && usdAtTime == null && hasTicks) {
         const derived = deriveDepositPrices(
           amount0, amount1, tickLower!, tickUpper!, decimalsA, decimalsB,
           coinTypeA, coinTypeB, STABLECOINS,
