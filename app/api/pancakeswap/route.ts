@@ -1,43 +1,31 @@
 import { NextResponse } from 'next/server';
 import { PositionListReadError, logPositionListReadFailure } from '../../lib/positionListRead';
-import { fetchCachedCoinGeckoPrices } from '../../lib/priceCache';
-import { getLlamaPools, llamaPoolsNotices } from '../../lib/defillamaPools';
-import { getCachedTokenMeta, setCachedTokenMeta } from '../../lib/tokenMetaCache';
+import { unsupportedPositionsNotice } from '../../lib/enumerationTruncation';
 import { alchemyKey } from '../../lib/alchemyKey';
 
-// DeFiLlama projects this route reads fee APR from.
-const LLAMA_PROJECTS = ['pancakeswap-v3'] as const;
+// PancakeSwap V3 on BNB: positions are NOT read yet (2026-10-25, owner decision).
+// The route used `positions(uint256)` selector 0x99fd0e82, which reverts, so it
+// never read a position for any wallet and answered 503 for every holder.
+// Swapping only the selector (0x99fbab88) returned 26 NFTs valued at $6.8e24
+// (range-midpoint estimate, unknown tokens), so that was not shipped. Until the
+// Uniswap-style rebuild (slot0, pending fees, resolver pricing, plausibility
+// guard; post-event list), the route counts the wallet's position NFTs and
+// answers the "can't read yet" notice: "PancakeSwap V3 / BNB: N positions we
+// can't read yet", totals marked ≈. The old decode path is in git history
+// (before this commit). A failed count is a named 503, never "owns nothing"
+// (Methodology rule (e)).
 
 const ALCHEMY_KEY = alchemyKey();
 const RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 
 const POSITION_MANAGER = '0x46A15B0b27311cedF172AB29E4f4766fbE7F4364';
 
-const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; coingeckoId: string }> = {
-  '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c': { symbol: 'WBNB',  decimals: 18, coingeckoId: 'binancecoin' },
-  '0x55d398326f99059ff775485246999027b3197955': { symbol: 'USDT',  decimals: 18, coingeckoId: 'tether' },
-  '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': { symbol: 'USDC',  decimals: 18, coingeckoId: 'usd-coin' },
-  '0xe9e7cea3dedca5984780bafc599bd69add087d56': { symbol: 'BUSD',  decimals: 18, coingeckoId: 'binance-usd' },
-  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82': { symbol: 'CAKE',  decimals: 18, coingeckoId: 'pancakeswap-token' },
-  '0x2170ed0880ac9a755fd29b2688956bd959f933f8': { symbol: 'ETH',   decimals: 18, coingeckoId: 'ethereum' },
-  '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c': { symbol: 'BTCB',  decimals: 18, coingeckoId: 'bitcoin' },
-  '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3': { symbol: 'DAI',   decimals: 18, coingeckoId: 'dai' },
-};
-
 const SELECTORS = {
-  balanceOf:           '0x70a08231',
-  tokenOfOwnerByIndex: '0x2f745c59',
-  positions:           '0x99fd0e82',
-  symbol:              '0x95d89b41',
-  decimals:            '0x313ce567',
+  balanceOf: '0x70a08231',
 };
 
 function padAddress(addr: string): string {
   return addr.toLowerCase().replace('0x', '').padStart(64, '0');
-}
-
-function padUint256(value: bigint): string {
-  return value.toString(16).padStart(64, '0');
 }
 
 // One eth_call to the BNB RPC. The reply is checked before it is read: an HTTP
@@ -84,145 +72,6 @@ async function getBalance(account: string): Promise<number> {
   return parseInt(result, 16);
 }
 
-async function getTokenId(account: string, index: number): Promise<bigint> {
-  const data = SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(index));
-  const result = await rpcCall(POSITION_MANAGER, data);
-  // An owned index always has a tokenId: no word is a failed read, never "skip it".
-  if (!result || result === '0x') throw new PositionListReadError('PancakeSwap', `position at index ${index}`);
-  return BigInt(result);
-}
-
-interface PositionData {
-  token0: string;
-  token1: string;
-  fee: number;
-  tickLower: number;
-  tickUpper: number;
-  liquidity: bigint;
-  tokensOwed0: bigint;
-  tokensOwed1: bigint;
-}
-
-async function getPosition(tokenId: bigint): Promise<PositionData | null> {
-  const data = SELECTORS.positions + padUint256(tokenId);
-  const result = await rpcCall(POSITION_MANAGER, data);
-  // positions() of an owned tokenId always answers 12 words: a shorter reply is
-  // a failed read, never "no such position".
-  if (!result || result === '0x' || result.length < 770) throw new PositionListReadError('PancakeSwap', `position ${tokenId}`);
-
-  const hex = result.startsWith('0x') ? result.slice(2) : result;
-  const readWord = (i: number) => hex.slice(i * 64, (i + 1) * 64);
-  const toAddress = (word: string) => '0x' + word.slice(24).toLowerCase();
-  // Correct int24 decode: read last 3 bytes, sign-extend if >= 0x800000
-  const toInt24 = (word: string) => {
-    const v = parseInt(word.slice(-6), 16);
-    return v >= 0x800000 ? v - 0x1000000 : v;
-  };
-
-  // word 0: nonce, 1: operator, 2: token0, 3: token1, 4: fee
-  // 5: tickLower, 6: tickUpper, 7: liquidity
-  // 8: feeGrowthInside0LastX128, 9: feeGrowthInside1LastX128
-  // 10: tokensOwed0, 11: tokensOwed1
-  return {
-    token0:      toAddress(readWord(2)),
-    token1:      toAddress(readWord(3)),
-    fee:         parseInt(readWord(4), 16),
-    tickLower:   toInt24(readWord(5)),
-    tickUpper:   toInt24(readWord(6)),
-    liquidity:   BigInt('0x' + readWord(7)),
-    tokensOwed0: BigInt('0x' + readWord(10)),
-    tokensOwed1: BigInt('0x' + readWord(11)),
-  };
-}
-
-async function fetchTokenInfo(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
-  const cached = await getCachedTokenMeta('bnb', tokenAddress);
-  if (cached) return cached;
-  // decimals() is required: a guessed 18 mis-scales every amount by powers of
-  // ten, so a failed read fails the route (named 503) instead.
-  const decResult = await rpcCall(tokenAddress, SELECTORS.decimals);
-  const decimals = parseInt(decResult, 16);
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
-    throw new PositionListReadError('PancakeSwap', `decimals of ${tokenAddress}`);
-  }
-  try {
-    const symResult = await rpcCall(tokenAddress, SELECTORS.symbol);
-
-    let symbol = 'UNKNOWN';
-    if (symResult && symResult.length > 130) {
-      const hex = symResult.startsWith('0x') ? symResult.slice(2) : symResult;
-      const strLen = parseInt(hex.slice(64, 128), 16);
-      const strHex = hex.slice(128, 128 + strLen * 2);
-      symbol = '';
-      for (let i = 0; i < strHex.length; i += 2) {
-        const charCode = parseInt(strHex.slice(i, i + 2), 16);
-        if (charCode > 0) symbol += String.fromCharCode(charCode);
-      }
-    }
-    const meta = { symbol, decimals };
-    if (symbol && symbol !== 'UNKNOWN') setCachedTokenMeta('bnb', tokenAddress, meta);
-    return meta;
-  } catch {
-    // The symbol is a label only; the amounts above are right without it.
-    return { symbol: 'UNKNOWN', decimals };
-  }
-}
-
-function estimateAmounts(
-  liquidity: bigint,
-  tickLower: number,
-  tickUpper: number,
-  decimals0: number,
-  decimals1: number
-): { amount0: number; amount1: number } {
-  if (liquidity === 0n) return { amount0: 0, amount1: 0 };
-  const sqrtLower = Math.sqrt(1.0001 ** tickLower);
-  const sqrtUpper = Math.sqrt(1.0001 ** tickUpper);
-  const sqrtCurrent = (sqrtLower + sqrtUpper) / 2;
-  const liq = Number(liquidity);
-  return {
-    amount0: Math.max(0, liq * (1 / sqrtCurrent - 1 / sqrtUpper) / (10 ** decimals0)),
-    amount1: Math.max(0, liq * (sqrtCurrent - sqrtLower) / (10 ** decimals1)),
-  };
-}
-
-async function fetchPrices(coingeckoIds: string[]): Promise<Record<string, number>> {
-  return fetchCachedCoinGeckoPrices(coingeckoIds);
-}
-
-async function fetchPancakeAPYs(): Promise<Record<string, number>> {
-  try {
-    // One shared, stored copy of DeFiLlama's pool list (app/lib/defillamaPools.ts).
-    // Rows keep the parsed-JSON typing the code below was written against.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: { data: any[] } = { data: (await getLlamaPools(LLAMA_PROJECTS)).pools };
-    const pools = data.data?.filter((p: { project: string }) => p.project === 'pancakeswap-v3') || [];
-
-    const apysByKey: Record<string, number[]> = {};
-    for (const pool of pools) {
-      if (pool.chain !== 'BSC') continue;
-      if (pool.underlyingTokens?.length >= 2) {
-        const tokens = pool.underlyingTokens.map((t: string) => t.toLowerCase()).sort();
-        const key = `BSC-${tokens.join('-')}`;
-        if (!apysByKey[key]) apysByKey[key] = [];
-        apysByKey[key].push(pool.apyBase || pool.apy || 0);
-      }
-    }
-
-    const result: Record<string, number> = {};
-    for (const [key, apys] of Object.entries(apysByKey)) {
-      const sorted = apys.sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      result[key] = Math.round(
-        (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) * 100
-      ) / 100;
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
@@ -235,100 +84,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const allCoingeckoIds = Object.values(KNOWN_TOKENS).map(t => t.coingeckoId);
-    const [prices, apyData] = await Promise.all([fetchPrices(allCoingeckoIds), fetchPancakeAPYs()]);
-
     const balance = await getBalance(account);
     if (balance === 0) {
       return NextResponse.json({ positions: [], count: 0, account });
     }
-
-    const count = Math.min(balance, 20);
-    const tokenIds: bigint[] = [];
-    for (let i = 0; i < count; i++) {
-      const id = await getTokenId(account, i);
-      if (id > 0n) tokenIds.push(id);
-    }
-
-    const positions: ReturnType<typeof Object.assign>[] = [];
-
-    for (const tokenId of tokenIds) {
-      try {
-        const pos = await getPosition(tokenId);
-        if (!pos) continue;
-
-        let t0Info = KNOWN_TOKENS[pos.token0];
-        let t1Info = KNOWN_TOKENS[pos.token1];
-
-        if (!t0Info) {
-          const fetched = await fetchTokenInfo(pos.token0);
-          t0Info = { ...fetched, coingeckoId: '' };
-        }
-        if (!t1Info) {
-          const fetched = await fetchTokenInfo(pos.token1);
-          t1Info = { ...fetched, coingeckoId: '' };
-        }
-
-        const { amount0, amount1 } = estimateAmounts(
-          pos.liquidity, pos.tickLower, pos.tickUpper, t0Info.decimals, t1Info.decimals
-        );
-
-        const price0 = t0Info.coingeckoId ? (prices[t0Info.coingeckoId] || 0) : 0;
-        const price1 = t1Info.coingeckoId ? (prices[t1Info.coingeckoId] || 0) : 0;
-        const value  = amount0 * price0 + amount1 * price1;
-
-        const fees0  = Number(pos.tokensOwed0) / (10 ** t0Info.decimals);
-        const fees1  = Number(pos.tokensOwed1) / (10 ** t1Info.decimals);
-        const feesUsd = fees0 * price0 + fees1 * price1;
-
-        const apyKey = `BSC-${[pos.token0, pos.token1].sort().join('-')}`;
-        const apy = apyData[apyKey] || 0;
-
-        // RULE: Closed positions (liquidity = 0) must ALWAYS be returned and
-        // never filtered out. Status is set to 'Closed' below. Applies to all
-        // current and future protocol integrations on any chain.
-        const status =
-          pos.liquidity === 0n ? 'Closed'
-          : amount0 > 0.0001 && amount1 > 0.0001 ? 'In Range'
-          : 'Out of Range';
-
-        positions.push({
-          id: `cake3-bsc-${tokenId.toString()}`,
-          pair: `${t0Info.symbol} / ${t1Info.symbol}`,
-          protocol: 'PancakeSwap V3',
-          chain: 'BNB Chain',
-          value:   Math.round(value   * 100) / 100,
-          apy,
-          fees:    Math.round(feesUsd * 100) / 100,
-          status,
-          tokenId: tokenId.toString(),
-          fee:     pos.fee / 10000,
-          amount0: Math.round(amount0 * 1000000) / 1000000,
-          amount1: Math.round(amount1 * 1000000) / 1000000,
-          token0Symbol:   t0Info.symbol,
-          token1Symbol:   t1Info.symbol,
-          tickLower:      pos.tickLower,
-          tickUpper:      pos.tickUpper,
-          token0Decimals: t0Info.decimals,
-          token1Decimals: t1Info.decimals,
-          token0Address:  pos.token0,
-          token1Address:  pos.token1,
-          liquidity: pos.liquidity.toString(),
-          price0,
-          price1,
-          walletAddress: account,
-        });
-      } catch (err) {
-        // A failed read is never a dropped position: the whole answer fails
-        // (named 503) and the page keeps the last good rows.
-        if (err instanceof PositionListReadError) throw err;
-        console.error(`PancakeSwap: error processing token ${tokenId}:`, err);
-        throw new PositionListReadError('PancakeSwap', `position ${tokenId}`);
-      }
-    }
-
-    const truncated = positions.length > 0 ? llamaPoolsNotices(LLAMA_PROJECTS) : [];
-    return NextResponse.json({ positions, count: positions.length, account, ...(truncated.length > 0 ? { truncated } : {}) });
+    return NextResponse.json({
+      positions: [],
+      count: 0,
+      account,
+      truncated: [unsupportedPositionsNotice('V3 / BNB', balance)],
+    });
   } catch (err) {
     if (err instanceof PositionListReadError) {
       logPositionListReadFailure('PancakeSwap', account, err);

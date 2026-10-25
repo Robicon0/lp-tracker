@@ -21,7 +21,7 @@ const addrWord = (a: string) => '0'.repeat(24) + a.slice(2);
 // positions(): nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity, fg0, fg1, owed0, owed1
 const POSITION = '0x' + [W(0), W(0), addrWord(WBNB), addrWord(USDT), W(500), W(BigInt(-1000) & ((1n << 256n) - 1n)), W(1000), W(10n ** 18n), W(0), W(0), W(0), W(0)].join('');
 
-type Mode = 'good' | 'empty' | 'empty-once' | 'http-502' | 'bad-json' | 'no-result';
+type Mode = 'good' | 'zero' | 'empty' | 'empty-once' | 'http-502' | 'bad-json' | 'no-result';
 function bnbStub(mode: Mode) {
   let calls = 0;
   const realFetch = globalThis.fetch;
@@ -36,7 +36,7 @@ function bnbStub(mode: Mode) {
     if (m === 'no-result') return new Response('{"jsonrpc":"2.0","id":1}', { status: 200 });
     const b = JSON.parse(String(init?.body));
     const data: string = b.params[0].data;
-    const result = data.startsWith('0x70a08231') ? '0x' + W(1)          // balanceOf → 1 position
+    const result = data.startsWith('0x70a08231') ? '0x' + W(mode === 'zero' ? 0 : 1) // balanceOf → 1 position (0 in 'zero')
       : data.startsWith('0x2f745c59') ? '0x' + W(4242)                  // tokenOfOwnerByIndex
       : data.startsWith('0x99fd0e82') ? POSITION
       : '0x';
@@ -48,13 +48,22 @@ function bnbStub(mode: Mode) {
 async function pancake() {
   const { GET } = await import('../app/api/pancakeswap/route');
   const ask = () => GET(new Request(`http://x/api/pancakeswap?account=${ACCOUNT}`));
+  {
+    const stub = bnbStub('zero');
+    const res = await ask();
+    const j = await res.json() as { positions?: unknown[]; truncated?: unknown[] };
+    stub.restore();
+    check('PancakeSwap, no position NFT: 200, empty, no notice', res.status === 200 && j.positions?.length === 0 && !j.truncated, JSON.stringify(j).slice(0, 120));
+  }
   for (const mode of ['good', 'empty-once', 'empty', 'http-502', 'bad-json', 'no-result'] as Mode[]) {
     const stub = bnbStub(mode);
     const res = await ask();
-    const j = await res.json() as { positions?: unknown[]; error?: string; protocol?: string };
+    const j = await res.json() as { positions?: unknown[]; error?: string; protocol?: string; truncated?: Array<{ reason: string; returned: number; scope: string }> };
     stub.restore();
     if (mode === 'good' || mode === 'empty-once') {
-      check(`PancakeSwap, BNB reply ${mode}: 200 with the position`, res.status === 200 && j.positions?.length === 1, `status ${res.status}, positions ${j.positions?.length}, RPC calls ${stub.calls()}`);
+      // Positions are not read yet (2026-10-25): the count becomes the "can't read yet" notice.
+      const n = j.truncated?.[0];
+      check(`PancakeSwap, BNB reply ${mode}: 200 with "1 position we can't read yet"`, res.status === 200 && j.positions?.length === 0 && n?.reason === 'unsupported-positions' && n?.returned === 1 && n?.scope === 'V3 / BNB', `status ${res.status}, ${JSON.stringify(j).slice(0, 120)}, RPC calls ${stub.calls()}`);
     } else {
       check(`PancakeSwap, BNB reply ${mode}: named 503, never a bare 500 or an empty list`, res.status === 503 && j.error === 'position-list-read-failed' && j.protocol === 'PancakeSwap' && !Array.isArray(j.positions), `status ${res.status} ${JSON.stringify(j).slice(0, 80)}, RPC calls ${stub.calls()}`);
     }
