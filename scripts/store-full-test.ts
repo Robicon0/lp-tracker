@@ -8,6 +8,10 @@ import { loadClosedPositionsGuarded } from '../app/lib/closedPositionCache';
 import { isFinishedUtcDay, priceCopyOpts } from '../app/lib/finishedDay';
 import { failingWritesStore, storeWriteFailuresSince } from '../app/lib/sharedStore';
 import { isInfoReason, STORE_WRITE_FAILED, storeWriteFailedNotice, hasLookupFailure } from '../app/lib/enumerationTruncation';
+// These checks run against an in-memory store, never the shared one. Clear the
+// local read-only switch (set for every local run, Methodology rule (f)), or the
+// fake store takes no writes and every resume / never-shrink check fails.
+delete process.env.CLOSED_POS_CACHE_READONLY;
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, extra = '') => { if (cond) { pass++; console.log(`  ok   ${name}`); } else { fail++; console.log(`  FAIL ${name} ${extra}`); } };

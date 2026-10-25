@@ -1,6 +1,10 @@
 // Resumable history-scan engine: budget, resume, caps, failure, lock, ordering.
 // Pure in-memory (fake chain + fake store). Run: npx tsx scripts/history-scan-test.ts
 import { runResumableScan, _resetHistoryScanOverlay, type ScanStore, type ScanSource } from '../app/lib/historyScan';
+// These checks run against an in-memory store, never the shared one. Clear the
+// local read-only switch (set for every local run, Methodology rule (f)), or the
+// fake store takes no writes and every resume / never-shrink check fails.
+delete process.env.CLOSED_POS_CACHE_READONLY;
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, extra = '') => { if (cond) { pass++; console.log(`  ok   ${name}`); } else { fail++; console.log(`  FAIL ${name} ${extra}`); } };

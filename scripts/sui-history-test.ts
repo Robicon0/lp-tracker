@@ -10,6 +10,10 @@
 //
 // USAGE  npx tsx scripts/sui-history-test.ts [wallet] [positionObjectId]
 import { getSuiWalletHistory, getSuiObjectHistory, getSuiOwnedObjectIds, _setSuiHistoryStoreForTests } from '../app/lib/suiHistory';
+// These checks run against an in-memory store, never the shared one. Clear the
+// local read-only switch (set for every local run, Methodology rule (f)), or the
+// fake store takes no writes and every resume / never-shrink check fails.
+delete process.env.CLOSED_POS_CACHE_READONLY;
 
 const WALLET = process.argv[2] ?? '0xdce8af889df949cacbef1188e6eb59d70508b76eba4c74cb1c8dc4f34454c30d'; // Account 1
 const CETUS_POSITION = '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb::position::Position';

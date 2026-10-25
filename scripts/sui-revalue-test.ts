@@ -2,6 +2,10 @@
 // closed record that still has an unpriced event is valued again with ONLY its
 // gaps filled. Forced cases; no chain, no store.
 //   npx tsx scripts/sui-revalue-test.ts
+// These checks run against an in-memory store, never the shared one. Clear the
+// local read-only switch (set for every local run, Methodology rule (f)), or the
+// fake store takes no writes and every resume / never-shrink check fails.
+delete process.env.CLOSED_POS_CACHE_READONLY;
 delete process.env.PRICE_CACHE_KV_REST_API_URL;
 delete process.env.PRICE_CACHE_KV_REST_API_TOKEN;
 
