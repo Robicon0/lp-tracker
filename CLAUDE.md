@@ -1022,7 +1022,7 @@ shorthand.
   fallback: pre-hydration paste on production reaches the dashboard URL in 615 ms.
   **Wording:** "N positions claiming" → "N position(s) with fees".
   **Production (00:22–00:35 UTC):** EVM 0xd99a, Solana GndR, Sui 0xdce8 pasted alone, cold and warm,
-  desktop / iPhone 14 / iPad: "— still loading …" then $8,384–8,387 (Out of Range 1, Closed 19),
+  desktop / iPhone 14 / iPad: "— still loading …" then $8,384–8,387 (In Range 1, Closed 19),
   $5,977–5,981 (In Range 2, Closed 47), $10,001–10,002 (In Range 1, Closed 60), 0 page errors; quick
   switch sui→evm→sol→evm lands on EVM only; 6 bad links each show the notice + "—"; paste box 3 of 3
   on both devices. B7: local new 23:34–23:46 = production old 23:46–23:58 = production new 00:09–00:21
