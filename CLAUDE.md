@@ -235,6 +235,21 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 
 In order. One active at a time. Each sprint must ship before the next begins.
 
+**📅 SCHEDULE + DECISIONS (owner, 2026-10-25).** Each item: short Phase A, build, local B7, push
+only if every gate passes, production B7, docs commit; one push per item; roll back first on any
+regression; rule (p) for every B7.
+- **Alchemy throughput:** `ALCHEMY_INSTANCE_CU_PER_SEC` is NOT changed now (stays 200).
+- **Nov 2–4 slot:** the shared cross-instance cap (about 400 CU/s for production, one budget in
+  the store per second, tokens claimed in chunks of about 100 CU; 100 CU/s per instance when the
+  store is unreachable) ships WITH abuse protection. A visitor who hits it sees a slower load and
+  the existing "still loading" / `≈` notices, never a wrong figure.
+- **Nov 20 freeze:** the Alchemy plan decision (Free vs Pay As You Go, $0.525 per 1M CU, 10,000
+  CU/s) is made then, from the console's monthly CU.
+- **Order now:** (1) production check + alert ✅ (see Recent fixes); (2) PancakeSwap BNB "can't
+  read yet" notice (the rebuild stays on the post-event list; do not swap the selector alone);
+  (3) the four failing test files; (4) Sui X / SUI and USDSUI pairs at deposit-day / claim-day
+  prices, USDSUI a stablecoin (8 h stop-loss).
+
 **✅ SUI OUTAGE (2026-10-22 22:46 UTC) — FIXED `e83c682` (notice) + `90cd0b5` (GraphQL), see Recent fixes.**
 The only Sui JSON-RPC user left is the browser wallet client (`app/providers.tsx:22`, dapp-kit,
 wallet connection only, no figure depends on it).
@@ -968,6 +983,31 @@ enumeration) is still the way to find such a position for a wallet whose history
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **(this commit)** (Production check, 2026-10-25) — **Production is checked every 30 minutes and
+  an issue alerts the owner.** `scripts/prod-check.mjs` + `.github/workflows/prod-check.yml`
+  (GitHub Actions, free for this public repo; no new account, no secret). 17 read-only GETs, one
+  after another, at :07 and :37 UTC: the home, dashboard and analytics pages, `/api/prices`, and
+  per chain a demo wallet already public in the repo or a third-party wallet with live positions
+  (EVM Account 1 Uniswap Base + Aerodrome open / closed + the unsupported-positions read; HyperEVM
+  Account 2; Solana H8r6 Orca, 2rr3SF Raydium, 6NcbT DefiTuna, 2rr3SF closed list; Sui 0x9d6e and
+  0x0256 Cetus, 0x0256 balances and closed list). A check fails on: no answer in 100 s, any non-200,
+  an `error` field, a failure notice (`*unavailable`, `*failed`, `unchecked`, `excluded`,
+  `kept-stored`, `unreadable`, `unverified`; information notices pass), an open position worth
+  $0.00, fewer open positions than expected, or a closed list shorter than today's (never-shrink).
+  A failure must hold on a retry 30 s later. **Alert:** an issue "Production check failing: <ids>"
+  (opened → email), a comment when the failure set changes, closed with "Recovered" when all pass;
+  the run turns red only on a new or changed failure. Pause during a B7 (rule (p)): repository
+  variable `PROD_CHECK_PAUSED=1`. Test: Actions → Production check → Run workflow →
+  `simulate_failure`. Verified 2026-10-25: production passes 17 / 17 (09:54 UTC); a stub server
+  playing back each class (503 `position-list-read-failed`, `sui-unavailable` notice and 503,
+  $0 open position, empty list, hang, `unsupported-unchecked`) fails all seven; the issue logic
+  replayed against a mock (new / same / changed / recovered / script crash). Cost: about 1–2k
+  Alchemy CU per run (estimate; Uniswap on Account 1 dominates), so roughly 1.5–3M CU a month of
+  the free 30M. A third-party wallet that closes its position shows as "expected at least 1 open
+  position (the demo wallet may have closed its position)": pick another wallet in the script.
+  **Not active until the owner adds the workflow file:** the push token has no `workflow` scope,
+  so `.github/workflows/prod-check.yml` was not pushed (kept locally, untracked).
 
 - **`0dc84c4`** (Dashboard tabs + Yield History headline, 2026-10-24, live as `dpl_BhxzEcgc1eRQAvBJgHyyKCayHrv5`)
   — **The list names counted positions the open tab hides; the Yield History headline uses only
