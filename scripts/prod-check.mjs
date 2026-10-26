@@ -7,9 +7,11 @@
 // Every check here is one read-only GET, run one after another (never in
 // parallel: the Alchemy CU/s limit is shared by the whole account, rule (p)).
 //
-// Wallets are public addresses already in the repo or third-party demo wallets
-// with live positions. A third-party wallet can close its position: the alert
-// then names that wallet, and the fix is to pick another one below.
+// Wallets come from PROD_CHECK_WALLETS (a GitHub Actions variable: JSON
+// {"evm1","evm2","sol1","sol2","sol3","sui1","sui2"}) or, locally, from the
+// "prodCheck" block of .local/wallets.json. No address is written in this file,
+// in the log or in an alert. A demo wallet can close its position: the alert
+// then names the check, and the fix is to put another wallet in the variable.
 //
 // Usage:
 //   node scripts/prod-check.mjs                  # defidesh.com
@@ -18,7 +20,7 @@
 //   PROD_CHECK_SIMULATE=<check id> node scripts/prod-check.mjs   # force one failure (alert test)
 // Exit code 0 = all good, 1 = at least one failure that held after a retry.
 
-import { writeFileSync, appendFileSync } from 'node:fs';
+import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const argOf = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
@@ -28,39 +30,40 @@ const SIMULATE = process.env.PROD_CHECK_SIMULATE || '';
 const TIMEOUT_MS = 100_000; // a route slower than this counts as hung
 const RETRY_DELAY_MS = 30_000;
 
-const EVM_A1 = '0xD99a9e66d000d4024dC77f00f784Cc45F8804F20'; // Account 1 EVM (in CLAUDE.md)
-const EVM_A2 = '0xEf93B7f19dcEf8E5f9c5F41CBBCe9e78B16B8d0C'; // Account 2 EVM (in CLAUDE.md)
-const SOL_TUNA = '6NcbT9g7xDTaBpAVJGjfQK4jW81KxBA5zH3nPdQVu9od'; // DefiTuna regression wallet (in CLAUDE.md)
-const SOL_2RR3 = '2rr3SFuM8YNFcn9RUvqGNPki8rxaXjHDscQuy7wNJTpn'; // Solana test wallet (in CLAUDE.md)
-const SOL_ORCA = 'H8r6UKSRPz6bVA2NqPj6s7raMgLfBPFQsnSs4xhqf595'; // third party, open Orca position
-const SUI_9D6E = '0x9d6ea1972a50e987182bc937f1ea5fca1c1e3e4190ae36751cf273d01a13b1f9'; // third party, 13 open Cetus
-const SUI_0256 = '0x0256c4c596fef5d0e0db6303982653ef283eb32162f8c3967d8b30488ac7e6ea'; // third party, open Cetus
+function loadWallets() {
+  if (process.env.PROD_CHECK_WALLETS) return JSON.parse(process.env.PROD_CHECK_WALLETS);
+  const file = new URL('../.local/wallets.json', import.meta.url);
+  return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')).prodCheck ?? {}) : {};
+}
+const W = loadWallets();
+// A check whose wallet is not configured fails with 'wallet-not-configured'.
+const acct = (role) => W[role] || null;
 
 // kind: 'page' (HTML 200), 'positions' (position list), 'closed' (closed list,
 // never shrinks), 'json' (any JSON 200 without an error field).
 // minOpen: open positions (status != Closed) the wallet holds; each must be worth > $0.
 // minCount: positions in the list (closed lists never shrink, so today's count is a floor).
 const CHECKS = [
-  { id: 'page-home', chain: 'site', kind: 'page', path: '/' },
-  { id: 'page-dashboard', chain: 'site', kind: 'page', path: '/dashboard' },
-  { id: 'page-analytics', chain: 'site', kind: 'page', path: '/analytics' },
-  { id: 'prices', chain: 'site', kind: 'prices', path: '/api/prices?ids=bitcoin,sui,solana&vs_currencies=usd' },
+  { id: 'page-home', chain: 'site', kind: 'page', path: () => '/' },
+  { id: 'page-dashboard', chain: 'site', kind: 'page', path: () => '/dashboard' },
+  { id: 'page-analytics', chain: 'site', kind: 'page', path: () => '/analytics' },
+  { id: 'prices', chain: 'site', kind: 'prices', path: () => '/api/prices?ids=bitcoin,sui,solana&vs_currencies=usd' },
 
-  { id: 'uniswap-a1', chain: 'evm', kind: 'positions', path: `/api/uniswap/v3?account=${EVM_A1}`, minOpen: 1 },
-  { id: 'aerodrome-open-a1', chain: 'evm', kind: 'positions', path: `/api/aerodrome?account=${EVM_A1}&scope=open` },
-  { id: 'aerodrome-closed-a1', chain: 'evm', kind: 'closed', path: `/api/aerodrome?account=${EVM_A1}&scope=closed`, minCount: 14 },
-  { id: 'uniswap-unsupported-a1', chain: 'evm', kind: 'json', path: `/api/uniswap/unsupported?account=${EVM_A1}` },
-  { id: 'hyperswap-a2', chain: 'hyperevm', kind: 'closed', path: `/api/hyperswap?account=${EVM_A2}`, minCount: 4 },
+  { id: 'uniswap-evm-1', chain: 'evm', kind: 'positions', wallet: 'evm1', path: (a) => `/api/uniswap/v3?account=${a}`, minOpen: 1 },
+  { id: 'aerodrome-open-evm-1', chain: 'evm', kind: 'positions', wallet: 'evm1', path: (a) => `/api/aerodrome?account=${a}&scope=open` },
+  { id: 'aerodrome-closed-evm-1', chain: 'evm', kind: 'closed', wallet: 'evm1', path: (a) => `/api/aerodrome?account=${a}&scope=closed`, minCount: 14 },
+  { id: 'uniswap-unsupported-evm-1', chain: 'evm', kind: 'json', wallet: 'evm1', path: (a) => `/api/uniswap/unsupported?account=${a}` },
+  { id: 'hyperswap-evm-2', chain: 'hyperevm', kind: 'closed', wallet: 'evm2', path: (a) => `/api/hyperswap?account=${a}`, minCount: 4 },
 
-  { id: 'orca-h8r6', chain: 'solana', kind: 'positions', path: `/api/orca?account=${SOL_ORCA}`, minOpen: 1 },
-  { id: 'raydium-2rr3', chain: 'solana', kind: 'positions', path: `/api/raydium?account=${SOL_2RR3}`, minOpen: 1 },
-  { id: 'defituna-6ncb', chain: 'solana', kind: 'positions', path: `/api/defituna?account=${SOL_TUNA}`, minOpen: 1 },
-  { id: 'solana-closed-2rr3', chain: 'solana', kind: 'closed', path: `/api/solana-closed-positions?account=${SOL_2RR3}`, minCount: 217 },
+  { id: 'orca-sol-1', chain: 'solana', kind: 'positions', wallet: 'sol1', path: (a) => `/api/orca?account=${a}`, minOpen: 1 },
+  { id: 'raydium-sol-2', chain: 'solana', kind: 'positions', wallet: 'sol2', path: (a) => `/api/raydium?account=${a}`, minOpen: 1 },
+  { id: 'defituna-sol-3', chain: 'solana', kind: 'positions', wallet: 'sol3', path: (a) => `/api/defituna?account=${a}`, minOpen: 1 },
+  { id: 'solana-closed-sol-2', chain: 'solana', kind: 'closed', wallet: 'sol2', path: (a) => `/api/solana-closed-positions?account=${a}`, minCount: 217 },
 
-  { id: 'cetus-9d6e', chain: 'sui', kind: 'positions', path: `/api/cetus?account=${SUI_9D6E}`, minOpen: 1 },
-  { id: 'cetus-0256', chain: 'sui', kind: 'positions', path: `/api/cetus?account=${SUI_0256}`, minOpen: 1 },
-  { id: 'sui-balances-0256', chain: 'sui', kind: 'json', path: `/api/sui/balances?account=${SUI_0256}` },
-  { id: 'sui-closed-0256', chain: 'sui', kind: 'closed', path: `/api/sui-closed-positions?account=${SUI_0256}`, minCount: 39 },
+  { id: 'cetus-sui-1', chain: 'sui', kind: 'positions', wallet: 'sui1', path: (a) => `/api/cetus?account=${a}`, minOpen: 1 },
+  { id: 'cetus-sui-2', chain: 'sui', kind: 'positions', wallet: 'sui2', path: (a) => `/api/cetus?account=${a}`, minOpen: 1 },
+  { id: 'sui-balances-sui-2', chain: 'sui', kind: 'json', wallet: 'sui2', path: (a) => `/api/sui/balances?account=${a}` },
+  { id: 'sui-closed-sui-2', chain: 'sui', kind: 'closed', wallet: 'sui2', path: (a) => `/api/sui-closed-positions?account=${a}`, minCount: 39 },
 ];
 
 // Notices that describe a failed or unavailable read. Information notices
@@ -80,62 +83,65 @@ async function fetchOnce(path) {
     const res = await fetch(BASE + path, { signal: ctl.signal, headers: { 'user-agent': 'defidesh-prod-check' } });
     const text = await res.text();
     return { status: res.status, text, ms: Date.now() - started };
-  } catch (e) {
-    return { status: 0, text: '', ms: Date.now() - started, error: ctl.signal.aborted ? `no answer in ${TIMEOUT_MS / 1000} s` : String(e?.message || e) };
+  } catch {
+    return { status: 0, text: '', ms: Date.now() - started, error: true, timedOut: ctl.signal.aborted };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Returns null when the check passes, else a one-line reason. */
+// Fixed reason codes: an alert carries the check id, chain, HTTP status and one
+// of these, never text from the answer.
+const REASONS = [
+  'simulated', 'wallet-not-configured', 'no-answer', 'request-failed', 'http-5xx', 'http-error',
+  'page-no-html', 'page-error', 'not-json', 'error-field', 'failure-notice', 'price-missing',
+  'no-positions-list', 'closed-list-short', 'no-positions', 'too-few-open', 'open-position-zero',
+  'too-few-positions', 'unknown',
+];
+
+/** Returns null when the check passes, else a reason code from REASONS. */
 function judge(check, r) {
-  if (SIMULATE && SIMULATE === check.id) return 'simulated failure (alert test)';
-  if (r.error) return `request failed: ${r.error}`;
-  if (r.status >= 500) return `HTTP ${r.status}${shortError(r.text)}`;
-  if (r.status !== 200) return `HTTP ${r.status}${shortError(r.text)}`;
+  if (SIMULATE && SIMULATE === check.id) return 'simulated';
+  if (r.notConfigured) return 'wallet-not-configured';
+  if (r.timedOut) return 'no-answer';
+  if (r.error) return 'request-failed';
+  if (r.status >= 500) return 'http-5xx';
+  if (r.status !== 200) return 'http-error';
   if (check.kind === 'page') {
-    if (!/<html/i.test(r.text)) return 'page answered 200 without HTML';
-    if (/Application error|Internal Server Error/i.test(r.text)) return 'page shows an error';
+    if (!/<html/i.test(r.text)) return 'page-no-html';
+    if (/Application error|Internal Server Error/i.test(r.text)) return 'page-error';
     return null;
   }
   let j;
-  try { j = JSON.parse(r.text); } catch { return 'answer is not JSON'; }
-  if (j && typeof j.error === 'string') return `answered error "${j.error}"`;
+  try { j = JSON.parse(r.text); } catch { return 'not-json'; }
+  if (j && typeof j.error === 'string') return 'error-field';
   const bad = (Array.isArray(j?.truncated) ? j.truncated : [])
     .map((t) => String(t?.reason ?? ''))
     .filter((reason) => !NOT_A_FAILURE.has(reason) && FAILURE_NOTICE.test(reason));
-  if (bad.length > 0) return `notice: ${[...new Set(bad)].join(', ')}`;
+  if (bad.length > 0) return 'failure-notice';
   if (check.kind === 'prices') {
-    const zero = Object.entries(j).filter(([, v]) => !(Number(v?.usd) > 0)).map(([k]) => k);
-    if (Object.keys(j).length === 0 || zero.length > 0) return `no price for ${zero.join(', ') || 'any coin'}`;
-    return null;
+    const zero = Object.entries(j).filter(([, v]) => !(Number(v?.usd) > 0));
+    return Object.keys(j).length === 0 || zero.length > 0 ? 'price-missing' : null;
   }
   if (check.kind === 'json') return null;
   const positions = Array.isArray(j?.positions) ? j.positions : null;
-  if (!positions) return 'answer has no positions list';
+  if (!positions) return 'no-positions-list';
   if (check.kind === 'closed') {
-    return check.minCount && positions.length < check.minCount ? `${positions.length} positions, expected at least ${check.minCount}` : null;
+    return check.minCount && positions.length < check.minCount ? 'closed-list-short' : null;
   }
   const open = positions.filter((p) => p.status !== 'Closed');
-  const zeroOpen = open.filter((p) => !(Number(p.value) > 0));
-  if (check.minOpen && open.length < check.minOpen) {
-    return positions.length === 0
-      ? 'no positions at all (chain lost, or the demo wallet closed everything)'
-      : `${open.length} open positions, expected at least ${check.minOpen} (the demo wallet may have closed its position)`;
-  }
-  if (zeroOpen.length > 0) return `${zeroOpen.length} open position(s) worth $0.00`;
-  if (check.minCount && positions.length < check.minCount) return `${positions.length} positions, expected at least ${check.minCount}`;
+  if (check.minOpen && open.length < check.minOpen) return positions.length === 0 ? 'no-positions' : 'too-few-open';
+  if (open.some((p) => !(Number(p.value) > 0))) return 'open-position-zero';
+  if (check.minCount && positions.length < check.minCount) return 'too-few-positions';
   return null;
 }
 
-function shortError(text) {
-  try { const j = JSON.parse(text); if (j?.error) return ` "${String(j.error).slice(0, 80)}"`; } catch { /* not JSON */ }
-  return '';
-}
-
 async function runCheck(check) {
-  const r = await fetchOnce(check.path);
-  return { ...check, status: r.status, ms: r.ms, reason: judge(check, r) };
+  const wallet = check.wallet ? acct(check.wallet) : '';
+  const r = wallet === null ? { status: 0, text: '', ms: 0, notConfigured: true } : await fetchOnce(check.path(wallet));
+  const reason = judge(check, r);
+  // Only a fixed code may leave this script (it ends up in a public issue).
+  return { ...check, status: r.status, ms: r.ms, reason: reason && !REASONS.includes(reason) ? 'unknown' : reason };
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -164,8 +170,8 @@ async function main() {
     measuredAt,
     finishedAt: new Date().toISOString(),
     chainsLost,
-    failures: failures.map(({ id, chain, path, status, reason }) => ({ id, chain, path, status, reason })),
-    fingerprint: failures.map((f) => `${f.id}:${f.reason.replace(/\d+(\.\d+)?/g, 'n')}`).sort().join('|'),
+    failures: failures.map(({ id, chain, status, reason }) => ({ id, chain, status, reason })),
+    fingerprint: failures.map((f) => `${f.id}:${f.reason}`).sort().join('|'),
     checks: results.map(({ id, chain, status, ms, reason, retried }) => ({ id, chain, status, ms, ok: !reason, ...(reason ? { reason } : {}), ...(retried ? { retried } : {}) })),
   };
 
@@ -182,4 +188,4 @@ async function main() {
   process.exit(summary.ok ? 0 : 1);
 }
 
-main().catch((e) => { console.error('prod-check crashed:', e); process.exit(2); });
+main().catch((e) => { console.error('prod-check crashed:', e?.name ?? 'Error'); process.exit(2); });

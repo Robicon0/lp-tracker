@@ -15,7 +15,7 @@ similar position shapes. Never frame a bug as wallet-specific.
 
 ## Rule 1: Every bug is a platform bug
 
-When a bug is reported (whether by Osho's own wallets, a Twitter user, or
+When a bug is reported (whether by the verification accounts, a Twitter user, or
 discovered in logs), the framing is always:
 
 > "X% of users with Y positions on Z chain see wrong values."
@@ -211,7 +211,7 @@ of half-finishing five sprints is large.
 This rule is about avoiding parallel work that creates conflicts — not about
 team size.
 
-Currently DefiDesh is built by a single developer (Osho with Claude Code),
+Currently DefiDesh is built by a single developer (the owner with Claude Code),
 so "one active sprint" is naturally enforced.
 
 When the team grows, this rule evolves: multiple parallel sprints are
@@ -388,7 +388,7 @@ transient failure zeroes a total, it violates Rule 11.
 Ask in order:
 
 1. **Does this fix work for any user with similar positions, not just
-   Osho's wallets?**
+   the verification accounts?**
    - No → not platform-level, find the root cause
    - Yes → continue
 

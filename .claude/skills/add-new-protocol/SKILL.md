@@ -297,10 +297,10 @@ client FIRST and routing every read through it — never by copying a bare-fetch
 each route. Immutable chain metadata (pool coin types/decimals) belongs in Redis
 (`sui_pool_ctx_v1` pattern) so cold instances don't re-pay reads into the burst.
 
-### Verification lesson — third-party wallets are MANDATORY when Osho holds no position of that type
+### Verification lesson — third-party wallets are MANDATORY when the verification accounts hold no position of that type
 
 **A protocol integration is NOT verified until it has been run against real on-chain wallets
-that actually hold (and have closed) positions on that protocol.** When Osho's accounts hold
+that actually hold (and have closed) positions on that protocol.** When the verification accounts hold
 none, find 2–3 public wallets by scanning the protocol program's recent history for
 lifecycle instructions (e.g. `close_position`) and use them as ground truth — including at
 least one BLIND wallet never used during development, as a generalization check.

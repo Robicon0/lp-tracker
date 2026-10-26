@@ -3,7 +3,7 @@ const pw = require("playwright");
 const src = require("fs").readFileSync(__dirname + "/wallet-test.cjs", "utf8");
 const mocks = eval("(" + src.slice(src.indexOf("function mocks("), src.indexOf("const results")).trim() + ")");
 const LABEL = process.argv[2] || "after", BASE = process.argv[3] || "http://localhost:3000";
-const EVM = "0xD99a9e66d000d4024dC77f00f784Cc45F8804F20", SOL = "GndRtybRYe3ShqES4RXpw9hq2MysJRLkjEf99M6PpogC", SUI = "0x8ef8c104d43e55b11fc6afcd58088274fabff2d30480dd4c4283ff834ac2297d";
+const EVM = require("../localWallets.cjs").account1().evm, SOL = require("../localWallets.cjs").account1().solana, SUI = "0x8ef8c104d43e55b11fc6afcd58088274fabff2d30480dd4c4283ff834ac2297d";
 let pass = 0, total = 0;
 const rec = (n, ok, d) => { total++; if (ok) pass++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); };
 const SEED = {

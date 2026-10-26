@@ -51,7 +51,7 @@ for the specific task.
 **Sprint WRAPPER-PROTOCOLS (Gap 2): positions held via position-manager wrappers.**
 
 **Goal:** LP positions managed by wrapper protocols (DefiTuna on Solana first —
-proven usage in Krishna's history; then survey Kamino vaults etc.) are INVISIBLE
+proven usage in Account 3's history; then survey Kamino vaults etc.) are INVISIBLE
 today because the position NFT/object sits in the wrapper's vault, not the user's
 wallet. Per the completeness directive (2026-07-19), a user with a wrapped
 position currently sees NOTHING — a critical missing-position class. Phase A:
@@ -59,7 +59,7 @@ enumerate wrapper protocols with real usage, their position-discovery mechanism
 (DefiTuna has a public API: api.defituna.com/api/v1/users/{wallet}/tuna-positions
 — verified live, returns empty for wallets without positions), and the
 Protocol Correctness Contract surface for each. Investigate-first; plan with
-Osho before building.
+the owner before building.
 
 **Status:** Phase 1 SHIPPED (`4c450a1`, 2026-07-20) — DefiTuna OPEN positions live
 (hybrid API+on-chain-verify, EQUITY semantics, selfReportedPnl mechanism in useLpPnl).
@@ -162,7 +162,7 @@ Phase A findings (kept for Part 3 / Part 4):
   CLOSED leveraged position both Rule 4 terms change: deposit = COLLATERAL (not LP total),
   withdrawal = NET of debt repayment, plus `leftovers_a/b` residuals. **Accrued borrowing
   interest has no slot in Rule 4's `withdrawal − deposit` — this needs an explicit
-  pricing-invariants decision from Osho and BLOCKS correct Part 3 numbers.**
+  pricing-invariants decision from the owner and BLOCKS correct Part 3 numbers.**
 
 _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1bc`
 2026-07-20; see Recent fixes.)_
@@ -195,7 +195,7 @@ _(Sprint 4 — clickable Capital G/L breakdown + closed rows — SHIPPED `00cd1b
 - **Closed positions are counted everywhere but not yet shown as Closed rows** — Sui
   (Cetus/Bluefin/Momentum) AND Solana (Orca, Raydium) closed positions fold into Capital G/L +
   Fee Income but have no dashboard/Closed-tab rows (queue item "UI for closed rows").
-- **Sheet reconciliation gap (~$610) is valuation basis, NOT a scan miss:** Osho's Business
+- **Sheet reconciliation gap (~$610) is valuation basis, NOT a scan miss:** the owner's Business
   P&L records ~$2,370 Orca fees vs $1,760.01 on-chain (`collect_fees` complete, 0 dropped
   legs, rewards $0) — the delta is DeFiLlama daily-close vs sheet-recorded prices on
   volatile-ZEC days. Chain is authoritative; the 19-row table in
@@ -587,7 +587,7 @@ hint. The user cannot tell which reading, if any, is right.
 1. **It is the product's core promise failing.** DefiDesh's pitch is "reconciled against
    on-chain truth, not estimates". A number that changes by a third on refresh is an
    estimate, and an unsignposted one.
-2. **It is on OSHO'S OWN ACCOUNT** — the wallet used to validate everything else.
+2. **It is on ACCOUNT 1** — the wallet used to validate everything else.
 3. **It invalidates the project's verification method.** It sets a **±$1,000 measurement
    floor** on any Capital G/L reading, so every before/after comparison in this repo —
    including the ones that signed off recent sprints — is only trustworthy to about a
@@ -759,7 +759,7 @@ failed enumeration cached as an empty) is the LEADING HYPOTHESIS for that sympto
 **not proven** — item 0 must name the cause first, and may land here or elsewhere.
 
 **⚠️ ESCALATED 2026-08-05 — this now demonstrably corrupts DISPLAYED DOLLAR FIGURES on
-Osho's own account.** Measured during Sprint SICKLE-CLOSED-REVERIFY with an IDENTICAL build
+Account 1.** Measured during Sprint SICKLE-CLOSED-REVERIFY with an IDENTICAL build
 and NO code change between runs, Account 1 (`0xD99a9e66…4F20`) analytics:
 
 ```
@@ -928,7 +928,7 @@ enumeration) is still the way to find such a position for a wallet whose history
    (`82d4954`): **B3** Solana pending rewards (Orca whirlpool `rewardInfos` offsets already
    documented in orca/route.ts comments; Raydium equivalent) so Orca/Raydium detail pages show
    reward emissions like the Sui ones now do; **B4** EVM gauge emissions (Aerodrome/Velodrome
-   staked AERO/VELO via the gauge `earned()`) — **staked EVM positions (e.g. Osho's Aerodrome
+   staked AERO/VELO via the gauge `earned()`) — **staked EVM positions (e.g. Account 1's Aerodrome
    WETH/USDC) UNDER-REPORT uncollected value vs the protocol UI until B4 ships**. Same Contract
    invariant (k): value pending rewards at current spot (Rule 2), never a fee-claim (Rule 1a).
    **B3 head start (Sprint RAYDIUM):** every reconstructed closed Raydium position already
@@ -1027,7 +1027,7 @@ shorthand.
   ≈ −16,789.11, Fees 15,671.09 (15,671.08 on the last run); Solana 2rr3SF 217 / ≈ −359.87 /
   ≈ 275.98; Account 2 16 / 3,720.98 / ≈ −1,570.28; Sui 0xdce8 63 / 8,846.45 (.44) / −9,106.81. The
   one-cent Fees moves are claims made today (priced from today's latest point); Account 1 and
-  0xdce8 moved from the 10-25 00:xx figures (Closed 126 → 129, 60 → 63) through the owner's own
+  0xdce8 moved from the 10-25 00:xx figures (Closed 126 → 129, 60 → 63) through the wallets' own
   transactions. No non-200, 0 page errors.
 
 - **`d77b66e`** (Production check, 2026-10-25) — **Production is checked every 30 minutes and
@@ -1115,7 +1115,7 @@ shorthand.
   to the cent (Account 1 Closed 126, Deposited 23,888.10, Fees 15,667.13, Capital G/L ≈ −16,580.17;
   Solana 2rr3SF 217 / ≈ −359.87 / ≈ 275.98; Account 2 16 / 3,720.98 / ≈ −1,570.28; Sui 0xdce8 60 /
   8,842.49 / −8,897.87). Account 1 and 0xdce8 moved from the 10-24 figures (Closed +1, Fees +245.16,
-  Capital G/L −147.32) through the owner's own Sui transactions 2026-10-24 22:37–22:43 UTC.
+  Capital G/L −147.32) through the wallet's own Sui transactions 2026-10-24 22:37–22:43 UTC.
   **Health findings recorded with it:** (1) the store is NOT "64 MB, 71% full": the engine changed
   (INFO now Redis 8.4 / maxmemory 3 GB, used_memory meaningless); MEMORY USAGE sum 46.98 MB over 5,032
   keys (2026-10-24 22:49 UTC) against the plan's 250 MB data limit; largest families
@@ -1319,7 +1319,7 @@ shorthand.
   the DeFiLlama day map: 0x15ac's 2025-10-19 Bluefin claim read 8.16 (DeFiLlama 2.6158) on one build and
   7.97 (CoinGecko 2.5016) on the other at the same time.
   **B7 (UTC):** local old / new 19:38-20:23 identical except that flip; production baseline 20:26-21:05,
-  production new 21:10-21:46 identical to it. Account 1 changed only through the owner's own
+  production new 21:10-21:46 identical to it. Account 1 changed only through its own
   transactions on 10-18 (chain-checked, sender = Account 1): Cetus USDC / SUI `0x9125…` closed 19:30
   (−305.06, fee 102.62, rewards SUI 12.04 + CETUS 0.24), Orca SOL / USDC `2Lz5…` closed 19:36 (−297.73,
   fee 11.61), Orca ZEC / USDC `GmhU…` closed 19:39 (−146.67, fee 73.75), Cetus USDC / SUI `0x6adae6…`
@@ -2750,12 +2750,12 @@ shorthand.
   walks; it reported "showing 200 of 373" for a wallet Sugar legitimately returns 0 for. Now
   gated on `balanceOfAuthoritative`, true only in the single-factory shape. **Lesson: erring
   HIGH is right for a SPAN and wrong for a user-facing NOTICE.**
-  **RAKA control byte-clean**: count 8, 1 Out of Range + 7 Closed, identical id set, identical
+  **Account 1 control byte-clean**: count 8, 1 Out of Range + 7 Closed, identical id set, identical
   values ($9,294.79 + seven zeros). A before/after field diff showed 56 differing
   closed-metadata fields — running the SAME post-fix build twice reproduced the same churn in
   the opposite direction, so it is pre-existing `buildClosedPositions` non-determinism
   (ITEM 0c family), NOT this change.
-  **⚠️ RAKA now carries one truncation notice (`pool-scan-ceiling`), not zero** — owner-
+  **⚠️ Account 1 now carries one truncation notice (`pool-scan-ceiling`), not zero** — owner-
   approved interim (option a) because `allPoolsLength` 3,498 > 2,000 makes it fire for EVERY
   Base wallet. It is TRUE (180 real staked positions are unreachable) but broad; **queue item
   C2** removes the ceiling and with it the banner.
@@ -2990,7 +2990,7 @@ shorthand.
   disagree. Idempotent (a second run finds 0).
   **How claim-time value is recovered:** from the linked transfer, which was auto-created at the
   old value and never updated — the reason those rows drift in the first place. **Independently
-  corroborated: the 12 Sep RAKA backup agrees to the cent on all 14 of the 17 it contains** (the
+  corroborated: the 12 Sep Account 1 backup agrees to the cent on all 14 of the 17 it contains** (the
   other 3 post-date it). A claim with no linked transfer is LEFT ALONE, not guessed at.
   **Detection requires a DISTINCT-DATE test, and this is the load-bearing detail.** A sale
   re-values claims from many dates at ONE price; two claims on the SAME date sharing a price is
@@ -3755,7 +3755,7 @@ shorthand.
   77.7410` vs `pool.price 77.74147`). Verified live (Playwright, clean profile, third-party
   wallet `2rr3SFuM…`): equity $198.71 / debt $596.47 / gross $795.17 (exact) / 4.00× /
   16.7% from liquidation; detail headline === panel equity on 3/3 positions; Orca control
-  (RAKA/A1 ZEC/USDC) unchanged, no panel, TOTAL VALUE === row exactly. Report:
+  (Account 1 ZEC/USDC) unchanged, no panel, TOTAL VALUE === row exactly. Report:
   `reports/wrapper-protocols-phase2-part1-report.md`. No cache bumps.
 
 - **`4c450a1`** — **Sprint WRAPPER-PROTOCOLS Phase 1: DefiTuna (Solana).** Wrapper-held
@@ -3777,7 +3777,7 @@ shorthand.
   −$12,779.66 exact, Withdrawn−Deposited === footer to the cent). New additive
   `LpPnlResult.closedRows`; `PositionMeta` carries openedTs/closedTs. Dashboard:
   reconstructed CLOSED Sui/Solana positions render as greyed Closed-tab rows with close
-  dates (RAKA Closed 11 → 61), synthesized display-only (never in the source positions
+  dates (Account 1 Closed 11 → 61), synthesized display-only (never in the source positions
   array), P&L from the same perPosition entries; dashboard now passes Sui/Solana wallet
   sets to useLpPnl (it previously never fetched closed reconstructions). Rows
   non-clickable (no live object for a detail page — follow-up candidate). Display-only,
@@ -3791,16 +3791,16 @@ shorthand.
   extension → chip + all 5 EVM routes fire; flag set → "no wallet". (2) **Dashboard APY
   derived-APR fallback** (`f9c9f84`): pools absent from DefiLlama (Orca ZEC/USDC) show
   "~X% est." from own earnings instead of N/A — same formula as detail page/analytics.
-  Also verified this session: RKHA Net P&L arithmetic EXACT (Net = Current − Deposited +
+  Also verified this session: Account 2 Net P&L arithmetic EXACT (Net = Current − Deposited +
   Fees + Unclaimed + CapG/L = −$3,713.40; the pricing-invariants Rule 4 formula text
-  differs from the implemented — flagged to Osho, code unchanged); RKHA closed-Sui
+  differs from the implemented — flagged to the owner, code unchanged); Account 2 closed-Sui
   CapG/L −$14,355.36 (26 pos) + EVM ≈ −$1,861 = −$16,216.88 shown.
 
 - **`c96d7fa`** — Navbar wallet chips show WATCHED + SCANNED wallets, not only connected
   (the bar said "no wallet" while the pages below were full of watched-wallet positions).
   Chips mirror exactly what the pages compute over: scan mode → single `·SCAN` chip;
   otherwise connected + watched deduped, capped at 4 + "+N" overflow (hover lists rest).
-  Verified LIVE: Krishna watched set shows all three chips; scan URL shows SUI·SCAN.
+  Verified LIVE: Account 3 watched set shows all three chips; scan URL shows SUI·SCAN.
 
 - **`e85f794`** — Analytics honors paste-a-wallet SCAN mode (wallet-security Rule 3
   parity): the paste flow showed positions on the dashboard but an EMPTY analytics page
@@ -3816,20 +3816,20 @@ shorthand.
   address on ONE chain by design. No cache bumps.
 
 - **`75d7619`** — DeFiLlama historical `searchWidth=24h`: the "1 claim pending" that never
-  resolved (Krishna DEEP/SUI fee claim 2025-07-03) was a DeFiLlama SPARSE-SERIES gap —
+  resolved (Account 3 DEEP/SUI fee claim 2025-07-03) was a DeFiLlama SPARSE-SERIES gap —
   its default nearest-point search is narrower than our documented ±24h acceptance
   window, so `{coins:{}}` came back even though a same-day point existed 6.1 h later.
   `?searchWidth=24h` lets DeFiLlama return that point; the existing `MAX_TS_DRIFT_SEC`
   ±24h validation still gates it (Rule 1c unchanged, never spot). Platform-level: any
   sparse-coverage token. No cache bumps (in-process negative cache clears on deploy;
-  misses were never Redis-persisted; client nulls are 5-min TTL). Verified LIVE: Krishna's
+  misses were never Redis-persisted; client nulls are 5-min TTL). Verified LIVE: Account 3's
   pending-claims note GONE post-deploy; DEEP@2025-07-03 = $0.153162
   (`defillama_historical_used`). **NEW KNOWN LIMITATION discovered en route: CoinGecko
   free tier now rejects `/history` >365 days old (error 10012)** — DeFiLlama is the ONLY
   claim-date source for >1-year-old claims, so its coverage gaps become permanent
   pendings as positions age (see Known limitations).
 
-- **`87db23d`** — Cetus V1 events + Tenderly throttle + honest Sui index fallback (Krishna
+- **`87db23d`** — Cetus V1 events + Tenderly throttle + honest Sui index fallback (Account 3
   DEEP/SUI investigation). (1) **Cetus V1 `AddLiquidityEvent`/`RemoveLiquidityEvent`**
   (original pkg `0x1eabed72…`, no V2 suffix, same fields, no `current_sqrt_price`) now
   parsed by cetus/activity AND suiClosedPositions — pre-V2 deposits/withdrawals were
@@ -3846,8 +3846,8 @@ shorthand.
   the PRIMARY endpoint; the public fullnode answers a silent `{data:[]}` for indexes it
   doesn't serve, so unavailability now THROWS `SuiIndexUnavailableError` ("I don't
   know") instead of masquerading as "no results". Verified LIVE on defidesh.com
-  (browser): Krishna settled excluded=0 (was 4), Cap G/L −$6,110.45 (was −$4,317.77
-  with DEEP/SUI + 3 Aerodrome missing), fees +$3,166.33 (was $2,398.40); RAKA
+  (browser): Account 3 settled excluded=0 (was 4), Cap G/L −$6,110.45 (was −$4,317.77
+  with DEEP/SUI + 3 Aerodrome missing), fees +$3,166.33 (was $2,398.40); Account 1
   regression-clean (deposited byte-identical $27,575.35; Cap G/L −$12,125.39 vs
   −$12,432.75 = 2.5% closed-Sui rescan daily-price tolerance). NOTE: Alchemy's Sui
   object-filter indexes are ~1-yr shallow (returned 3 of 5 txs for the DEEP/SUI
@@ -4056,7 +4056,7 @@ Investigate-first, always. Before any fix:
 
 1. Instrument and capture logs
 2. Diagnose root cause from evidence
-3. Plan with Osho in plain language, get explicit confirmation
+3. Plan with the owner in plain language, get explicit confirmation
 4. Write thorough Claude Code prompt using `fix-prompt-template`
 5. Verify post-fix `route_summary` matches expected numbers
 6. Commit and push automatically when verified — never ask permission
@@ -4229,7 +4229,7 @@ with similar position shapes. Never wallet-specific framing.
 - **(p) Local and production B7 run one after the other, never side by side, and never two local
   servers at once, unless every local server is capped well below 100 CU/s
   (`ALCHEMY_INSTANCE_CU_PER_SEC=50`).** Alchemy's 500 CU/s limit is per ACCOUNT, measured over a
-  rolling 10 s window: the local key (`.env.local`, app "Johnny's First App") and production
+  rolling 10 s window: the local key (`.env.local`, the local Alchemy app) and production
   ("Defidesh-prod") share it. Each process has its own 200 CU/s limiter plus a 5 s burst (1,000
   CU), so two processes can reach about 600 CU/s over 10 s and three can hold 600 CU/s steadily.
   Why (2026-10-25): the console showed a 7-day peak of 532.7 / 500 CU/s and a "throughput exceeded"
@@ -4424,7 +4424,7 @@ AlphaFi and Dolomite APY now working from on-chain data.
 
 ## Wallet addresses for verification
 
-Osho's two accounts. Never mix in analysis.
+Two verification accounts (Account 1, Account 2). Never mix in analysis.
 
 **Account 1:**
 - EVM: `0xD99a9e66d000d4024dC77f00f784Cc45F8804F20`
@@ -4577,7 +4577,7 @@ future. All internal pricing stays USD; FX conversion at UI layer only.
 Subscription-based feature gating planned for future. Must remain
 architecturally separate from wallet logic. Server-side only.
 
-Osho is currently sole developer due to cost constraints. Plans to hire
+The owner is currently the sole developer due to cost constraints. Plans to hire
 team once platform generates income. Architecture must stay team-friendly.
 
 ---
@@ -4595,7 +4595,7 @@ Specifically:
 - Update "Known limitations" if a limitation was resolved or a new one
   discovered
 - Update "Cache versions" if any version was bumped
-- Update Osho's wallet address if changed (rare)
+- Update the verification wallet addresses if changed (rare)
 
 Do not amend stable rules here. If a stable rule needs to change, amend
 the relevant file in `.claude/rules/`. This file stays focused on what

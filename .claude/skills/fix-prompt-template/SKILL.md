@@ -15,7 +15,7 @@ half-fixes, missed edge cases, or symptom patches.
 Invoke this skill when:
 
 - The `investigate-first` skill has produced a verified diagnosis
-- The plan has been explained to Osho and explicitly approved
+- The plan has been explained to the owner and explicitly approved
 - We are about to write the actual Claude Code prompt
 
 Do not invoke this skill for:

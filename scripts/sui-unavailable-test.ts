@@ -3,6 +3,7 @@
 // way Alchemy and the public fullnode answer since 2026-10-22 (JSON-RPC removed).
 //   npx tsx scripts/sui-unavailable-test.ts
 import { NextRequest } from 'next/server';
+import { account1 } from './localWallets.cjs';
 import {
   reportSuiRead, getTruncationSnapshot, resetTruncationNotices, isInfoReason, isLookupFailureReason,
   isSuiUnavailableReason, describeTruncation, SUI_UNAVAILABLE_TEXT,
@@ -22,7 +23,7 @@ globalThis.fetch = (async () => new Response(JSON.stringify({
   error: { code: -32601, message: 'suix_getOwnedObjects is not supported. JSON-RPC has been removed on Sui as of Sui v1.82. Please migrate to gRPC.' },
 }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
 
-const A = '0xdce8af889df949cacbef1188e6eb59d70508b76eba4c74cb1c8dc4f34454c30d';
+const A = account1().sui; // Account 1 (.local/wallets.json)
 
 (async () => {
   // ── the notice ────────────────────────────────────────────────────────────

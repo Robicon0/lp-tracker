@@ -1,4 +1,5 @@
 import { parseScanParams } from "../app/lib/scanParams";
+import { account1 } from "./localWallets.cjs";
 let pass = 0, fail = 0;
 const t = (name: string, a: string | null, c: string | null, kind: string, re?: RegExp) => {
   const r = parseScanParams(a, c);
@@ -6,8 +7,8 @@ const t = (name: string, a: string | null, c: string | null, kind: string, re?: 
   if (ok) pass++; else { fail++; console.log("FAIL", name, JSON.stringify(r)); }
 };
 const EVM = "0xD99a9e66d000d4024dC77f00f784Cc45F8804F20";
-const SUI = "0xdce8af889df949cacbef1188e6eb59d70508b76eba4c74cb1c8dc4f34454c30d";
-const SOL = "GndRtybRYe3ShqES4RXpw9hq2MysJRLkjEf99M6PpogC";
+const SUI = account1().sui; // Account 1 (.local/wallets.json)
+const SOL = account1().solana;
 t("none", null, null, "none");
 t("evm ok", EVM, "evm", "ok"); t("sui ok", SUI, "sui", "ok"); t("sol ok", SOL, "solana", "ok");
 t("chain case", EVM, "EVM", "ok");

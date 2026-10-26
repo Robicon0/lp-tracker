@@ -24,7 +24,7 @@ identity is restored automatically UNLESS the per-chain
 This applies to all chains (EVM, Solana, Sui) and to any future chains added.
 
 Original rule ("no auto-connect unless the user clicked Connect in the
-current session") was amended at Osho's explicit direction for UX parity:
+current session") was amended at the owner's explicit direction for UX parity:
 Solana/Sui Wallet Standard adapters already silently restored sessions, and
 EVM was the outlier because MetaMask-style extensions reveal no accounts
 while locked. EVM now restores the LAST-CONFIRMED address from localStorage
@@ -190,7 +190,7 @@ storage and disconnect/remove actions are independent.
 
 ## Rule 4: Two accounts must stay strictly separate
 
-Osho uses DefiDesh for verification with two separate accounts:
+DefiDesh is verified with two separate accounts:
 
 **Account 1:**
 - EVM: 0xD99a9e66d000d4024dC77f00f784Cc45F8804F20

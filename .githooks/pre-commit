@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks a commit holding a key-like string or a full wallet address.
+# Install once per clone: git config core.hooksPath .githooks
+exec node "$(git rev-parse --show-toplevel)/scripts/hooks/pre-commit-scan.mjs"

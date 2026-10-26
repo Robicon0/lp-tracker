@@ -41,7 +41,7 @@
 //     unstable" and the verdict could never be green.
 
 import { createRequire } from "module";
-const require = createRequire("/Users/johnnyarya/lp-tracker-fresh/package.json");
+const require = createRequire(new URL("../package.json", import.meta.url));
 const { chromium } = require("playwright");
 import fs from "fs";
 

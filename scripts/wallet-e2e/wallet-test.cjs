@@ -7,7 +7,7 @@ require("fs").mkdirSync(OUT, { recursive: true });
 const BASE = process.argv[3] || "http://localhost:3000";
 
 const EVM = "0xD99a9e66d000d4024dC77f00f784Cc45F8804F20";
-const SOL = "GndRtybRYe3ShqES4RXpw9hq2MysJRLkjEf99M6PpogC";
+const SOL = require("../localWallets.cjs").account1().solana;
 const SUI = "0x8ef8c104d43e55b11fc6afcd58088274fabff2d30480dd4c4283ff834ac2297d";
 
 // Simulated wallets, installed on every navigation like a real extension.

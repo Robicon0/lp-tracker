@@ -79,7 +79,7 @@ liquidity to zero, in which case standard `balanceOf` already works.
 
 Test:
 
-1. Identify a known closed position on the protocol (Osho's wallet or
+1. Identify a known closed position on the protocol (Account 1 or 2 or
    any test wallet)
 2. Call `balanceOf(wallet)` — does the closed position's token ID
    appear in the returned list?
@@ -160,7 +160,7 @@ source value to the enum in `priceLogger.ts`.
 
 ### Step 8: Verify against ground truth
 
-After implementation, verify against Osho's manual claim records:
+After implementation, verify against the manual claim records:
 
 1. Identify a wallet with known closed positions on the new protocol
 2. Compare DefiDesh's recovered closed-position count to the manual count

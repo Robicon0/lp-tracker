@@ -14,6 +14,7 @@
 //   - the disconnect flag is cleared only by a Connect pick.
 // Exit code 1 if any check fails.
 const { chromium } = require("playwright");
+const SOL_A1 = require("../localWallets.cjs").account1().solana; // .local/wallets.json
 const BASE = process.argv[2] || "http://localhost:3000";
 // Throwaway test addresses. A1/A2 belong to wallet A, B1 to wallet B.
 const A1 = "0xAaAaAaaAaAAAAaAAaaAAAaAaAAaaAAaAaAAA0F20";
@@ -296,7 +297,7 @@ function check(id, what, pass, observed) {
     const msg = await paste(p, "0x" + "c".repeat(40));
     const s = await read(p);
     check("P3", "21st watched address on one chain: rejected with the limit message", /limit reached/i.test(msg) && s.watched === 20, `message: ${msg} | watched ${s.watched}`);
-    const sol = await paste(p, "GndRtybRYe3ShqES4RXpw9hq2MysJRLkjEf99M6PpogC");
+    const sol = await paste(p, SOL_A1);
     const s2 = await read(p);
     check("P4", "the cap is per chain: a Solana address is still accepted", s2.watched === 21, `message: ${sol} | watched ${s2.watched}`);
     pageErrors.push(...errs); await c.close();

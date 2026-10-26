@@ -10,10 +10,11 @@
 // USAGE  node scripts/closed-cache-guard-test.mjs [--base URL] [--sui 0x..] [--solana ...]
 // Exits 0 when every check passes, 1 otherwise.
 import { createHash } from "node:crypto";
+import localWallets from "./localWallets.cjs";
 import { loadClosedPositionsGuarded } from "../app/lib/closedPositionCache.ts";
 const arg=(n,d)=>{const i=process.argv.indexOf(`--${n}`);return i>=0&&process.argv[i+1]?process.argv[i+1]:d;};
 const BASE=arg("base","https://www.defidesh.com");
-const SUI=arg("sui","0xdce8af889df949cacbef1188e6eb59d70508b76eba4c74cb1c8dc4f34454c30d"), SOL=arg("solana","GndRtybRYe3ShqES4RXpw9hq2MysJRLkjEf99M6PpogC"); // Account 1
+const SUI=arg("sui",localWallets.account1().sui), SOL=arg("solana",localWallets.account1().solana); // Account 1 (.local/wallets.json)
 const sui=(await (await fetch(`${BASE}/api/sui-closed-positions?account=${SUI}`)).json()).positions??[];
 const sol=(await (await fetch(`${BASE}/api/solana-closed-positions?account=${SOL}`)).json()).positions??[];
 if(!sui.length||!sol.length){console.log(`cannot seed: Sui ${sui.length}, Solana ${sol.length} positions from ${BASE}`);process.exit(1);}

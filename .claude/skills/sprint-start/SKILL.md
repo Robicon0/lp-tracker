@@ -89,15 +89,15 @@ In your first response, briefly state:
 > agree on the plan. Build clean before commit. Stop and report on
 > significant verification gaps."
 
-This is not boilerplate. It's a commitment that Osho can hold you to
+This is not boilerplate. It's a commitment that the owner can hold you to
 later in the session. If you skip this step and start writing code,
-Osho cannot point back to a commitment you made.
+the owner cannot point back to a commitment you made.
 
 ### Step 6: Wait for the specific task
 
 Do not assume what the session is about based on the active sprint. The
 sprint says what category of work is queued. The specific task within
-that sprint comes from Osho in the next message.
+that sprint comes from the owner in the next message.
 
 Ask:
 
@@ -118,7 +118,7 @@ specific task in this session might be "investigate why Vercel KV setup
 is producing 401 errors." Don't conflate them.
 
 ### Skipping the methodology statement
-The verbal commitment in Step 5 is what gives Osho leverage to correct
+The verbal commitment in Step 5 is what gives the owner leverage to correct
 you mid-session. Without it, course-correction becomes a debate instead
 of pointing to a previously-stated rule.
 
@@ -128,7 +128,7 @@ at startup burns tokens and front-loads context that may not be needed.
 Deep-read the rules you actually need during the task.
 
 ### Starting work before the user answers
-Step 6 ends with "wait for the answer." If Osho is slow to respond, do
+Step 6 ends with "wait for the answer." If the owner is slow to respond, do
 not preemptively start work to "be helpful." Wait.
 
 ## Example session start
@@ -156,7 +156,7 @@ A clean session start looks like this:
 >
 > What's the specific task for this session?
 
-**Osho:**
+**Owner:**
 > Let's investigate the Vercel KV setup. The free tier configuration is
 > unclear and I want to confirm the approach before committing to it.
 

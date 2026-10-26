@@ -48,3 +48,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# npm cache and logs (were tracked until 2026-10-27)
+/.npm-cache/
+*.log
+
+# local-only data: full wallet addresses read by tests and scripts
+# (scripts/localWallets.cjs). Never committed.
+/.local/

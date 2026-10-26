@@ -15,7 +15,7 @@ Reading evidence before writing fixes broke that loop.
 
 Invoke this skill whenever any of the following happens:
 
-- A bug or regression is reported (Osho's wallets, Twitter user, or
+- A bug or regression is reported (the verification accounts, Twitter user, or
   discovered in production logs)
 - Resolution rates drop or fail to meet target (e.g., 32/78 instead of
   81/81)
@@ -96,7 +96,7 @@ in the same fix unless the root cause is in the compounding factor itself.
 ### Step 5: Plan with the user
 
 Before writing any code or any Claude Code prompt, summarize the plan in
-plain language for Osho:
+plain language for the owner:
 
 1. What the bug is (platform-level framing)
 2. What the diagnosis showed
@@ -104,7 +104,7 @@ plain language for Osho:
 4. What metric will verify the fix (target `route_summary` numbers)
 5. What edge cases to test
 
-Wait for Osho's explicit approval before continuing. Never just build.
+Wait for the owner's explicit approval before continuing. Never just build.
 
 ### Step 6: Write a thorough Claude Code prompt
 
@@ -131,7 +131,7 @@ If the numbers match within a small margin: proceed to commit per
 `.claude/rules/commit-protocol.md`.
 
 If the numbers are off by a significant margin (20%+): stop and report
-to Osho per `commit-protocol.md` Rule 3. Do not iterate silently.
+to the owner per `commit-protocol.md` Rule 3. Do not iterate silently.
 
 ### Step 8: Update memory and CLAUDE.md
 
@@ -143,7 +143,7 @@ Once the fix is verified and committed:
   constraint, a new pattern), update the relevant file in
   `.claude/rules/`
 - If the fix revealed something worth preserving across Claude.ai
-  sessions, propose a memory update to Osho
+  sessions, propose a memory update to the owner
 
 ## Anti-patterns
 
@@ -166,7 +166,7 @@ mismatches that will resurface later.
 
 ### Skipping the plan-with-user step
 Writing a Claude Code prompt without first explaining the plan in plain
-language and getting confirmation. Loses Osho's chance to catch a
+language and getting confirmation. Loses the owner's chance to catch a
 misunderstanding before tokens are spent.
 
 ## Reference: the original 3-week loop
