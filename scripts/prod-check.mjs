@@ -18,7 +18,14 @@
 //   node scripts/prod-check.mjs --base http://localhost:3000
 //   node scripts/prod-check.mjs --out result.json
 //   PROD_CHECK_SIMULATE=<check id> node scripts/prod-check.mjs   # force one failure (alert test)
-// Exit code 0 = all good, 1 = at least one failure that held after a retry.
+// Exit code 0 = all good, 1 = at least one failure that held after a retry (or
+// that could not be retried in time).
+//
+// Time limits (2026-10-27): the job is cancelled at 5 minutes, and a cancelled
+// job opens no issue. So every request gives up after 20 s, and the whole run
+// stops at 3 minutes: checks not reached by then fail as 'time-limit', the
+// result file is written and the script exits 1. A watchdog enforces the 3
+// minutes even if a request ignores its timeout.
 
 import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
 
@@ -27,8 +34,14 @@ const argOf = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i +
 const BASE = (argOf('--base') || process.env.PROD_CHECK_BASE || 'https://www.defidesh.com').replace(/\/$/, '');
 const OUT = argOf('--out');
 const SIMULATE = process.env.PROD_CHECK_SIMULATE || '';
-const TIMEOUT_MS = 100_000; // a route slower than this counts as hung
+const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
+const REQUEST_TIMEOUT_MS = num(process.env.PROD_CHECK_REQUEST_TIMEOUT_MS, 20_000); // slower = hung
+const RUN_LIMIT_MS = num(process.env.PROD_CHECK_LIMIT_MS, 180_000); // hard limit for the whole run
 const RETRY_DELAY_MS = 30_000;
+const STARTED = Date.now();
+// Requests must end by here, leaving time to write the result.
+const DEADLINE = STARTED + RUN_LIMIT_MS - 5_000;
+const left = () => DEADLINE - Date.now();
 
 function loadWallets() {
   if (process.env.PROD_CHECK_WALLETS) return JSON.parse(process.env.PROD_CHECK_WALLETS);
@@ -78,7 +91,7 @@ const FAILURE_NOTICE = /unavailable|failed|unreadable|unverified|unchecked|exclu
 async function fetchOnce(path) {
   const started = Date.now();
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => ctl.abort(), Math.min(REQUEST_TIMEOUT_MS, left()));
   try {
     const res = await fetch(BASE + path, { signal: ctl.signal, headers: { 'user-agent': 'defidesh-prod-check' } });
     const text = await res.text();
@@ -96,13 +109,14 @@ const REASONS = [
   'simulated', 'wallet-not-configured', 'no-answer', 'request-failed', 'http-5xx', 'http-error',
   'page-no-html', 'page-error', 'not-json', 'error-field', 'failure-notice', 'price-missing',
   'no-positions-list', 'closed-list-short', 'no-positions', 'too-few-open', 'open-position-zero',
-  'too-few-positions', 'unknown',
+  'too-few-positions', 'time-limit', 'unknown',
 ];
 
 /** Returns null when the check passes, else a reason code from REASONS. */
 function judge(check, r) {
   if (SIMULATE && SIMULATE === check.id) return 'simulated';
   if (r.notConfigured) return 'wallet-not-configured';
+  if (r.notRun) return 'time-limit';
   if (r.timedOut) return 'no-answer';
   if (r.error) return 'request-failed';
   if (r.status >= 500) return 'http-5xx';
@@ -138,7 +152,9 @@ function judge(check, r) {
 
 async function runCheck(check) {
   const wallet = check.wallet ? acct(check.wallet) : '';
-  const r = wallet === null ? { status: 0, text: '', ms: 0, notConfigured: true } : await fetchOnce(check.path(wallet));
+  const r = wallet === null ? { status: 0, text: '', ms: 0, notConfigured: true }
+    : left() < 1_000 ? { status: 0, text: '', ms: 0, notRun: true }
+    : await fetchOnce(check.path(wallet));
   const reason = judge(check, r);
   // Only a fixed code may leave this script (it ends up in a public issue).
   return { ...check, status: r.status, ms: r.ms, reason: reason && !REASONS.includes(reason) ? 'unknown' : reason };
@@ -146,29 +162,23 @@ async function runCheck(check) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function main() {
-  const measuredAt = new Date().toISOString();
-  const results = [];
-  for (const c of CHECKS) results.push(await runCheck(c));
+// Filled as checks finish, so the watchdog can report a partial run.
+const results = CHECKS.map((c) => ({ ...c, status: 0, ms: 0, reason: 'time-limit', pending: true }));
+let finished = false;
 
-  // A failure must hold on a second try 30 s later before it alerts.
-  const failing = results.filter((r) => r.reason);
-  if (failing.length > 0) {
-    await sleep(RETRY_DELAY_MS);
-    for (const f of failing) {
-      const again = await runCheck(f);
-      Object.assign(f, { status: again.status, ms: again.ms, reason: again.reason, retried: true });
-    }
-  }
-
+function finish() {
+  if (finished) return;
+  finished = true;
+  for (const r of results) if (r.pending) Object.assign(r, { reason: 'time-limit', pending: false });
   const failures = results.filter((r) => r.reason);
   const chainsLost = [...new Set(results.map((r) => r.chain))]
     .filter((ch) => results.filter((r) => r.chain === ch).every((r) => r.reason));
   const summary = {
     ok: failures.length === 0,
     base: BASE,
-    measuredAt,
+    measuredAt: new Date(STARTED).toISOString(),
     finishedAt: new Date().toISOString(),
+    elapsedMs: Date.now() - STARTED,
     chainsLost,
     failures: failures.map(({ id, chain, status, reason }) => ({ id, chain, status, reason })),
     fingerprint: failures.map((f) => `${f.id}:${f.reason}`).sort().join('|'),
@@ -176,7 +186,7 @@ async function main() {
   };
 
   const lines = [
-    `Production check ${summary.ok ? 'PASSED' : 'FAILED'} — ${BASE} — measured ${measuredAt}`,
+    `Production check ${summary.ok ? 'PASSED' : 'FAILED'} — ${BASE} — measured ${summary.measuredAt} — ${Math.round(summary.elapsedMs / 1000)} s`,
     ...(chainsLost.length ? [`Chains with every check failing: ${chainsLost.join(', ')}`] : []),
     ...results.map((r) => `${r.reason ? 'FAIL' : 'ok  '}  ${r.chain.padEnd(8)} ${r.id.padEnd(24)} ${String(r.status).padEnd(4)} ${String(r.ms).padStart(6)} ms${r.reason ? `  ${r.reason}` : ''}`),
   ];
@@ -187,5 +197,26 @@ async function main() {
   }
   process.exit(summary.ok ? 0 : 1);
 }
+
+async function main() {
+  for (let i = 0; i < CHECKS.length; i++) {
+    Object.assign(results[i], await runCheck(CHECKS[i]), { pending: false });
+  }
+
+  // A failure must hold on a second try 30 s later before it alerts. With too
+  // little time left for the wait plus a request, the failure stands unretried.
+  const failing = results.filter((r) => r.reason && r.reason !== 'time-limit');
+  if (failing.length > 0 && left() > RETRY_DELAY_MS + 5_000) {
+    await sleep(RETRY_DELAY_MS);
+    for (const f of failing) {
+      const again = await runCheck(f);
+      Object.assign(f, { status: again.status, ms: again.ms, reason: again.reason, retried: true });
+    }
+  }
+  finish();
+}
+
+// Watchdog: the run ends at the hard limit whatever is still waiting.
+setTimeout(() => { console.log(`prod-check: hard limit of ${RUN_LIMIT_MS / 1000} s reached`); finish(); }, RUN_LIMIT_MS);
 
 main().catch((e) => { console.error('prod-check crashed:', e?.name ?? 'Error'); process.exit(2); });
