@@ -984,6 +984,26 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`308c670`** (Cleanup batch, 2026-10-27, no site change) — **No keys, wallet addresses or
+  home paths in the repo; a pre-commit check keeps them out.** `.claude/settings.json` lost the saved
+  commands with the revoked Jupiter key, full addresses and Mac paths (278 → 197 allow entries).
+  `.npm-cache` untracked; `.gitignore` adds `/.npm-cache/`, `*.log`, `/.local/`. Account 1's full
+  addresses live only in the git-ignored `.local/wallets.json` (shape in `scripts/localWallets.cjs`;
+  `LOCAL_WALLETS_JSON` overrides it). Labels are neutral (Account 1/2/3, the owner).
+  **Production check:** the repo is PUBLIC, so the demo wallets come from the repository variable
+  `PROD_CHECK_WALLETS` (JSON `evm1, evm2, sol1, sol2, sol3, sui1, sui2`; value kept in
+  `~/Documents/defidesh-reports/work-2026-10-27/PROD_CHECK_WALLETS.json`). Check ids are neutral
+  (`cetus-sui-1`, `raydium-sol-2`, …); a failure carries only id, chain, HTTP status and a fixed
+  reason code (`REASONS` in the script); paths and answer text are never logged. Workflow copy with
+  `timeout-minutes: 5` in the same folder (still not pushed: the token has no `workflow` scope).
+  **Pre-commit check:** `git config core.hooksPath .githooks` once per clone. It blocks, in added
+  lines, local `.env` values, provider-shaped keys, any address in `.local/wallets.json`, and any
+  NEW full 0x / base58 address or random-looking literal (already in HEAD, or listed in
+  `.githooks/address-allowlist.txt` for public contracts, passes). Test
+  `node scripts/hooks/pre-commit-scan-test.mjs` (12). `closed-cache-guard-test.mjs` must run with
+  `CLOSED_POS_CACHE_READONLY` unset (fails under it, before and after this change). Git history
+  still holds the old values (not rewritten).
+
 - **`e3b8c8c`** (Sui day prices, 2026-10-25, live 11:42:55 UTC as `dpl_9ze48vqhg9kz9V9MSCgyNzz64YzT`)
   — **Sui deposits and withdrawals in pools with no stablecoin side are valued at day prices; USDSUI
   is a stablecoin.** The Cetus / Bluefin / Momentum activity routes anchored an event's pool price only
