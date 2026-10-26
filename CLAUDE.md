@@ -984,6 +984,20 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`d24567f`** (Production check time limits, 2026-10-27, no site change) — **The check always
+  finishes inside the 5-minute job limit, so an outage cannot cancel its own alert.** Each request
+  gives up after 20 s (`PROD_CHECK_REQUEST_TIMEOUT_MS`); the run stops at 3 minutes
+  (`PROD_CHECK_LIMIT_MS`, plus a watchdog): checks not reached fail as `time-limit`, the result is
+  written, exit 1. The retry 30 s later is skipped when it would pass the limit (failure stands).
+  Workflow (still local, copy in `~/Documents/defidesh-reports/work-2026-10-27/prod-check.yml`):
+  script step `timeout-minutes: 4`, alert step 1, and a last step `if: always()` that opens or
+  updates the issue (`job` / `site` / `job-incomplete`) when the alert step set no output.
+  Tested (UTC 2026-10-26): every request hanging (stub) 23:26–23:29, 176 s, 17 failures, all five
+  chains; three routes hanging 175 s; fetch ignoring its abort, watchdog at the limit; production
+  healthy 23:31, 26 s (slowest 4.2 s); `simulate_failure` on production 23:32, 53 s; both issue steps
+  replayed on a mock API (new, changed, crashed script, recovered, fallback once, no duplicate).
+  The workflow itself has not run on GitHub yet (not pushed: token has no `workflow` scope).
+
 - **`308c670`** (Cleanup batch, 2026-10-27, no site change) — **No keys, wallet addresses or
   home paths in the repo; a pre-commit check keeps them out.** `.claude/settings.json` lost the saved
   commands with the revoked Jupiter key, full addresses and Mac paths (278 → 197 allow entries).
