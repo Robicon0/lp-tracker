@@ -1,0 +1,134 @@
+# Production check every 30 minutes (scripts/prod-check.mjs).
+#
+# Alert: an open issue titled "Production check failing" (GitHub emails the
+# repo owner when it is opened, when the failure set changes, and when it is
+# closed on recovery). A run is marked failed (red, one more email) only when a
+# failure is new or has changed, so a long outage does not send 48 emails a day.
+#
+# Pause (for example during a B7, rule (p)): set the repository variable
+# PROD_CHECK_PAUSED to 1 (Settings > Secrets and variables > Actions > Variables).
+# Test the alert: Actions > Production check > Run workflow > simulate_failure.
+#
+# Demo wallets: repository variable PROD_CHECK_WALLETS (JSON with keys evm1,
+# evm2, sol1, sol2, sol3, sui1, sui2). The repo is public, so no address is kept
+# in the script, and the log and the alert issue carry only the check id, chain,
+# HTTP status and a fixed reason code.
+#
+# Time limits: each request 20 s, the whole script 3 minutes (it then fails the
+# checks it did not reach as 'time-limit' and exits). The script step is also
+# killed at 4 minutes and the alert step at 1, inside the 5-minute job limit.
+# The last step runs even when the job failed or was cancelled, and opens or
+# updates the alert issue if the alert step did not get to.
+name: Production check
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: 'Force one check to fail (opens the alert issue; the next normal run closes it)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: prod-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: vars.PROD_CHECK_PAUSED != '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/prod-check.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run the check
+        id: run
+        continue-on-error: true
+        timeout-minutes: 4
+        env:
+          PROD_CHECK_SIMULATE: ${{ inputs.simulate_failure && 'cetus-sui-1' || '' }}
+          PROD_CHECK_WALLETS: ${{ vars.PROD_CHECK_WALLETS }}
+        run: node scripts/prod-check.mjs --out result.json
+
+      - name: Open, update or close the alert issue
+        id: alert
+        timeout-minutes: 1
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let r;
+            try { r = JSON.parse(fs.readFileSync('result.json', 'utf8')); }
+            catch { r = { ok: false, measuredAt: new Date().toISOString(), chainsLost: [], failures: [{ id: 'check-script', chain: 'site', status: '', reason: 'script-crashed' }], fingerprint: 'check-script' }; }
+            const TITLE = 'Production check failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', creator: 'github-actions[bot]', per_page: 50 });
+            const issue = open.find((i) => i.title.startsWith(TITLE));
+            const table = [
+              `Measured ${r.measuredAt} (UTC) on ${r.base ?? 'production'}. [Run log](${runUrl})`,
+              ...(r.chainsLost?.length ? [``, `**Every check failed on: ${r.chainsLost.join(', ')}**`] : []),
+              ``, `| Check | Chain | HTTP | Reason |`, `|---|---|---|---|`,
+              ...r.failures.map((f) => `| ${f.id} | ${f.chain ?? ''} | ${f.status ?? ''} | ${f.reason} |`),
+            ].join('\n');
+            const marker = (fp) => `<!-- fingerprint:${Buffer.from(fp).toString('base64')} -->`;
+            let alert = 'none';
+            if (!r.ok) {
+              if (!issue) {
+                await github.rest.issues.create({ ...context.repo, title: `${TITLE}: ${r.failures.map((f) => f.id).join(', ')}`.slice(0, 250), body: `${table}\n\n${marker(r.fingerprint)}` });
+                alert = 'new';
+              } else if (!issue.body?.includes(marker(r.fingerprint))) {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: `Failure set changed.\n\n${table}` });
+                await github.rest.issues.update({ ...context.repo, issue_number: issue.number, body: `${table}\n\n${marker(r.fingerprint)}` });
+                alert = 'changed';
+              } else {
+                alert = 'same';
+              }
+            } else if (issue) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: `Recovered: every check passed at ${r.measuredAt} (UTC). [Run log](${runUrl})` });
+              await github.rest.issues.update({ ...context.repo, issue_number: issue.number, state: 'closed' });
+              alert = 'recovered';
+            }
+            core.setOutput('alert', alert);
+
+      - name: Mark the run failed on a new or changed failure
+        if: steps.alert.outputs.alert == 'new' || steps.alert.outputs.alert == 'changed'
+        run: exit 1
+
+      # Runs even when the job failed or was cancelled. If the alert step did not
+      # finish (no output), opens or updates the issue with reason 'job-incomplete'.
+      - name: Alert if the run did not finish
+        if: always() && steps.alert.outputs.alert == ''
+        timeout-minutes: 1
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const TITLE = 'Production check failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const fp = 'job:job-incomplete';
+            const marker = `<!-- fingerprint:${Buffer.from(fp).toString('base64')} -->`;
+            const table = [
+              `Measured ${new Date().toISOString()} (UTC). The check run did not finish. [Run log](${runUrl})`,
+              ``, `| Check | Chain | HTTP | Reason |`, `|---|---|---|---|`, `| job | site |  | job-incomplete |`,
+            ].join('\n');
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', creator: 'github-actions[bot]', per_page: 50 });
+            const issue = open.find((i) => i.title.startsWith(TITLE));
+            if (!issue) {
+              await github.rest.issues.create({ ...context.repo, title: `${TITLE}: job`, body: `${table}\n\n${marker}` });
+            } else if (!issue.body?.includes(marker)) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: `Failure set changed.\n\n${table}` });
+              await github.rest.issues.update({ ...context.repo, issue_number: issue.number, body: `${table}\n\n${marker}` });
+            }
+            core.setFailed('the check run did not finish');
