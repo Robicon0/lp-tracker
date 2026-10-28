@@ -129,12 +129,12 @@ try {
   redis = null;
 }
 
-function alchemyUrl(chain: ArchiveChain): string {
+export function alchemyUrl(chain: ArchiveChain): string {
   const key = (alchemyKey() ?? '').trim();
   return key ? `https://${ALCHEMY_NETWORK[chain]}.g.alchemy.com/v2/${key}` : '';
 }
 
-class LookupError extends Error {
+export class LookupError extends Error {
   constructor(public reason: typeof LOOKUP_FAILED | typeof LOOKUP_UNAVAILABLE, message: string) { super(message); }
 }
 
@@ -146,7 +146,7 @@ const word = (data: string, i: number): bigint => {
 };
 
 /** One `alchemy_getAssetTransfers` query, paged, from `fromBlock` to latest. */
-async function assetTransfers(
+export async function assetTransfers(
   url: string,
   params: Record<string, unknown>,
   fromBlock: number,

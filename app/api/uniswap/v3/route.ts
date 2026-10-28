@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { PositionListReadError, logPositionListReadFailure } from '../../../lib/positionListRead';
 import { rpcUrlFromEnv } from '../../../lib/rpcEnv';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
-import { getEverOwnedTokenIds } from '../../../lib/evmEverOwnedNftIds';
-import { archiveRpcUrl, type ArchiveChain } from '../../../lib/evmArchiveRpc';
+import { getBurnedTokenIds } from '../../../lib/evmBurnedNftIds';
+import { type ArchiveChain } from '../../../lib/evmArchiveRpc';
 import {
   type RouteTruncation,
   lookupFailureNotice,
@@ -21,14 +21,11 @@ const LLAMA_PROJECTS = ['uniswap-v3'] as const;
 
 const ALCHEMY_KEY = alchemyKey();
 
-// Archive RPCs for full-range Transfer-log enumeration (Alchemy free tier caps
-// eth_getLogs at 10 blocks). Tenderly has no BSC gateway, so BNB has no entry
-// and burned-NFT recovery is gracefully skipped there. Mirrors the activity
-// route's TENDERLY_RPCS / DEPLOY_BLOCKS. Base's gateway cannot serve wide logs
-// (archiveServesWideLogs('base') is false), so getEverOwnedTokenIds reads Base
-// from the transfer index (evmAssetTransferHistory.ts), as Aerodrome does.
+// Chains with a history source for burned positions (getBurnedTokenIds: the
+// archive gateway's logs, or the transfer index where the gateway cannot serve
+// wide ranges, as on Base). Tenderly has no BSC gateway, so BNB has none and
+// says so. DEPLOY_BLOCKS mirrors the activity route's.
 const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism', 'base'];
-const TENDERLY_RPCS: Record<string, string> = Object.fromEntries(ARCHIVE_CHAINS.map((c) => [c, archiveRpcUrl(c)]));
 const DEPLOY_BLOCKS: Record<string, number> = {
   ethereum: 12_369_140,
   arbitrum:    165_216,
@@ -282,22 +279,6 @@ interface PositionData {
   feeGrowthInside1LastX128: bigint;
   tokensOwed0: bigint;
   tokensOwed1: bigint;
-}
-
-async function getPosition(rpc: string, nftManager: string, tokenId: bigint): Promise<PositionData | null> {
-  // positions(uint256) selector. keccak256("positions(uint256)")[:4] = 0x99fbab88.
-  // SAME selector across every Uniswap V3 NPM deployment (Ethereum, Arbitrum,
-  // Optimism, Polygon, BNB Chain) and across HyperEVM V3 forks. The previous
-  // value '0x99fd0e82' was wrong and reverted with "execution reverted: 0x" on
-  // every chain — silently caused getPosition to return null so the route
-  // emitted zero positions on chains where balanceOf reported any. Returns the
-  // standard 12-tuple (nonce, operator, token0, token1, fee, tickLower,
-  // tickUpper, liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128,
-  // tokensOwed0, tokensOwed1).
-  const selector = '0x99fbab88';
-  const data = selector + padUint256(tokenId);
-  const result = await rpcCall(rpc, nftManager, data);
-  return decodePositionData(result);
 }
 
 /**
@@ -608,22 +589,14 @@ async function fetchUniswapAPYs(): Promise<Record<string, number>> {
   }
 }
 
-// Build a minimal Closed record for a BURNED tokenId (positions() reverts).
-// Returns null if the tokenId still exists (transferred to another owner — not
-// this wallet's closed position). Metadata is intentionally left generic: this
-// is display-only (the dashboard Closed tab) and per-position mint-tx derivation
-// is far too slow to run on every load for active LPs (measured 74s for a wallet
-// with 20 churned positions). Fees from these are recovered via the wallet-scope
-// /api/uniswap/activity?tokenId=all, so value/fees stay 0 here.
-async function buildBurnedPosition(
-  chainKey: string,
-  tokenId: string,
-  account: string,
-): Promise<Record<string, unknown> | null> {
+// A minimal Closed record for a tokenId the wallet BURNED. Metadata is left
+// generic: this is display-only (the dashboard Closed tab), and per-position
+// mint-tx derivation is far too slow to run on every load for active LPs
+// (measured 74s for a wallet with 20 churned positions). Fees from these are
+// recovered via the wallet-scope /api/uniswap/activity?tokenId=all, so
+// value/fees stay 0 here.
+function burnedPositionRecord(chainKey: string, tokenId: string, account: string): Record<string, unknown> {
   const chain = CHAINS[chainKey];
-  // positions() still returns → NFT exists (transferred away), not burned → skip.
-  const stillExists = await getPosition(chain.rpc, chain.nftManager, BigInt(tokenId));
-  if (stillExists) return null;
   return {
     id: `uni3-${chainKey}-${tokenId}`,
     pair: 'Uniswap V3 Position',
@@ -657,39 +630,6 @@ class NothingHeld extends Error {}
 // Each half reports only its own notices; the client keys them per source.
 type Scope = 'open' | 'closed' | 'both';
 
-/**
- * The tokenIds the wallet holds on a chain (balanceOf + tokenOfOwnerByIndex),
- * for the closed half, which only needs them to leave held positions out of
- * the burned candidates. THROWS on a failed balance read; `complete` is false
- * when an index could not be read. Either way the caller does not run the
- * recovery: a held id taken for a burned candidate whose positions() read then
- * failed would be shown as a burned position.
- */
-async function readHeldTokenIds(
-  chain: (typeof CHAINS)[string],
-  account: string,
-  deadline: number,
-): Promise<{ ids: Set<string>; complete: boolean; nothingHeld: boolean }> {
-  const balance = await getBalance(chain.rpc, chain.nftManager, account);
-  if (balance === 0) return { ids: new Set(), complete: true, nothingHeld: true };
-  const idResults = await ethCallMany(
-    chain.rpc,
-    Array.from({ length: balance }, (_, i) => ({
-      to: chain.nftManager,
-      data: SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(i)),
-    })),
-    { deadline },
-  );
-  const ids = new Set<string>();
-  let unreadable = 0;
-  for (const r of idResults) {
-    if (r === null) { unreadable += 1; continue; }
-    const id = BigInt(r);
-    if (id > 0n) ids.add(id.toString());
-  }
-  return { ids, complete: unreadable === 0, nothingHeld: false };
-}
-
 async function fetchPositionsForChain(
   chainKey: string,
   account: string,
@@ -710,18 +650,16 @@ async function fetchPositionsForChain(
   // expensive cannot also spend the recovery's time and blow `maxDuration`.
   const recoveryDeadline = Date.now() + ENUMERATION_BUDGET_MS;
   let nothingHeld = false;
-  // The held tokenIds the recovery leaves out. The open enumeration fills them
-  // from its own rows; the closed half reads them on its own. Null = unknown.
-  let heldIds: Set<string> | null = null;
 
   if (scope === 'closed') {
-    try {
-      const held = await readHeldTokenIds(chain, account, recoveryDeadline);
-      nothingHeld = held.nothingHeld;
-      if (held.complete) heldIds = held.ids;
-      else console.warn(`[uniswap] ${chain.chainName}: held tokenIds not fully read; closed-position recovery not run`);
-    } catch (err) {
-      logPositionListReadFailure(`Uniswap V3 ${chain.chainName} (closed half)`, account, err);
+    // Burns need no held ids. Only a chain with no history source reads the
+    // balance, to decide whether its "not available" notice applies.
+    if (!ARCHIVE_CHAINS.some((c) => c === chainKey)) {
+      try {
+        nothingHeld = (await getBalance(chain.rpc, chain.nftManager, account)) === 0;
+      } catch (err) {
+        logPositionListReadFailure(`Uniswap V3 ${chain.chainName} (closed half)`, account, err);
+      }
     }
   } else try {
     const balance = await getBalance(chain.rpc, chain.nftManager, account);
@@ -908,68 +846,49 @@ async function fetchPositionsForChain(
       truncated.push(lookupFailureNotice(`${chain.chainName} positions`));
     }
   }
-  // Before the split the recovery ran on whatever the open rows held, a failed
-  // open read included (then every ever-owned id is a candidate and positions()
-  // tells held from burned). `both` keeps exactly that.
-  if (scope !== 'closed') heldIds = new Set(positions.map((p) => String(p.tokenId)));
-
   // The open half stops here: its notices are about the positions it listed.
   if (scope === 'open') return { positions, truncated };
 
-  // ── Burned-NFT recovery (defensive, additive) ────────────────────────────
-  // Enumerate every tokenId this wallet ever owned on this chain; any NOT
-  // currently held whose positions() reverts is a BURNED position (NFT
-  // destroyed on close). Surface it as Closed (burned:true). Requires an
-  // archive RPC (Tenderly); BNB has none and is skipped gracefully. The
-  // balanceOf/tokenOfOwnerByIndex path above is untouched (incl. closed-but-not-
-  // burned liquidity=0 positions, which still exist and are already returned).
-  const archiveRpc = TENDERLY_RPCS[chainKey];
-  if (archiveRpc && heldIds === null) {
-    // Closed half only: what the wallet holds could not be read, so no burned
-    // position can be told apart. Said, never shown as "no closed positions".
-    truncated.push(lookupFailureNotice(`${chain.chainName} closed-position recovery`));
-  } else if (archiveRpc && heldIds && Date.now() < recoveryDeadline) {
+  // ── Burned-NFT recovery ───────────────────────────────────────────────────
+  // The wallet's own burns on this chain's position manager (Transfer from the
+  // wallet to 0x0), read in one query and saved per wallet with a cursor
+  // (getBurnedTokenIds). A burned position is the wallet's closed position by
+  // construction, so no positions() call per candidate and no held-id read are
+  // needed (2026-10-28: those calls were 25-35 s per chain for a wallet with
+  // many positions). BNB has no history source and is said, below.
+  // liquidity=0 positions that still exist are returned by the open half.
+  const archiveChain = ARCHIVE_CHAINS.find((c) => c === chainKey);
+  if (archiveChain && Date.now() < recoveryDeadline) {
     try {
-      const everOwned = await getEverOwnedTokenIds(
-        chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0,
-        ARCHIVE_CHAINS.find((c) => c === chainKey),
-      );
-      // Queue item B — an enumeration that failed is NOT an empty wallet. Without
-      // this the whole recovery block silently produced zero burned positions.
-      if (!everOwned.complete) {
+      const burnedIds = await getBurnedTokenIds({
+        chain: archiveChain, nftManager: chain.nftManager, wallet: account,
+        fromBlock: DEPLOY_BLOCKS[chainKey] ?? 0,
+      });
+      // A lookup that did not complete is NOT "burned nothing": said, with
+      // whatever was saved earlier still shown.
+      if (!burnedIds.complete) {
         truncated.push(lookupFailureNotice(
           `${chain.chainName} closed-position recovery`,
-          everOwned.reason ?? LOOKUP_FAILED,
+          burnedIds.reason ?? LOOKUP_FAILED,
         ));
       }
-      // Cap candidates so an active LP / market-maker wallet (hundreds of
-      // ever-owned NFTs) can't fan out into hundreds of positions()+receipt
-      // calls and time the route out. Normal users (the defensive target) have
-      // a handful, so the cap never triggers for them.
-      const held = heldIds;
-      const allCandidates = everOwned.ids.filter((id) => !held.has(id));
-      const candidates = allCandidates.slice(0, CLOSED_CANDIDATE_CAP);
-      if (allCandidates.length > candidates.length) {
+      const candidates = burnedIds.ids.slice(0, CLOSED_CANDIDATE_CAP);
+      if (burnedIds.ids.length > candidates.length) {
         truncated.push({
           scope: `${chain.chainName} closed-position recovery`,
           cap: CLOSED_CANDIDATE_CAP,
           returned: candidates.length,
-          knownTotal: allCandidates.length,
+          knownTotal: burnedIds.ids.length,
           reason: 'closed-candidate-scan-cap',
         });
-        console.warn(`[uniswap] ${chain.chainName}: ${allCandidates.length} closed candidates, cap is ${CLOSED_CANDIDATE_CAP}`);
+        console.warn(`[uniswap] ${chain.chainName}: ${burnedIds.ids.length} burned positions, cap is ${CLOSED_CANDIDATE_CAP}`);
       }
-      const burned = await Promise.all(
-        candidates.map((tokenId) => buildBurnedPosition(chainKey, tokenId, account)),
-      );
-      for (const r of burned) if (r) positions.push(r);
+      for (const tokenId of candidates) positions.push(burnedPositionRecord(chainKey, tokenId, account));
     } catch (err) {
       console.error(`[uniswap] burned-recovery failed on ${chainKey}:`, err);
-      // Queue item B — a thrown recovery dropped every burned position with no
-      // trace. Disclose it on the same channel as a bound cap.
       truncated.push(lookupFailureNotice(`${chain.chainName} closed-position recovery`));
     }
-  } else if (!archiveRpc && !nothingHeld) {
+  } else if (!archiveChain && !nothingHeld) {
     // No archive endpoint exists for this chain (BNB: Tenderly has no BSC
     // gateway). Previously "skipped gracefully" — i.e. silently, so a BNB
     // wallet's burned positions were absent with nothing said. This is the
@@ -981,7 +900,7 @@ async function fetchPositionsForChain(
       `${chain.chainName} closed-position recovery`,
       LOOKUP_UNAVAILABLE,
     ));
-  } else if (archiveRpc) {
+  } else if (archiveChain) {
     // The open-position enumeration consumed the chain's budget. Skipping
     // recovery keeps the route inside `maxDuration`; saying so keeps it honest —
     // a wallet is told its closed positions were not reached, rather than being
