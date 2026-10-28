@@ -33,14 +33,27 @@ async function checkUnsupportedUniswap(account: string): Promise<void> {
   }
 }
 
-export async function fetchUniswapV3Positions(account: string): Promise<UniswapPosition[]> {
-  void checkUnsupportedUniswap(account);
+// The route is asked for in two halves, as Aerodrome is, so the open rows never
+// wait for the burned-NFT recovery's archive log scans:
+//
+//   fetchUniswapV3Positions        scope=open   — every position the wallet holds
+//   fetchUniswapV3ClosedPositions  scope=closed — burned positions, from history
+//
+// Each is its own source in PositionsContext ("Uniswap V3", "Uniswap V3
+// history"), so the closed half stays in `pendingSources` (totals marked) until
+// it lands, and a failed half is named. Notices are keyed per half: a clean
+// answer from one must not clear a notice the other raised.
+async function fetchUniswapV3Scope(
+  account: string,
+  scope: 'open' | 'closed',
+  noticeSource: string,
+): Promise<UniswapPosition[]> {
   try {
-    const data = await fetchPositionsJson<UniswapResponse>(`/api/uniswap/v3?account=${account}`);
+    const data = await fetchPositionsJson<UniswapResponse>(`/api/uniswap/v3?account=${account}&scope=${scope}`);
 
     // Label MUST match PositionsContext's source label so the banner names the
     // same source the user sees elsewhere.
-    applyTruncationNotices('Uniswap V3', account, data.truncated);
+    applyTruncationNotices(noticeSource, account, data.truncated);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (data.positions || []).map((p: any): UniswapPosition => ({
@@ -48,8 +61,17 @@ export async function fetchUniswapV3Positions(account: string): Promise<UniswapP
       feeTier: p.fee, // API returns fee tier as `fee` (e.g. 0.3 = 0.3%)
     }));
   } catch (error) {
-    console.error('Failed to fetch Uniswap V3 positions:', error);
+    console.error(`Failed to fetch Uniswap V3 positions (${scope}):`, error);
     // A failed request is not "no positions" (positionsFetch.ts): the page keeps the last good rows.
     throw error;
   }
+}
+
+export function fetchUniswapV3Positions(account: string): Promise<UniswapPosition[]> {
+  void checkUnsupportedUniswap(account);
+  return fetchUniswapV3Scope(account, 'open', 'Uniswap V3');
+}
+
+export function fetchUniswapV3ClosedPositions(account: string): Promise<UniswapPosition[]> {
+  return fetchUniswapV3Scope(account, 'closed', 'Uniswap V3 history');
 }

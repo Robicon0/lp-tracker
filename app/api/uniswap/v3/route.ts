@@ -648,11 +648,54 @@ async function buildBurnedPosition(
 // recovery below still runs; never a failure, never disclosed as one.
 class NothingHeld extends Error {}
 
+// The route is asked for in two halves, as /api/aerodrome is, so the open
+// positions never wait for the archive log scans of the burned-NFT recovery
+// (measured 2026-10-28: up to 32 s on one Tenderly gateway):
+//   open   — every position the wallet holds now, priced (liquidity 0 ones as Closed)
+//   closed — burned positions only, from the wallet's whole NFT history
+//   both   — no scope parameter: the two together, as before the split
+// Each half reports only its own notices; the client keys them per source.
+type Scope = 'open' | 'closed' | 'both';
+
+/**
+ * The tokenIds the wallet holds on a chain (balanceOf + tokenOfOwnerByIndex),
+ * for the closed half, which only needs them to leave held positions out of
+ * the burned candidates. THROWS on a failed balance read; `complete` is false
+ * when an index could not be read. Either way the caller does not run the
+ * recovery: a held id taken for a burned candidate whose positions() read then
+ * failed would be shown as a burned position.
+ */
+async function readHeldTokenIds(
+  chain: (typeof CHAINS)[string],
+  account: string,
+  deadline: number,
+): Promise<{ ids: Set<string>; complete: boolean; nothingHeld: boolean }> {
+  const balance = await getBalance(chain.rpc, chain.nftManager, account);
+  if (balance === 0) return { ids: new Set(), complete: true, nothingHeld: true };
+  const idResults = await ethCallMany(
+    chain.rpc,
+    Array.from({ length: balance }, (_, i) => ({
+      to: chain.nftManager,
+      data: SELECTORS.tokenOfOwnerByIndex + padAddress(account) + padUint256(BigInt(i)),
+    })),
+    { deadline },
+  );
+  const ids = new Set<string>();
+  let unreadable = 0;
+  for (const r of idResults) {
+    if (r === null) { unreadable += 1; continue; }
+    const id = BigInt(r);
+    if (id > 0n) ids.add(id.toString());
+  }
+  return { ids, complete: unreadable === 0, nothingHeld: false };
+}
+
 async function fetchPositionsForChain(
   chainKey: string,
   account: string,
   prices: Record<string, number>,
-  apyData: Record<string, number>
+  apyData: Record<string, number>,
+  scope: Scope = 'both',
 ): Promise<{ positions: unknown[]; truncated: RouteTruncation[] }> {
   const chain = CHAINS[chainKey];
   const knownTokens = KNOWN_TOKENS[chainKey] || {};
@@ -667,8 +710,20 @@ async function fetchPositionsForChain(
   // expensive cannot also spend the recovery's time and blow `maxDuration`.
   const recoveryDeadline = Date.now() + ENUMERATION_BUDGET_MS;
   let nothingHeld = false;
-  
-  try {
+  // The held tokenIds the recovery leaves out. The open enumeration fills them
+  // from its own rows; the closed half reads them on its own. Null = unknown.
+  let heldIds: Set<string> | null = null;
+
+  if (scope === 'closed') {
+    try {
+      const held = await readHeldTokenIds(chain, account, recoveryDeadline);
+      nothingHeld = held.nothingHeld;
+      if (held.complete) heldIds = held.ids;
+      else console.warn(`[uniswap] ${chain.chainName}: held tokenIds not fully read; closed-position recovery not run`);
+    } catch (err) {
+      logPositionListReadFailure(`Uniswap V3 ${chain.chainName} (closed half)`, account, err);
+    }
+  } else try {
     const balance = await getBalance(chain.rpc, chain.nftManager, account);
     // Holding no position NFT on this chain is not "no history": the burned-NFT
     // recovery below still runs (queue item a, 2026-10-16 — it used to return
@@ -853,6 +908,13 @@ async function fetchPositionsForChain(
       truncated.push(lookupFailureNotice(`${chain.chainName} positions`));
     }
   }
+  // Before the split the recovery ran on whatever the open rows held, a failed
+  // open read included (then every ever-owned id is a candidate and positions()
+  // tells held from burned). `both` keeps exactly that.
+  if (scope !== 'closed') heldIds = new Set(positions.map((p) => String(p.tokenId)));
+
+  // The open half stops here: its notices are about the positions it listed.
+  if (scope === 'open') return { positions, truncated };
 
   // ── Burned-NFT recovery (defensive, additive) ────────────────────────────
   // Enumerate every tokenId this wallet ever owned on this chain; any NOT
@@ -862,9 +924,12 @@ async function fetchPositionsForChain(
   // balanceOf/tokenOfOwnerByIndex path above is untouched (incl. closed-but-not-
   // burned liquidity=0 positions, which still exist and are already returned).
   const archiveRpc = TENDERLY_RPCS[chainKey];
-  if (archiveRpc && Date.now() < recoveryDeadline) {
+  if (archiveRpc && heldIds === null) {
+    // Closed half only: what the wallet holds could not be read, so no burned
+    // position can be told apart. Said, never shown as "no closed positions".
+    truncated.push(lookupFailureNotice(`${chain.chainName} closed-position recovery`));
+  } else if (archiveRpc && heldIds && Date.now() < recoveryDeadline) {
     try {
-      const heldIds = new Set(positions.map((p) => String(p.tokenId)));
       const everOwned = await getEverOwnedTokenIds(
         chain.nftManager, account, archiveRpc, DEPLOY_BLOCKS[chainKey] ?? 0,
         ARCHIVE_CHAINS.find((c) => c === chainKey),
@@ -881,7 +946,8 @@ async function fetchPositionsForChain(
       // ever-owned NFTs) can't fan out into hundreds of positions()+receipt
       // calls and time the route out. Normal users (the defensive target) have
       // a handful, so the cap never triggers for them.
-      const allCandidates = everOwned.ids.filter((id) => !heldIds.has(id));
+      const held = heldIds;
+      const allCandidates = everOwned.ids.filter((id) => !held.has(id));
       const candidates = allCandidates.slice(0, CLOSED_CANDIDATE_CAP);
       if (allCandidates.length > candidates.length) {
         truncated.push({
@@ -937,6 +1003,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get('account');
   const chain = searchParams.get('chain'); // Optional: filter to specific chain
+  // Optional: 'open' | 'closed'; absent = both halves (see `Scope`).
+  const scopeParam = searchParams.get('scope');
+  const scope: Scope = scopeParam === 'open' || scopeParam === 'closed' ? scopeParam : 'both';
   
   if (!account) {
     return NextResponse.json({ error: 'Account address required' }, { status: 400 });
@@ -955,18 +1024,21 @@ export async function GET(request: Request) {
       }
     }
     
-    // Fetch prices and APY data in parallel
-    const [prices, apyData] = await Promise.all([
-      fetchPrices(allCoingeckoIds),
-      fetchUniswapAPYs(),
-    ]);
+    // Fetch prices and APY data in parallel. The closed half builds burned
+    // positions only, which carry no price or APY.
+    const [prices, apyData] = scope === 'closed'
+      ? [{} as Record<string, number>, {} as Record<string, number>]
+      : await Promise.all([
+          fetchPrices(allCoingeckoIds),
+          fetchUniswapAPYs(),
+        ]);
     
     // Determine which chains to query
     const chainsToQuery = chain && CHAINS[chain] ? [chain] : Object.keys(CHAINS);
     
     // Fetch positions from all chains in parallel
     const results = await Promise.all(
-      chainsToQuery.map(c => fetchPositionsForChain(c, account, prices, apyData))
+      chainsToQuery.map(c => fetchPositionsForChain(c, account, prices, apyData, scope))
     );
     
     const allPositions = results.flatMap((r) => r.positions);
@@ -980,6 +1052,7 @@ export async function GET(request: Request) {
       count: allPositions.length,
       account,
       chains: chainsToQuery,
+      ...(scope !== 'both' ? { scope } : {}),
       // Additive (queue item C Phase 1). Present ONLY when a cap actually bound
       // this request; absent means the enumeration was complete.
       ...(truncated.length > 0 ? { truncated } : {}),

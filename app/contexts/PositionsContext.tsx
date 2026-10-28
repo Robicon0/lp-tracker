@@ -6,7 +6,7 @@ import { useQueries, useQueryClient, keepPreviousData } from "@tanstack/react-qu
 import { fetchAerodromePositions, fetchAerodromeClosedPositions, AerodromePosition } from "../lib/aerodrome";
 import { useWalletAuth } from "./WalletAuthContext";
 import { useWatchedWallets } from "./WatchedWalletsContext";
-import { fetchUniswapV3Positions } from "../lib/uniswap";
+import { fetchUniswapV3Positions, fetchUniswapV3ClosedPositions } from "../lib/uniswap";
 import { fetchVelodromePositions } from "../lib/velodrome";
 import { fetchRaydiumPositions } from "../lib/raydium";
 import { fetchOrcaPositions } from "../lib/orca";
@@ -237,6 +237,9 @@ export function PositionsProvider({ children }: { children: React.ReactNode }) {
       // and this one stays in `pendingSources` (totals marked) until it lands.
       { label: "Aerodrome history", address: a, fetcher: fetchAerodromeClosedPositions },
       { label: "Uniswap V3", address: a, fetcher: fetchUniswapV3Positions },
+      // Burned Uniswap positions need archive log scans on four chains (up to
+      // ~30 s), so they are their own source too, behind the open rows.
+      { label: "Uniswap V3 history", address: a, fetcher: fetchUniswapV3ClosedPositions },
       { label: "Velodrome", address: a, fetcher: fetchVelodromePositions },
       { label: "HyperEVM", address: a, fetcher: fetchHyperSwapPositions },
       { label: "PancakeSwap", address: a, fetcher: fetchPancakeSwapPositions },

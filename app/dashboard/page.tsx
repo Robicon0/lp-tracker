@@ -1865,7 +1865,7 @@ export default function Dashboard() {
             {mounted && !isLoading && pendingSources.length > 0 && (
               <div style={{ fontSize: 11, color: C.text, letterSpacing: "0.06em", padding: "4px 2px 8px" }}>
                 <span className="spin-icon" style={{ display: "inline-block", marginRight: 6 }}>↻</span>
-                still scanning: {pendingSources.join(" · ")}
+                still loading: {pendingSources.map((s) => (/history$/i.test(s) ? `closed ${s}` : s)).join(" · ")}
               </div>
             )}
 

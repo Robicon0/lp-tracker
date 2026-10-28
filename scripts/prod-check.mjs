@@ -26,6 +26,13 @@
 // stops at 3 minutes: checks not reached by then fail as 'time-limit', the
 // result file is written and the script exits 1. A watchdog enforces the 3
 // minutes even if a request ignores its timeout.
+//
+// Uniswap halves (2026-10-28): /api/uniswap/v3 answers in two halves, as
+// /api/aerodrome does. The open half keeps the 20 s limit. The closed half
+// (burned positions, read from four archive log gateways) gets its own 45 s
+// limit (`timeoutMs`): its slowest call on a normal day was 40.4 s (Oct 25-28),
+// and 45 s twice plus the 30 s retry wait (120 s) still fits the 3-minute run.
+// It runs last, so a slow answer cannot hold up the other checks.
 
 import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
 
@@ -56,13 +63,14 @@ const acct = (role) => W[role] || null;
 // never shrinks), 'json' (any JSON 200 without an error field).
 // minOpen: open positions (status != Closed) the wallet holds; each must be worth > $0.
 // minCount: positions in the list (closed lists never shrink, so today's count is a floor).
+// timeoutMs: this check's own request limit (default REQUEST_TIMEOUT_MS).
 const CHECKS = [
   { id: 'page-home', chain: 'site', kind: 'page', path: () => '/' },
   { id: 'page-dashboard', chain: 'site', kind: 'page', path: () => '/dashboard' },
   { id: 'page-analytics', chain: 'site', kind: 'page', path: () => '/analytics' },
   { id: 'prices', chain: 'site', kind: 'prices', path: () => '/api/prices?ids=bitcoin,sui,solana&vs_currencies=usd' },
 
-  { id: 'uniswap-evm-1', chain: 'evm', kind: 'positions', wallet: 'evm1', path: (a) => `/api/uniswap/v3?account=${a}`, minOpen: 1 },
+  { id: 'uniswap-evm-1', chain: 'evm', kind: 'positions', wallet: 'evm1', path: (a) => `/api/uniswap/v3?account=${a}&scope=open`, minOpen: 1 },
   { id: 'aerodrome-open-evm-1', chain: 'evm', kind: 'positions', wallet: 'evm1', path: (a) => `/api/aerodrome?account=${a}&scope=open` },
   { id: 'aerodrome-closed-evm-1', chain: 'evm', kind: 'closed', wallet: 'evm1', path: (a) => `/api/aerodrome?account=${a}&scope=closed`, minCount: 14 },
   { id: 'uniswap-unsupported-evm-1', chain: 'evm', kind: 'json', wallet: 'evm1', path: (a) => `/api/uniswap/unsupported?account=${a}` },
@@ -77,6 +85,11 @@ const CHECKS = [
   { id: 'cetus-sui-2', chain: 'sui', kind: 'positions', wallet: 'sui2', path: (a) => `/api/cetus?account=${a}`, minOpen: 1 },
   { id: 'sui-balances-sui-2', chain: 'sui', kind: 'json', wallet: 'sui2', path: (a) => `/api/sui/balances?account=${a}` },
   { id: 'sui-closed-sui-2', chain: 'sui', kind: 'closed', wallet: 'sui2', path: (a) => `/api/sui-closed-positions?account=${a}`, minCount: 39 },
+
+  // Last: the one check allowed more than 20 s (see the header).
+  { id: 'uniswap-closed-evm-1', chain: 'evm', kind: 'closed', wallet: 'evm1', path: (a) => `/api/uniswap/v3?account=${a}&scope=closed`, timeoutMs: 45_000 },
+  // No minCount: evm1 has no burned Uniswap position today (2026-10-28), so the list is empty;
+  // the check still fails on a non-200, a timeout or a failure notice (lookup-*).
 ];
 
 // Notices that describe a failed or unavailable read. Information notices
@@ -88,10 +101,10 @@ const NOT_A_FAILURE = new Set([
 ]);
 const FAILURE_NOTICE = /unavailable|failed|unreadable|unverified|unchecked|excluded|kept-stored/;
 
-async function fetchOnce(path) {
+async function fetchOnce(path, timeoutMs = REQUEST_TIMEOUT_MS) {
   const started = Date.now();
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), Math.min(REQUEST_TIMEOUT_MS, left()));
+  const timer = setTimeout(() => ctl.abort(), Math.min(timeoutMs, left()));
   try {
     const res = await fetch(BASE + path, { signal: ctl.signal, headers: { 'user-agent': 'defidesh-prod-check' } });
     const text = await res.text();
@@ -154,7 +167,7 @@ async function runCheck(check) {
   const wallet = check.wallet ? acct(check.wallet) : '';
   const r = wallet === null ? { status: 0, text: '', ms: 0, notConfigured: true }
     : left() < 1_000 ? { status: 0, text: '', ms: 0, notRun: true }
-    : await fetchOnce(check.path(wallet));
+    : await fetchOnce(check.path(wallet), check.timeoutMs);
   const reason = judge(check, r);
   // Only a fixed code may leave this script (it ends up in a public issue).
   return { ...check, status: r.status, ms: r.ms, reason: reason && !REASONS.includes(reason) ? 'unknown' : reason };
