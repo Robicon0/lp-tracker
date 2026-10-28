@@ -48,6 +48,7 @@ import {
   type ModalState,
 } from "../../components/PositionActions";
 import type { FeeClaim, Position } from "../../lib/types";
+import { usePrivacyMode, maskAmountsInText } from "../../lib/format";
 
 // Full detail for ONE position, open or closed. Every figure comes from the
 // same helpers the Positions list uses (derive, withLiveValues, the live-price
@@ -55,6 +56,7 @@ import type { FeeClaim, Position } from "../../lib/types";
 // sort the Fee Claims page uses, and every action from the same
 // PositionActionHost — so nothing here can disagree with the list.
 export default function PositionDetailPage() {
+  usePrivacyMode();
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(String(params?.id ?? ""));
   const router = useRouter();
@@ -249,7 +251,7 @@ export default function PositionDetailPage() {
               Notes
             </div>
             <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">
-              {position.notes}
+              {maskAmountsInText(position.notes)}
             </p>
           </div>
         )}
@@ -311,7 +313,7 @@ export default function PositionDetailPage() {
                         <ClaimTx value={claim.txId ?? null} />
                       </td>
                       <td className="max-w-[16rem] px-4 py-3 text-[12px] text-[var(--muted)]">
-                        {claim.notes?.trim() ? claim.notes : "—"}
+                        {claim.notes?.trim() ? maskAmountsInText(claim.notes) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -358,6 +360,7 @@ function PairHistoryPanel({
   history: Array<{ position: Position; deposited: number }>;
   currentId: string;
 }) {
+  usePrivacyMode();
   // Collapsed on every visit; not persisted.
   const [open, setOpen] = useState(false);
   const openCount = history.filter((h) => h.position.status === "active").length;
@@ -565,6 +568,7 @@ function ClosedPanel({
   position: Position;
   deposited: number;
 }) {
+  usePrivacyMode();
   // Hedge fields, each shown only when THIS position actually has a value.
   const hedge: { label: string; value: string; tone?: string }[] = [];
   const addUsd = (label: string, v: number | null, signed = false) => {
@@ -681,6 +685,7 @@ function ClosedPanel({
 }
 
 function SaleCell({ claim }: { claim: FeeClaim }) {
+  usePrivacyMode();
   if (claim.sale === undefined) return <span className="text-[var(--muted)]">—</span>;
   const gain = claimSaleGain(claim);
   return (

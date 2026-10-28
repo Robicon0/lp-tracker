@@ -18,13 +18,7 @@ import {
   type ReconcileResult,
 } from "../lib/transferAutomation";
 import type { FeeClaim, Position } from "../lib/types";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+import { formatUsdRaw, usePrivacyMode } from "../lib/format";
 
 const optionDateFormatter = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
@@ -51,10 +45,10 @@ export function positionOptionLabel(p: Position): string {
     }
   }
   const deposited = getEffectiveDeposited(p);
-  if (deposited > 0) parts.push(`dep ${usdFormatter.format(deposited)}`);
+  if (deposited > 0) parts.push(`dep ${formatUsdRaw(deposited)}`);
   const current = p.currentBalance;
   if (Number.isFinite(current) && current > 0) {
-    parts.push(`now ${usdFormatter.format(current)}`);
+    parts.push(`now ${formatUsdRaw(current)}`);
   }
   return parts.join(" · ");
 }
@@ -382,6 +376,7 @@ export function ClaimFormModal({
   onSubmit,
   onCancel,
 }: ClaimFormModalProps) {
+  usePrivacyMode();
   const [form, setForm] = useState<ClaimFormState>(() =>
     initialForm(mode, claim, lockedPositionId ?? initialPositionId, positions),
   );

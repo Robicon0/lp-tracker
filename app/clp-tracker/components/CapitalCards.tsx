@@ -13,17 +13,7 @@ import type { CapitalContribution } from "../lib/types";
 import { DisclosureToggle } from "./Breakdown";
 import { ModalShell } from "./ClaimFormModal";
 import { Field, Section, inputClass } from "./PositionFormParts";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd, formatSignedUsd, usePrivacyMode, maskAmountsInText } from "../lib/format";
 
 function pnlColor(value: number): string {
   if (value > 0) return "text-emerald-400";
@@ -53,6 +43,7 @@ export function InitialCapitalCard({
   onChanged: (next: CapitalContribution[]) => void;
   loadError?: string | null;
 }) {
+  usePrivacyMode();
   const [open, setOpen] = useState(false);
   const value = calcInitialCapital(contributions);
 
@@ -121,10 +112,6 @@ function formatEntryDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : entryDateFormatter.format(d);
 }
 
-function formatSignedUsd(value: number): string {
-  return value > 0 ? `+${formatUsd(value)}` : formatUsd(value);
-}
-
 function CapitalHistoryModal({
   contributions,
   onChanged,
@@ -134,6 +121,7 @@ function CapitalHistoryModal({
   onChanged: (next: CapitalContribution[]) => void;
   onClose: () => void;
 }) {
+  usePrivacyMode();
   const [kind, setKind] = useState<"deposit" | "withdrawal">("deposit");
   const [date, setDate] = useState(todayInputDate());
   const [amount, setAmount] = useState("");
@@ -240,7 +228,7 @@ function CapitalHistoryModal({
                   >
                     {formatSignedUsd(c.amount)}
                   </td>
-                  <td className="py-2 pl-4 text-[var(--muted)]">{c.notes}</td>
+                  <td className="py-2 pl-4 text-[var(--muted)]">{maskAmountsInText(c.notes)}</td>
                   <td className="whitespace-nowrap py-2 pl-4 text-right">
                     {pendingDelete === c.id ? (
                       <span className="inline-flex gap-2">
@@ -399,6 +387,7 @@ export function OverallPnLCard({
   // Undefined (or zero, when there is nothing held) renders the old sentence.
   heldFeesValue?: number;
 }) {
+  usePrivacyMode();
   const [open, setOpen] = useState(false);
 
   return (

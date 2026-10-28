@@ -8,14 +8,9 @@ import { formatUsd } from "../lib/positionFormUtils";
 // page, moved verbatim from claims/page.tsx so a claim renders — and a list of
 // claims totals and sorts — identically in both places.
 
-export const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
+import { formatToken, usePrivacyMode } from "../lib/format";
 
-export function formatToken(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
-}
+export { formatToken };
 
 export function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -51,6 +46,7 @@ export function ClaimTokenTotalsFooter({
   totals: ReturnType<typeof calcClaimTokenTotals>;
   claimCount: number;
 }) {
+  usePrivacyMode();
   return (
     <div className="border-t border-[var(--border-strong)] bg-[var(--surface-2)]/40 px-5 py-4">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">

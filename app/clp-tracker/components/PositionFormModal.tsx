@@ -50,6 +50,7 @@ import {
   pnlColor,
   tryComputeIL,
 } from "../lib/positionFormUtils";
+import { usePrivacyMode } from "../lib/format";
 
 // The token counts an auto-split replaced, kept only to show them back to
 // the user in the amber note.
@@ -64,12 +65,13 @@ export interface TokenSplitWarning {
 export interface RecalcSummary {
   fromEntry: string;
   toEntry: string;
-  fromDeposited: string;
-  toDeposited: string;
+  // Numbers, formatted at render so "Hide numbers" masks them live.
+  fromDeposited: number;
+  toDeposited: number;
   // Whether Current Balance moved with the correction, and if it did not,
   // the stale figure the user needs to review.
   balanceMoved: boolean;
-  staleBalance: string | null;
+  staleBalance: number | null;
 }
 
 
@@ -112,6 +114,7 @@ export function RecalcFromTokensPanel({
   ) => void;
   onCancel: () => void;
 }) {
+  usePrivacyMode();
   const [base, setBase] = useState(initialBase);
   const [quote, setQuote] = useState(initialQuote);
 
@@ -306,6 +309,7 @@ export function ClosedProfitSummary({
   scalp: string;
   totalFees: number;
 }) {
+  usePrivacyMode();
   const profit = calcClosedProfit(optionalNum(scalp), totalFees);
   return (
     <div className="space-y-1.5">
@@ -404,6 +408,7 @@ export function PositionFormModal({
   onCancel,
   onSubmit,
 }: PositionFormModalProps) {
+  usePrivacyMode();
   const [form, setForm] = useState<PositionFormState>(initial);
   // Tracks whether the user hand-typed a token count. Auto-split still wins
   // (it must, or Deposited and the token counts could disagree), but when it
@@ -414,7 +419,7 @@ export function PositionFormModal({
   );
   // Set when a typed deposit exceeded what this position size can be worth,
   // holding the formatted ceiling for the note.
-  const [clampNote, setClampNote] = useState<string | null>(null);
+  const [clampNote, setClampNote] = useState<number | null>(null);
   // editingStatus is only passed from the Edit call site.
   const isEditing = editingStatus !== undefined;
   // Which fields drive the rest. "price" is the existing behaviour — entry
@@ -511,7 +516,7 @@ export function PositionFormModal({
       if (solved) {
         next.entryPrice = formatAmountInput(solved.entryPrice, 6);
         if (solved.clamped) {
-          setClampNote(formatUsd(solved.maxDeposited));
+          setClampNote(solved.maxDeposited);
           next.deposited = formatAmountInput(solved.maxDeposited, 2);
         }
       }
@@ -1074,12 +1079,12 @@ export function PositionFormModal({
                 setRecalcApplied({
                   fromEntry: form.entryPrice,
                   toEntry: formatAmountInput(entryPrice, 6),
-                  fromDeposited: formatUsd(effectiveDeposited),
-                  toDeposited: formatUsd(deposited),
+                  fromDeposited: effectiveDeposited,
+                  toDeposited: deposited,
                   balanceMoved: newBalance !== null,
                   staleBalance:
                     newBalance === null && savedCurrentBalance !== undefined
-                      ? formatUsd(savedCurrentBalance)
+                      ? savedCurrentBalance
                       : null,
                 });
                 setForm((prev) => ({
@@ -1103,17 +1108,17 @@ export function PositionFormModal({
               role="status"
             >
               Recalculated: Entry Price {recalcApplied.fromEntry} →{" "}
-              {recalcApplied.toEntry}, Deposited {recalcApplied.fromDeposited} →{" "}
-              {recalcApplied.toDeposited}
+              {recalcApplied.toEntry}, Deposited {formatUsd(recalcApplied.fromDeposited)} →{" "}
+              {formatUsd(recalcApplied.toDeposited)}
               {recalcApplied.balanceMoved
-                ? `, Current Balance ${recalcApplied.fromDeposited} → ${recalcApplied.toDeposited}`
+                ? `, Current Balance ${formatUsd(recalcApplied.fromDeposited)} → ${formatUsd(recalcApplied.toDeposited)}`
                 : ""}
               . Save this position to record it, or close without saving to
               discard.
-              {!recalcApplied.balanceMoved && recalcApplied.staleBalance && (
+              {!recalcApplied.balanceMoved && recalcApplied.staleBalance !== null && (
                 <>
                   {" "}
-                  Current Balance stays at {recalcApplied.staleBalance} — run
+                  Current Balance stays at {formatUsd(recalcApplied.staleBalance)} — run
                   Update afterwards so Profit reflects reality.
                 </>
               )}
@@ -1143,12 +1148,12 @@ export function PositionFormModal({
               range bounds are set and Range Up is above Range Down.
             </p>
           )}
-          {clampNote && (
+          {clampNote !== null && (
             <p
               className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300"
               role="status"
             >
-              At this position size the deposit tops out at {clampNote} — above
+              At this position size the deposit tops out at {formatUsd(clampNote)} — above
               the top of your range the position is all{" "}
               {form.token2Symbol || "quote token"}, so its value stops rising.
               Change a token count to size the position differently.
@@ -1370,6 +1375,7 @@ export function OutOfRangeBox({
   baseSymbol,
   quoteSymbol,
 }: OutOfRangeBoxProps) {
+  usePrivacyMode();
   const ready = il !== null && profit !== null;
   return (
     <div className="rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--surface-2)]/40 p-3">
@@ -1441,6 +1447,7 @@ export function NetCoverageBox({
   fallbackLabel,
   fallbackValue,
 }: NetCoverageBoxProps) {
+  usePrivacyMode();
   const showFallback = !shortPresent && fallbackValue !== null;
   const displayValue = shortPresent ? value : fallbackValue;
   const isMissing = displayValue === null;

@@ -19,26 +19,7 @@ import {
 import { useLivePositionPrices } from "../lib/useLivePositionPrices";
 import { useHydrated } from "../lib/useHydrated";
 import type { FeeClaim, Position } from "../lib/types";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
-function formatToken(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd, formatToken, usePrivacyMode } from "../lib/format";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -121,6 +102,7 @@ function derive(positions: Position[]): DerivedPosition[] {
 type StatusFilter = "all" | "active" | "closed";
 
 export default function PoolPnlPage() {
+  usePrivacyMode();
   const [positions, setPositions] = useState<Position[]>([]);
   const [claims, setClaims] = useState<FeeClaim[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -358,6 +340,7 @@ interface TokenRowProps {
 }
 
 function TokenRow({ row }: TokenRowProps) {
+  usePrivacyMode();
   const positionsLabel = [
     row.activeCount > 0 ? `${row.activeCount} active` : null,
     row.closedCount > 0 ? `${row.closedCount} closed` : null,
@@ -410,6 +393,7 @@ interface TokenTotalsRowProps {
 }
 
 function TokenTotalsRow({ rows }: TokenTotalsRowProps) {
+  usePrivacyMode();
   let active = 0;
   let closed = 0;
   let unrealized = 0;
@@ -521,6 +505,7 @@ interface PositionRowProps {
 }
 
 function PositionRow({ row, isOpen, onToggle }: PositionRowProps) {
+  usePrivacyMode();
   const { position, deposited, lpProfit, shortTotal, netPnl, upsideIL, downsideIL, upsideProfit, downsideProfit } =
     row;
   // Live recomputation is the source of truth; the stored snapshot is only
@@ -638,6 +623,7 @@ interface ExpandedDetailProps {
 }
 
 function ExpandedDetail({ row }: ExpandedDetailProps) {
+  usePrivacyMode();
   const { position, shortTotal, upsideIL, downsideIL, upsideProfit, downsideProfit } =
     row;
   const isClosed = position.status === "closed";
@@ -838,6 +824,7 @@ function ScenarioBox({
   baseSymbol,
   quoteSymbol,
 }: ScenarioBoxProps) {
+  usePrivacyMode();
   if (il === null || profit === null) {
     return (
       <div className="rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--surface)]/60 p-3">
@@ -909,6 +896,7 @@ function CoverageBox({
   fallback,
   direction,
 }: CoverageBoxProps) {
+  usePrivacyMode();
   const showFallback = !shortPresent && fallback !== null;
   const display = shortPresent ? value : fallback;
   const missing = display === null;

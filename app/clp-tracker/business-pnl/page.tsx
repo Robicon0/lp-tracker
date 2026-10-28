@@ -25,40 +25,7 @@ import { useHydrated } from "../lib/useHydrated";
 import { mergePrices, useTokenPrices } from "../lib/useTokenPrices";
 import { normalizeChain, normalizeToken } from "../lib/nameNormalization";
 import type { AppSettings, FeeClaim, Position } from "../lib/types";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
-function formatToken(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
-// A needed price can land far outside the 2dp range a dollar total lives in —
-// a cheap token with a small holding needs a big number, a large holding needs
-// fractions of a cent — so this keeps more precision than formatUsd.
-const priceFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
-
-function formatPrice(value: number): string {
-  return priceFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd, formatToken, formatUsdPrice as formatPrice, usePrivacyMode } from "../lib/format";
 
 // Per-symbol reward totals for a chain block's footer. One symbol renders as
 // "12.5 ETH"; a chain mixing reward tokens renders each on its own line so no
@@ -112,6 +79,7 @@ function claimStatus(claim: FeeClaim): string {
 }
 
 export default function BusinessPnlPage() {
+  usePrivacyMode();
   const [claims, setClaims] = useState<FeeClaim[]>([]);
   // Read only to compute the Growth Target gap below — this page never writes
   // positions or app settings (loadCapitalContributions may run the one-time

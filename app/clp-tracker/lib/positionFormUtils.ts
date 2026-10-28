@@ -21,17 +21,10 @@ import type {
   Transfer,
 } from "./types";
 
-export const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+// Money and token-quantity formatting lives in ./format (privacy mode).
+import { formatTokenUnguarded, formatUsd } from "./format";
 
-
-export function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
+export { formatUsd };
 
 
 export function formatPercent(value: number): string {
@@ -559,9 +552,4 @@ export function formatPrice(value: number): string {
 }
 
 
-export function fmtTokenAmount(value: number): string {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  });
-}
+export { formatTokenUnguarded as fmtTokenAmount };

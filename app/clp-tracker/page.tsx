@@ -51,6 +51,7 @@ import type {
   Position,
   Transfer,
 } from "./lib/types";
+import { formatUsd, formatToken as formatTokenAmount, usePrivacyMode } from "./lib/format";
 
 const EMPTY_OVERALL: OverallPnL = {
   activeCurrentValue: 0,
@@ -102,29 +103,9 @@ const EMPTY_SUMMARY: PortfolioSummary = {
   closedPositions: 0,
 };
 
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
 function formatPercent(value: number): string {
   const safe = Number.isFinite(value) ? value : 0;
   return `${safe.toFixed(2)}%`;
-}
-
-function formatTokenAmount(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
 }
 
 function pad(n: number): string {
@@ -313,6 +294,7 @@ function recentClaims(claims: FeeClaim[]): FeeClaim[] {
 }
 
 export default function DashboardPage() {
+  usePrivacyMode();
   const [positions, setPositions] = useState<Position[]>([]);
   const [claims, setClaims] = useState<FeeClaim[]>([]);
 

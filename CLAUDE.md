@@ -984,6 +984,31 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(CLP Hide numbers, 2026-10-28)** — **A Sidebar toggle masks every amount and token quantity on
+  every CLP page, for screen-sharing.** NEW `app/clp-tracker/lib/format.ts` is the ONE place CLP
+  formats money and quantities, and owns the mode (`useSyncExternalStore`, localStorage
+  `clp_privacy_mode` in try/catch, default off, cross-tab sync; server snapshot `false`, so the
+  hydration render never differs). The 14 local `usdFormatter` / `tokenFormatter` copies are gone
+  (`positionFormUtils` and `ClaimDisplay` re-export the shared ones); every component that formats
+  money calls `usePrivacyMode()`. When on: amounts and quantities read `••••`; prices (entry, range,
+  "price to hit target", the sold-at price), percentages, days, counts, dates, names and tx links stay.
+  Dollar amounts typed into notes are masked on display (`maskAmountsInText`), the Sell modal's
+  "Only N TOKEN is unconverted" sentence (`maskNumbersInText`), the sold quantity tooltip
+  (`hideAmount`); the recalculation summary now stores numbers and formats at render. Stored text
+  keeps real figures (`formatUsdExact` for the amount-edit note stamp). Inputs show real values while
+  edited (Claim, Close, Update, Position form, Growth Target, Business P&L price overrides, Transfer
+  and Initial Capital amounts). Exports and backups are unchanged. Still visible: the "+" goes with
+  the masked figure, but the green / red colour still shows gain vs loss. Tests: `npx tsx scripts/clp-format-test.ts` (346: old formatters vs new with the mode off,
+  NaN / Infinity / negatives; masked when on; prices never masked) and
+  `npx tsx scripts/clp-format-guard-test.ts` (fails on a currency `Intl.NumberFormat` /
+  `toLocaleString` anywhere under `app/clp-tracker` except `lib/format.ts`; checked with a probe
+  file). Browser (Profile 6 data, clean profile, prices replayed): with the mode on, 0 `$` amounts
+  left on dashboard, positions, an active and a closed position page, claims, transfers, Total /
+  Pool / Business P&L, settings and the Initial Capital history modal (only token prices remain);
+  toggling kept scroll, rows, the open modal and typed "4321"; a second tab toggled the first;
+  refresh stayed hidden with no `$` on first paint; off again every amount equal to before (only
+  elapsed-time APR / months moved). 0 page errors.
+
 - **`14b694d`** (Dead hosts + open-first pacing, 2026-10-28, live as `dpl_D9cT87CG…`, Ready 08:01 UTC) — **No EVM activity route calls a dead host; open
   positions are fetched before closed ones; the Uniswap closed check is 20 s.**
   **Hosts.** Every hardcoded host in the repo (85) was DNS-checked (no keys). Dead: `arb1` / `op` /

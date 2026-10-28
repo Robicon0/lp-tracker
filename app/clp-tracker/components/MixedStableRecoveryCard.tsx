@@ -4,17 +4,7 @@ import { useState } from "react";
 import type { FeeClaim } from "../lib/types";
 import type { OverallPnL } from "../lib/calculations";
 import { findMixedStableClaims } from "../lib/calculations";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd, usePrivacyMode } from "../lib/format";
 
 // One-time diagnostic for the per-leg conversion fix (2026-07-28).
 //
@@ -34,6 +24,7 @@ export function MixedStableRecoveryCard({
   overall: OverallPnL;
   onDismiss: () => void;
 }) {
+  usePrivacyMode();
   const [expanded, setExpanded] = useState(false);
 
   // Nothing to report when no claim has a stable leg under a "No" flag.

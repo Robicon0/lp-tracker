@@ -18,6 +18,8 @@ import { useLivePositionPrices } from "../lib/useLivePositionPrices";
 import { useHydrated } from "../lib/useHydrated";
 import { mergePrices, useTokenPrices } from "../lib/useTokenPrices";
 import type { FeeClaim, Position, Transfer } from "../lib/types";
+import { Eye, EyeOff } from "lucide-react";
+import { formatUsd, setPrivacyMode, usePrivacyMode } from "../lib/format";
 
 interface NavItem {
   href: string;
@@ -83,17 +85,6 @@ function computePortfolioStatus(
   const state =
     netPnl > 0 ? "positive" : netPnl < 0 ? "negative" : "neutral";
   return { state, netPnl, hasData: true };
-}
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
 }
 
 export function Sidebar() {
@@ -206,6 +197,8 @@ export function Sidebar() {
         <span aria-hidden="true">←</span> DefiDesh
       </Link>
 
+      <PrivacyToggle />
+
       <nav className="flex flex-1 flex-row gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:px-3 md:pb-6">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href);
@@ -251,11 +244,41 @@ export function Sidebar() {
   );
 }
 
+// "Hide numbers": masks every amount and token quantity on every CLP page
+// (lib/format.ts owns the state). Outside the md:block footer so it is reachable
+// on mobile too, and the "Numbers hidden" line stays visible while it is on.
+function PrivacyToggle() {
+  const hidden = usePrivacyMode();
+  const Icon = hidden ? EyeOff : Eye;
+  return (
+    <div className="mx-3 mb-2 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setPrivacyMode(!hidden)}
+        aria-pressed={hidden}
+        className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]/60 hover:text-[var(--foreground)]"
+      >
+        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        {hidden ? "Show numbers" : "Hide numbers"}
+      </button>
+      {hidden && (
+        <span
+          role="status"
+          className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--foreground)] ring-1 ring-inset ring-[var(--border-strong)]"
+        >
+          Numbers hidden
+        </span>
+      )}
+    </div>
+  );
+}
+
 interface PortfolioStatusBarProps {
   status: PortfolioStatus | null;
 }
 
 function PortfolioStatusBar({ status }: PortfolioStatusBarProps) {
+  usePrivacyMode();
   if (status === null) {
     return <div className="h-1 bg-[var(--surface-2)]" aria-hidden />;
   }

@@ -1,17 +1,7 @@
 "use client";
 
 import type { OutlierRow } from "../lib/dataHealth";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function usd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd as usd, usePrivacyMode } from "../lib/format";
 
 function shortDate(value: string): string {
   const d = new Date(value);
@@ -39,6 +29,7 @@ export function OutlierBanner({
   // Persisted "I checked this, it's correct" dismissal (Part 1).
   onConfirm: (row: OutlierRow) => void;
 }) {
+  usePrivacyMode();
   if (rows.length === 0) return null;
   return (
     <div

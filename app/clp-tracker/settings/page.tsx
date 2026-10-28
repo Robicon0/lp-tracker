@@ -31,6 +31,7 @@ import {
 } from "../lib/calculations";
 import { useHydrated } from "../lib/useHydrated";
 import type { AppSettings, FeeClaim, Position, Transfer } from "../lib/types";
+import { formatUsd, usePrivacyMode } from "../lib/format";
 
 const STORAGE_KEYS = [
   "clp_positions",
@@ -245,16 +246,6 @@ function todayDate(): string {
   return `${y}-${m}-${day}`;
 }
 
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
 function readKey(key: string): unknown {
   if (typeof window === "undefined") return null;
   try {
@@ -266,6 +257,7 @@ function readKey(key: string): unknown {
 }
 
 export default function SettingsPage() {
+  usePrivacyMode();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [importState, setImportState] = useState<ImportState>({ kind: "idle" });
   const [csvImportState, setCsvImportState] = useState<CsvImportState>({

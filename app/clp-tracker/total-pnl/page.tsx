@@ -40,6 +40,7 @@ import type {
   Position,
   Transfer,
 } from "../lib/types";
+import { formatUsd, formatToken, usePrivacyMode } from "../lib/format";
 
 const EMPTY_OVERALL: OverallPnL = {
   activeCurrentValue: 0,
@@ -52,26 +53,6 @@ const EMPTY_OVERALL: OverallPnL = {
   mixedStableClaims: 0,
   mixedStableRecovered: 0,
 };
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
-function formatToken(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "\u2014";
@@ -666,6 +647,7 @@ function PortfolioSummarySection({
   onCapitalChanged,
   capitalLoadError,
 }: PortfolioSummarySectionProps) {
+  usePrivacyMode();
   // Prices arrive from the page, which fetches them once for every consumer
   // (this section AND Growth Target). Only the derived figure lives here.
   const heldFeesValue = useMemo(
@@ -812,6 +794,7 @@ function ClosedScalpList({
   // future divergence would be visible rather than silent.
   expected: number;
 }) {
+  usePrivacyMode();
   const [open, setOpen] = useState(false);
 
   if (rows.length === 0) return null;
@@ -919,6 +902,7 @@ function FeesEarnedCard({
   // cards quote the identical figure by construction.
   heldFeesValue: number;
 }) {
+  usePrivacyMode();
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5">
       <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
@@ -950,6 +934,7 @@ interface NetPnlCardProps {
 }
 
 function NetPnlCard({ value, breakdown }: NetPnlCardProps) {
+  usePrivacyMode();
   return (
     <div
       className={`rounded-lg border-2 ${pnlBorder(value)} bg-[var(--surface)] p-6 shadow-lg`}
@@ -980,6 +965,7 @@ function PerformanceBreakdownSection({
   active,
   closed,
 }: PerformanceBreakdownSectionProps) {
+  usePrivacyMode();
   const avgApr = active.weight > 0 ? active.weightedApr / active.weight : 0;
   return (
     <div className="space-y-3">
@@ -1059,6 +1045,7 @@ interface FeeIncomeSectionProps {
 }
 
 function FeeIncomeSection({ rows }: FeeIncomeSectionProps) {
+  usePrivacyMode();
   return (
     <div className="space-y-3">
       <SectionHeading title="Fee Income Breakdown" />
@@ -1131,6 +1118,7 @@ interface MonthlyPerformanceSectionProps {
 }
 
 function MonthlyPerformanceSection({ rows }: MonthlyPerformanceSectionProps) {
+  usePrivacyMode();
   return (
     <div className="space-y-3">
       <SectionHeading title="Monthly Performance" />

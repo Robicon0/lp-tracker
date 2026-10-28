@@ -73,10 +73,12 @@ import {
   PositionActionHost,
   type ModalState,
 } from "../components/PositionActions";
+import { usePrivacyMode } from "../lib/format";
 
 const ALL_CHAINS = "__all__";
 
 export default function PositionsPage() {
+  usePrivacyMode();
   const [positions, setPositions] = useState<Position[]>([]);
   const [claims, setClaims] = useState<FeeClaim[]>([]);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
@@ -392,6 +394,7 @@ function SuspectScalpBanner({
   rows: SuspectScalpRow[];
   onEdit: (p: Position) => void;
 }) {
+  usePrivacyMode();
   return (
     <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] px-5 py-4">
       <h2 className="text-sm font-semibold text-amber-300">
@@ -801,6 +804,7 @@ function PositionCard({
   onClaim?: (p: Position) => void;
   onDelete?: (p: Position) => void;
 }) {
+  usePrivacyMode();
   const {
     position, deposited, claimed, fees, days, apr, priceDiff, profit, saleGain,
   } = row;
@@ -1155,6 +1159,7 @@ function PositionListRow({
   onClaim?: (p: Position) => void;
   onDelete?: (p: Position) => void;
 }) {
+  usePrivacyMode();
   const {
     position, deposited, claimed, fees, days, apr, priceDiff, profit, saleGain,
   } = row;

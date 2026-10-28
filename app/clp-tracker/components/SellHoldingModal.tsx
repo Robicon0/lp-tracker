@@ -5,32 +5,13 @@ import { saveClaims } from "../lib/storage";
 import { applyTokenSale, planTokenSale } from "../lib/calculations";
 import type { FeeClaim } from "../lib/types";
 import { ModalShell } from "./ClaimFormModal";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
-});
+import { formatUsd, formatToken, usePrivacyMode, maskNumbersInText } from "../lib/format";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
   month: "short",
   year: "numeric",
 });
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
-function formatToken(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
-}
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -64,6 +45,7 @@ export function SellHoldingModal({
   onCancel: () => void;
   onCommitted: (next: FeeClaim[]) => void;
 }) {
+  usePrivacyMode();
   const [amount, setAmount] = useState("");
   const [price, setPrice] = useState(
     suggestedPrice !== null && suggestedPrice > 0 ? String(suggestedPrice) : "",
@@ -185,7 +167,7 @@ export function SellHoldingModal({
           </div>
 
           {showError !== null && (
-            <p className="text-xs text-rose-400">{showError}</p>
+            <p className="text-xs text-rose-400">{maskNumbersInText(showError)}</p>
           )}
 
           <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { positionOptionLabel } from "./ClaimFormModal";
 import { normalizeChain } from "../lib/nameNormalization";
 import type { Position } from "../lib/types";
+import { usePrivacyMode } from "../lib/format";
 
 // How an option's annotation reads at a glance:
 //   danger  — the money is gone (100% expensed)
@@ -60,6 +61,7 @@ export function PositionCombobox({
   // order within a group is not.
   sortWithinSection?: (a: Position, b: Position) => number;
 }) {
+  usePrivacyMode();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);

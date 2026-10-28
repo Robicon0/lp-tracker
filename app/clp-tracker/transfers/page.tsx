@@ -98,6 +98,7 @@ import type {
   Transfer,
   Withdrawal,
 } from "../lib/types";
+import { formatUsd, formatUsdExact, formatTokenCount as formatTokenAmount, usePrivacyMode, maskAmountsInText } from "../lib/format";
 
 type TransferType = Transfer["transferType"];
 type MoneyStatus = NonNullable<Transfer["moneyStatus"]>;
@@ -122,29 +123,6 @@ const TYPE_PILL: Record<TransferType, string> = {
   outOfRangeUpside: "bg-orange-500/10 text-orange-300 ring-orange-500/30",
   expense: "bg-rose-500/10 text-rose-300 ring-rose-500/30",
 };
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
-
-// Token counts, not dollars: a count can legitimately be 0.0042 or 871, so a
-// fixed 2dp would print "0.00" for a real holding. Up to 6 significant
-// decimals, trailing zeros dropped.
-const tokenFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 6,
-});
-
-function formatTokenAmount(value: number): string {
-  return tokenFormatter.format(Number.isFinite(value) ? value : 0);
-}
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -296,7 +274,6 @@ interface ExpenseFormState {
   notes: string;
 }
 
-
 function expenseToForm(t: Transfer): ExpenseFormState {
   return {
     date: toDateInputValue(t.date),
@@ -391,7 +368,7 @@ function withAmountEditNote(
   next: number,
 ): string {
   if (previous === next) return notes;
-  const stamp = `· amount edited from ${formatUsd(previous)} to ${formatUsd(
+  const stamp = `· amount edited from ${formatUsdExact(previous)} to ${formatUsdExact(
     next,
   )} on ${formatDateDDMMYYYY(todayDateInput())}`;
   return notes.trim() === "" ? stamp : `${notes.trim()} ${stamp}`;
@@ -562,6 +539,7 @@ function TransferListRow({
   selected: boolean;
   onToggleSelect: (id: string) => void;
 }) {
+  usePrivacyMode();
   // Settled money is visually locked (dimmed). THREE states count as settled
   // and read identically — "this money has been put to use": a deploy-link
   // (inside a position), a platform (sent out for yield) and an Expense
@@ -702,6 +680,7 @@ function SelectionActions({
   onDeleteConfirm: () => void;
   onDeleteCancel: () => void;
 }) {
+  usePrivacyMode();
   if (selected.length === 0) return null;
   const single = selected.length === 1 ? selected[0] : null;
   const total = selected.reduce((sum, t) => sum + t.amount, 0);
@@ -862,6 +841,7 @@ function RecentlyDeletedSection({
   onPurgeCancel: () => void;
   onRestore: (id: string) => void;
 }) {
+  usePrivacyMode();
   if (rows.length === 0) return null;
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]">
@@ -945,7 +925,7 @@ function RecentlyDeletedSection({
                 </dl>
                 {t.notes && (
                   <p className="mt-2 text-[12px] text-[var(--muted)]">
-                    {t.notes}
+                    {maskAmountsInText(t.notes)}
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1016,6 +996,7 @@ function IdleUpsideBanner({
   pairLabelFor: (t: Transfer) => string;
   onSelect: (t: Transfer) => void;
 }) {
+  usePrivacyMode();
   const total = rows.reduce((sum, r) => sum + r.transfer.amount, 0);
   return (
     <div
@@ -1081,6 +1062,7 @@ function ClaimDriftBanner({
   pairLabelFor: (t: Transfer) => string;
   onSelect: (t: Transfer) => void;
 }) {
+  usePrivacyMode();
   return (
     <div
       id="claim-drift"
@@ -1146,6 +1128,7 @@ function ClaimDeletedBanner({
   pairLabelFor: (t: Transfer) => string;
   onReview: (t: Transfer) => void;
 }) {
+  usePrivacyMode();
   return (
     <div
       id="claim-deleted"
@@ -1300,6 +1283,7 @@ function TransferSymbolBanner({
 }
 
 export default function TransfersPage() {
+  usePrivacyMode();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
@@ -2546,7 +2530,6 @@ export default function TransfersPage() {
             onDone={refresh}
           />
 
-
           {/* Money Flow ledger: earned − withdrawn − deployed − transferred
               = available now. The three subtracted buckets are mutually
               exclusive (see the state predicates at the top of this file). */}
@@ -3037,7 +3020,7 @@ export default function TransfersPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 max-w-xs truncate text-[var(--muted)]">
-                          {row.notes || "—"}
+                          {row.notes ? maskAmountsInText(row.notes) : "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
                           {/* Transfer-backed rows are edited in the transfer
@@ -3419,6 +3402,7 @@ interface GroupTableProps {
 // unavailable" — never $0.00, which would say the tokens are worthless. A
 // partly-priced group shows what it could price plus the count it left out.
 function ValuedSumCell({ sum, count }: { sum: ValuedSum; count?: number }) {
+  usePrivacyMode();
   if (count !== undefined && sum.unpriced === count) {
     return <span className="text-amber-300">Price unavailable</span>;
   }
@@ -3500,6 +3484,7 @@ interface SummaryStatProps {
 }
 
 function SummaryStat({ label, value, hint, parts, note }: SummaryStatProps) {
+  usePrivacyMode();
   const [open, setOpen] = useState(false);
   const shown = (parts ?? []).filter((p) => p.value !== 0);
   // Explanatory text is hidden until asked for, so every card reads as label +
@@ -3773,6 +3758,7 @@ function TransferFormModal({
   onSubmit,
   onDelete,
 }: TransferFormModalProps) {
+  usePrivacyMode();
   const [form, setForm] = useState<TransferFormState>(initial);
 
   const set = <K extends keyof TransferFormState>(
@@ -4124,6 +4110,7 @@ function DeployLinkModal({
   onCancel: () => void;
   onSubmit: (positionId: string) => void;
 }) {
+  usePrivacyMode();
   const eligible = transfers.filter(canPlaceTransfer);
   const skipped = transfers.length - eligible.length;
   const total = eligible.reduce((sum, t) => sum + t.amount, 0);
@@ -4249,6 +4236,7 @@ function SendToPlatformModal({
   onCancel: () => void;
   onSubmit: (platform: string) => void;
 }) {
+  usePrivacyMode();
   const eligible = transfers.filter(canPlaceTransfer);
   const skipped = transfers.length - eligible.length;
   const total = eligible.reduce((sum, t) => sum + t.amount, 0);
@@ -4329,6 +4317,7 @@ function BulkSplitModal({
   onCancel: () => void;
   onSubmit: (plan: BulkSplitPlan) => void;
 }) {
+  usePrivacyMode();
   const plan = useMemo(
     () => planBulkSplit(transfers, claims),
     [transfers, claims],
@@ -4427,6 +4416,7 @@ function UndoSplitModal({
   onCancel: () => void;
   onSubmit: (plan: UndoSplitPlan) => void;
 }) {
+  usePrivacyMode();
   const plan = useMemo(
     () => planUndoSplit(piece, transfers, allTransfers),
     [piece, transfers, allTransfers],
@@ -4529,6 +4519,7 @@ function SplitTransferModal({
   onCancel: () => void;
   onSubmit: (plan: TransferSplitPlan) => void;
 }) {
+  usePrivacyMode();
   const linked = useMemo(
     () => planTransferSplit(transfer, claims),
     [transfer, claims],
@@ -4651,6 +4642,7 @@ function RevertToAutoModal({
   onCancel: () => void;
   onApplied: () => void;
 }) {
+  usePrivacyMode();
   const [plans, setPlans] = useState<AutoRevertPlan[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -4802,7 +4794,6 @@ function RevertToAutoModal({
     </ModalShell>
   );
 }
-
 
 function ExpenseFormModal({
   title,
@@ -5089,6 +5080,7 @@ function BackfillReview({
   transfers,
   onDone,
 }: BackfillReviewProps) {
+  usePrivacyMode();
   const [excludedClaims, setExcludedClaims] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 

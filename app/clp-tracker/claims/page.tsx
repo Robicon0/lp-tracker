@@ -50,17 +50,7 @@ import {
   formatDateDDMMYYYY,
   formatToken,
 } from "../components/ClaimDisplay";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd, formatUsdExact, hideAmount, usePrivacyMode } from "../lib/format";
 
 function formatPercent(value: number): string {
   const safe = Number.isFinite(value) ? value : 0;
@@ -120,6 +110,7 @@ function ClaimSymbolMismatchBanner({
   onEdit: (claim: FeeClaim) => void;
   onFixAll: () => void;
 }) {
+  usePrivacyMode();
   const [confirming, setConfirming] = useState(false);
   return (
     <div
@@ -279,6 +270,7 @@ const EMPTY_FILTERS: FilterState = {
 };
 
 export default function ClaimsPage() {
+  usePrivacyMode();
   const [claims, setClaims] = useState<FeeClaim[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
@@ -758,8 +750,8 @@ export default function ClaimsPage() {
                       ) : (
                         <span
                           title={
-                            `Sold ${claim.sale.quantity} at ` +
-                            `${formatUsd(claim.sale.pricePerToken)}` +
+                            `Sold ${hideAmount(String(claim.sale.quantity))} at ` +
+                            `${formatUsdExact(claim.sale.pricePerToken)}` +
                             (claim.sale.date ? ` on ${claim.sale.date}` : " (date not recorded)")
                           }
                         >

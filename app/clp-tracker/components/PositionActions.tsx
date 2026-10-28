@@ -43,6 +43,7 @@ import {
 } from "../lib/positionFormUtils";
 import { PositionFormModal } from "./PositionFormModal";
 import { ClosePositionModal } from "./ClosePositionModal";
+import { usePrivacyMode } from "../lib/format";
 
 export type ModalState =
   | { kind: "none" }
@@ -152,6 +153,7 @@ export function UpdatePositionModal({
   onCancel,
   onSubmit,
 }: UpdatePositionModalProps) {
+  usePrivacyMode();
   const [currentBalance, setCurrentBalance] = useState(
     String(position.currentBalance ?? 0),
   );

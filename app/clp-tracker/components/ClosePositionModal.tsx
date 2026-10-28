@@ -32,6 +32,7 @@ import {
   pnlColor,
   pnlLabel,
 } from "../lib/positionFormUtils";
+import { usePrivacyMode } from "../lib/format";
 
 export type HistoricalPriceState =
   | { status: "idle" }
@@ -240,6 +241,7 @@ export function ClosePositionModal({
   onCancel,
   onSubmit,
 }: ClosePositionModalProps) {
+  usePrivacyMode();
   const [exitDatetime, setExitDatetime] = useState(nowDatetimeLocal());
   const [scalp, setScalp] = useState("");
   const [currentBalance, setCurrentBalance] = useState(

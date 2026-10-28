@@ -5,17 +5,7 @@ import Link from "next/link";
 import { calcBusinessPnL, calcGrowthTarget } from "../lib/calculations";
 import { Breakdown } from "./Breakdown";
 import type { FeeClaim, Position } from "../lib/types";
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatUsd(value: number): string {
-  return usdFormatter.format(Number.isFinite(value) ? value : 0);
-}
+import { formatUsd, usePrivacyMode } from "../lib/format";
 
 function formatPercent(value: number): string {
   return `${Number.isFinite(value) ? value.toFixed(2) : "0.00"}%`;
@@ -68,6 +58,7 @@ export function GrowthTargetSection({
   targetMonthlyPercent,
   onSaveTarget,
 }: GrowthTargetSectionProps) {
+  usePrivacyMode();
   // The fee half of Combined Earnings is calcBusinessPnL's `feeBasis`: realized
   // dollars from converted claims + today's value of what is still held. It was
   // "All Total", which repriced tokens already sold at today's rate and so
