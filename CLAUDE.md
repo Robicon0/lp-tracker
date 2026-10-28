@@ -984,6 +984,23 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(CLP capital history, 2026-10-28)** — **Initial Capital is a dated ledger, not one overwritable
+  number.** `CapitalContribution` (`clp_capital_contributions`, + deposit / − withdrawal, soft delete via
+  `deletedAt`); the total is `calcInitialCapital(getCapitalContributions())`, the ONE computation, used by
+  Dashboard, Total P&L and Business P&L (Growth Target). `InitialCapitalCard` lost its inline Edit: the
+  figure opens a History modal (signed rows, two-step soft delete, Add entry with a Deposit / Withdrawal
+  toggle, date and amount required with an on-screen message). One-time migration
+  (`migrateCapitalHistory`, run by `loadCapitalContributions` on each of the three pages' hydrate): only
+  when NO entry was ever stored (deleted ones count) AND `clp_settings_backup_pre_capital_history` is
+  absent AND `settings.initialCapital ≠ 0`; it backs the settings up to that key first, then writes one
+  entry dated 2025-11-25 for the old value. `AppSettings.initialCapital` is no longer read or written for
+  any figure (kept so old blobs parse). The new key is in the Settings JSON backup (so Clear All now
+  clears it too, and the migration will not re-run). Verified on Profile 6 production data, prices
+  pinned: Overall P&L −$1,050.98 before and after on both pages, Growth Target / Business P&L identical
+  but for elapsed-time drift; migration 1 entry across 6 reloads of 3 pages; +$5,000 / −$1,234.56 →
+  $40,677.44 and Overall −$4,816.42 on both pages; deleting the withdrawal → $41,912.00 / −$6,050.98 on
+  both; deleting the migrated entry did not re-migrate; 0 page errors on all 8 CLP pages.
+
 - **`4c3d7bb`** (Uniswap open first, 2026-10-28, live 01:45 UTC) — **`/api/uniswap/v3` answers open
   positions before closed history** (`scope=open|closed`, as Aerodrome; no scope = the old combined
   answer). Client sources "Uniswap V3" and "Uniswap V3 history"; while history loads the dashboard reads

@@ -12,6 +12,7 @@ import {
   getSettings,
   getTransfers,
   isMixedStableNoticeDismissed,
+  loadCapitalContributions,
   saveSettings,
 } from "./lib/storage";
 import {
@@ -29,6 +30,7 @@ import { mergePrices, useTokenPrices } from "./lib/useTokenPrices";
 import {
   calcDaysActive,
   calcFeeAPR,
+  calcInitialCapital,
   calcOverallPnL,
   calcPortfolioSummary,
   withLiveValues,
@@ -41,6 +43,7 @@ import {
   getEffectiveTotalFees,
 } from "./lib/calculations";
 import type {
+  CapitalContribution,
   FeeClaim,
   OutlierDismissal,
   StalePositionDismissal,
@@ -314,7 +317,17 @@ export default function DashboardPage() {
   const [claims, setClaims] = useState<FeeClaim[]>([]);
 
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [initialCapital, setInitialCapital] = useState(0);
+  // Initial Capital is derived from the capital ledger, never stored as one
+  // number: the same read and the same calcInitialCapital as Total P&L and
+  // Business P&L (Invariant #6).
+  const [capitalContributions, setCapitalContributions] = useState<
+    CapitalContribution[]
+  >([]);
+  const [capitalLoadError, setCapitalLoadError] = useState<string | null>(null);
+  const initialCapital = useMemo(
+    () => calcInitialCapital(capitalContributions),
+    [capitalContributions],
+  );
   const [targetMonthlyPercent, setTargetMonthlyPercent] = useState(0);
   const [dismissals, setDismissals] = useState<OutlierDismissal[]>([]);
   const [staleDismissals, setStaleDismissals] = useState<
@@ -335,14 +348,11 @@ export default function DashboardPage() {
     setMixedNoticeHidden(isMixedStableNoticeDismissed());
     setManualPrices(getBusinessPnLSettings().prices);
     const settings = getSettings();
-    setInitialCapital(settings.initialCapital);
+    const capital = loadCapitalContributions();
+    setCapitalContributions(capital.contributions);
+    setCapitalLoadError(capital.error);
     setTargetMonthlyPercent(settings.targetMonthlyPercent);
   });
-
-  const handleSaveInitialCapital = (next: number) => {
-    saveSettings({ ...getSettings(), initialCapital: next });
-    setInitialCapital(next);
-  };
 
   const handleSaveTarget = (next: number) => {
     saveSettings({ ...getSettings(), targetMonthlyPercent: next });
@@ -489,8 +499,9 @@ export default function DashboardPage() {
               hint="Positions currently open."
             />
             <InitialCapitalCard
-              value={initialCapital}
-              onSave={handleSaveInitialCapital}
+              contributions={capitalContributions}
+              onChanged={setCapitalContributions}
+              loadError={capitalLoadError}
             />
             {/* The identical breakdown Total P&L builds, from this page's own
                 `overall` result — the two pages compute the same figure and

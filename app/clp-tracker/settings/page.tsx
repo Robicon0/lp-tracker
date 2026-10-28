@@ -40,6 +40,7 @@ const STORAGE_KEYS = [
   "clp_pool_pnl",
   "clp_business_pnl",
   "clp_withdrawals",
+  "clp_capital_contributions",
   "clp_position_prices",
   "clp_outlier_dismissals",
   "clp_stale_position_dismissals",

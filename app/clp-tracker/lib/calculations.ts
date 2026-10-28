@@ -1,4 +1,5 @@
 import type {
+  CapitalContribution,
   FeeClaim,
   PortfolioSummary,
   Position,
@@ -1469,6 +1470,15 @@ export function calcConvertedFeesDetail(claims: FeeClaim[]): ConvertedFees {
 // The dollar figure alone, for callers that only need the number.
 export function calcConvertedFees(claims: FeeClaim[]): number {
   return calcConvertedFeesDetail(claims).convertedFees;
+}
+
+// Initial Capital = the sum of the live capital ledger (deposits positive,
+// withdrawals negative). The ONLY place the total is computed: the Dashboard,
+// Total P&L and Business P&L all pass it getCapitalContributions(), so the
+// figure cannot differ between them (Invariant #6). Callers must pass the live
+// list — a soft-deleted entry is excluded by that read, not here.
+export function calcInitialCapital(contributions: CapitalContribution[]): number {
+  return contributions.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 }
 
 export function calcOverallPnL(

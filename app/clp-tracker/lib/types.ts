@@ -170,6 +170,20 @@ export interface Withdrawal {
   notes: string;
 }
 
+// One dated movement of the business's own capital. Initial Capital is the sum
+// of these (calcInitialCapital), so the figure has a history instead of being a
+// single number that each edit overwrote. A ledger: entries are only added or
+// soft-deleted, never edited.
+export interface CapitalContribution {
+  id: string;
+  date: string; // ISO
+  amount: number; // positive = capital added, negative = capital withdrawn
+  notes: string;
+  // Soft delete, same convention as Transfer.deletedAt: the record is kept,
+  // and getCapitalContributions() hides it from every total.
+  deletedAt?: string;
+}
+
 // A user's "I checked this, it's correct" dismissal of an outlier flag. Keyed
 // by record kind+id AND the exact amount at confirmation time, so a later edit
 // that changes the amount no longer matches and the record is re-flagged for
@@ -227,8 +241,8 @@ export interface PoolPnLEntry {
 export interface AppSettings {
   transfersEnabled: boolean;
   currency: "USD";
-  // Real capital the business started with. Manually entered, never derived
-  // from position records, and never changed automatically.
+  // Superseded by clp_capital_contributions (calcInitialCapital); no longer
+  // read or written for any live figure, kept so existing stored settings parse.
   initialCapital: number;
   // Personal monthly earning goal, as a percentage of initialCapital (e.g. 4
   // means "4% a month"). Manually entered; 0 means "no target set yet" and the

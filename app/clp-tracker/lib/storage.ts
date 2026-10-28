@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  CapitalContribution,
   FeeClaim,
   LPRange,
   OutlierDismissal,
@@ -20,6 +21,7 @@ const KEYS = {
   businessPnl: "clp_business_pnl",
   priceCache: "clp_price_cache",
   withdrawals: "clp_withdrawals",
+  capitalContributions: "clp_capital_contributions",
   positionPrices: "clp_position_prices",
   outlierDismissals: "clp_outlier_dismissals",
   stalePositionDismissals: "clp_stale_position_dismissals",
@@ -32,7 +34,7 @@ const KEYS = {
 export const DEFAULT_SETTINGS: AppSettings = {
   transfersEnabled: true,
   currency: "USD",
-  initialCapital: 0,
+  initialCapital: 0, // superseded by capitalContributions; kept so old blobs parse
   targetMonthlyPercent: 0,
 };
 
@@ -254,6 +256,92 @@ export function getWithdrawals(): Withdrawal[] {
 
 export function saveWithdrawals(withdrawals: Withdrawal[]): void {
   writeValue(KEYS.withdrawals, withdrawals);
+}
+
+// Every stored capital entry, soft-deleted ones included. Only the history
+// modal's delete plumbing should read this; totals use getCapitalContributions.
+export function getAllCapitalContributions(): CapitalContribution[] {
+  return readArray<CapitalContribution>(KEYS.capitalContributions);
+}
+
+// The live ledger: what Initial Capital is summed from (calcInitialCapital).
+export function getCapitalContributions(): CapitalContribution[] {
+  return getAllCapitalContributions().filter((c) => c.deletedAt === undefined);
+}
+
+// Writes the live set while keeping soft-deleted entries the caller never saw
+// (getCapitalContributions hides them), same reasoning as saveTransfers.
+export function saveCapitalContributions(
+  contributions: CapitalContribution[],
+): void {
+  const kept = new Set(contributions.map((c) => c.id));
+  const orphanedDeleted = getAllCapitalContributions().filter(
+    (c) => c.deletedAt !== undefined && !kept.has(c.id),
+  );
+  writeValue(KEYS.capitalContributions, [...contributions, ...orphanedDeleted]);
+}
+
+export function softDeleteCapitalContribution(id: string): void {
+  writeValue(
+    KEYS.capitalContributions,
+    getAllCapitalContributions().map((c) =>
+      c.id === id ? { ...c, deletedAt: new Date().toISOString() } : c,
+    ),
+  );
+}
+
+export const CAPITAL_HISTORY_BACKUP_KEY = "clp_settings_backup_pre_capital_history";
+
+// One-time move of the old single Initial Capital number into the ledger.
+// Runs only while NO entry has ever been stored (soft-deleted ones count, so
+// deleting the migrated entry can't bring it back) and the backup key it writes
+// is absent (so clearing the ledger can't either), and only for a non-zero
+// value. The stored settings are copied to the backup key BEFORE the entry is
+// written; a failed write throws, and nothing after it runs. Returns true when
+// it migrated.
+export function migrateCapitalHistory(): boolean {
+  if (!isBrowser()) return false;
+  if (getAllCapitalContributions().length > 0) return false;
+  if (window.localStorage.getItem(CAPITAL_HISTORY_BACKUP_KEY) !== null) return false;
+  const rawSettings = window.localStorage.getItem(KEYS.settings);
+  const capital = Number(getSettings().initialCapital) || 0;
+  if (rawSettings === null || capital === 0) return false;
+  writeValue(CAPITAL_HISTORY_BACKUP_KEY, JSON.parse(rawSettings) as unknown);
+  writeValue<CapitalContribution[]>(KEYS.capitalContributions, [
+    {
+      id: newRecordId(),
+      date: "2025-11-25T00:00:00.000Z",
+      amount: capital,
+      notes: "Starting capital (migrated from the old single Initial Capital field)",
+    },
+  ]);
+  return true;
+}
+
+// What every page that shows Initial Capital loads on hydrate: the migration
+// (a no-op after its one run) then the live ledger. A failed migration write
+// is returned as an error so the card can say so instead of showing $0.
+export function loadCapitalContributions(): {
+  contributions: CapitalContribution[];
+  error: string | null;
+} {
+  try {
+    migrateCapitalHistory();
+    return { contributions: getCapitalContributions(), error: null };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      contributions: getCapitalContributions(),
+      error: `Couldn’t move the old Initial Capital into the history — ${detail}. Nothing was changed.`,
+    };
+  }
+}
+
+export function newRecordId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function getSettings(): AppSettings {

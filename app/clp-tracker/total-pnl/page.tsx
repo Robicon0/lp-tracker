@@ -8,12 +8,14 @@ import {
   getPositions,
   getSettings,
   getTransfers,
+  loadCapitalContributions,
   saveSettings,
 } from "../lib/storage";
 import {
   calcFeeBasis,
   calcDaysActive,
   calcFeeAPR,
+  calcInitialCapital,
   calcOverallPnL,
   withLiveValues,
   calcPositionProfit,
@@ -32,7 +34,12 @@ import { GrowthTargetSection } from "../components/GrowthTarget";
 import { useLivePositionPrices } from "../lib/useLivePositionPrices";
 import { useHydrated } from "../lib/useHydrated";
 import { mergePrices, useTokenPrices } from "../lib/useTokenPrices";
-import type { FeeClaim, Position, Transfer } from "../lib/types";
+import type {
+  CapitalContribution,
+  FeeClaim,
+  Position,
+  Transfer,
+} from "../lib/types";
 
 const EMPTY_OVERALL: OverallPnL = {
   activeCurrentValue: 0,
@@ -337,7 +344,17 @@ export default function TotalPnlPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [claims, setClaims] = useState<FeeClaim[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [initialCapital, setInitialCapital] = useState(0);
+  // Initial Capital is derived from the capital ledger, never stored as one
+  // number: the same read and the same calcInitialCapital as Total P&L and
+  // Business P&L (Invariant #6).
+  const [capitalContributions, setCapitalContributions] = useState<
+    CapitalContribution[]
+  >([]);
+  const [capitalLoadError, setCapitalLoadError] = useState<string | null>(null);
+  const initialCapital = useMemo(
+    () => calcInitialCapital(capitalContributions),
+    [capitalContributions],
+  );
   const [targetMonthlyPercent, setTargetMonthlyPercent] = useState(0);
 
   // ONE price fetch for the whole page (state declared here so the hydrate
@@ -353,7 +370,9 @@ export default function TotalPnlPage() {
     setClaims(getClaims());
     setTransfers(getTransfers());
     const settings = getSettings();
-    setInitialCapital(settings.initialCapital);
+    const capital = loadCapitalContributions();
+    setCapitalContributions(capital.contributions);
+    setCapitalLoadError(capital.error);
     setTargetMonthlyPercent(settings.targetMonthlyPercent);
   });
 
@@ -491,11 +510,6 @@ export default function TotalPnlPage() {
     return { active, closed, closedRows };
   }, [livePositions]);
 
-  const handleSaveInitialCapital = (next: number) => {
-    saveSettings({ ...getSettings(), initialCapital: next });
-    setInitialCapital(next);
-  };
-
   const handleSaveTarget = (next: number) => {
     saveSettings({ ...getSettings(), targetMonthlyPercent: next });
     setTargetMonthlyPercent(next);
@@ -587,8 +601,9 @@ export default function TotalPnlPage() {
             overall={overall}
             claims={claims}
             prices={prices}
-            initialCapital={initialCapital}
-            onSaveInitialCapital={handleSaveInitialCapital}
+            capitalContributions={capitalContributions}
+            onCapitalChanged={setCapitalContributions}
+            capitalLoadError={capitalLoadError}
           />
           <PerformanceBreakdownSection
             active={activeSummary}
@@ -634,8 +649,9 @@ interface PortfolioSummarySectionProps {
   overall: OverallPnL;
   claims: FeeClaim[];
   prices: Record<string, number>;
-  initialCapital: number;
-  onSaveInitialCapital: (next: number) => void;
+  capitalContributions: CapitalContribution[];
+  onCapitalChanged: (next: CapitalContribution[]) => void;
+  capitalLoadError: string | null;
 }
 
 function PortfolioSummarySection({
@@ -646,8 +662,9 @@ function PortfolioSummarySection({
   overall,
   claims,
   prices,
-  initialCapital,
-  onSaveInitialCapital,
+  capitalContributions,
+  onCapitalChanged,
+  capitalLoadError,
 }: PortfolioSummarySectionProps) {
   // Prices arrive from the page, which fetches them once for every consumer
   // (this section AND Growth Target). Only the derived figure lives here.
@@ -746,8 +763,9 @@ function PortfolioSummarySection({
           }
         />
         <InitialCapitalCard
-          value={initialCapital}
-          onSave={onSaveInitialCapital}
+          contributions={capitalContributions}
+          onChanged={onCapitalChanged}
+          loadError={capitalLoadError}
         />
         <OverallPnLCard
           result={overall}

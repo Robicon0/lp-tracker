@@ -8,6 +8,7 @@ import {
   getClaims,
   getPositions,
   getSettings,
+  loadCapitalContributions,
   saveBusinessPnLSettings,
   type BusinessPnLSettings,
 } from "../lib/storage";
@@ -15,6 +16,7 @@ import {
   calcBusinessPnL,
   calcConvertedFees,
   calcGrowthTarget,
+  calcInitialCapital,
   calcUnconvertedHoldings,
   isStableSymbol,
 } from "../lib/calculations";
@@ -112,9 +114,11 @@ function claimStatus(claim: FeeClaim): string {
 export default function BusinessPnlPage() {
   const [claims, setClaims] = useState<FeeClaim[]>([]);
   // Read only to compute the Growth Target gap below — this page never writes
-  // positions or app settings.
+  // positions or app settings (loadCapitalContributions may run the one-time
+  // capital-history migration, the same call the Dashboard and Total P&L make).
   const [positions, setPositions] = useState<Position[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [initialCapital, setInitialCapital] = useState(0);
   const [settings, setSettings] = useState<BusinessPnLSettings>({
     prices: {},
     checkpoints: [],
@@ -135,6 +139,9 @@ export default function BusinessPnlPage() {
     setClaims(getClaims());
     setPositions(getPositions());
     setAppSettings(getSettings());
+    setInitialCapital(
+      calcInitialCapital(loadCapitalContributions().contributions),
+    );
     // Manual prices are keyed by the token symbol shown in the table, which
     // has been normalized (WETH→ETH) since the 2ef8ca5 merge. Overrides saved
     // BEFORE that merge are keyed by the raw symbol, so they have no row to
@@ -257,10 +264,10 @@ export default function BusinessPnlPage() {
       calcGrowthTarget(
         positions,
         business.allTotal,
-        appSettings.initialCapital,
+        initialCapital,
         appSettings.targetMonthlyPercent,
       ),
-    [positions, business.allTotal, appSettings],
+    [positions, business.allTotal, initialCapital, appSettings],
   );
 
   // The gap is now SHARED: every eligible token carries an equal slice of it,
