@@ -9,6 +9,7 @@ import type { ActivityEventForPnL } from "../lib/positionPnl";
 import { mergeNeverShrink } from "../lib/feeEventsNeverShrink";
 // Wallet-wide fee scans start after the first open-position row has painted.
 import { whenFirstRowsPainted } from "../lib/firstRowsGate";
+import { fetchSolanaClosed } from "../lib/solanaClosedScan";
 
 // Rounds of "ask again" for a resumable history scan that is still reading.
 const FEE_SCAN_MAX_ROUNDS = 12;
@@ -649,8 +650,9 @@ export function useWalletLevelFees(
       const cached = urlCacheRef.current.get(solUrl);
       if (cached) { fetches.push(cached); continue; }
       const solKey = `solana-closed|${acct.toLowerCase()}`;
-      const p = whenFirstRowsPainted().then(() => fetch(solUrl))
-        .then((r) => (r.ok ? (r.json() as Promise<{ positions?: Array<{ protocol?: string; events?: ActivityEvent[]; pendingEventCount?: number }>; truncated?: RouteTruncation[]; failed?: boolean }>) : { positions: [], failed: true }))
+      // One request per wallet, shared with useLpPnl (solanaClosedScan.ts).
+      const p = whenFirstRowsPainted().then(() => fetchSolanaClosed(acct))
+        .then((a) => (a.ok ? (a.json as { positions?: Array<{ protocol?: string; events?: ActivityEvent[]; pendingEventCount?: number }>; truncated?: RouteTruncation[]; failed?: boolean }) : { positions: [], failed: true }))
         .then((j: { positions?: Array<{ protocol?: string; events?: ActivityEvent[]; pendingEventCount?: number }>; truncated?: RouteTruncation[]; failed?: boolean }) => {
           // A non-200 is a failed source, not "no closed positions": named, asked
           // again next run, and the events already on the page stay.

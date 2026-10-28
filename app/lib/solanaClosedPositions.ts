@@ -1469,6 +1469,73 @@ export function getCachedClosedPositionCapitalGL(wallet: string): Promise<Solana
   return getCachedClosedPositionsGuarded(wallet).then((r) => r.positions);
 }
 
+// ── Progress of a first read, for the page ("reading history (2,000 of about 14,000)") ──
+// `scanned` is what the resumable scan has examined so far (its meta). `total`
+// is the wallet's signature count, read from signature pages only (1,000 per
+// call, 40 CU each, at most 50 calls) in the background and kept for an hour.
+// It is an estimate: the wallet keeps signing while it is read. `totalAtLeast`
+// is set when the count reached the scan limit.
+export interface SolanaScanProgress { scanned: number; total: number | null; totalAtLeast: boolean }
+const SIG_COUNT_PAGE = 1_000;
+const SIG_COUNT_TTL_SECONDS = 60 * 60;
+const _sigCount = new Map<string, { total: number; atLeast: boolean; at: number }>();
+const _sigCountInFlight = new Map<string, Promise<void>>();
+const sigCountKey = (wallet: string) => `solana_sig_count_v1:${wallet.toLowerCase()}`;
+
+async function readSigCount(wallet: string): Promise<{ total: number; atLeast: boolean } | null> {
+  const mem = _sigCount.get(wallet);
+  if (mem && Date.now() - mem.at < SIG_COUNT_TTL_SECONDS * 1000) return mem;
+  if (!_scanStore) return null;
+  try {
+    const raw = await _scanStore.get(sigCountKey(wallet));
+    const v = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { total?: unknown; atLeast?: unknown } | null;
+    if (v && typeof v.total === 'number') {
+      const out = { total: v.total, atLeast: v.atLeast === true, at: Date.now() };
+      _sigCount.set(wallet, out);
+      return out;
+    }
+  } catch { /* no count: the page shows the read count alone */ }
+  return null;
+}
+
+/** Count the wallet's signatures (background). A failed page leaves no count. */
+export function countSolanaSignatures(wallet: string): Promise<void> {
+  const running = _sigCountInFlight.get(wallet);
+  if (running) return running;
+  const p = (async () => {
+    if (!ALCHEMY_RPC || (await readSigCount(wallet))) return;
+    const stats = newStats();
+    let total = 0; let before: string | undefined;
+    for (;;) {
+      const page = (await alchemyRpc('getSignaturesForAddress', [wallet, { limit: SIG_COUNT_PAGE, ...(before ? { before } : {}) }], stats)) as SigInfo[] | null;
+      if (!Array.isArray(page)) return; // not the end of the history: no count
+      total += page.length;
+      if (page.length < SIG_COUNT_PAGE) break;
+      if (total >= SOLANA_MAX_SCANNED_SIGNATURES) break;
+      before = page[page.length - 1].signature;
+    }
+    const atLeast = total >= SOLANA_MAX_SCANNED_SIGNATURES;
+    _sigCount.set(wallet, { total, atLeast, at: Date.now() });
+    if (_scanStore && !readOnlyStore()) {
+      try { await _scanStore.set(sigCountKey(wallet), JSON.stringify({ total, atLeast }), { ex: SIG_COUNT_TTL_SECONDS }); } catch { /* kept in memory */ }
+    }
+  })().catch(() => undefined);
+  _sigCountInFlight.set(wallet, p);
+  return p.finally(() => { _sigCountInFlight.delete(wallet); });
+}
+
+/** Progress of the wallet's FIRST read; null once the first read has ended or when nothing is stored. */
+export async function readSolanaScanProgress(wallet: string): Promise<SolanaScanProgress | null> {
+  if (!_scanStore) return null;
+  try {
+    const raw = await _scanStore.get(`solana_wallet_hist_v1:${wallet.toLowerCase()}`);
+    const m = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { scanned?: unknown; backfillDone?: unknown } | null;
+    if (!m || m.backfillDone === true || typeof m.scanned !== 'number') return null;
+    const c = await readSigCount(wallet);
+    return { scanned: m.scanned, total: c ? Math.max(c.total, m.scanned) : null, totalAtLeast: c?.atLeast ?? false };
+  } catch { return null; }
+}
+
 /** Script and test hooks; not used by product code. */
 export const _solanaEngineTestHooks = {
   newStats,

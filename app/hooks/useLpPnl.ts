@@ -10,6 +10,7 @@ import { notHeldNote } from "../lib/positionOwnership";
 import { hasLookupFailure, applyTruncationNotices, lookupFailureNotice, isScanInProgress, type RouteTruncation } from "../lib/enumerationTruncation";
 import { useTruncationNotices } from "./useTruncationNotices";
 import { whenFirstRowsPainted } from "../lib/firstRowsGate";
+import { fetchSolanaClosed } from "../lib/solanaClosedScan";
 
 // ── Result shape ────────────────────────────────────────────────────────────
 
@@ -907,6 +908,8 @@ async function loadClosedProgressively<D>(opts: {
   urlFor: (addr: string) => string;
   noticeSource: string;
   isCancelled: () => boolean;
+  /** Shared request for one address (Solana: one request per wallet for every consumer). Replaces `urlFor`'s fetch. */
+  fetchAnswer?: (addr: string) => Promise<{ ok: true; json: { positions?: unknown[]; truncated?: RouteTruncation[] } } | { ok: false }>;
   /** Called once every address has answered at least once, then after each further round. */
   onUpdate: (byAddr: Map<string, D[]>) => void;
 }): Promise<void> {
@@ -920,14 +923,20 @@ async function loadClosedProgressively<D>(opts: {
     for (let round = 0; round < CLOSED_SCAN_MAX_ROUNDS; round++) {
       let more = false;
       try {
-        const res = await fetchClosedWithBudget(opts.urlFor(addr));
+        let json: { positions?: unknown[]; truncated?: RouteTruncation[] } | null = null;
+        if (opts.fetchAnswer) {
+          const a = await opts.fetchAnswer(addr);
+          if (a.ok) json = a.json;
+        } else {
+          const res = await fetchClosedWithBudget(opts.urlFor(addr));
+          if (res && res.ok) json = await res.json();
+        }
         // A failed request is not "no closed positions": say so through the
         // same notice the route uses for a short scan. What an earlier round
         // returned is kept.
-        if (!res || !res.ok) {
+        if (!json) {
           applyTruncationNotices(opts.noticeSource, addr, [lookupFailureNotice("closed-position history")]);
         } else {
-          const json = await res.json();
           const truncated = json.truncated as RouteTruncation[] | undefined;
           applyTruncationNotices(opts.noticeSource, addr, truncated);
           byAddr.set(addr, (json.positions ?? []) as D[]);
@@ -1859,6 +1868,8 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       await loadClosedProgressively<SolanaClosedPositionDTO>({
         addrs,
         urlFor: (addr) => `/api/solana-closed-positions?account=${encodeURIComponent(addr)}`,
+        // One request per wallet, shared with useWalletLevelFees.
+        fetchAnswer: fetchSolanaClosed,
         noticeSource: SOLANA_CLOSED_NOTICE_SOURCE,
         isCancelled: () => cancelled || !mountedRef.current,
         onUpdate: (byAddr) => {

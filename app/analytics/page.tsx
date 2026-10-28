@@ -1,7 +1,8 @@
 "use client";
 
 import { parseScanParams } from "../lib/scanParams";
-import { useMemo, useEffect, useState, useRef, Suspense, type CSSProperties } from "react";
+import { useMemo, useEffect, useState, useRef, Suspense, useSyncExternalStore, type CSSProperties } from "react";
+import { solanaHistoryStates, solanaHistoryVersion, subscribeSolanaHistory, summarizeSolanaHistory } from "../lib/solanaClosedScan";
 import { TruncationBanner } from "../components/TruncationBanner";
 import { useTruncationNotices } from "../hooks/useTruncationNotices";
 import { isSuiUnavailableReason, isUnsupportedReason, UNSUPPORTED_UNCHECKED } from "../lib/enumerationTruncation";
@@ -739,6 +740,15 @@ export default function Analytics() {
   // `lpPnl` selector below — snapshot values while the pipeline settles, live
   // values once it settles cleanly (stale-while-revalidate).
   const lpPnlLive = useLpPnl(filteredPositions, suiWalletAddresses, solanaWalletAddresses);
+  // While a Solana wallet's closed history is only partly read (or its read
+  // failed), Capital G/L, Fees Collected and Net P&L are not shown: "—" plus
+  // how far the read is, never "≈ $0.00" or a partial sum that looks whole.
+  const solanaHistoryVer = useSyncExternalStore(subscribeSolanaHistory, solanaHistoryVersion, () => 0);
+  const solanaHistory = useMemo(
+    () => summarizeSolanaHistory(solanaHistoryStates(solanaWalletAddresses.filter(Boolean))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [solanaHistoryVer, solanaWalletAddresses.join(",")],
+  );
 
   // ── Sort + view state ──────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -1236,6 +1246,7 @@ export default function Analytics() {
   const cellNotes = (c: { pendingOpen?: boolean; pendingClosed?: boolean; feesPending?: boolean; unsupported?: boolean }): string[] => {
     const notes: string[] = [];
     const add = (n: string | null | undefined) => { if (n && !notes.includes(n)) notes.push(n); };
+    if ((c.pendingClosed || c.feesPending) && solanaHistory.hold) add(solanaHistory.note);
     if ((c.pendingOpen || c.pendingClosed) && loadingMore) add(loadingNote);
     if (c.pendingClosed && (lpPnl.suiClosedLoading || lpPnl.solanaClosedLoading)) add("scanning closed positions…");
     if (c.pendingClosed && lpPnl.historyLookupFailed) add("incomplete — some history couldn't be loaded");
@@ -2281,6 +2292,9 @@ export default function Analytics() {
                             is the honest render: we do not know this number. */}
                         {lpPnl.aggregateSelfContradictory
                           ? "—"
+                          // A Solana closed history that is still being read
+                          // (or failed) is not in these figures yet.
+                          : ((c.pendingClosed || c.feesPending) && solanaHistory.hold) ? "—"
                           // An open-position sum that is still zero while
                           // sources are loading has nothing in it yet — a dash,
                           // not "≈ $0.00", which reads as an estimate of zero.

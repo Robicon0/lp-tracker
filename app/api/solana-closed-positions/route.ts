@@ -1,5 +1,5 @@
 import { NextResponse, after } from 'next/server';
-import { getClosedPositionsWithinBudget, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
+import { getClosedPositionsWithinBudget, readSolanaScanProgress, countSolanaSignatures, type SolanaClosedPosition } from '../../lib/solanaClosedPositions';
 import { scanStatusNotice, unreadableTxNotice, type RouteTruncation } from '../../lib/enumerationTruncation';
 import { capClosedPositions } from '../../lib/closedPositionResponse';
 import { withActivityRouteCache } from '../../lib/activityRouteCache';
@@ -64,9 +64,18 @@ async function GET_impl(request: Request) {
     const { positions, notice: capNotice }: { positions: SolanaClosedPosition[]; notice: RouteTruncation | null } =
       capClosedPositions(all, (p) => p.closedTs);
     const truncated: RouteTruncation[] = withStoreWriteNotice([...(unread ? [unread] : []), ...(notice ? [notice] : []), ...(capNotice ? [capNotice] : [])], __storeT0, 'closed-position history');
+    // While the first read is under way the page shows how far it is
+    // ("reading history (2,000 of about 14,000)"); the total is counted in
+    // the background from signature pages only.
+    let progress = null;
+    if (status === 'in-progress') {
+      progress = await readSolanaScanProgress(account);
+      if (progress && progress.total == null) after(() => countSolanaSignatures(account));
+    }
     return NextResponse.json({
       positions, count: positions.length, account,
       ...(truncated.length > 0 ? { truncated } : {}),
+      ...(progress ? { progress } : {}),
     });
   } catch (err) {
     console.error('[solana-closed-positions] error:', err);
