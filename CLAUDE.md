@@ -299,11 +299,13 @@ plan):**
 **DefiTuna wallets are slow because of the CLOSED Solana scan, not DefiTuna (Phase A 2026-10-28, report
 `~/Documents/defidesh-reports/work-2026-10-28/defituna-phase-a.md`).** `/api/defituna` answers in
 0.4-0.6 s. `/api/solana-closed-positions` reads every transaction the wallet signed (40 CU each) and keeps
-only Orca / Raydium ones: 6NcbT9 13,964 transactions (2,000 read, 3 kept after one visit), upgMGF over
-40,000 (1,400 read, 0 kept); each visit adds about 3-4 min of scanning, so Capital G/L and Fees read
-`≈ $0.00` for many visits, and a capped scan costs about 2M CU. Proposed: pre-filter the history to
-Whirlpool / Raydium transactions (probe 1-2 h, build 5-8 h); one closed-scan request per wallet per tab
-(1-2 h); progress text and `—` instead of `≈ $0.00` (2-3 h). NOT built.
+only Orca / Raydium ones (6NcbT9 about 14,000, upgMGF over 80,000). **Shipped `e43a0c5` + `bb41a8a`:** one
+request per wallet, progress line, `—` instead of `≈ $0.00` (see Recent fixes). **Still open, owner to
+decide:** (1) the scan cap (table in the 2026-10-28 batch report; now 50,000); (2) the fast path: find
+the wallet's Orca / Raydium positions from burnt-NFT search (Helius DAS `searchAssets`, 214 of 217 on
+2rr3SF in 0.3 s) and read each position account's own signatures, keeping the full scan as the
+completeness check (6-10 h). Pace today: about 200 transactions per 40-60 s request (the limiter's
+200 CU/s), about 2,400 per visit.
 
 **Small fixes list:** Solana balances "couldn't load" notice on Token Holdings / the wallet
 page (deliberately left out of the safety net). Local `.env.local` Helius key is dead, and the
@@ -992,6 +994,28 @@ enumeration) is still the way to find such a position for a wallet whose history
 
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
+
+- **`e43a0c5` + `bb41a8a`** (Closed Solana scan, 2026-10-28, `bb41a8a` live as `dpl_54kWjYyw…`) — **One
+  closed-Solana request per wallet; "—" and read progress until the history is whole; a page cut by the
+  time limit is "still reading".** NEW `app/lib/solanaClosedScan.ts` (`fetchSolanaClosed`): `useLpPnl` and
+  `useWalletLevelFees` join a request already running for the wallet; a complete or capped answer is
+  reused 5 min, a reading or failed answer never. The route adds `progress` (`readSolanaScanProgress`,
+  transactions read; `countSolanaSignatures`, the wallet's total, stored 1 h, "at least" past 50,000).
+  While any wallet's history is reading or failed, Capital G/L, Fees Collected and Net P&L show `—` with
+  "reading history (3,400 of about 14,000)" or "couldn't read Solana closed history"; never `≈ $0.00`.
+  **`bb41a8a`:** the scan reads about 200 transactions per request, so every request ended inside a page
+  and threw "transactions not returned (60 of 100)"; the engine counted it as a FAILED read (the page
+  showed "couldn't read" and stopped asking, on production too). `ScanPageOutOfTimeError` (thrown only
+  after the deadline) is now in-progress; a provider that does not answer is still failed. Tests:
+  solana-closed-scan 20, history-scan 22, sui-history 8.
+  **B7 (UTC):** local old 20:28-20:58, production old 20:59-21:13, production `e43a0c5` 21:15-21:27, local
+  `bb41a8a` 21:28-21:49, production `bb41a8a` 21:54-22:15. evm1 Deposited 8,326.17, Fees 3,145.41,
+  Capital G/L ≈ −4,400.91, Closed (19); evm2 8,964.74 / 3,817.56 / ≈ −1,570.28 / (16); x844e ≈ +8.9-9.1
+  (51 not priced); x5cfb 26 can't read; identical throughout. 0 page errors. Production checks paused
+  20:59:48-22:15:13 UTC. Production `bb41a8a`: 6NcbT9 read 4,100 → 5,000 of about 14,000 in one visit, upgMGF 2,800 → 3,400 of at least 50,000 (one dashboard + five analytics requests per wallet, the page kept asking); Capital G/L and Fees `—` throughout; 2rr3SF Closed (217), ≈ −359.87, ≈ 275.98 unchanged.
+  **Found, not fixed:** run locally under `CLOSED_POS_CACHE_READONLY=1`, the shown read count does not
+  advance between requests (production does); DAS misses burnt NFTs with an empty owner; Helius
+  `source=ORCA` is incomplete (423 of 508).
 
 - **(CLP Hide numbers, 2026-10-28)** — **A Sidebar toggle masks every amount and token quantity on
   every CLP page, for screen-sharing.** NEW `app/clp-tracker/lib/format.ts` is the ONE place CLP
