@@ -1001,6 +1001,35 @@ shorthand.
   $40,677.44 and Overall −$4,816.42 on both pages; deleting the withdrawal → $41,912.00 / −$6,050.98 on
   both; deleting the migrated entry did not re-migrate; 0 page errors on all 8 CLP pages.
 
+- **`1c12683`** (Uniswap burned list, 2026-10-28, live as `dpl_7UMR1uXH…`, created
+  05:26 UTC) — **The Uniswap closed half reads the wallet's burned position NFTs in one query per chain.**
+  Before: every NFT the wallet ever held got a `positions()` call (about 26 CU each, 25–35 s per chain at
+  200 ids, Base 84–95 s). Now `app/lib/evmBurnedNftIds.ts` (`getBurnedTokenIds`) reads Transfer(wallet →
+  0x0) on the manager: `eth_getLogs` on the archive gateway where it serves wide ranges, the transfer index
+  otherwise (Base) or as fallback. Saved as `evm_burned_ids_v1:{chain}:{manager}:{wallet}` (no expiry,
+  only grows, only complete reads, never written after a failed store read). Reorg margin about 30 minutes
+  of blocks (`REORG_MARGIN_BLOCKS`: ethereum 150, arbitrum 7,200, polygon / optimism / base 900): burns in
+  it are returned, not saved, and read again on every update. A failed read is `lookup-failed` with the
+  saved ids, never "burned nothing". Ever-owned scan, `heldIds` and the per-id `positions()` calls removed
+  from the route. Test `npx tsx scripts/burned-ids-test.ts` (22).
+  **Phase A:** keeping the old ever-owned scan with a stored cursor would not help a first-time wallet; the
+  Base-style transfer history would be slower on first load (receipts; burner Base 58–69 s) and 4–6 h.
+  **Burner test wallet `0xb353…74bf`** (chain evidence: burned 446 Arbitrum / 214 Polygon / 72 Optimism /
+  271 Base, new list = old method on every chain, 02:33 UTC). None of evm1, evm2, x844e, x5cfb has a
+  burned Uniswap position. Its page shows Closed (672) = 200 + 200 + 72 + 200 (cap 200 per chain, notice).
+  **Closed half per chain, burner:** local old 3.3 / 26.5 / 29.3 / 9.7 / 94.5 s (eth / arb / pol / op /
+  base, 02:36 UTC) → local new 3.8 / 7.1 / 2.2 / 3.8 / 5.6 s (03:01 UTC); production old 1.1 / 22.7 /
+  timeout 577.9 / 6.0 / timeout 478.9 s (04:39–04:57 UTC) → production new 0.7 / 1.0 / 0.9 / 0.5 / 0.8 s
+  (05:37 UTC, cold store). evm1 production new 0.3–4.6 s.
+  **B7 (UTC):** local old 02:36–02:59, local new 04:03–04:37 (a first new run at 03:00 was cut by idle
+  sleep at 03:02 and repeated under `caffeinate`), production old 04:38–05:26, production new 05:37–05:52:
+  evm1 Deposited 8,326.17, Fees 3,055.72, Capital G/L ≈ −4,400.91, Closed (19); evm2 8,964.74 / 3,720.98 /
+  ≈ −1,570.28 / (16); x844e Closed (66), ≈ +8.5–8.8 (estimates); x5cfb 26 can't read. No non-200, 0 page
+  errors, no out-of-memory. Forced: Tenderly + Alchemy blocked → `lookup-failed` on all five chains;
+  Tenderly blocked → transfer index, same 200 / 200 / 72 / 200 in 7.1 s. The burner's analytics page
+  shows "—" while its 703 positions price (no wrong figure). **Found, not fixed:** `/api/uniswap/activity`
+  logs `getaddrinfo ENOTFOUND arb1.llamarpc.com` (a dead Arbitrum log endpoint in that route).
+
 - **`4c3d7bb`** (Uniswap open first, 2026-10-28, live 01:45 UTC) — **`/api/uniswap/v3` answers open
   positions before closed history** (`scope=open|closed`, as Aerodrome; no scope = the old combined
   answer). Client sources "Uniswap V3" and "Uniswap V3 history"; while history loads the dashboard reads
