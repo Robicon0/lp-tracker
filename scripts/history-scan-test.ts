@@ -1,6 +1,6 @@
 // Resumable history-scan engine: budget, resume, caps, failure, lock, ordering.
 // Pure in-memory (fake chain + fake store). Run: npx tsx scripts/history-scan-test.ts
-import { runResumableScan, _resetHistoryScanOverlay, type ScanStore, type ScanSource } from '../app/lib/historyScan';
+import { runResumableScan, _resetHistoryScanOverlay, ScanPageOutOfTimeError, type ScanStore, type ScanSource } from '../app/lib/historyScan';
 // These checks run against an in-memory store, never the shared one. Clear the
 // local read-only switch (set for every local run, Methodology rule (f)), or the
 // fake store takes no writes and every resume / never-shrink check fails.
@@ -97,6 +97,19 @@ const base = { idOf: (t: Tx) => String(t.id), maxScanned: 1e9, maxKept: 1e9, loc
     ok('a failed page stops the scan as failed, keeping earlier pages', r1.status === 'failed' && !r1.complete && (await r1.items()).length === 20);
     down = null; const r2 = await run();
     ok('next load retries the failed page and completes', r2.complete && (await r2.items()).length === 47 && ch.calls.filter((x) => x.cursor === 55).length === 2);
+
+    // A page cut short by the request's time limit is "still reading", not failed.
+    {
+      const sT = memStore(); let slow: number | null = 60; const chT = chain(() => 95);
+      const src: ScanSource<Tx, number> = {
+        async page(a) { const hi = a.cursor ?? 95; if (slow != null && hi <= slow) throw new ScanPageOutOfTimeError('transactions not returned (8 of 10)'); return chT.source.page(a); },
+      };
+      const runT = () => { _resetHistoryScanOverlay(); return runResumableScan({ ...base, key: 'k8', store: sT, source: src, budgetMs: 1e9 }); };
+      const t1 = await runT();
+      ok('a page stopped by the time limit is in-progress, not failed', t1.status === 'in-progress' && !t1.complete && !t1.reason?.includes('not returned') && (await t1.items()).length === 20);
+      slow = null; const t2 = await runT();
+      ok('next load reads that page again and completes', t2.complete && (await t2.items()).length === 47 && chT.calls.filter((x) => x.cursor === 55).length === 1);
+    }
 
     store.data.set('k4:lock', '1'); const n0 = ch.calls.length; const r3 = await run();
     ok('lock held elsewhere: serves stored items, scans nothing', ch.calls.length === n0 && (await r3.items()).length === 47);

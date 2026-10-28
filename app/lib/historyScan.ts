@@ -57,6 +57,15 @@ export interface ScanSource<T, C> {
   page(args: { until: string | null; cursor: C | null; deadlineMs: number }): Promise<ScanPage<T, C>>;
 }
 
+/**
+ * Thrown by a page that stopped only because the request's time ran out (not
+ * because the provider failed). The scan is still running, not failed: the
+ * pages before it are kept and the next request continues from the same cursor.
+ */
+export class ScanPageOutOfTimeError extends Error {
+  constructor(message: string) { super(message); this.name = 'ScanPageOutOfTimeError'; }
+}
+
 interface Segment<C> { until: string | null; top: string | null; cursor: C | null; pages: number; no: number }
 
 export type ScanCap = 'scanned' | 'kept' | 'store';
@@ -348,9 +357,11 @@ async function runScan<T, C>(opts: ScanOptions<T, C>): Promise<ScanResult<T>> {
     }
     if (pending.length > 0 || pagesSinceFlush > 0) await flush();
   } catch (err) {
-    failed = true;
-    reason = String(err instanceof Error ? err.message : err).slice(0, 160);
-    log(`scan stopped: ${reason}`);
+    // Out of time inside a page is "still running": the cursor is unchanged and
+    // the next request reads that page again. Anything else is a failed read.
+    failed = !(err instanceof ScanPageOutOfTimeError);
+    reason = failed ? String(err instanceof Error ? err.message : err).slice(0, 160) : undefined;
+    log(failed ? `scan stopped: ${reason}` : `scan paused, out of time: ${String((err as Error).message).slice(0, 120)}`);
     // Keep whatever finished before the failure; the failed page is retried next time.
     try { if (pending.length > 0 || pagesSinceFlush > 0) await flush(); } catch { /* progress since the last flush is rescanned */ }
   } finally {

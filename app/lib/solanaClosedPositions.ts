@@ -63,7 +63,7 @@ import { resolveToken } from './tokenResolver';
 import { logPrice } from './priceLogger';
 import { rpcUrlFromEnv } from './rpcEnv';
 import { loadClosedPositionsGuarded, type ClosedCacheBackend } from './closedPositionCache';
-import { runResumableScan, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
+import { runResumableScan, ScanPageOutOfTimeError, type ScanSource, type ScanStatus, type ScanStore } from './historyScan';
 import { parseWhirlpoolEvents, poolPriceForLeg, lastTradedSqrtPrice, consistentWithOneSided, usdPricesFromPool } from './whirlpoolEventPrice';
 import { SOLANA_GET_TX_OPTIONS, SOLANA_MAX_TX_VERSION, isUnsupportedTxVersion, unreadableCause } from './solanaTxVersion';
 import { createSharedRedis } from './sharedStore';
@@ -1060,7 +1060,12 @@ function walletSource(wallet: string, stats: ScanStats): ScanSource<SolTx, strin
       stats.validSignatures += valid.length;
       const unreadable = new Map<string, string>();
       const txMap = valid.length ? await fetchTransactions(valid, stats, deadlineMs + PAGE_GRACE_MS, unreadable) : new Map<string, SolTx | null>();
-      if (txMap.size !== valid.length) throw new Error(`transactions not returned (${txMap.size} of ${valid.length})`);
+      if (txMap.size !== valid.length) {
+        const msg = `transactions not returned (${txMap.size} of ${valid.length})`;
+        // Stopped by the request's time limit, not by the provider: still reading.
+        if (Date.now() >= deadlineMs + PAGE_GRACE_MS) throw new ScanPageOutOfTimeError(msg);
+        throw new Error(msg);
+      }
       const timeOf = new Map(page.map((x) => [x.signature, x.blockTime ?? null] as const));
       const items: SolTx[] = [];
       for (let i = valid.length - 1; i >= 0; i--) { // oldest first within the page
