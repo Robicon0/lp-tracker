@@ -358,49 +358,85 @@ function PairHistoryPanel({
   history: Array<{ position: Position; deposited: number }>;
   currentId: string;
 }) {
+  // Collapsed on every visit; not persisted.
+  const [open, setOpen] = useState(false);
+  const openCount = history.filter((h) => h.position.status === "active").length;
   return (
-    <Panel title={`Pair history (${history.length})`} flush>
-      <ul className="divide-y divide-[var(--border)] text-sm" data-pair-history>
-        {history.map(({ position: p, deposited }) => {
-          const current = p.id === currentId;
-          return (
-            <li
-              key={p.id}
-              data-current={current ? "true" : undefined}
-              className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2.5 ${
-                current ? "bg-[var(--surface-2)]" : ""
-              }`}
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+      <h2 className="text-sm font-semibold tracking-tight">
+        {/* The whole header is the toggle, so DisclosureToggle (itself a
+            button) cannot sit inside it; its look is reproduced here. */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls="pair-history-list"
+          aria-label={open ? "Collapse pair history" : "Expand pair history"}
+          className={`group flex w-full items-center justify-between gap-3 px-5 py-3 text-left ${
+            open ? "border-b border-[var(--border)]" : ""
+          }`}
+        >
+          <span>Pair history ({history.length})</span>
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--muted)] transition-colors group-hover:text-[var(--accent)]">
+            <span
+              aria-hidden
+              className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}
             >
-              <span className="w-36 tabular-nums text-[var(--muted)]">
-                {formatDateTime24(p.entryDatetime)}
-              </span>
-              <span className="w-28 tabular-nums">{formatUsd(deposited)}</span>
-              <span className="w-20">
-                <StatusPill
-                  label={p.status === "active" ? "Open" : "Closed"}
-                  tone={p.status === "active" ? "open" : "closed"}
-                />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--muted)]">
-                {p.pair}
-              </span>
-              {current ? (
-                <span className="text-[11px] font-medium text-[var(--foreground)]">
-                  This position
+              &#9656;
+            </span>
+            {open ? "Hide" : "Show"}
+          </span>
+        </button>
+      </h2>
+      {!open && (
+        <p className="-mt-1 px-5 pb-3 text-[12px] tabular-nums text-[var(--muted)]" data-pair-summary>
+          First deposit {formatUsd(history[0]?.deposited ?? 0)} · {history.length} positions ·{" "}
+          {openCount} open
+        </p>
+      )}
+      {open && (
+        <ul id="pair-history-list" className="divide-y divide-[var(--border)] text-sm" data-pair-history>
+          {history.map(({ position: p, deposited }) => {
+            const current = p.id === currentId;
+            return (
+              <li
+                key={p.id}
+                data-current={current ? "true" : undefined}
+                className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2.5 ${
+                  current ? "bg-[var(--surface-2)]" : ""
+                }`}
+              >
+                <span className="w-36 tabular-nums text-[var(--muted)]">
+                  {formatDateTime24(p.entryDatetime)}
                 </span>
-              ) : (
-                <Link
-                  href={`/clp-tracker/positions/${encodeURIComponent(p.id)}`}
-                  className="text-[12px] text-[var(--accent)] hover:underline"
-                >
-                  View →
-                </Link>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </Panel>
+                <span className="w-28 tabular-nums">{formatUsd(deposited)}</span>
+                <span className="w-20">
+                  <StatusPill
+                    label={p.status === "active" ? "Open" : "Closed"}
+                    tone={p.status === "active" ? "open" : "closed"}
+                  />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--muted)]">
+                  {p.pair}
+                </span>
+                {current ? (
+                  <span className="text-[11px] font-medium text-[var(--foreground)]">
+                    This position
+                  </span>
+                ) : (
+                  <Link
+                    href={`/clp-tracker/positions/${encodeURIComponent(p.id)}`}
+                    className="text-[12px] text-[var(--accent)] hover:underline"
+                  >
+                    View →
+                  </Link>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
