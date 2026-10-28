@@ -984,6 +984,27 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **`4c3d7bb`** (Uniswap open first, 2026-10-28, live 01:45 UTC) — **`/api/uniswap/v3` answers open
+  positions before closed history** (`scope=open|closed`, as Aerodrome; no scope = the old combined
+  answer). Client sources "Uniswap V3" and "Uniswap V3 history"; while history loads the dashboard reads
+  "still loading: closed Uniswap V3 history" and analytics marks totals `≈`. The closed half reads the
+  held ids itself; a failed held-id or history read is `lookup-failed` per chain ("<Chain> closed-position
+  recovery"), never an empty list. No cache bump (no versioned key holds this route's output).
+  **Timings (evm1):** local old combined 24.6–26.4 s → open 2.4 s warm / closed 11.6–42.3 s; production
+  old combined 17.6 / 23.6 s → open 0.8 / 0.4 s, closed 12.0 / 5.3 s. Dashboard In Range row: production
+  old ~15 s → new 4 s (`≈$8,383.46` + "still loading: closed … Uniswap V3 history", plain at 5 s).
+  Open ∪ closed = the old list on evm1, evm2, 0x844e, 0x5cfb; no wallet has a burned Uniswap position, so
+  the closed half was proven on its empty and forced-failure paths (Tenderly blocked: transfer index
+  answers in full; Tenderly + Alchemy blocked: 5 × `lookup-failed`, headline "—").
+  **B7 (UTC):** local old 00:45–01:01, local new 01:03–01:20, production old 01:30–01:44, production new
+  01:45–01:58: evm1 Deposited 8,326.17, Fees 3,055.72, Capital G/L ≈ −4,400.91, Closed (19); evm2
+  8,964.74 / 3,720.98 / ≈ −1,570.28 / (16); 0x844e ≈ +8.5–8.8 (estimates), Closed (66); 0x5cfb 26
+  PancakeSwap "can't read yet". No non-200, 0 page errors, logs only one aave-v3 line.
+  **prod-check:** `uniswap-evm-1` now times the open half (20 s); new last check `uniswap-closed-evm-1`
+  (45 s: slowest closed call seen 40.4–42.3 s; 45 × 2 + 30 s retry wait fits the 3-minute run). The
+  workflow file is on `main` (`9f2d2b9`, added by the owner) and runs every 30 minutes.
+  **Next (not built):** fix 2, keep the Uniswap ever-owned scan stored so the closed half is fast too.
+
 - **`d24567f`** (Production check time limits, 2026-10-27, no site change) — **The check always
   finishes inside the 5-minute job limit, so an outage cannot cancel its own alert.** Each request
   gives up after 20 s (`PROD_CHECK_REQUEST_TIMEOUT_MS`); the run stops at 3 minutes
