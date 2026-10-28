@@ -8,6 +8,7 @@ import { useHydrated } from "../../lib/useHydrated";
 import { useLivePositionPrices } from "../../lib/useLivePositionPrices";
 import {
   calcClaimTokenTotals,
+  calcPairFirstDeposit,
   calcRangeHealth,
   calcWideRangePercent,
   claimSaleGain,
@@ -88,6 +89,13 @@ export default function PositionDetailPage() {
     () => calcClaimTokenTotals(positionClaims),
     [positionClaims],
   );
+
+  // First-ever deposit for this pair, from the STORED records (a deposit does
+  // not depend on live price).
+  const pairFirst = useMemo(() => {
+    const target = positions.find((x) => x.id === id);
+    return target ? calcPairFirstDeposit(positions, target) : null;
+  }, [positions, id]);
 
   if (!hydrated) {
     return <p className="text-sm text-[var(--muted)]">Loading position…</p>;
@@ -182,6 +190,17 @@ export default function PositionDetailPage() {
         )}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
           <Metric label="Deposited" value={formatUsd(deposited)} />
+          {pairFirst && (
+            <Metric
+              label="First Deposit"
+              value={formatUsd(pairFirst.firstDeposit)}
+              sub={`${formatDateTime24(pairFirst.first.entryDatetime)} · ${
+                pairFirst.isThisTheFirst
+                  ? "this position"
+                  : `${pairFirst.totalInPair} positions in this pair`
+              }`}
+            />
+          )}
           <Metric label="Current" value={formatUsd(position.currentBalance)} />
           <Metric
             label="Profit"
@@ -235,6 +254,10 @@ export default function PositionDetailPage() {
           </div>
         )}
       </Panel>
+
+      {pairFirst && pairFirst.totalInPair > 1 && (
+        <PairHistoryPanel history={pairFirst.history} currentId={position.id} />
+      )}
 
       {!isActive && <ClosedPanel position={position} deposited={deposited} />}
 
@@ -323,6 +346,61 @@ function BackLink() {
     >
       ← Back to positions
     </Link>
+  );
+}
+
+// Every position of this pair (open and closed), oldest entry first, each
+// linking to its own detail page; the one on screen is highlighted.
+function PairHistoryPanel({
+  history,
+  currentId,
+}: {
+  history: Array<{ position: Position; deposited: number }>;
+  currentId: string;
+}) {
+  return (
+    <Panel title={`Pair history (${history.length})`} flush>
+      <ul className="divide-y divide-[var(--border)] text-sm" data-pair-history>
+        {history.map(({ position: p, deposited }) => {
+          const current = p.id === currentId;
+          return (
+            <li
+              key={p.id}
+              data-current={current ? "true" : undefined}
+              className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2.5 ${
+                current ? "bg-[var(--surface-2)]" : ""
+              }`}
+            >
+              <span className="w-36 tabular-nums text-[var(--muted)]">
+                {formatDateTime24(p.entryDatetime)}
+              </span>
+              <span className="w-28 tabular-nums">{formatUsd(deposited)}</span>
+              <span className="w-20">
+                <StatusPill
+                  label={p.status === "active" ? "Open" : "Closed"}
+                  tone={p.status === "active" ? "open" : "closed"}
+                />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--muted)]">
+                {p.pair}
+              </span>
+              {current ? (
+                <span className="text-[11px] font-medium text-[var(--foreground)]">
+                  This position
+                </span>
+              ) : (
+                <Link
+                  href={`/clp-tracker/positions/${encodeURIComponent(p.id)}`}
+                  className="text-[12px] text-[var(--accent)] hover:underline"
+                >
+                  View →
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Panel>
   );
 }
 

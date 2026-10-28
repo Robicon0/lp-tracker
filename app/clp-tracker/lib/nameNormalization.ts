@@ -68,7 +68,12 @@ export function normalizePlatform(raw: string): string {
 // (FEE_TIER)" (buildRecords), and the tier is incidental when grouping claims
 // by what was traded — so any trailing parenthetical is stripped. Same
 // guarantee as the rest of this file: grouping/label only, the stored pair
-// (tier included) is never modified.
+// (tier included) is never modified. Each side then goes through
+// normalizeToken, so "WETH/USDC (0.3%)" and "ETH/USDC (0.05%)" both → "ETH/USDC".
 export function normalizePair(raw: string): string {
-  return baseNormalize(raw).replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const noTier = baseNormalize(raw).replace(/\s*\([^)]*\)\s*$/, "").trim();
+  return noTier
+    .split("/")
+    .map((side) => normalizeToken(side))
+    .join("/");
 }

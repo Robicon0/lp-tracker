@@ -6,7 +6,7 @@ import type {
   Transfer,
   Withdrawal,
 } from "./types";
-import { normalizeToken } from "./nameNormalization";
+import { normalizePair, normalizeToken } from "./nameNormalization";
 import { isExpensedTransfer } from "./transferState";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -2132,4 +2132,48 @@ export function applyTokenSale(
   }
 
   return [...out, ...added];
+}
+
+export interface PairFirstDeposit {
+  first: Position;
+  firstDeposit: number;
+  totalInPair: number;
+  /** Every position of the pair (open and closed), oldest entry first. */
+  history: Array<{ position: Position; deposited: number }>;
+  isThisTheFirst: boolean;
+}
+
+// The first-ever deposit for a position's PAIR: every position (open or closed)
+// whose pair groups with the target's (normalizePair: fee tier dropped, WETH
+// read as ETH), ordered by entry date. Uses stored records — a deposit never
+// depends on live price — and getEffectiveDeposited (Invariant #9). Display only.
+export function calcPairFirstDeposit(
+  positions: Position[],
+  target: Position,
+): PairFirstDeposit {
+  const key = normalizePair(target.pair);
+  const entryMs = (p: Position): number => {
+    const t = p.entryDatetime ? new Date(p.entryDatetime).getTime() : NaN;
+    return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+  };
+  const candidates = positions.filter((p) => normalizePair(p.pair) === key);
+  if (!candidates.some((p) => p.id === target.id)) candidates.push(target);
+  candidates.sort((a, b) => {
+    const ta = entryMs(a);
+    const tb = entryMs(b);
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  const history = candidates.map((position) => ({
+    position,
+    deposited: getEffectiveDeposited(position),
+  }));
+  const first = history[0];
+  return {
+    first: first.position,
+    firstDeposit: first.deposited,
+    totalInPair: history.length,
+    history,
+    isThisTheFirst: first.position.id === target.id,
+  };
 }

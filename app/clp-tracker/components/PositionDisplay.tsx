@@ -172,10 +172,13 @@ export function Metric({
   label,
   value,
   tone,
+  sub,
 }: {
   label: string;
   value: string;
   tone?: string;
+  /** Optional small muted line under the value. */
+  sub?: string;
 }) {
   return (
     <div>
@@ -187,6 +190,7 @@ export function Metric({
       >
         {value}
       </dd>
+      {sub && <dd className="mt-0.5 text-[11px] text-[var(--muted)]">{sub}</dd>}
     </div>
   );
 }
