@@ -3,6 +3,7 @@ import { resolveBlockTimestamps } from '../../../lib/blockTimestamps';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
+import { legPriceFinal, eventPriceFinal } from '../../../lib/priceFinal';
 import { prewarmTokenPrices, getCachedOnlyTokenPrice } from '../../../lib/cgPriceHistory';
 import { prewarmDefillamaPrices, getCachedOnlyDefillamaPrice } from '../../../lib/defillamaPriceHistory';
 import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
@@ -84,6 +85,8 @@ export interface ActivityEvent {
   // ITEM 0b — set ONLY when this event's claim-date historical price was cold
   // and CURRENT SPOT was substituted. Consumers treat it as not-yet-final.
   priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
+  // No price source covers this leg; the client does not retry it (priceFinal.ts).
+  priceFinal?: true;
   cumulativeFeeUSD: number;
   // On-chain log index — the analytics Fee Income dedup keys on
   // (protocol, txHash, logIndex) so the SAME Collect seen by both the
@@ -444,6 +447,9 @@ async function GET_impl(request: Request) {
     // simple/price endpoint. Stablecoins anchor at $1 unconditionally.
     let currentSpot0 = fallback0;
     let currentSpot1 = fallback1;
+    // A spot read that threw or came back without a price is a FAILED read:
+    // it keeps the position's pricing retry (app/lib/priceFinal.ts).
+    let spotReadFailed = false;
     {
       if (currentSpot0 === 0 && STABLECOINS.has(token0)) currentSpot0 = 1;
       if (currentSpot1 === 0 && STABLECOINS.has(token1)) currentSpot1 = 1;
@@ -457,9 +463,14 @@ async function GET_impl(request: Request) {
           const spots = await fetchCachedCoinGeckoPrices([...new Set(idsNeeded)]);
           if (cg0Spot && spots[cg0Spot] > 0) currentSpot0 = spots[cg0Spot];
           if (cg1Spot && spots[cg1Spot] > 0) currentSpot1 = spots[cg1Spot];
-        } catch { /* coerced to 0 by final guard below */ }
+          if ((cg0Spot && !(spots[cg0Spot] > 0)) || (cg1Spot && !(spots[cg1Spot] > 0))) spotReadFailed = true;
+        } catch { spotReadFailed = true; /* coerced to 0 by final guard below */ }
       }
     }
+    // No price source can ever cover an unpriced or substituted deposit /
+    // withdrawal of this position (no stablecoin side, pool known, no failed
+    // read): its legs are marked `priceFinal` and the client does not retry it.
+    const legsFinal = legPriceFinal({ pool, token0, token1, stablecoins: STABLECOINS, spotReadFailed });
 
     // Sprint 2.1b: DeFiLlama claim-date historical is the SECONDARY fee-claim
     // source (after sqrtPriceX96 archive + CoinGecko historical) so a sqrtPrice
@@ -632,7 +643,7 @@ async function GET_impl(request: Request) {
           notes: `source=${__src}`,
         });
       }
-      return { type: ev.type, txHash: ev.txHash, logIndex: ev.logIndex, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), cumulativeFeeUSD };
+      return { type: ev.type, txHash: ev.txHash, logIndex: ev.logIndex, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), ...(eventPriceFinal(ev.type, usdAtTime, priceBasis, legsFinal) ? { priceFinal: true } : {}), cumulativeFeeUSD };
     });
 
     events.reverse();

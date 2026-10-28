@@ -1,6 +1,7 @@
 "use client";
 
 import { isRememberedUnpriceable, rememberUnpriceable, forgetUnpriceable } from '../lib/unpriceableMemo';
+import { positionPricingFinal, isPlaceholderBurnedRow } from '../lib/priceFinal';
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { AerodromePosition } from "../lib/aerodrome";
 import { computePositionPnL, type PositionPnLData, type ActivityEventForPnL } from "../lib/positionPnl";
@@ -720,7 +721,7 @@ function buildActivityUrl(pos: AerodromePosition): string | null {
 // v33 → v34 (Oct 18): Uniswap / PancakeSwap fee claims are valued at their claim
 // day (ITEM 0e); a v33 entry can hold a claim valued at today's spot.
 // v34 → v35 (Oct 19, batch C): SUI claims priced from the stored day map only.
-const CACHE_KEY_PREFIX = "lp-pnl-events-v36-"; // v36 (Oct 25): Sui deposits/withdrawals of non-stable pairs at day prices; USDSUI a stablecoin
+const CACHE_KEY_PREFIX = "lp-pnl-events-v37-"; // v37 (Oct 28): deposit / withdrawal events carry `priceFinal` (no price source covers the leg; never retried). v36 (Oct 25): Sui deposits/withdrawals of non-stable pairs at day prices; USDSUI a stablecoin
 const CACHE_TTL_MS = 5 * 60 * 1000;       // 5 min — successful fetch with events
 const EMPTY_RESULT_TTL_MS = 60 * 1000;    // 60s — legitimately-empty result (retry soon)
 
@@ -1111,8 +1112,8 @@ async function fetchAndCompute(
    */
   forceRepricing = false,
 ): Promise<
-  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number } }
-  | { ok: false; reason: string }
+  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number }; priceFinal?: true }
+  | { ok: false; reason: string; priceFinal?: true }
 > {
   const tag = `[lpPnl] ${pos.protocol} ${pos.chain} ${pos.id}`;
 
@@ -1204,6 +1205,17 @@ async function fetchAndCompute(
         ? (e.priceBasis as 'current-spot-substituted' | 'tick-derived-estimate')
         : undefined,
   }));
+  // No price source covers this position's unpriced / substituted legs (the
+  // route's `priceFinal` marker), or it is a placeholder burned Uniswap row:
+  // its answer cannot change on a re-fetch, so the pricing retry skips it
+  // (app/lib/priceFinal.ts). Read from the raw events so a cached body carries it.
+  const priceFinal = isPlaceholderBurnedRow(pos) || positionPricingFinal(rawEvents.map((e) => ({
+    type: String(e.type),
+    usdAtTime: (e.usdAtTime as number | null) ?? null,
+    priceBasis: typeof e.priceBasis === 'string' ? e.priceBasis : undefined,
+    priceFinal: e.priceFinal === true,
+  })));
+  const markFinal = <T extends object>(r: T): T => (priceFinal ? { ...r, priceFinal: true as const } : r);
 
   const result = computePositionPnL({
     currentValue: pos.value,
@@ -1221,7 +1233,7 @@ async function fetchAndCompute(
     // estimate (which pulls claimed fees out of the events we DID get). Uniform
     // across chains now (the old HyperEVM-only gate is folded into degradeOnFailure).
     console.warn(`${tag} degrading: ${result.reason}`);
-    return degradeOnFailure(pos, result.reason, events);
+    return markFinal(degradeOnFailure(pos, result.reason, events));
   }
 
   const d = result.data;
@@ -1237,7 +1249,7 @@ async function fetchAndCompute(
   // computed value (see degradeOnFailure).
   lkgSet(pos.id, d);
 
-  return { ok: true, data: d };
+  return markFinal({ ok: true as const, data: d });
 }
 
 // ── Aggregate per-position results into totals ─────────────────────────────
@@ -1245,8 +1257,9 @@ async function fetchAndCompute(
 type PosResult =
   // `failedWith`: this load's fetch failed and the value shown is a degraded one
   // (stale or estimated) — the reason is kept so the page can name it.
-  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number }; failedWith?: string }
-  | { ok: false; reason: string };
+  // `priceFinal`: no price source covers its unpriced legs; never retried.
+  | { ok: true; data: PositionPnLData; fallback?: true; stale?: { computedAt: number }; failedWith?: string; priceFinal?: true }
+  | { ok: false; reason: string; priceFinal?: true };
 
 // Sprint 4 — one display row per CLOSED position, assembled in aggregate()
 // from EXACTLY the per-position values the Capital G/L total sums
@@ -2078,12 +2091,15 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       for (const [id, r] of Array.from(resultsRef.current.entries())) {
         const pendingExclusion = !r.ok && PRICING_PENDING_REASONS.has(r.reason);
         const pendingSpotFallback = r.ok && (r.data.spotFallbackEventCount ?? 0) > 0;
-        if ((pendingExclusion || pendingSpotFallback) && !isRememberedUnpriceable(id, now)) out.push(id);
+        // A position no price source covers (r.priceFinal) is final: its answer
+        // cannot change, so it is never retried. A failed read keeps the retry.
+        if ((pendingExclusion || pendingSpotFallback) && !r.priceFinal && !isRememberedUnpriceable(id, now)) out.push(id);
       }
       return out;
     };
     if (retryableIds().length === 0) {
-      // Every pending position is remembered as unpriceable: say so now.
+      // Every pending position is final (no source covers it) or remembered as
+      // unpriceable: say so now.
       setPricingGaveUp(true);
       return;
     }
@@ -2094,6 +2110,10 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       const t = setTimeout(() => { rememberUnpriceable(retryableIds()); setPricingGaveUp(true); }, pricingRetryDelay(PRICING_RETRY_MAX - 1));
       return () => clearTimeout(t);
     }
+    // A position that can still change is pending: the notice is "pricing…"
+    // until it settles (it may have read "could not be priced" while only
+    // final positions were pending).
+    setPricingGaveUp(false);
     const t = setTimeout(() => {
       pricingAttemptsRef.current += 1;
       // Marked for a re-fetch, NOT removed: the result it has stays in the

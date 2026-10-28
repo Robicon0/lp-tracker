@@ -3,6 +3,7 @@ import { resolveBlockTimestamps } from '../../../lib/blockTimestamps';
 import { withActivityRouteCache } from '../../../lib/activityRouteCache';
 import { deriveDepositPrices } from '../../../lib/v3PriceDerivation';
 import { createHistoricalFeePriceResolver } from '../../../lib/v3HistoricalFeePrice';
+import { legPriceFinal, eventPriceFinal } from '../../../lib/priceFinal';
 import { prewarmEvmClaimPrices, priceEvmFeeClaim, type EvmClaimSides } from '../../../lib/evmClaimPrice';
 import { redisCacheSnapshot } from '../../../lib/redisPriceCache';
 import { fetchCachedCoinGeckoPrices } from '../../../lib/priceCache';
@@ -190,6 +191,8 @@ export interface ActivityEvent {
   // ITEM 0b — set ONLY when this event's claim-date historical price was cold
   // and CURRENT SPOT was substituted. Consumers treat it as not-yet-final.
   priceBasis?: 'current-spot-substituted' | 'tick-derived-estimate';
+  // No price source covers this leg; the client does not retry it (priceFinal.ts).
+  priceFinal?: true;
   cumulativeFeeUSD: number;
 }
 
@@ -732,6 +735,9 @@ async function GET_impl(request: Request) {
     // CoinGecko's simple/price endpoint. Stablecoins anchor at $1.
     let currentSpot0 = fallback0;
     let currentSpot1 = fallback1;
+    // A spot read that threw or came back without a price is a FAILED read:
+    // it keeps the position's pricing retry (app/lib/priceFinal.ts).
+    let spotReadFailed = false;
     {
       if (currentSpot0 === 0 && stablecoins.has(token0)) currentSpot0 = 1;
       if (currentSpot1 === 0 && stablecoins.has(token1)) currentSpot1 = 1;
@@ -745,9 +751,14 @@ async function GET_impl(request: Request) {
           const spots = await fetchCachedCoinGeckoPrices([...new Set(idsNeeded)]);
           if (cg0Spot && spots[cg0Spot] > 0) currentSpot0 = spots[cg0Spot];
           if (cg1Spot && spots[cg1Spot] > 0) currentSpot1 = spots[cg1Spot];
-        } catch { /* coerced to 0 by final guard below */ }
+          if ((cg0Spot && !(spots[cg0Spot] > 0)) || (cg1Spot && !(spots[cg1Spot] > 0))) spotReadFailed = true;
+        } catch { spotReadFailed = true; /* coerced to 0 by final guard below */ }
       }
     }
+    // No price source can ever cover an unpriced or substituted deposit /
+    // withdrawal of this position (no stablecoin side, pool known, no failed
+    // read): its legs are marked `priceFinal` and the client does not retry it.
+    const legsFinal = legPriceFinal({ pool, token0, token1, stablecoins: stablecoins, spotReadFailed });
 
     // Claim-day prices for every fee claim (Rule 1): one batched DeFiLlama
     // request per pass, stored per coin, awaited so a claim is never valued
@@ -863,7 +874,7 @@ async function GET_impl(request: Request) {
           notes: `source=${__src} chain=${chain}`,
         });
       }
-      return { type: ev.type, txHash: ev.txHash, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), ...(claimPriceBasis ? { claimPriceBasis } : {}), cumulativeFeeUSD };
+      return { type: ev.type, txHash: ev.txHash, blockNumber: ev.blockNumber, timestamp: ev.timestamp, amount0, amount1, usdAtTime, price0AtTime, price1AtTime, ...(priceBasis ? { priceBasis } : {}), ...(eventPriceFinal(ev.type, usdAtTime, priceBasis, legsFinal) ? { priceFinal: true } : {}), ...(claimPriceBasis ? { claimPriceBasis } : {}), cumulativeFeeUSD };
     });
 
     // Reverse to newest-first for display
