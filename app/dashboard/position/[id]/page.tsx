@@ -164,7 +164,7 @@ function getManageUrl(protocol: string): string {
   if (protocol.includes("Bluefin"))    return "https://trade.bluefin.io/liquidity-pools";
   if (protocol.includes("Cetus"))      return "https://app.cetus.zone/pools?tab=positions";
   if (protocol.includes("Momentum"))   return "https://app.mmt.finance";
-  if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.fi/pool";
+  if (protocol.includes("HyperSwap"))  return "https://app.hyperswap.exchange/pool";
   if (protocol.includes("KittenSwap")) return "https://www.kittenswap.org";
   if (protocol.includes("ProjectX") || protocol.includes("PRJX")) return "https://www.prjx.com/portfolio";
   if (protocol.includes("PancakeSwap")) return "https://pancakeswap.finance/liquidity";

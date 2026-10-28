@@ -25,9 +25,11 @@ const ALCHEMY_KEY = alchemyKey();
 const ALCHEMY_RPC = `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // Tenderly — primary for eth_getLogs: supports full-history scans with no block-range limit
 const TENDERLY_RPC = archiveRpcUrl('optimism');
-// LlamaRPC Optimism — secondary: now enforces 30k block range limit (code -32012)
-const LLAMA_RPC = 'https://op.llamarpc.com';
-// publicnode — tertiary fallback for chunked scanning
+// After Tenderly the fallback is the transfer index (Alchemy). The LlamaRPC
+// (op.llamarpc.com) and publicnode tiers that followed were removed 2026-10-28:
+// op.llamarpc.com no longer exists (NXDOMAIN), and publicnode was reached only
+// through a LlamaRPC error.
+// publicnode — second source for block timestamps (resolveBlockTimestamps)
 const PUBLIC_NODE_RPC = 'https://optimism-rpc.publicnode.com';
 
 // Velodrome Slipstream (CL) NonfungiblePositionManager on Optimism
@@ -38,12 +40,6 @@ const NFT_MANAGER = '0x416b433906b1B72FA758e166e239c43d68dC6F29';
 // Optimism pre-Bedrock (Dec2021-Jun2023) ~12s blocks → ~3.9M; post-Bedrock 2s blocks.
 // At Q4 2023 Optimism was at approximately block 12-15M. Use 10M as conservative start.
 const DEPLOY_BLOCK = 10_000_000;  // conservative start, before Velodrome CL launch
-
-// Chunk sizes: LlamaRPC just under 30k limit; publicnode supports up to 49k
-const LLAMA_CHUNK   = 29_000;
-const PUBNODE_CHUNK = 49_000;
-// Max parallel getLogs requests per batch
-const MAX_CONCURRENCY = 50;
 
 // Standard V3 event topic0 hashes (identical across all V3-fork NFT managers)
 // Pool Mint topic (same signature across all Uniswap-V3 forks) — identifies
@@ -122,49 +118,10 @@ async function rpcPost(url: string, body: object): Promise<unknown> {
   return res.json();
 }
 
-async function fetchLogsChunked(
-  tokenIdHex: string,
-  fromBlock: number,
-  toBlock: number,
-  rpcUrl: string,
-  chunkSize: number,
-): Promise<RawLog[]> {
-  const chunks: Array<[number, number]> = [];
-  for (let b = fromBlock; b <= toBlock; b += chunkSize) {
-    chunks.push([b, Math.min(b + chunkSize - 1, toBlock)]);
-  }
-  console.log(`[velodrome/activity] chunked scan: ${chunks.length} chunks @ ${chunkSize} blocks, rpc=${rpcUrl}`);
-
-  const allLogs: RawLog[] = [];
-  for (let i = 0; i < chunks.length; i += MAX_CONCURRENCY) {
-    const batch = chunks.slice(i, i + MAX_CONCURRENCY);
-    let batchErrors = 0;
-    const results = await Promise.all(
-      batch.map(async ([from, to]) => {
-        const res = await rpcPost(rpcUrl, {
-          jsonrpc: '2.0',
-          method: 'eth_getLogs',
-          params: [{
-            address: NFT_MANAGER,
-            topics: [[TOPIC_INCREASE, TOPIC_DECREASE, TOPIC_COLLECT], tokenIdHex],
-            fromBlock: '0x' + from.toString(16),
-            toBlock:   '0x' + to.toString(16),
-          }],
-          id: from,
-        }) as { result?: RawLog[]; error?: { message: string } };
-        if (res.error) {
-          batchErrors++;
-          return [] as RawLog[];
-        }
-        return res.result ?? [];
-      })
-    );
-    allLogs.push(...results.flat());
-    if (i === 0 && batchErrors === batch.length) {
-      throw new Error(`[velodrome/activity] chunked scan: first batch 100% error rate on ${rpcUrl}`);
-    }
-  }
-  return allLogs;
+// Tenderly and the transfer index both failed: the route answers 503
+// `history-unverified` (same as Aerodrome and Uniswap).
+class HistoryUnverifiedError extends Error {
+  constructor() { super('history-unverified'); this.name = 'HistoryUnverifiedError'; }
 }
 
 async function fetchLogs(tokenIdHex: string, owner: string): Promise<RawLog[]> {
@@ -176,9 +133,12 @@ async function fetchLogs(tokenIdHex: string, owner: string): Promise<RawLog[]> {
   };
 
   // Tier 1: Tenderly (full-range, no limits, fast)
-  const tenderlyAttempt = await rpcPost(TENDERLY_RPC, {
+  // A transport failure (gateway down) is an error like any other, so the
+  // transfer index below still answers instead of the request failing.
+  const tenderlyAttempt = await (rpcPost(TENDERLY_RPC, {
     jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+  }) as Promise<{ result?: RawLog[]; error?: { message: string; code?: number } }>)
+    .catch((e: unknown) => ({ result: undefined, error: { message: `unreachable: ${String(e)}`, code: -32603 } }));
 
   if (!tenderlyAttempt.error) {
     return tenderlyAttempt.result ?? [];
@@ -191,42 +151,9 @@ async function fetchLogs(tokenIdHex: string, owner: string): Promise<RawLog[]> {
   });
   if (viaTransfers) return viaTransfers;
 
-  // Tier 2: LlamaRPC full range
-  const llamaAttempt = await rpcPost(LLAMA_RPC, {
-    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
-
-  if (!llamaAttempt.error) {
-    return llamaAttempt.result ?? [];
-  }
-
-  const code = (llamaAttempt.error as unknown as { code?: number }).code;
-  const msg  = llamaAttempt.error.message;
-  console.warn('[velodrome/activity] LlamaRPC full-range error:', code, msg);
-
-  const bnRes = await rpcPost(ALCHEMY_RPC, {
-    jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
-  }) as { result?: string };
-  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 150_000_000;
-
-  const isRangeErr    = code === -32012 || msg.includes('ExceededMaxAllowed') || msg.includes('range');
-  const isUnreachable = code === -32603 || msg.toLowerCase().includes('unreachable');
-
-  // Tier 3: LlamaRPC chunked
-  if (isRangeErr) {
-    try {
-      return await fetchLogsChunked(tokenIdHex, DEPLOY_BLOCK, currentBlock, LLAMA_RPC, LLAMA_CHUNK);
-    } catch (llamaChunkErr) {
-      console.warn('[velodrome/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
-    }
-  }
-
-  // Tier 4: publicnode chunked
-  if (isRangeErr || isUnreachable) {
-    return fetchLogsChunked(tokenIdHex, DEPLOY_BLOCK, currentBlock, PUBLIC_NODE_RPC, PUBNODE_CHUNK);
-  }
-
-  throw new Error(`[velodrome/activity] eth_getLogs RPC error: ${msg}`);
+  // Neither source could read the history: the page counts it as
+  // "history couldn't be loaded", never as an empty history.
+  throw new HistoryUnverifiedError();
 }
 
 async function fetchTimestamps(blockNumbers: number[]): Promise<Record<number, number>> {
@@ -736,6 +663,10 @@ async function GET_impl(request: Request) {
       totalFees1:   Number(fees1) / Number(scale1),
     } satisfies ActivityResponse);
   } catch (err) {
+    if (err instanceof HistoryUnverifiedError) {
+      console.warn('[velodrome/activity] history could not be read (Tenderly and transfer index), answering 503');
+      return NextResponse.json({ error: 'history-unverified' }, { status: 503 });
+    }
     console.error('[velodrome/activity] Unexpected error:', err);
     return NextResponse.json({ error: 'Failed to fetch activity', details: String(err) }, { status: 500 });
   }

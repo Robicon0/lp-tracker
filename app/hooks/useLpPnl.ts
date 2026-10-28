@@ -963,14 +963,18 @@ async function loadClosedProgressively<D>(opts: {
 // count can never transiently exceed MAX_PER_ENDPOINT.
 const MAX_PER_ENDPOINT = 2;
 const endpointInUse = new Map<string, number>();
-const endpointWaiters = new Map<string, Array<() => void>>();
+// A waiter for an OPEN position goes ahead of every waiting closed one (FIFO
+// within each group). Open positions arrive from a slower source than closed
+// history (the Uniswap closed half answers in ~4 s, the open half in ~28 s on a
+// heavy wallet), so plain FIFO put hundreds of closed fetches in front of them.
+const endpointWaiters = new Map<string, Array<{ resolve: () => void; first: boolean }>>();
 
 function endpointKeyOf(activityUrl: string): string {
   const q = activityUrl.indexOf("?");
   return q === -1 ? activityUrl : activityUrl.slice(0, q);
 }
 
-async function paceByEndpoint<R>(key: string, fn: () => Promise<R>): Promise<R> {
+async function paceByEndpoint<R>(key: string, fn: () => Promise<R>, first = false): Promise<R> {
   const inUse = endpointInUse.get(key) ?? 0;
   if (inUse < MAX_PER_ENDPOINT) {
     endpointInUse.set(key, inUse + 1);
@@ -978,7 +982,8 @@ async function paceByEndpoint<R>(key: string, fn: () => Promise<R>): Promise<R> 
     // At capacity — park until an in-flight fetch on this endpoint hands us its slot.
     await new Promise<void>((resolve) => {
       const w = endpointWaiters.get(key) ?? [];
-      w.push(resolve);
+      const at = first ? w.findIndex((x) => !x.first) : -1;
+      if (at === -1) w.push({ resolve, first }); else w.splice(at, 0, { resolve, first });
       endpointWaiters.set(key, w);
     });
     // Slot inherited without decrement — count stays the same.
@@ -989,7 +994,7 @@ async function paceByEndpoint<R>(key: string, fn: () => Promise<R>): Promise<R> 
     const w = endpointWaiters.get(key);
     if (w && w.length > 0) {
       // Hand our slot straight to the next waiter (count unchanged).
-      w.shift()!();
+      w.shift()!.resolve();
     } else {
       endpointInUse.set(key, (endpointInUse.get(key) ?? 1) - 1);
     }
@@ -1978,9 +1983,14 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
     }
 
     // Find positions we haven't fetched or started fetching yet.
+    // Open positions first. The pacer serves each endpoint in submission order,
+    // so a wallet with hundreds of closed positions on one endpoint used to
+    // queue its open ones behind them: measured 2026-10-28 on a wallet with 672
+    // burned Uniswap positions and 31 open ones, the open rows landed at
+    // t≈600-645 s and the LP P&L block read "calculating…" until then.
     const toFetch = eligible.filter(
       (p) => !p.selfReportedPnl && (!resultsRef.current.has(p.id) || repriceIdsRef.current.has(p.id)) && !inflightRef.current.has(p.id),
-    );
+    ).sort((a, b) => Number(a.status === 'Closed') - Number(b.status === 'Closed'));
 
     if (toFetch.length === 0) {
       // All positions already fetched — just recompute totals (in case
@@ -2018,7 +2028,7 @@ export function useLpPnl(positions: AerodromePosition[], suiWalletAddresses: str
       // Positions with no activity URL still flow through fetchAndCompute (it
       // returns {ok:false}); only paced when there's a real endpoint to gate.
       const run = activityUrl
-        ? () => paceByEndpoint(endpointKeyOf(activityUrl), () => fetchAndCompute(pos, reprice))
+        ? () => paceByEndpoint(endpointKeyOf(activityUrl), () => fetchAndCompute(pos, reprice), pos.status !== 'Closed')
         : () => fetchAndCompute(pos, reprice);
       run().then((r) => {
         if (!mountedRef.current) return;

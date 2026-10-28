@@ -18,8 +18,6 @@ const ALCHEMY_RPC = `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // publicnode — works reliably for BSC eth_getLogs (Tenderly has no public BSC gateway
 // and LlamaRPC's BSC endpoint is frequently unreachable from both localhost and Vercel)
 const PUBLIC_NODE_RPC = 'https://bsc-rpc.publicnode.com';
-// LlamaRPC public BNB endpoint — secondary for eth_getLogs
-const LLAMA_RPC = 'https://binance.llamarpc.com';
 
 // PancakeSwap V3 NonfungiblePositionManager on BNB Chain (same address used by app/api/pancakeswap/route.ts)
 const NFT_MANAGER = '0x46A15B0b27311cedF172AB29E4f4766fbE7F4364';

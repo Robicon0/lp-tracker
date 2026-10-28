@@ -984,6 +984,37 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
+- **(Dead hosts + open-first pacing, 2026-10-28)** — **No EVM activity route calls a dead host; open
+  positions are fetched before closed ones; the Uniswap closed check is 20 s.**
+  **Hosts.** Every hardcoded host in the repo (85) was DNS-checked (no keys). Dead: `arb1` / `op` /
+  `polygon` / `binance.llamarpc.com` (NXDOMAIN); `eth` / `base.llamarpc.com` resolve but answer HTTP 525;
+  `app.hyperswap.fi`, `app.alphafi.xyz`, `app.suilend.fi` (links only). The llamarpc tiers and the
+  publicnode archive-log tiers after them (publicnode refuses archive logs: 403 / pruned) are removed from
+  the Uniswap, Velodrome and Aerodrome activity routes, and the unused constant from PancakeSwap. History
+  is now Tenderly → transfer index (Alchemy, through the limiter, rule (m)) → 503 `history-unverified`
+  (counted by the page, never retried); a Tenderly network failure no longer escapes as a 500. publicnode
+  stays only as the second block-timestamp source (accepted only when the reply names the block) and for
+  the BNB rolling window. Links: HyperSwap `app.hyperswap.exchange/pool`, AlphaFi `alphafi.xyz/alphalend`,
+  Suilend `suilend.fi`. Forced (local, Tenderly and the transfer index blocked, 07:08 UTC): Uniswap
+  Arbitrum / Polygon / Optimism / Ethereum and Velodrome all 503 `history-unverified` in 2-3 s (Ethereum was
+  a 500 after a 4.5 s publicnode scan).
+  **Pacing.** `useLpPnl` fetches open positions first and its endpoint pacer puts an open position ahead of
+  waiting closed ones. Burner `0xb353…74bf` (703 positions, 672 burned): first LP P&L figures 605 s → 170 s
+  (local); "—" before that is correct (no open-position value yet, never $0.00).
+  **prod-check:** `uniswap-closed-evm-1` back to the 20 s default (production answers 0.3-4.6 s); 20 × 2 +
+  30 s retry = 70 s inside the 3-minute run.
+  **B7 (UTC):** local old 07:15-07:24, local new 07:25-07:37, identical settled figures: evm1 Deposited
+  8,326.17, Fees 3,055.72, Capital G/L ≈ −4,400.91, Closed (19); evm2 8,964.74 / 3,720.98 / ≈ −1,570.28 /
+  (16); 0x844e Closed (66), ≈ +8.77-8.78 (estimates); 0x5cfb 26 can't read yet. No non-200, 0 page errors.
+  **Found, not fixed:** (1) 0x844e analytics: 51 positions with a long-tail Base token (no historical
+  price) are fetched 14 times each (745 activity requests for 67 positions, about 400 s to "51 positions
+  could not be priced") on every fresh browser; the 6 h memo only helps the same browser. Fix A: the route
+  marks a leg no source can price as final, no client retry (2-3 h). Fix B: price that side from the pool
+  at the event block × the priced side, marked (4-6 h). (2) Burned Uniswap rows carry placeholder tokens
+  (TOKEN0 / 18 / p0 0), so they can never be priced and run the full retry (3-4 h to resolve each row's pool).
+  (3) Two slow burned-position fetches can still hold both pacer slots. (4) With all of Alchemy down the
+  activity routes answer 500 from a plain read before the history step.
+
 - **(CLP capital history, 2026-10-28)** — **Initial Capital is a dated ledger, not one overwritable
   number.** `CapitalContribution` (`clp_capital_contributions`, + deposit / − withdrawal, soft delete via
   `deletedAt`); the total is `calcInitialCapital(getCapitalContributions())`, the ONE computation, used by
@@ -1028,7 +1059,7 @@ shorthand.
   errors, no out-of-memory. Forced: Tenderly + Alchemy blocked → `lookup-failed` on all five chains;
   Tenderly blocked → transfer index, same 200 / 200 / 72 / 200 in 7.1 s. The burner's analytics page
   shows "—" while its 703 positions price (no wrong figure). **Found, not fixed:** `/api/uniswap/activity`
-  logs `getaddrinfo ENOTFOUND arb1.llamarpc.com` (a dead Arbitrum log endpoint in that route).
+  logs `getaddrinfo ENOTFOUND arb1.llamarpc.com` (a dead Arbitrum log endpoint in that route; removed, see "Dead hosts").
 
 - **`4c3d7bb`** (Uniswap open first, 2026-10-28, live 01:45 UTC) — **`/api/uniswap/v3` answers open
   positions before closed history** (`scope=open|closed`, as Aerodrome; no scope = the old combined
@@ -1047,7 +1078,7 @@ shorthand.
   8,964.74 / 3,720.98 / ≈ −1,570.28 / (16); 0x844e ≈ +8.5–8.8 (estimates), Closed (66); 0x5cfb 26
   PancakeSwap "can't read yet". No non-200, 0 page errors, logs only one aave-v3 line.
   **prod-check:** `uniswap-evm-1` now times the open half (20 s); new last check `uniswap-closed-evm-1`
-  (45 s: slowest closed call seen 40.4–42.3 s; 45 × 2 + 30 s retry wait fits the 3-minute run). The
+  (45 s then: slowest closed call seen 40.4–42.3 s; now 20 s, see "Dead hosts"). The
   workflow file is on `main` (`9f2d2b9`, added by the owner) and runs every 30 minutes.
   **Next (not built):** fix 2, keep the Uniswap ever-owned scan stored so the closed half is fast too.
 

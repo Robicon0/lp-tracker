@@ -36,8 +36,8 @@ export interface UseLendingPositionsData {
 const MANAGE_URLS: Record<string, string> = {
   Dolomite:       "https://app.dolomite.io/balances",
   "Jupiter Lend": "https://jup.ag/lend",
-  AlphaFi:        "https://app.alphafi.xyz/alphalend",
-  Suilend:        "https://app.suilend.fi",
+  AlphaFi:        "https://alphafi.xyz/alphalend",
+  Suilend:        "https://suilend.fi",
   HyperLend:      "https://app.hyperlend.finance/dashboard",
   Kamino:         "https://app.kamino.finance/lending",
   HypurrFi:       "https://hypurr.fi",

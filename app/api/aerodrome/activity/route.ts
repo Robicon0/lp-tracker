@@ -32,7 +32,6 @@ const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
 // degrades to the public gateway instead of throwing on URL parse.
 const TENDERLY_RPC = archiveRpcUrl('base');
 // LlamaRPC — secondary: now enforces 30k block range limit (code -32012)
-const LLAMA_RPC = 'https://base.llamarpc.com';
 // publicnode — tertiary fallback with chunked scanning; ~8s/request for historical blocks
 const PUBLIC_NODE_RPC = 'https://base-rpc.publicnode.com';
 
@@ -60,12 +59,6 @@ const CG_IDS: Record<string, string> = {
   '0x940181a94a35a4569e4529a3cdfb74e38fd98631': 'aerodrome-finance',    // AERO
 };
 
-// Chunk sizes: LlamaRPC just under its 30k limit; publicnode supports up to 49k
-const LLAMA_CHUNK   = 29_000;
-const PUBNODE_CHUNK = 49_000;
-// Concurrency limits per RPC — publicnode rate-limits aggressively at high concurrency
-const LLAMA_CONCURRENCY   = 10;
-const PUBNODE_CONCURRENCY =  5;
 // Sprint SPOT-RESILIENCE-V2: Tenderly has no documented block-range limit and
 // serves single-tokenId chunks in 0.3–0.7 s, so a hung full-range call falls
 // into a LARGE-chunk paced Tenderly scan (each call is small + independently
@@ -300,42 +293,9 @@ async function fetchLogs(tokenIdHex: string, tokenId: number, owner: string): Pr
     console.warn('[aerodrome/activity] Tenderly chunked also failing, trying legacy fallbacks:', String(tenderlyChunkErr));
   }
 
-  // Tier 2: LlamaRPC full range
-  const llamaAttempt = await rpcPost(LLAMA_RPC, {
-    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
-
-  if (!llamaAttempt.error) {
-    return llamaAttempt.result ?? [];
-  }
-
-  const llamaCode = (llamaAttempt.error as unknown as { code?: number }).code;
-  const llamaMsg  = llamaAttempt.error.message;
-  console.warn('[aerodrome/activity] LlamaRPC full-range error:', llamaCode, llamaMsg);
-
-  const isRangeErr    = llamaCode === -32012 || llamaMsg.includes('ExceededMaxAllowed') || llamaMsg.includes('range');
-  // Per-IP throttles (403/429) and HTTP-level failures are transient transport
-  // states, not authoritative "no data" — fall through to the remaining tiers
-  // instead of the terminal throw (which surfaced as a route 500 → position
-  // degraded client-side even though publicnode was never tried).
-  const isUnreachable = llamaCode === -32603 || llamaMsg.toLowerCase().includes('unreachable')
-    || isEvmRpcThrottle(llamaMsg) || llamaMsg.startsWith('evm-rpc-http-') || llamaMsg === 'evm-rpc-timeout' || llamaMsg === 'evm-rpc-network-error';
-
-  // Tier 3: LlamaRPC chunked
-  if (isRangeErr) {
-    try {
-      return await fetchLogsChunked(tokenIdHex, startBlock, currentBlock, LLAMA_RPC, LLAMA_CHUNK, LLAMA_CONCURRENCY);
-    } catch (llamaChunkErr) {
-      console.warn('[aerodrome/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
-    }
-  }
-
-  // Tier 4: publicnode chunked
-  if (isRangeErr || isUnreachable) {
-    return fetchLogsChunked(tokenIdHex, startBlock, currentBlock, PUBLIC_NODE_RPC, PUBNODE_CHUNK, PUBNODE_CONCURRENCY);
-  }
-
-  throw new Error(`[aerodrome/activity] eth_getLogs RPC error: ${llamaMsg}`);
+  // Nothing else serves Base archive logs: base.llamarpc.com answers HTTP 525
+  // (2026-10-28) and publicnode refuses archive logs (403).
+  throw new HistoryUnverifiedError();
 }
 
 // Batch-fetch block timestamps using Alchemy (eth_getBlockByNumber works fine on free tier)

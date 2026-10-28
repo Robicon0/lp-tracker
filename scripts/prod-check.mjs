@@ -28,11 +28,11 @@
 // minutes even if a request ignores its timeout.
 //
 // Uniswap halves (2026-10-28): /api/uniswap/v3 answers in two halves, as
-// /api/aerodrome does. The open half keeps the 20 s limit. The closed half
-// (burned positions, read from four archive log gateways) gets its own 45 s
-// limit (`timeoutMs`): its slowest call on a normal day was 40.4 s (Oct 25-28),
-// and 45 s twice plus the 30 s retry wait (120 s) still fits the 3-minute run.
-// It runs last, so a slow answer cannot hold up the other checks.
+// /api/aerodrome does. Both halves have the 20 s limit. The closed half had
+// 45 s until it read the burned-position list in one query per chain
+// (`1c12683`); production now answers it in 0.3-4.6 s (evm1, 2026-10-28 05:37
+// UTC), so 20 s twice plus the 30 s retry wait (70 s) fits the 3-minute run.
+// It still runs last, so a slow answer cannot hold up the other checks.
 
 import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
 
@@ -86,8 +86,8 @@ const CHECKS = [
   { id: 'sui-balances-sui-2', chain: 'sui', kind: 'json', wallet: 'sui2', path: (a) => `/api/sui/balances?account=${a}` },
   { id: 'sui-closed-sui-2', chain: 'sui', kind: 'closed', wallet: 'sui2', path: (a) => `/api/sui-closed-positions?account=${a}`, minCount: 39 },
 
-  // Last: the one check allowed more than 20 s (see the header).
-  { id: 'uniswap-closed-evm-1', chain: 'evm', kind: 'closed', wallet: 'evm1', path: (a) => `/api/uniswap/v3?account=${a}&scope=closed`, timeoutMs: 45_000 },
+  // Last (see the header).
+  { id: 'uniswap-closed-evm-1', chain: 'evm', kind: 'closed', wallet: 'evm1', path: (a) => `/api/uniswap/v3?account=${a}&scope=closed` },
   // No minCount: evm1 has no burned Uniswap position today (2026-10-28), so the list is empty;
   // the check still fails on a non-200, a timeout or a failure notice (lookup-*).
 ];

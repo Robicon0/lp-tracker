@@ -28,17 +28,8 @@ const ALCHEMY_KEY = alchemyKey();
 const ARCHIVE_CHAINS: ArchiveChain[] = ['ethereum', 'arbitrum', 'polygon', 'optimism', 'base'];
 const TENDERLY_RPCS: Record<string, string> = Object.fromEntries(ARCHIVE_CHAINS.map((c) => [c, archiveRpcUrl(c)]));
 
-// LlamaRPC public RPCs — secondary: now enforces 30k block range limit (code -32012)
-const BLAST_RPCS: Record<string, string> = {
-  ethereum: 'https://eth.llamarpc.com',
-  arbitrum: 'https://arb1.llamarpc.com',
-  polygon:  'https://polygon.llamarpc.com',
-  optimism: 'https://op.llamarpc.com',
-  base:     'https://base.llamarpc.com',
-  bnb:      'https://binance.llamarpc.com',
-};
-
-// publicnode — tertiary fallback for chunked scanning
+// publicnode: the BNB rolling-window scan, and the second source for block
+// timestamps (a reply is used only when it names the block asked for).
 const PUBLIC_NODE_RPCS: Record<string, string> = {
   ethereum: 'https://ethereum-rpc.publicnode.com',
   arbitrum: 'https://arbitrum-one-rpc.publicnode.com',
@@ -93,8 +84,7 @@ const ROLLING_SCAN_DEPTH: Record<string, number | undefined> = {
   bnb: 48_000, // ~40 hours, fits inside publicnode's pruning window
 };
 
-// Chunk sizes: LlamaRPC just under 30k limit; publicnode supports up to 49k
-const LLAMA_CHUNK   = 29_000;
+// publicnode serves up to 49k blocks per getLogs call
 const PUBNODE_CHUNK = 49_000;
 // Max parallel getLogs requests per batch
 const MAX_CONCURRENCY = 50;
@@ -283,7 +273,6 @@ class HistoryUnverifiedError extends Error {
 
 async function fetchLogs(
   chain: string,
-  blastRpc: string,
   alchemyRpc: string,
   tokenIdHex: string,
   owner: string,
@@ -344,9 +333,12 @@ async function fetchLogs(
 
   // Tier 1: Tenderly (full-range, no limits, fast)
   if (tenderlyRpc) {
-    const tenderlyAttempt = await rpcPost(tenderlyRpc, {
+    // A transport failure (gateway down) is an error like any other, so the
+    // transfer index below still answers instead of the request failing.
+    const tenderlyAttempt = await (rpcPost(tenderlyRpc, {
       jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-    }) as { result?: RawLog[]; error?: { message: string; code?: number } };
+    }) as Promise<{ result?: RawLog[]; error?: { message: string; code?: number } }>)
+      .catch((e: unknown) => ({ result: undefined, error: { message: `unreachable: ${String(e)}`, code: -32603 } }));
     if (!tenderlyAttempt.error) {
       return tenderlyAttempt.result ?? [];
     }
@@ -362,42 +354,10 @@ async function fetchLogs(
     }
   }
 
-  // Tier 2: LlamaRPC full range
-  const llamaAttempt = await rpcPost(blastRpc, {
-    jsonrpc: '2.0', method: 'eth_getLogs', params: [logsParams], id: 1,
-  }) as { result?: RawLog[]; error?: { message: string; code?: number } };
-
-  if (!llamaAttempt.error) {
-    return llamaAttempt.result ?? [];
-  }
-
-  const code = (llamaAttempt.error as unknown as { code?: number }).code;
-  const msg  = llamaAttempt.error.message;
-  console.warn('[uniswap/activity] LlamaRPC full-range error:', chain, code, msg);
-
-  const bnRes = await rpcPost(alchemyRpc, {
-    jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1,
-  }) as { result?: string };
-  const currentBlock = bnRes.result ? parseInt(bnRes.result, 16) : 21_500_000;
-
-  const isRangeErr    = code === -32012 || msg.includes('ExceededMaxAllowed') || msg.includes('range');
-  const isUnreachable = code === -32603 || msg.toLowerCase().includes('unreachable');
-
-  // Tier 3: LlamaRPC chunked
-  if (isRangeErr) {
-    try {
-      return await fetchLogsChunked(nftManager, tokenIdHex, deployBlock, currentBlock, blastRpc, LLAMA_CHUNK);
-    } catch (llamaChunkErr) {
-      console.warn('[uniswap/activity] LlamaRPC chunks also failing, switching to publicnode:', String(llamaChunkErr));
-    }
-  }
-
-  // Tier 4: publicnode chunked
-  if ((isRangeErr || isUnreachable) && pubNodeRpc) {
-    return fetchLogsChunked(nftManager, tokenIdHex, deployBlock, currentBlock, pubNodeRpc, PUBNODE_CHUNK);
-  }
-
-  throw new Error(`[uniswap/activity] eth_getLogs RPC error: ${msg}`);
+  // No live secondary: every llamarpc host is gone (arb1 / polygon / op / binance
+  // NXDOMAIN, eth / base HTTP 525, 2026-10-28) and publicnode refuses archive
+  // logs (403). The history could not be read and checked.
+  throw new HistoryUnverifiedError();
 }
 
 async function fetchTimestamps(alchemyRpc: string, blockNumbers: number[]): Promise<Record<number, number>> {
@@ -472,7 +432,7 @@ async function GET_impl(request: Request) {
   if (walletScope && !account) {
     return NextResponse.json({ error: 'account required for tokenId=all' }, { status: 400 });
   }
-  if (!BLAST_RPCS[chain]) {
+  if (!ALCHEMY_RPCS[chain]) {
     return NextResponse.json({ error: `Unsupported chain: ${chain}` }, { status: 400 });
   }
   if (!ALCHEMY_KEY) {
@@ -480,7 +440,6 @@ async function GET_impl(request: Request) {
   }
 
   try {
-    const blastRpc   = BLAST_RPCS[chain];
     const alchemyRpc = ALCHEMY_RPCS[chain];
 
     // ── WALLET SCOPE ────────────────────────────────────────────────────
@@ -654,7 +613,7 @@ async function GET_impl(request: Request) {
     let logs: RawLog[];
     {
       const tokenIdHex = '0x' + BigInt(tokenId).toString(16).padStart(64, '0');
-      logs = await fetchLogs(chain, blastRpc, alchemyRpc, tokenIdHex, owner);
+      logs = await fetchLogs(chain, alchemyRpc, tokenIdHex, owner);
     }
 
     if (logs.length === 0) {
@@ -663,7 +622,7 @@ async function GET_impl(request: Request) {
     }
 
     const blockNumbers = logs.map(l => parseInt(l.blockNumber, 16));
-    const timestamps = await resolveBlockTimestamps(chain, blockNumbers, (missing) => fetchTimestamps(alchemyRpc, missing), blastRpc);
+    const timestamps = await resolveBlockTimestamps(chain, blockNumbers, (missing) => fetchTimestamps(alchemyRpc, missing), PUBLIC_NODE_RPCS[chain]);
 
     const scale0 = BigInt(10) ** BigInt(t0d);
     const scale1 = BigInt(10) ** BigInt(t1d);
