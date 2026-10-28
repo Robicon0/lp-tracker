@@ -984,7 +984,7 @@ enumeration) is still the way to find such a position for a wallet whose history
 Most recent first. Commit hashes are authoritative; descriptions are
 shorthand.
 
-- **(Dead hosts + open-first pacing, 2026-10-28)** — **No EVM activity route calls a dead host; open
+- **`14b694d`** (Dead hosts + open-first pacing, 2026-10-28, live as `dpl_D9cT87CG…`, Ready 08:01 UTC) — **No EVM activity route calls a dead host; open
   positions are fetched before closed ones; the Uniswap closed check is 20 s.**
   **Hosts.** Every hardcoded host in the repo (85) was DNS-checked (no keys). Dead: `arb1` / `op` /
   `polygon` / `binance.llamarpc.com` (NXDOMAIN); `eth` / `base.llamarpc.com` resolve but answer HTTP 525;
@@ -1006,6 +1006,9 @@ shorthand.
   **B7 (UTC):** local old 07:15-07:24, local new 07:25-07:37, identical settled figures: evm1 Deposited
   8,326.17, Fees 3,055.72, Capital G/L ≈ −4,400.91, Closed (19); evm2 8,964.74 / 3,720.98 / ≈ −1,570.28 /
   (16); 0x844e Closed (66), ≈ +8.77-8.78 (estimates); 0x5cfb 26 can't read yet. No non-200, 0 page errors.
+  Production old 07:37-07:59, production new 08:01-08:10: the same figures (0x844e ≈ +8.80 / +8.98,
+  estimates); prod-check 18 / 18 at 08:10 (uniswap-closed-evm-1 555 ms); logs only the known aave-v3 400.
+  Production checks paused (`PROD_CHECK_PAUSED=1`) 07:37:28-08:11 UTC, set and removed through the API.
   **Found, not fixed:** (1) 0x844e analytics: 51 positions with a long-tail Base token (no historical
   price) are fetched 14 times each (745 activity requests for 67 positions, about 400 s to "51 positions
   could not be priced") on every fresh browser; the 6 h memo only helps the same browser. Fix A: the route
