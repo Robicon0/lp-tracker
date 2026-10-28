@@ -296,6 +296,15 @@ plan):**
 - **e. Hard ceiling (about 60 s) on a positions source.** A stuck source must end as
   "unavailable", never "loading" forever. This is the still-open part (b) of ITEM 0i.
 
+**DefiTuna wallets are slow because of the CLOSED Solana scan, not DefiTuna (Phase A 2026-10-28, report
+`~/Documents/defidesh-reports/work-2026-10-28/defituna-phase-a.md`).** `/api/defituna` answers in
+0.4-0.6 s. `/api/solana-closed-positions` reads every transaction the wallet signed (40 CU each) and keeps
+only Orca / Raydium ones: 6NcbT9 13,964 transactions (2,000 read, 3 kept after one visit), upgMGF over
+40,000 (1,400 read, 0 kept); each visit adds about 3-4 min of scanning, so Capital G/L and Fees read
+`≈ $0.00` for many visits, and a capped scan costs about 2M CU. Proposed: pre-filter the history to
+Whirlpool / Raydium transactions (probe 1-2 h, build 5-8 h); one closed-scan request per wallet per tab
+(1-2 h); progress text and `—` instead of `≈ $0.00` (2-3 h). NOT built.
+
 **Small fixes list:** Solana balances "couldn't load" notice on Token Holdings / the wallet
 page (deliberately left out of the safety net). Local `.env.local` Helius key is dead, and the
 local `HYPEREVM_ARCHIVE_RPC` (Chainstack) key returns 401 — production state of the latter is
@@ -1008,6 +1017,32 @@ shorthand.
   toggling kept scroll, rows, the open modal and typed "4321"; a second tab toggled the first;
   refresh stayed hidden with no `$` on first paint; off again every amount equal to before (only
   elapsed-time APR / months moved). 0 page errors.
+
+- **`971af05`** (Fix A, 2026-10-28, live as `dpl_2ocvnQeo…`, Ready 12:20 UTC) — **A deposit / withdrawal leg
+  that no price source covers is final and is never retried.** The Aerodrome, Velodrome and Uniswap
+  activity routes mark such a leg `priceFinal` when the pool has no stablecoin side (its block price can
+  never become dollars, `applyStableAnchor`), both token addresses are known and no spot read failed this
+  request (`app/lib/priceFinal.ts`). `useLpPnl` skips a position whose every unpriced or substituted leg is
+  final, and a burned Uniswap placeholder row (TOKEN0 / TOKEN1, no addresses) at once. A failed read is
+  never final: a stablecoin-side pool with no block price, a missing pool, a spot read that threw or came
+  back empty keep the capped retry. Nothing else changes: the rows, the `≈` and "N positions could not be
+  priced" stay. Bump: lp-pnl-events v37. Test `npx tsx scripts/price-final-test.ts` (24).
+  **0x844e (fresh browser):** activity requests 959 → 133 (old local 08:25 / new local 08:35 UTC),
+  production 949 (08:51) → 133 (12:20); "could not be priced" at 365 s → 6.1 s local, 364 s → 2.7 s
+  production; Closed (66), 51 not priced, Capital G/L ≈ +9.07 / +9.18 → ≈ +9.20 / +8.67 (32 positions
+  valued at live prices). Route check: all 51 marked final, the 15 USDC-side positions not, values equal.
+  **Alchemy (estimate):** per 66 activity requests, 0 Alchemy calls while the contract wallet's stored
+  scan is reused (3 min) and 14 calls / 1,376 CU when it rescans (11 `alchemy_getAssetTransfers`);
+  1.6 Tenderly `eth_call` per request. Old load (365 s) rescanned about 2-3 times: about 2.8-4.1k CU and
+  about 1,500 Tenderly calls; new: about 1.4k CU and about 215 Tenderly calls.
+  **B7 (UTC):** local old 08:25-08:33 (0x844e) and 08:45-08:50 (evm1, evm2), local new 08:35-08:44,
+  production old 08:51-09:04, production new 12:20-12:28. evm1 Deposited 8,326.17, Capital G/L
+  ≈ −4,400.91, Closed (19); evm2 8,964.74 / ≈ −1,570.28 / (16), identical throughout. Fees moved only
+  on production new: evm1 3,055.72 → 3,145.41 and evm2 3,720.98 → 3,817.56, the wallets' own fee
+  claims at 09:29 and 09:32 UTC (tx `0x6034a817…`, `0xcfe804c7…`; Uncollected fell by the same).
+  No non-200, 0 page errors; logs only the aave-v3 400 and one pool-list timeout. Production checks
+  paused 08:50:57-09:01:19 and 10:22:55-12:28:44 UTC. **Rule (o) not met:** the production baseline
+  was 3 h old at the push (12:19). **Not changed:** the HyperSwap and PancakeSwap activity routes.
 
 - **`14b694d`** (Dead hosts + open-first pacing, 2026-10-28, live as `dpl_D9cT87CG…`, Ready 08:01 UTC) — **No EVM activity route calls a dead host; open
   positions are fetched before closed ones; the Uniswap closed check is 20 s.**
@@ -4550,8 +4585,7 @@ those chains is wired); while a fee source is still answering, Fees Collected ca
 visible because `/api/uniswap/v3` runs recovery on empty chains (up to 15-17 s on Account 1).
 
 **Open, found 2026-10-15/16 (details in the `f170229` entry):** contract wallet 0x844e…7c97 has 51 closed
-Aerodrome positions that can never be priced (`TOKEN0 / TOKEN1`) and the pricing retry still runs
-its 12 rounds on every page (about 700-940 requests per analytics load) before saying so; the
+Aerodrome positions that can never be priced (retry resolved `971af05`: final at once, 133 requests); the
 `evmRpc` 12 s timeout includes the limiter's backoff, so under a sustained 429 storm a long scan
 (Base history) fails as a visible notice rather than finishing.
 
